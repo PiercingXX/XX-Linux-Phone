@@ -1,0 +1,27 @@
+#!/bin/sh
+# Session launcher: starts the phoc compositor with PiercingOS shell as the client.
+# Reads ~/.config/piercing-shell/config.json to propagate theme preference to GTK.
+
+_prefer_dark=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('$HOME/.config/piercing-shell/config.json'))
+    print('1' if cfg.get('prefer_dark', True) else '0')
+except Exception:
+    print('1')
+" 2>/dev/null || echo '1')
+
+if [ "$_prefer_dark" = "1" ]; then
+    export ADWAITA_COLOR_SCHEME=prefer-dark
+    export GTK_THEME=Adw-dark
+else
+    export ADWAITA_COLOR_SCHEME=prefer-light
+    export GTK_THEME=Adw
+fi
+
+# Ensure Space Mono and JetBrains Mono are on the font path if installed into the overlay
+export FONTCONFIG_PATH="@datadir@/piercing-shell/fonts:${FONTCONFIG_PATH:-/etc/fonts}"
+
+exec phoc \
+  -C @datadir@/piercing-shell/phoc.ini \
+  -E "@bindir@/piercing-shell"

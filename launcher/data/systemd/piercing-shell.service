@@ -1,0 +1,16 @@
+[Unit]
+Description=PiercingOS Shell
+Documentation=https://github.com/piercingxx/linux-phone
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@bindir@/piercing-shell
+Restart=on-failure
+RestartSec=2s
+# Ensure the shell inherits the Wayland display from the session
+PassEnvironment=WAYLAND_DISPLAY DISPLAY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Piercing Shell
-Comment=Text-first Linux phone shell for the Pixel 3a
+Comment=Text-first Linux phone shell
 Exec=@bindir@/piercing-shell
 Terminal=false
 Categories=Utility;System;

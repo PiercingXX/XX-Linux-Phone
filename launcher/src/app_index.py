@@ -64,14 +64,24 @@ class AppIndex:
         by_id = {entry.app_id: entry for entry in self.entries}
         return [by_id[app_id] for app_id in app_ids if app_id in by_id]
 
-    def search(self, query: str) -> list[AppEntry]:
+    def search(
+        self,
+        query: str,
+        sort_by_usage: bool = False,
+        launch_counts: dict | None = None,
+    ) -> list[AppEntry]:
         trimmed = query.strip().casefold()
         if not trimmed:
-            return list(self.entries)
+            entries = list(self.entries)
+        else:
+            prefix_matches = [e for e in self.entries if e.name.casefold().startswith(trimmed)]
+            contains_matches = [e for e in self.entries if trimmed in e.search_text and e not in prefix_matches]
+            entries = prefix_matches + contains_matches
 
-        prefix_matches = [entry for entry in self.entries if entry.name.casefold().startswith(trimmed)]
-        contains_matches = [entry for entry in self.entries if trimmed in entry.search_text and entry not in prefix_matches]
-        return prefix_matches + contains_matches
+        if sort_by_usage and launch_counts:
+            entries.sort(key=lambda e: launch_counts.get(e.app_id, 0), reverse=True)
+
+        return entries
 
     def launch(self, entry: AppEntry) -> tuple[bool, str | None]:
         try:

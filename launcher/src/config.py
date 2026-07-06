@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +27,7 @@ THEME_PRESETS = {
     'ocean': ThemePreset('ocean', 'Ocean', '#10161a', '#182129', '#1f2a34', '#32404c', '#edf4f7', '#9fb0bb', '#cad8df'),
     'paper': ThemePreset('paper', 'Paper', '#f4f1ea', '#ede6db', '#e4dccf', '#d0c4b2', '#151515', '#585147', '#262626'),
     'mist': ThemePreset('mist', 'Mist', '#e8ecef', '#dce2e6', '#d1d8de', '#bcc6cd', '#151a1f', '#55606c', '#2f3943'),
+    'aura': ThemePreset('aura', 'Aura', '#0d0b14', '#14112a', '#1e1a3a', '#3d3066', '#f0eeff', '#9080c0', '#a855f7'),
 }
 
 FONT_FAMILIES = {
@@ -37,7 +40,11 @@ DEFAULT_CONFIG = {
     'theme': 'graphite',
     'font': 'space-mono',
     'pinned': [],
+    'hidden_apps': [],
     'prefer_dark': True,
+    'auto_lock_timeout': 120,
+    'text_size_scale': 1.0,
+    'home_alignment': 'left',
 }
 
 
@@ -103,4 +110,76 @@ class ShellConfig:
 
     def set_pinned(self, app_ids: list[str]) -> None:
         self.data['pinned'] = app_ids[:8]
+        self.save()
+
+    @property
+    def pin_hash(self) -> str | None:
+        value = self.data.get('pin_hash')
+        return str(value) if value else None
+
+    def set_pin(self, pin: str) -> None:
+        self.data['pin_hash'] = hashlib.sha256(pin.encode()).hexdigest()
+        self.save()
+
+    def verify_pin(self, pin: str) -> bool:
+        stored = self.pin_hash
+        if stored is None:
+            return True
+        return hmac.compare_digest(stored, hashlib.sha256(pin.encode()).hexdigest())
+
+    @property
+    def auto_lock_timeout(self) -> int:
+        val = self.data.get('auto_lock_timeout', DEFAULT_CONFIG['auto_lock_timeout'])
+        try:
+            return max(0, int(val))
+        except (TypeError, ValueError):
+            return int(DEFAULT_CONFIG['auto_lock_timeout'])
+
+    def set_auto_lock_timeout(self, seconds: int) -> None:
+        self.data['auto_lock_timeout'] = max(0, seconds)
+        self.save()
+
+    @property
+    def hidden_apps(self) -> list[str]:
+        val = self.data.get('hidden_apps', [])
+        if isinstance(val, list):
+            return [str(x) for x in val]
+        return []
+
+    def set_hidden_apps(self, app_ids: list[str]) -> None:
+        self.data['hidden_apps'] = list(app_ids)
+        self.save()
+
+    @property
+    def text_size_scale(self) -> float:
+        try:
+            return max(0.5, min(2.0, float(self.data.get('text_size_scale', 1.0))))
+        except (TypeError, ValueError):
+            return 1.0
+
+    def set_text_size_scale(self, scale: float) -> None:
+        self.data['text_size_scale'] = max(0.5, min(2.0, round(scale, 2)))
+        self.save()
+
+    @property
+    def home_alignment(self) -> str:
+        val = str(self.data.get('home_alignment', 'left'))
+        return val if val in ('left', 'center', 'right') else 'left'
+
+    def set_home_alignment(self, alignment: str) -> None:
+        if alignment in ('left', 'center', 'right'):
+            self.data['home_alignment'] = alignment
+            self.save()
+
+    @property
+    def launch_counts(self) -> dict[str, int]:
+        val = self.data.get('launch_counts', {})
+        if isinstance(val, dict):
+            return {str(k): int(v) for k, v in val.items()}
+        return {}
+
+    def record_launch(self, app_id: str) -> None:
+        counts = self.launch_counts
+        counts[app_id] = counts.get(app_id, 0) + 1
+        self.data['launch_counts'] = counts
         self.save()

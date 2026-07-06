@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=PiercingOS
+Comment=PiercingOS — text-first Linux phone shell
+Exec=@libexecdir@/piercing-session
+Type=Application
+DesktopNames=PiercingOS

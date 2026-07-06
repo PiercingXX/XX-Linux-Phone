@@ -1,0 +1,118 @@
+/* ── Uniform black background ───────────────────────────────────── */
+/* Set the one true background on the window; everything inside is  */
+/* transparent so there is a single colour across the whole screen. */
+window.piercing-shell {
+  background-color: #000;
+}
+window.piercing-shell scrolledwindow,
+window.piercing-shell scrolledwindow > viewport,
+window.piercing-shell stack,
+window.piercing-shell paned {
+  background: transparent;
+  background-color: transparent;
+}
+
+.shell-root {
+  letter-spacing: 0.02em;
+}
+
+.eyebrow {
+  font-size: 11pt;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+}
+
+.display-clock {
+  font-size: 52pt;
+  font-weight: 300;
+}
+
+.display-date {
+  font-size: 14pt;
+  margin-bottom: 4px;
+}
+
+.section-title {
+  font-size: 18pt;
+  font-weight: 600;
+}
+
+.dim-label {
+  font-size: 11.5pt;
+}
+
+/* Borders only inside the settings page, not globally */
+.settings-card,
+.settings-page list,
+.settings-page row,
+.settings-page scrolledwindow,
+entry {
+  border-radius: 20px;
+  border-width: 1px;
+  border-style: solid;
+}
+
+/* Home launcher scroll area — fully transparent so it matches the clock background */
+.home-scroll,
+.home-scroll > viewport {
+  background: transparent;
+  background-color: transparent;
+}
+
+/* Paned divider is invisible — we manage sections via layout, not chrome */
+paned > separator {
+  min-height: 0;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+entry {
+  min-height: 52px;
+  padding: 0 14px;
+}
+
+.text-list {
+  background: transparent;
+}
+
+.app-entry {
+  padding: 14px 16px;
+  border-radius: 18px;
+}
+
+.app-name {
+  font-size: 16pt;
+  font-weight: 400;
+}
+
+.app-subtitle {
+  font-size: 10.5pt;
+}
+
+.nav-row {
+  border-top-width: 1px;
+  border-top-style: solid;
+  padding-top: 12px;
+}
+
+.nav-button,
+.action-link {
+  font-size: 12.5pt;
+}
+
+.settings-card {
+  padding: 18px;
+}
+
+.alpha-jump {
+  font-size: 8pt;
+  font-weight: 600;
+  min-width: 22px;
+  min-height: 20px;
+  padding: 1px 2px;
+  border-radius: 4px;
+  letter-spacing: 0;
+}

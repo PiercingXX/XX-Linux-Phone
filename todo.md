@@ -1,146 +1,119 @@
-# Piercing Shell — Pixel 3a: Path to Fully Functional
+# Piercing WM — Work Order (Skippy)
 
-Architecture target: phoc (forked) as Wayland compositor backend + custom GTK4/libadwaita shell surfaces (Python + gtk4-layer-shell) using the PiercingXX design language. Minimal, gesture-driven, text-first.
+You are Skippy, working on **Piercing WM**: the PiercingXX Android launcher (github.com/PiercingXX/PiercingXX-launcher) rebuilt as a Wayland launcher/shell for Linux phones. Read `README.md` (identity), `design.md` (the parity contract — treat it as spec), and `launcher/README.md` (code layout) before touching anything.
 
----
+**Everything in Workstreams 1–10 runs on the dev machine — no phone required.** Device-gated work is quarantined at the bottom; do not attempt it.
 
-## Phase 0 — Research & Foundation Decisions
+## Ground rules
 
-- [ ] **Audit PiercingXX Android launcher** (`github.com/piercingxx/piercingxx-launcher`) — extract gesture model, layout logic, quick-action panel spec, and any interaction patterns not yet in the GTK shell. Document what maps directly and what needs rethinking for a Wayland compositor context.
-- [ ] **OS comparison: Mobian vs postmarketOS for Pixel 3a (sargo/sdm670)**
-  - Boot both Mobian phosh (`mobian-sdm670-phosh-20260607.tar.xz`) and postmarketOS phosh (`20260605-0025-postmarketOS-v25.12-phosh-25-google-sargo`) on the device
-  - Test: cellular modem, WiFi, touch, display, audio, camera init, suspend/resume
-  - Decide primary OS based on which has more complete hardware support on sargo out of the box
-  - Ubuntu Touch and Droidian images kept as device-support reference only (not a target)
-- [ ] **Pin dependency versions**: document GTK4, libadwaita, phoc, wlroots, and gtk4-layer-shell versions present on the chosen OS image so shell dev targets exactly that stack
-- [ ] **Set up cross-compile or on-device dev workflow** — decide between: build on device (slow but exact), cross-compile for aarch64 on host, or QEMU/chroot for Python-only layers
-
----
-
-## Phase 1 — Build & Deploy Pipeline
-
-- [ ] **Fork phoc** into `pixel-3a/compositor/` — tag the base upstream commit for reference diffs
-- [ ] **Verify phoc builds on chosen OS** — confirm wlroots version compatibility with the Pixel 3a kernel
-- [ ] **Write deploy script** (`pixel-3a/deploy.sh`) — rsync or scp shell source + compositor onto device, restart session, tail logs. One command for iteration.
-- [ ] **Establish session entry point** — write a `.desktop` session file that launches forked phoc + Piercing Shell instead of phoc + phosh; register it with the display manager so it can be selected on login
-- [ ] **Add gtk4-layer-shell dependency** to meson.build — required for all shell surfaces to anchor to screen edges using `wlr-layer-shell-unstable-v1`
+- **Spec**: `design.md` wins. Where this file and design.md disagree, design.md is right; flag the conflict in your commit message.
+- **Style**: Python 3.12+, GTK4/libadwaita via `gi`, match the existing code's idiom. No comments unless the WHY is non-obvious. Text-first UI: no icon grids, no images, monochrome per theme.
+- **CSS invariants** (`launcher/src/style.css`): uniform background from the active theme on every surface; children transparent; no borders anywhere except inside `.settings-page`; Space Mono default; invisible Paned separators. Don't regress these.
+- **Verify before every commit**: `python3 -m py_compile launcher/src/*.py` and `python3 -m pytest tests/ -q` (create `tests/` in Workstream 10 — from then on it gates everything). If you add a runtime behavior, run the shell locally (`cd launcher && PYTHONPATH=src python3 src/main.py` — it falls back to a window when layer-shell is absent) and exercise the flow.
+- **Commits**: one commit per task or coherent group, imperative subject, body says what changed and how it was verified. Never commit `__pycache__`, `build/`, or `devices/*/downloads/` (gitignored).
+- **Config compatibility**: `~/.config/piercing-shell/config.json` may exist from earlier runs. Every schema change needs a silent migration path (missing keys → defaults; never crash on old configs).
+- **Decisions already made** (don't relitigate): keep `piercing-shell` internal naming for now (rename is user-gated, see bottom); keep the `aura` theme preset as a seventh Linux-only bonus; phoc is the compositor; lisgd owns system-level gestures via IPC.
 
 ---
 
-## Phase 2 — Core Shell Surfaces (Layer Shell)
+## Workstream 1 — Home: 8-slot model (the big one)
 
-Each surface is a separate GTK4 `Gtk.Window` configured via gtk4-layer-shell to anchor to the correct screen zone. They communicate via a lightweight IPC bus (GDBus or a simple Unix socket).
+The Android launcher's home is **up to 8 ordered slots**, each holding an app, a pinned shortcut, or a folder (`design.md` "Home screen"). Current code instead renders a hardcoded `HOME_ITEMS` tree (`launcher/src/home_launcher.py:130`) plus a `pinned` list (`config.py`). Replace that with the slot model.
 
-### 2a — Home & Launcher (extend existing shell)
-- [ ] Port existing `window.py` / `main.py` to use `gtk4-layer-shell` instead of a plain `Adw.ApplicationWindow` — anchor to full screen, set layer to `BOTTOM` so apps render above it
-- [ ] Remove the three-button nav row — replace with gesture-only navigation (buttons are a fallback in settings only)
-- [ ] Keep Home / Apps / Settings page stack but driven by swipe gestures, not buttons
-- [ ] Add pinned app editing: long-press on home row enters edit mode, drag to reorder, tap X to unpin, tap any app in drawer to pin
+- [ ] **1.1 Slot schema in config** — `config.py`: add `home_slots` to `DEFAULT_CONFIG`: list of ≤8 dicts, `{type: 'app'|'folder', label: str, app_id: str|None, cmd: list[str]|None, folder: [member…]|None}` where members are `{label, app_id or cmd}`. `app_id` is a `.desktop` id resolvable by `Gio.DesktopAppInfo.new()`; `cmd` is an argv list for non-desktop entries (e.g. `piercing-note`). Accessors: `get_home_slots()`, `set_home_slots(slots)` with validation (cap 8, reject unknown types). Migration: if `home_slots` missing, empty list.
+- [ ] **1.2 Default layout seeding** — new `launcher/src/default_layout.py`, modeled on the Android `DefaultLayoutBootstrapper`: on first boot (`home_slots` empty AND a `default_layout_applied` flag unset) seed: **Notes** → `cmd: ['piercing-note']` if found on PATH else first installed notes-ish app else skip; **Audio** folder → Audiobooks, Music; **Comms** folder → Phone (built-in dialer), Text, Email; **Tools** folder → Internet (default browser via `Gio.AppInfo.get_default_for_type('x-scheme-handler/http', True)`), Camera, Calculator, Photos. Resolve each against installed desktop apps; skip unresolvable members; don't create empty folders; set the flag even if nothing resolved. **Never overwrite a non-empty `home_slots`.** Unit-test the resolution logic with a fake resolver (mirror the Android `AppResolver` injection pattern).
+- [ ] **1.3 Render home from slots** — rewrite the home page in `home_launcher.py`/`window.py` to render `get_home_slots()`: one text row per slot, alignment from `config.home_alignment`, folder rows open a folder view. Delete `HOME_ITEMS` and the old pinned-row rendering once parity is reached (search `window.py` for `pinned` usages).
+- [ ] **1.4 Folder view** — full-screen overlay (same window, stack page or modal box — follow the existing stack pattern) listing member rows in the same typography; tap launches, back gesture/row closes. No nested folders (Android doesn't have them).
+- [ ] **1.5 Edit mode** — long-press on home (there's already a `GestureLongPress` wired to settings — rebind: long-press → edit mode, move settings entry into edit mode header). In edit mode: per-slot remove (✕), reorder (up/down buttons — GTK4 DnD stays out of scope), "add slot" when <8 (picker: app from drawer / new folder), folder editing (rename, add/remove members from an app picker).
+- [ ] **1.6 Launch dispatch** — single `launch_slot(slot)` helper: `app_id` → `Gio.DesktopAppInfo.launch()`, `cmd` → `subprocess.Popen`, label `Phone` with no target → built-in dialer surface (preserve the existing special-case). Record usage via `config.record_launch()`.
 
-### 2b — Lock Screen
-- [ ] New surface: `src/lock_screen.py` — layer `OVERLAY`, exclusive keyboard grab, rendered above all other surfaces
-- [ ] PIN entry: 6-digit keypad (large touch targets, minimal chrome), matching PiercingXX style (monochrome, large type)
-- [ ] Show clock + date (reuse `_refresh_clock` logic) on lock surface
-- [ ] Show incoming call UI on lock screen (see Phase 5)
-- [ ] Unlock: correct PIN dismisses layer, emits `unlocked` signal on IPC bus
-- [ ] Auto-lock: idle timer in session manager triggers lock surface; configurable timeout in Settings
+## Workstream 2 — Drawer parity
 
-### 2c — Notification Shade (swipe down)
-- [ ] New surface: `src/notification_shade.py` — layer `TOP`, anchored top, slides down on swipe-down gesture from top edge
-- [ ] Connects to `org.freedesktop.Notifications` via DBus, renders a list of active notifications in the PiercingXX text-list style (title + body, app name dim, dismiss button)
-- [ ] Tap to open app, swipe left/right on individual notification to dismiss
-- [ ] Pull-down gesture drives the reveal animation (Gtk.Gesture + manual translation via `set_margin_top`)
-- [ ] Quick settings row at top of shade (see Phase 3) — visible as soon as shade opens
-- [ ] Second pull-down expands to full quick-settings grid
+Current drawer (`window.py` + `app_index.py`): search-on-open, A–Z jump strip, hidden apps, usage/A–Z sort. Gaps vs `design.md` "App drawer":
 
-### 2d — App Switcher (swipe up)
-- [ ] New surface: `src/app_switcher.py` — layer `TOP`, anchored bottom, slides up on swipe-up from bottom edge
-- [ ] Query running Wayland clients via phoc IPC or `wlr-foreign-toplevel-management-unstable-v1` protocol
-- [ ] Render as horizontal card strip (app name + last-known screenshot/thumbnail if available, else icon/name card)
-- [ ] Swipe card up to close, tap to focus
-- [ ] Home gesture (short swipe up) collapses switcher back; long swipe up enters full switcher view
-- [ ] Swipe left on a card to force-kill the app
+- [ ] **2.1 Auto-launch single result** — new config bool `search_auto_launch` (default off, like Android). In the drawer search handler: when the query narrows to exactly one visible row and the user presses Enter — or, when the option is on, immediately — launch it.
+- [ ] **2.2 `!` web search fallback** — query starting with `!` → strip prefix, open `https://duckduckgo.com/?q=<urlencoded>` via `Gio.AppInfo.launch_default_for_uri()`. Also offer it as the Enter action when a non-`!` search has zero results (Android behavior: fall back to web when prefixed — keep it prefix-only unless trivial).
+- [ ] **2.3 Per-app rename labels** — config dict `app_labels: {app_id: label}`. Long-press a drawer row → menu with Rename / Hide / Pin-to-slot / App info (skip uninstall — package ops are distro-specific and device-gated). Renamed label shows everywhere: drawer, search, folders, home slots (slot label copies it at pin time; renames afterwards update slots pointing at that `app_id`). Search matches both original and renamed label (mirror `AppSearchMatcher` semantics).
+- [ ] **2.4 Sort modes** — extend the drawer sort toggle to cycle: Default (usage when counts exist, else A–Z) → A–Z → Install date (mtime of the `.desktop` file — good enough) → back. Skip APK-size (meaningless here); document the omission in `design.md`.
+- [ ] **2.5 Visibility options** — two config bools in Settings: `hide_home_items_from_search` and `hide_folder_members_from_drawer`; filter accordingly in `app_index.search()` call sites (home-slot and folder-member `app_id`s come from `home_slots`).
 
----
+## Workstream 3 — Theme parity
 
-## Phase 3 — Quick Actions Panel
+`config.py:23` has the right preset names but **wrong colors** vs the Android source, and the wrong default.
 
-Accessible from notification shade (top strip always visible, expand for full grid).
+- [ ] **3.1 Align backgrounds** — set preset background (first hex) to the canonical values from `design.md`: amoled `#000000` (already right), graphite `#111827`, forest `#10261B`, ocean `#0F1C2E`, paper `#F3EEE2`, mist `#E6EDF5`. Rederive the surface/border shades per preset from its background (keep the current relative-lightness relationships); keep text colors near-white on dark presets, near-black on paper/mist. Keep `aura` untouched (Linux bonus).
+- [ ] **3.2 Default = AMOLED** — `DEFAULT_CONFIG['theme'] = 'amoled'` (Android default). Existing configs keep their saved choice.
+- [ ] **3.3 Custom solid color** — Settings: a hex entry (validate `#RRGGBB`) that builds an ad-hoc ThemePreset from one background color (auto-derive shades + pick black/white text by luminance). Persist as `theme: 'custom'`, `custom_background: '#…'`. Backgrounds are solid colors only — no wallpaper support, ever.
+- [ ] **3.4 Burgundy** — add `#2A1018` as a named custom-color suggestion (Android has it as an extra background, not a preset).
 
-- [ ] **Tile layout**: 4-across grid, PiercingXX style — text label + icon glyph (symbolic), no color fills except active state
-- [ ] **Tier 1 tiles (always on strip)**: WiFi toggle, Bluetooth toggle, Mobile Data toggle, Airplane Mode toggle
-- [ ] **Tier 2 tiles (expanded grid)**: Flashlight, Do Not Disturb, Auto-rotate, Location, Hotspot
-- [ ] **Sliders below grid**: Brightness (via `/sys/class/backlight`), Volume (via PulseAudio/PipeWire GObject bindings)
-- [ ] Each toggle fires the appropriate DBus method (NetworkManager for WiFi/data, BlueZ for BT, ofono/ModemManager for airplane mode)
-- [ ] Active tile state persists from DBus property subscriptions — tiles reflect live system state, not last tap
+## Workstream 4 — Fonts
 
----
+`FONT_FAMILIES` (`config.py`) has system-light/space-mono/jetbrains-mono. Parity adds:
 
-## Phase 4 — Gesture System
+- [ ] **4.1 JetBrains Mono Nerd** — add `'jetbrains-mono-nerd': 'JetBrainsMono Nerd Font, JetBrains Mono, Monospace'`. Render gracefully when not installed (the fallback chain handles it).
+- [ ] **4.2 Custom font import** — Settings: file path entry (a phone file-picker is overkill; text entry + validation is fine) for a `.ttf`/`.otf`; copy into `~/.local/share/fonts/`, run `fc-cache -f` (subprocess, silent on failure), store `font: 'custom'`, `custom_font_family` read via Pango after install. Note the Android backup caveat applies here too: custom font files are not part of backup (4.3 → Workstream 6).
 
-- [ ] **Define gesture map** in `src/gesture_config.py` — configurable dict mapping gesture actions to handler names; stored in `~/.config/piercing-shell/gestures.json`
-- [ ] **Default gesture set** (Pixel-familiar defaults):
-  - Swipe down from top edge → open notification shade
-  - Swipe up from bottom edge → open app switcher (short) / home (very short)
-  - Swipe left from right edge → back
-  - Long-press bottom edge → assistant/search trigger (placeholder for now)
-- [ ] **Gesture recognizers**: use `Gtk.GestureSwipe` + `Gtk.GesturePan` on each surface; for edge gestures, phoc provides the raw pointer/touch events at the compositor level — add a phoc plugin or use the `input-method` / grab approach to intercept edge swipes before surfaces get them
-- [ ] **Settings page addition**: gesture editor — list each gesture slot, show current binding, allow rebinding to any registered action
-- [ ] **Gesture feedback**: subtle spring animation on gesture begin/cancel (interpolate surface translation, snap back if threshold not met)
+## Workstream 5 — Widgets row (time / date / battery / weather)
 
----
+Home header currently: clock, date, battery+network status strip, hardcoded. Parity (`design.md` "Home screen"):
 
-## Phase 5 — Telephony & SMS
+- [ ] **5.1 Widget config model** — `config.py`: `widgets` dict `{time: {enabled, order, tap}, date: {…}, battery: {…}, weather: {…}}`; `tap` ∈ `'default' | 'none' | {'app': app_id}`. Defaults: time/date/battery enabled, weather disabled.
+- [ ] **5.2 Render + tap actions** — build the header from the config, ordered, skipping disabled. Tap `default`: time → installed clock app if any else none; date → calendar app; battery → power/settings page; weather → refresh. Tap `{'app': id}` → launch it.
+- [ ] **5.3 Settings section** — per-widget enable switch, order up/down, tap-action dropdown (Default / Open app… / None).
+- [ ] **5.4 Weather widget** — new `launcher/src/weather.py`: Open-Meteo current-conditions endpoint (no API key), lat/lon from two config floats set manually in Settings (no GPS dependency — iio location is device-gated). Cache result to `~/.cache/piercing-shell/weather.json`; refresh at most every 15 min (Android parity); render `18° Clear` text-only; **silent** (widget shows `--°`) when offline/unset. Fetch in a `threading.Thread(daemon=True)` + `GLib.idle_add` like `sms.py` does — never block the main loop. Unit-test the cache/staleness logic with injected clock + fetcher.
 
-- [ ] **Modem stack**: confirm ofono or ModemManager is present on chosen OS image; if ofono, add `python-dbus` bindings; if ModemManager, use `gi.repository.ModemManager`
-- [ ] **Call UI surface**: `src/call_ui.py` — full-screen overlay, shows caller ID, accept/decline buttons (large, thumb-reachable), mute, speaker, keypad
-  - Incoming call: surface appears over lock screen
-  - Active call: persistent bar at top of home (like Android) with tap-to-expand
-  - End call returns to previous surface
-- [ ] **Dialer page**: add 'Phone' tab or standalone app entry that opens numeric keypad + contact search (read contacts from Evolution Data Server or local vCard store)
-- [ ] **SMS/Messages**: lightweight message list surface — conversation view, send field at bottom; backend via ofono SMS DBus API or mmcli; no third-party messenger integration in scope yet
-- [ ] **Mobile data**: integrate APN configuration into Settings page; NetworkManager DBus for connection management
+## Workstream 6 — Backup / restore (JSON)
 
----
+Mirror the Android backup scope (`design.md` "Backup / restore"):
 
-## Phase 6 — System Integration
+- [ ] **6.1 Export** — `launcher/src/backup.py`: `export_backup() -> dict` with `{version: 1, home_slots, app_labels, hidden_apps, widgets, theme (+custom color), font, text_size_scale, home_alignment, auto_lock_timeout, gestures (from gesture_config), search/visibility prefs}`. Explicitly excluded: PIN hash (security), launch counts (noise), custom font file. Settings button "Export backup" → write `~/piercing-wm-backup-YYYYMMDD.json`.
+- [ ] **6.2 Restore, atomic** — `restore_backup(path)`: parse → validate the **entire** payload against the schema (types, slot cap, known theme/font/gesture keys) → only then apply, via one `ShellConfig` write + one gestures write. Invalid payload = zero writes + visible error label (Android's no-write-on-invalid-payload guarantee). Settings button "Restore from backup" with a confirm step.
+- [ ] **6.3 Tests** — round-trip test (export → restore onto fresh config → configs equal), and a table of malformed payloads (truncated JSON, wrong types, 9 slots, unknown gesture action) asserting nothing was written.
 
-- [ ] **Battery**: read `/sys/class/power_supply/` and display in status area on home and lock screen; low battery toast notification
-- [ ] **Network status**: show WiFi SSID or signal bars + mobile signal strength in a minimal status strip at top of home screen (not a full status bar — just inline text in the header zone)
-- [ ] **Audio routing**: PipeWire/PulseAudio GObject bindings for volume control; auto-switch to earpiece on call, speaker toggle, headset detection
-- [ ] **Display**: auto-brightness option (read ambient light sensor if available); forced rotation lock toggle in quick actions
-- [ ] **Suspend/wake**: handle `logind` `PrepareForSleep` signal — lock screen before suspend, unlock on resume (correct PIN required)
-- [ ] **Notification daemon**: if no system notification daemon is running, start a minimal one as part of the shell session that implements `org.freedesktop.Notifications`; bridge to the shade surface
+## Workstream 7 — Sounds
 
----
+Assets already in `launcher/data/sounds/` (ringtone.mp3, notify.wav, comm-on.wav, alert.wav — from linux-phone-mod).
 
-## Phase 7 — Packaging & Image Build
+- [ ] **7.1 Meson install** — `install_data` the four files to `datadir/piercing-shell/sounds/`.
+- [ ] **7.2 Player helper** — `launcher/src/sound.py`: resolve sound dir (installed path, fall back to repo-relative for dev runs); `play(name, loop=False)` / `stop()` via `paplay` subprocess (PipeWire's pactl frontend ships it everywhere we target); loop = respawn on exit from a daemon thread until stopped. Silent no-op if `paplay` is missing.
+- [ ] **7.3 Wire ringtone** — `call_ui.py`: loop `ringtone.mp3` on `show_incoming()`, stop on accept/decline/`end_call()`/remote hangup (all `StateChanged` paths in `modem_monitor.py` flow through `window.py._on_call_*` — stop in every terminal path).
+- [ ] **7.4 Wire notification sound** — `notif_daemon.py`: play `notify.wav` on `Notify` unless the shade's DnD tile is active (read the DnD state from `quick_actions.py` — it's currently a stub tile; give it a real boolean the daemon can query) or the notification carries the `suppress-sound` hint.
+- [ ] **7.5 Config toggles** — Settings switches: `sound_ringtone` (default on), `sound_notifications` (default on).
 
-- [ ] **Meson install targets**: update `meson.build` to install all new surface modules, session `.desktop`, and systemd user service for the shell
-- [ ] **Session file**: `data/io.piercingxx.PiercingShell.session` — registers the full compositor+shell combo as a selectable session
-- [ ] **OS image overlay**: write a `rootfs-overlay/` directory under `pixel-3a/` that can be extracted on top of the chosen base image — includes all installed shell files, session config, and any patched phoc binary
-- [ ] **Flash script**: `pixel-3a/flash.sh` — takes the base image, applies the overlay, and flashes via fastboot/heimdall in one step; documents unlock + flash steps for Pixel 3a bootloader
-- [ ] **First-boot setup**: minimal first-run wizard surface (before lock screen is configured) — set PIN, pick theme, confirm timezone
+## Workstream 8 — Gesture parity polish
+
+`gesture_config.py` already has the right shape. Gaps:
+
+- [ ] **8.1 Arbitrary app targets** — Android lets swipe-left/right launch *any chosen app*. Extend actions with `launch:<app_id>` (validate the id exists at bind time, fall back to `none` at dispatch if uninstalled). Settings gesture editor: the dropdown gains "Launch app…" → app picker.
+- [ ] **8.2 Swipe-down choice** — verify the Settings editor exposes `swipe_down_top` = notifications vs search (both already valid actions) and that the `search` action opens the drawer with keyboard focus. Fix if not.
+- [ ] **8.3 Prune dead slots** — `squeeze` (Pixel Active Edge) and `double_press_power`/`fingerprint_swipe` are hardware-gated; keep them in `_DEFAULTS` but hide from the Settings editor behind a "hardware gestures" expander with a note that they need device support.
+
+## Workstream 9 — Scripts (installer / deploy / init)
+
+Follow the linux-phone-mod installer pattern (whiptail menu, cached sudo, network check) — see its `linux-phone-mod.sh` on GitHub for the reference shape.
+
+- [ ] **9.1 `scripts/install.sh`** — whiptail TUI, POSIX sh. Menu: Install / Update / Reboot / Exit. Install path: detect `apk` vs `apt` → install deps (`py3-gobject3 gtk4 libadwaita gtk4-layer-shell meson ninja rsync` | Debian equivalents `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libgtk4-layer-shell0 …`) → `meson setup build && meson install` from `launcher/` → install session files → run `scripts/bootstrap-dots.sh` (tolerate its current loud failure — the piercing-dots phone profile is a parallel task) → enable the shell service (systemd user unit or OpenRC, detected via `ps -p 1`).
+- [ ] **9.2 `scripts/deploy.sh`** — dev-loop rsync deploy: env `PIERCING_DEVICE` (required), `PIERCING_USER` (default `user`); rsync `launcher/src/` → `~/piercing-shell/src/` on device, then restart the shell service over SSH, handling both systemd (`systemctl --user restart piercing-shell`) and OpenRC (`rc-service piercing-shell restart` via doas/sudo). `--dry-run` flag. Can't be end-to-end tested without a phone — test the argument handling and rsync command construction locally (echo mode).
+- [ ] **9.3 OpenRC service** — `launcher/data/openrc/piercing-shell` init script equivalent to the systemd user unit (respawn on failure), meson-installed. postmarketOS default images are OpenRC; this unblocks device day one.
+- [ ] **9.4 App-set menu entry** — optional "Install phone apps" install.sh menu item carrying the linux-phone-mod set forward, distro-aware: Neovim, Yazi, Flathub (FLOSS subset), UFW + allow SSH, Tailscale, Waydroid (skip cleanly where unavailable). Skip Homebrew (broken on musl). Each item guarded by `command -v`/repo checks — the menu must never hard-fail on one missing package.
+- [ ] **9.5 `shellcheck`** — all of `scripts/*.sh` and `devices/*/*.sh` pass `shellcheck -s sh` (or `-s bash` where the shebang says bash). Add fixes as needed.
+
+## Workstream 10 — Tests & QA harness
+
+- [ ] **10.1 `tests/` with pytest** — pure-logic coverage, no GTK imports needed: `config.py` (defaults, migration, slot validation), `default_layout.py` (fake resolver: full/partial/none resolution, never-overwrite), `backup.py` (6.3), `gesture_config.py` (unknown key/action rejection, `launch:` validation), `app_index.py` search matching + sort modes, weather cache logic. Guard GTK-importing modules out of test collection (`tests/conftest.py`).
+- [ ] **10.2 CI-ish gate script** — `scripts/check.sh`: `py_compile` all sources + `pytest -q` + `shellcheck`. This is the pre-commit gate; run it before every commit.
+- [ ] **10.3 Docs drift** — when a workstream lands, tick it here and update `design.md`/`launcher/README.md` if behavior diverged from spec (e.g. the APK-size sort omission).
 
 ---
 
-## Phase 8 — Polish & Hardening
+## Suggested order
 
-- [ ] **Touch target audit**: every interactive element must be >= 48px tall; review all surfaces on 2160×1080 (Pixel 3a) at 420dpi
-- [ ] **Theme propagation**: phoc + gtk4 theme should be consistent — dark/light preference in config propagates to GTK_THEME env var and libadwaita color scheme at session start
-- [ ] **Font installation**: ensure Space Mono and JetBrains Mono are present in the OS image overlay; fall back gracefully to system monospace
-- [ ] **Performance baseline**: measure shell startup time, gesture latency, and app launch latency on device; target <300ms home-to-app-open
-- [ ] **Crash recovery**: phoc should restart the shell surface if it exits unexpectedly; add a `Restart=on-failure` systemd unit
-- [ ] **Logging**: structured log output to `~/.local/share/piercing-shell/shell.log` with rotation; accessible from Settings page
+1 → 3 → 2 → 7 → 10.1/10.2 (early, then continuous) → 4 → 8 → 5 → 6 → 9 → 10.3. Workstream 1 first: everything else touches config, and the slot migration is the riskiest schema change — land it while the surface area is small.
 
----
+## Blocked — do NOT attempt (needs hardware or the user)
 
-## Deferred / Out of Scope for Now
-
-- Camera app
-- Web browser integration
-- OTA update mechanism
-- Third-party messenger support (Signal, WhatsApp, etc.)
-- Multi-user / guest mode
-- Accessibility (screen reader, large-text mode)
-- App sandboxing / Flatpak integration
+- **Flashing / device bring-up** (Fairphone 5 fastboot, Librem 5 session swap, FLX1 research) — `devices/*/notes.md` hold the checklists.
+- **lisgd/wob/wvkbd runtime integration, threshold calibration, telephony testing** — phone required.
+- **Final product rename** (`piercing-shell` → ?) — user decision; when made, rename DBus namespace, socket, service, meson project in one commit.
+- **piercing-dots phone profile** — separate agent, separate repo. This repo only consumes `install.sh --profile phone` via `scripts/bootstrap-dots.sh`.
+- **Publishing/releases** — none until first device boot.
