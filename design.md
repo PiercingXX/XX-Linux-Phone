@@ -1,6 +1,6 @@
 # Piercing WM — Design Spec
 
-The [PiercingXX Android launcher](https://github.com/PiercingXX/PiercingXX-launcher) (v6.5) is the reference implementation. This document is the parity contract: what the Linux launcher must match, adapted where Android and Wayland genuinely differ. Facts below are taken from the launcher source (`LauncherThemePreset.kt`, `LauncherBackground.kt`, `LauncherFont.kt`, `DefaultLayoutBootstrapper.kt`, `Constants.kt`, README).
+This document is the UI contract for Piercing WM: every surface, theme, and gesture the shell provides. Anything the shell draws must conform to it.
 
 ## Design language — PiercingXX
 
@@ -10,7 +10,7 @@ Text-first. No icon grids, no app icons on home. Low visual noise, local-only cu
 
 - Up to **8 home slots**; each slot holds an app, a pinned shortcut, or a **folder**.
 - Default layout (seeded on first boot, never overwrites user config):
-  - **Notes** → note-taking app (Android: Keep; Linux: kitty + nvim daily note via piercing-dots)
+  - **Notes** → daily note (kitty + nvim via piercing-dots)
   - **Audio** (folder) → Audiobooks, Music
   - **Comms** (folder) → Phone, Text, Email
   - **Tools** (folder) → Internet, Camera, Calculator, Photos
@@ -23,7 +23,7 @@ Text-first. No icon grids, no app icons on home. Low visual noise, local-only cu
 
 - Full-screen text list, **search auto-focused** on open.
 - Search can **auto-launch the single result**; `!query` falls back to web search.
-- Sort modes: default, A–Z, A–Z incognito, install date, size. (Linux adds: usage frequency — already built.)
+- Sort modes: default, A–Z, A–Z incognito, install date, size, usage frequency.
 - A–Z character jump strip on the right edge.
 - **Hidden apps**: hideable per-app; optional hiding of home items from search and folder members from the main drawer.
 - Per-app rename labels (folder members show their renamed label everywhere).
@@ -41,10 +41,10 @@ Create, rename, delete, manage membership, manual reorder. Folder opens as a tex
 | Swipe right on home | Launch configured app (default: Phone) |
 | Swipe down | Notifications **or** search (user choice) |
 | Double-tap | Lock screen |
-| Swipe up | (Linux, system-level) Home / app switcher — via lisgd |
-| Edge swipe left/right | (Linux, system-level) Back — via lisgd |
+| Swipe up | Home / app switcher (system-level, via lisgd) |
+| Edge swipe left/right | Back (system-level, via lisgd) |
 
-On Linux the system-level gestures (up/edges) belong to lisgd + IPC; the on-surface gestures (left/right/down/double-tap on home) stay GTK gesture recognizers, exactly as the Android launcher handles them in-process.
+System-level gestures (swipe up, edge swipes) belong to lisgd + IPC because they must work over any app. On-surface gestures (left/right/down/double-tap on home) are GTK gesture recognizers handled in-process by the launcher.
 
 ## Themes
 
@@ -67,11 +67,11 @@ Bundled options: **Space Mono (default)**, JetBrains Mono, JetBrains Mono Nerd, 
 
 ## Backup / restore
 
-Versioned JSON export covering: home slots, folders + membership, pins, widget config + tap actions, theme, hidden apps, gestures, prefs. Restore never writes on invalid payload. (Linux: same JSON schema where possible — a phone reflash should restore the launcher in one file.)
+Versioned JSON export covering: home slots, folders + membership, pins, widget config + tap actions, theme, hidden apps, gestures, prefs. Restore never writes on invalid payload. A phone reflash should restore the launcher in one file.
 
-## Linux-only surfaces (no Android equivalent)
+## System surfaces
 
-The Android launcher lives inside SystemUI; on Linux we *are* SystemUI. These surfaces extend the same design language and already exist in `launcher/src/`:
+Piercing WM *is* the system UI, so the shell owns every surface beyond the launcher. These extend the same design language and already exist in `launcher/src/`:
 
 lock screen (6-digit PIN, fingerprint when hardware supports), notification shade + daemon, quick settings tiles, app switcher, call UI + dialer + SMS + contacts, first-boot wizard, power menu, volume/brightness HUD (wob), virtual keyboard (wvkbd), display/power management.
 

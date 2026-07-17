@@ -1,6 +1,6 @@
 # Piercing WM — launcher
 
-GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" name, this is a *shell*, not a window manager — it runs on top of phoc (which does the window management) as a full Wayland session replacement (no GNOME, no Phosh). Text-first, gesture-driven, monochrome — the PiercingXX design language; `../design.md` is the parity contract with the Android launcher.
+GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" name, this is a *shell*, not a window manager — it runs on top of phoc (which does the window management) as a full Wayland session replacement (no GNOME, no Phosh). Text-first, gesture-driven, monochrome — the PiercingXX design language; `../design.md` is the UI spec.
 
 ## What's built
 
@@ -20,7 +20,7 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" nam
 
 ## What's not done yet
 
-- Android-launcher parity gaps — 8-slot home model, widgets config, `!` web search, rename labels, theme presets, JSON backup (`../todo.md` Phase 1)
+- Spec gaps — 8-slot home model, widgets config, `!` web search, rename labels, theme presets, JSON backup (`../todo.md` Phase 1)
 - Device bring-up: evdev paths, IIO sensor path, wlopm output name (Phase 3)
 - lisgd gesture service wiring, wob HUD, wvkbd keyboard (Phases 2–3)
 - Telephony verification on device (Phase 3; VoLTE testing on the FLX1 in Phase 4)
@@ -72,4 +72,4 @@ ps -p 1                            # systemd or OpenRC?
 
 ## Fonts
 
-Space Mono (default), JetBrains Mono, JetBrains Mono Nerd (parity spec). Install per distro; overlay dir fallback for Space Mono.
+Space Mono (default), JetBrains Mono, JetBrains Mono Nerd (per the design spec). Install per distro; overlay dir fallback for Space Mono.
