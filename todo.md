@@ -72,7 +72,7 @@ Mirror the Android backup scope (`design.md` "Backup / restore"):
 
 ## Workstream 7 — Sounds
 
-Assets already in `launcher/data/sounds/` (ringtone.mp3, notify.wav, comm-on.wav, alert.wav — from linux-phone-mod).
+Assets already in `launcher/data/sounds/` (ringtone.mp3, notify.wav, comm-on.wav, alert.wav).
 
 - [ ] **7.1 Meson install** — `install_data` the four files to `datadir/piercing-shell/sounds/`.
 - [ ] **7.2 Player helper** — `launcher/src/sound.py`: resolve sound dir (installed path, fall back to repo-relative for dev runs); `play(name, loop=False)` / `stop()` via `paplay` subprocess (PipeWire's pactl frontend ships it everywhere we target); loop = respawn on exit from a daemon thread until stopped. Silent no-op if `paplay` is missing.
@@ -90,12 +90,12 @@ Assets already in `launcher/data/sounds/` (ringtone.mp3, notify.wav, comm-on.wav
 
 ## Workstream 9 — Scripts (installer / deploy / init)
 
-Follow the linux-phone-mod installer pattern (whiptail menu, cached sudo, network check) — see its `linux-phone-mod.sh` on GitHub for the reference shape.
+Installer pattern: whiptail menu, cached sudo, network check up front.
 
 - [ ] **9.1 `scripts/install.sh`** — whiptail TUI, POSIX sh. Menu: Install / Update / Reboot / Exit. Install path: detect `apk` vs `apt` → install deps (`py3-gobject3 gtk4 libadwaita gtk4-layer-shell meson ninja rsync` | Debian equivalents `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libgtk4-layer-shell0 …`) → `meson setup build && meson install` from `launcher/` → install session files → run `scripts/bootstrap-dots.sh` (tolerate its current loud failure — the piercing-dots phone profile is a parallel task) → enable the shell service (systemd user unit or OpenRC, detected via `ps -p 1`).
 - [ ] **9.2 `scripts/deploy.sh`** — dev-loop rsync deploy: env `PIERCING_DEVICE` (required), `PIERCING_USER` (default `user`); rsync `launcher/src/` → `~/piercing-shell/src/` on device, then restart the shell service over SSH, handling both systemd (`systemctl --user restart piercing-shell`) and OpenRC (`rc-service piercing-shell restart` via doas/sudo). `--dry-run` flag. Can't be end-to-end tested without a phone — test the argument handling and rsync command construction locally (echo mode).
 - [ ] **9.3 OpenRC service** — `launcher/data/openrc/piercing-shell` init script equivalent to the systemd user unit (respawn on failure), meson-installed. postmarketOS default images are OpenRC; this unblocks device day one.
-- [ ] **9.4 App-set menu entry** — optional "Install phone apps" install.sh menu item carrying the linux-phone-mod set forward, distro-aware: Neovim, Yazi, Flathub (FLOSS subset), UFW + allow SSH, Tailscale, Waydroid (skip cleanly where unavailable). Skip Homebrew (broken on musl). Each item guarded by `command -v`/repo checks — the menu must never hard-fail on one missing package.
+- [ ] **9.4 App-set menu entry** — optional "Install phone apps" install.sh menu item, distro-aware: Neovim, Yazi, Flathub (FLOSS subset), UFW + allow SSH, Tailscale, Waydroid (skip cleanly where unavailable). Skip Homebrew (broken on musl). Each item guarded by `command -v`/repo checks — the menu must never hard-fail on one missing package.
 - [ ] **9.5 `shellcheck`** — all of `scripts/*.sh` and `devices/*/*.sh` pass `shellcheck -s sh` (or `-s bash` where the shebang says bash). Add fixes as needed.
 
 ## Workstream 10 — Tests & QA harness

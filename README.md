@@ -2,6 +2,8 @@
 
 **The PiercingXX Launcher, rebuilt as a Wayland window manager + launcher for Linux phones.**
 
+> **"WM" is the name, not the architecture.** Piercing WM is in fact a *shell*: the phoc compositor does the actual window management, and Piercing WM provides every surface drawn over it (home, lock screen, shade, switcher, call UI, …) — the same relationship Phosh has to phoc.
+
 GNOME Mobile and Phosh are not the answer. This repo replaces them: a text-first, monochrome, gesture-driven shell that boots straight into the PiercingXX design language on real Linux phones. The [PiercingXX Android launcher](https://github.com/PiercingXX/PiercingXX-launcher) is the reference implementation — its home model, drawer, themes, and gestures define what we build here. Android is the prototype; this is the real thing.
 
 <table>
@@ -9,7 +11,7 @@ GNOME Mobile and Phosh are not the answer. This repo replaces them: a text-first
 <tr><td><b>Reference UI</b></td><td>PiercingXX Launcher v6.5 (Android) — see <code>design.md</code></td></tr>
 <tr><td><b>Compositor</b></td><td>phoc today (all test phones ship it); Hyprland when Hyprgrass matures</td></tr>
 <tr><td><b>Stack</b></td><td>Python + GTK4/libadwaita + gtk4-layer-shell, lisgd gestures, wob HUD, wvkbd keyboard</td></tr>
-<tr><td><b>Ecosystem</b></td><td><a href="https://github.com/PiercingXX/piercing-dots">piercing-dots</a> for the terminal/dotfile layer; <a href="https://github.com/PiercingXX/linux-phone-mod">linux-phone-mod</a> (predecessor — installer pattern, app set, sounds); <a href="https://github.com/PiercingXX/debian-mini-mod">debian-mini-mod</a> minimal-install patterns</td></tr>
+<tr><td><b>Ecosystem</b></td><td><a href="https://github.com/PiercingXX/piercing-dots">piercing-dots</a> for the terminal/dotfile layer; <a href="https://github.com/PiercingXX/debian-mini-mod">debian-mini-mod</a> minimal-install patterns</td></tr>
 </table>
 
 ## What this is (and isn't)

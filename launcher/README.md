@@ -1,6 +1,6 @@
 # Piercing WM — launcher
 
-GTK4/libadwaita launcher + shell surfaces for Linux phones. Runs on top of phoc as a full Wayland session replacement (no GNOME, no Phosh). Text-first, gesture-driven, monochrome — the PiercingXX design language; `../design.md` is the parity contract with the Android launcher.
+GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" name, this is a *shell*, not a window manager — it runs on top of phoc (which does the window management) as a full Wayland session replacement (no GNOME, no Phosh). Text-first, gesture-driven, monochrome — the PiercingXX design language; `../design.md` is the parity contract with the Android launcher.
 
 ## What's built
 
@@ -16,7 +16,7 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Runs on top of phoc 
 - **IPC server** (`ipc.py`) — Unix socket at `$XDG_RUNTIME_DIR/piercing-shell.sock`.
 - **Modem monitor** (`modem_monitor.py`) — ModemManager DBus watcher for call events.
 - **Back arrow overlay** (`back_gesture.py`) — visual feedback only; gesture detection is lisgd's job, delivered via `gesture.*` IPC commands.
-- **Sounds** (`data/sounds/`) — ringtone + notification sounds carried over from linux-phone-mod (wiring: todo.md Phase 2).
+- **Sounds** (`data/sounds/`) — ringtone + notification sounds (wiring: todo.md Phase 2).
 
 ## What's not done yet
 
