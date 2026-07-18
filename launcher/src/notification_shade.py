@@ -73,7 +73,7 @@ _SWIPE_DISMISS_THRESHOLD = 140  # pixels to trigger dismiss
 
 
 class Notification:
-    __slots__ = ('id', 'app_name', 'summary', 'body', 'desktop_entry', 'timestamp')
+    __slots__ = ('id', 'app_name', 'summary', 'body', 'desktop_entry', 'timestamp', 'actions')
 
     def __init__(
         self,
@@ -82,6 +82,7 @@ class Notification:
         summary: str,
         body: str,
         desktop_entry: str = '',
+        actions: list[tuple[str, object]] | None = None,
     ) -> None:
         self.id = notif_id
         self.app_name = app_name
@@ -89,6 +90,7 @@ class Notification:
         self.body = body
         self.desktop_entry = desktop_entry
         self.timestamp = datetime.now()
+        self.actions = actions or []
 
 
 class NotificationShade(Gtk.Window):
@@ -237,9 +239,10 @@ class NotificationShade(Gtk.Window):
         summary: str,
         body: str,
         desktop_entry: str = '',
+        actions: list[tuple[str, object]] | None = None,
     ) -> None:
         self.dismiss(notif_id)
-        notif = Notification(notif_id, app_name, summary, body, desktop_entry)
+        notif = Notification(notif_id, app_name, summary, body, desktop_entry, actions)
         self._notifications.append(notif)
         self.list_box.append(self._make_row(notif))
 
@@ -273,6 +276,20 @@ class NotificationShade(Gtk.Window):
             body_label.add_css_class('notif-body')
             content.append(body_label)
 
+        if notif.actions:
+            action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            action_row.set_margin_top(6)
+            for label, callback in notif.actions:
+                btn = Gtk.Button(label=label)
+                btn.add_css_class('flat')
+                btn.add_css_class('action-link')
+                btn.connect(
+                    'clicked',
+                    lambda _b, cb=callback, nid=notif.id: self._run_action(cb, nid),
+                )
+                action_row.append(btn)
+            content.append(action_row)
+
         dismiss_btn = Gtk.Button(label='×')
         dismiss_btn.add_css_class('dismiss-button')
         dismiss_btn.connect('clicked', lambda _b, nid=notif.id: self.dismiss(nid))
@@ -303,6 +320,12 @@ class NotificationShade(Gtk.Window):
         row = Gtk.ListBoxRow(selectable=False, activatable=False)
         row.set_child(row_box)
         return row
+
+    def _run_action(self, callback: object, notif_id: int) -> None:
+        self.dismiss(notif_id)
+        self.hide_shade()
+        if callable(callback):
+            callback()
 
     def _launch_notif_app(self, desktop_entry: str, notif_id: int) -> None:
         try:

@@ -45,6 +45,9 @@ DEFAULT_CONFIG = {
     'auto_lock_timeout': 120,
     'text_size_scale': 1.0,
     'home_alignment': 'left',
+    'update_script': '~/.scripts/PiercingXX-Settings-Menu/update-system.sh',
+    'update_last_check': 0.0,
+    'update_snooze_until': 0.0,
 }
 
 
@@ -170,6 +173,33 @@ class ShellConfig:
         if alignment in ('left', 'center', 'right'):
             self.data['home_alignment'] = alignment
             self.save()
+
+    @property
+    def update_script(self) -> str:
+        val = self.data.get('update_script', DEFAULT_CONFIG['update_script'])
+        return str(val) if val else str(DEFAULT_CONFIG['update_script'])
+
+    @property
+    def update_last_check(self) -> float:
+        try:
+            return max(0.0, float(self.data.get('update_last_check', 0.0)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def set_update_last_check(self, timestamp: float) -> None:
+        self.data['update_last_check'] = max(0.0, timestamp)
+        self.save()
+
+    @property
+    def update_snooze_until(self) -> float:
+        try:
+            return max(0.0, float(self.data.get('update_snooze_until', 0.0)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def set_update_snooze_until(self, timestamp: float) -> None:
+        self.data['update_snooze_until'] = max(0.0, timestamp)
+        self.save()
 
     @property
     def launch_counts(self) -> dict[str, int]:

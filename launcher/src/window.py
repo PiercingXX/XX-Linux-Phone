@@ -23,6 +23,8 @@ from system_status import status_line
 
 _PAGE_ORDER = ['home', 'apps', 'settings']
 
+_UPDATE_NOTIF_ID = 999901
+
 
 class ShellWindow(Adw.ApplicationWindow):
     def __init__(self, application: Adw.Application) -> None:
@@ -160,6 +162,11 @@ class ShellWindow(Adw.ApplicationWindow):
         self._setup_idle_timer()
         GLib.timeout_add_seconds(1, self._tick_clock)
         GLib.timeout_add_seconds(60, self._tick_status)
+
+        from update_checker import UpdateChecker
+        self._update_checker = UpdateChecker(
+            self.config, on_updates_available=self._on_updates_available,
+        )
 
     def _load_css(self) -> None:
         style_path = Path(__file__).with_name('style.css')
@@ -388,12 +395,15 @@ class ShellWindow(Adw.ApplicationWindow):
         if lock is not None and lock.get_visible():
             lock.try_fingerprint_unlock()
 
-    def _show_shade(self) -> None:
+    def _ensure_shade(self) -> object:
         if self._shade is None:
             from notification_shade import NotificationShade
             self._shade = NotificationShade()
             self._shade.set_application(self.get_application())
-        self._shade.show_shade()
+        return self._shade
+
+    def _show_shade(self) -> None:
+        self._ensure_shade().show_shade()
 
     def _show_switcher(self) -> None:
         if self._switcher is None:
@@ -514,6 +524,26 @@ class ShellWindow(Adw.ApplicationWindow):
         index_card.append(refresh_button)
         index_card.append(self.status_label)
 
+        # System updates
+        system_title = Gtk.Label(label='System', xalign=0)
+        system_title.add_css_class('section-title')
+
+        system_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        system_card.add_css_class('settings-card')
+
+        update_button = Gtk.Button(label='Update system')
+        update_button.add_css_class('flat')
+        update_button.add_css_class('action-link')
+        update_button.connect('clicked', self._on_update_clicked)
+
+        check_updates_button = Gtk.Button(label='Check for updates now')
+        check_updates_button.add_css_class('flat')
+        check_updates_button.add_css_class('action-link')
+        check_updates_button.connect('clicked', self._on_check_updates_clicked)
+
+        system_card.append(update_button)
+        system_card.append(check_updates_button)
+
         # Gesture editor
         gesture_title = Gtk.Label(label='Gestures', xalign=0)
         gesture_title.add_css_class('section-title')
@@ -566,6 +596,8 @@ class ShellWindow(Adw.ApplicationWindow):
         box.append(title)
         box.append(appearance)
         box.append(index_card)
+        box.append(system_title)
+        box.append(system_card)
         box.append(hidden_title)
         box.append(hidden_card)
         box.append(network_title)
@@ -1049,6 +1081,42 @@ class ShellWindow(Adw.ApplicationWindow):
         self.config.set_home_alignment(alignment)
         self._populate_home()
         self._show_status('Home alignment updated.')
+
+    def _on_update_clicked(self, _btn: Gtk.Button | None = None) -> None:
+        from update_checker import run_update_script
+        ok, detail = run_update_script(self.config.update_script)
+        if ok:
+            self._show_status('Update running in terminal.')
+        else:
+            self._show_status(detail)
+
+    def _on_check_updates_clicked(self, _btn: Gtk.Button) -> None:
+        self._show_status('Checking for updates...')
+        self._update_checker.check_now(self._on_manual_check_result)
+
+    def _on_manual_check_result(self, count: int) -> None:
+        if count > 0:
+            self._on_updates_available(count)
+        else:
+            self._show_status('System is up to date.')
+
+    def _on_updates_available(self, count: int) -> None:
+        plural = 's' if count != 1 else ''
+        self._ensure_shade().add_notification(
+            _UPDATE_NOTIF_ID,
+            'System',
+            'Updates available',
+            f'{count} package{plural} can be updated.',
+            actions=[
+                ('Update now', self._on_update_clicked),
+                ('Snooze 1 week', self._snooze_updates),
+            ],
+        )
+        self._show_status(f'{count} update{plural} available — see notifications.')
+
+    def _snooze_updates(self) -> None:
+        self._update_checker.snooze()
+        self._show_status('Update checks snoozed for 1 week.')
 
     def _show_status(self, message: str) -> None:
         self.status_label.set_text(message)
