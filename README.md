@@ -16,7 +16,7 @@ The default home screen: AMOLED black, centered, Space Mono. A clock, the essent
 <tr><td><b>Product</b></td><td>Piercing WM — compositor session + GTK4 layer-shell launcher</td></tr>
 <tr><td><b>Design spec</b></td><td><code>design.md</code> — the full UI contract for every surface, theme, and gesture</td></tr>
 <tr><td><b>Compositor</b></td><td>phoc today (all test phones ship it); Hyprland when Hyprgrass matures</td></tr>
-<tr><td><b>Stack</b></td><td>Python + GTK4/libadwaita + gtk4-layer-shell, lisgd gestures, wob HUD, wvkbd keyboard</td></tr>
+<tr><td><b>Stack</b></td><td>Python + GTK4/libadwaita + gtk4-layer-shell, lisgd gestures, wob HUD, squeekboard keyboard (PiercingXX Colemak layouts)</td></tr>
 <tr><td><b>Ecosystem</b></td><td><a href="https://github.com/PiercingXX/piercing-dots">piercing-dots</a> for the terminal/dotfile layer; <a href="https://github.com/PiercingXX/debian-mini-mod">debian-mini-mod</a> minimal-install patterns</td></tr>
 </table>
 

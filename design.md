@@ -73,7 +73,32 @@ Versioned JSON export covering: home slots, folders + membership, pins, widget c
 
 Piercing WM *is* the system UI, so the shell owns every surface beyond the launcher. These extend the same design language and already exist in `launcher/src/`:
 
-lock screen (6-digit PIN, fingerprint when hardware supports), notification shade + daemon, quick settings tiles, app switcher, call UI + dialer + SMS + contacts, first-boot wizard, power menu, volume/brightness HUD (wob), virtual keyboard (wvkbd), display/power management.
+lock screen (6-digit PIN, fingerprint when hardware supports), notification shade + daemon, quick settings tiles, app switcher, call UI + dialer + SMS + contacts, first-boot wizard, power menu, volume/brightness HUD (wob), virtual keyboard (squeekboard with the PiercingXX Colemak layouts), display/power management.
+
+### Lock screen
+
+- **Swipe up to unlock.** No PIN set → an upward swipe unlocks directly. PIN set → the swipe reveals the keypad (keypad is not shown until the swipe).
+- 6-digit PIN with escalating lockout; fingerprint when hardware supports it.
+- **Notifications on the lock screen**: a text list of app name + summary (no bodies, no actions), fed by the shell's notification daemon. Config `lock_screen_notifications`: `summary` (default) / `count` / `off`. Hidden while Do Not Disturb is active. Tapping one prompts unlock, then opens the shade.
+
+### Notification shade & quick settings
+
+- **Header**: date + time on the left; tapping it expands an inline text-first month calendar (no events — just the month). A **Settings** entry on the right opens the Settings page and collapses the shade.
+- **Tiles**: WiFi, Bluetooth, Data, Airplane always visible; Torch, DnD, Focus, Auto-brightness, Location, Hotspot in the expanded tier. Hardware-gated tiles stay hidden until the device supports them.
+- **Brightness and volume sliders** in the expanded tier.
+- Notification list below: swipe to dismiss, clear all.
+
+### Do Not Disturb
+
+Modeled on the Pixel's DnD. One toggle silences notification sounds and banners; notifications still collect silently in the shade. Exceptions that always get through: alarms, **repeat callers** (same number calling twice within 15 minutes), and **starred contacts**. Optional schedules (days + start/end time). While active, the lock screen shows no notifications. State is config-backed so the notification daemon and call UI can consult it.
+
+### Focus Mode
+
+Modeled on the Pixel's Focus Mode. The user picks a list of distracting apps; while focus is active those apps render dimmed with a "paused" note on home and in the drawer, launching them is blocked, and their notifications are held silently and delivered when focus ends. **Take a break** pauses focus for 5/10/15 minutes, then auto-resumes. Optional schedule, sharing the DnD schedule machinery. Focus and DnD are independent toggles.
+
+### Settings scope
+
+The in-shell Settings page is **system-only**: the things a config file can't own — WiFi networks, Bluetooth pairing, cellular/APN, sound devices, battery/power, system updates, backup/restore actions, about. It replaces both GNOME Settings and phosh-mobile-settings for everything that applies to this shell. Every *shell* preference — theme, fonts, text size, alignment, home slots, widgets, gestures, sounds, DnD/Focus rules — lives in `~/.config/piercing-shell/` and is edited there (or through dedicated surfaces like home edit mode). The shell hot-reloads the config file, so editing it in a terminal is a first-class workflow.
 
 ## Non-goals
 
