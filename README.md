@@ -1,4 +1,4 @@
-# Piercing WM
+# PiercingXX Mobile Shell
 
 **A minimalist Wayland shell for Linux phones — text-first, gesture-driven, and fully functional as a daily phone.**
 
