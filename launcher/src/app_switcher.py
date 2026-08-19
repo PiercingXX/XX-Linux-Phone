@@ -23,7 +23,6 @@ _SWITCHER_CSS = b"""
 .switcher-root {
     background: rgba(0, 0, 0, 0.92);
     color: #f4f4f4;
-    font-family: 'Space Mono', monospace;
 }
 .switcher-header {
     font-size: 11pt;
@@ -79,7 +78,7 @@ class AppSwitcher(Gtk.Window):
     """
 
     def __init__(self) -> None:
-        super().__init__(title='PiercingOS Switcher')
+        super().__init__(title='PiercingXX Switcher')
 
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)

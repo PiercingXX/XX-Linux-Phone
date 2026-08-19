@@ -1,6 +1,6 @@
-# Piercing WM — Design Spec
+# XX-WM — Design Spec
 
-This document is the UI contract for Piercing WM: every surface, theme, and gesture the shell provides. Anything the shell draws must conform to it.
+This document is the UI contract for XX-WM: every surface, theme, and gesture the shell provides. Anything the shell draws must conform to it.
 
 ## Design language — PiercingXX
 
@@ -10,45 +10,70 @@ Text-first. No icon grids, no app icons on home. Low visual noise, local-only cu
 
 - Up to **8 home slots**; each slot holds an app, a pinned shortcut, or a **folder**.
 - Default layout (seeded on first boot, never overwrites user config):
-  - **Notes** → daily note (kitty + nvim via piercing-dots)
-  - **Audio** (folder) → Audiobooks, Music
-  - **Comms** (folder) → Phone, Text, Email
-  - **Tools** (folder) → Internet, Camera, Calculator, Photos
-  - Members that don't resolve to an installed app are skipped; empty folders are not created.
-- Widgets above the slots: **time, date, battery, weather** — individually toggleable, manually orderable, each with a configurable tap action (open default app / refresh weather / open chosen app).
+  - **Notes** → daily note (`piercing-note` via piercing-dots, else first notes app)
+  - **Audio** (folder) → Audiobook, Music
+  - **Comms** (folder) → Phone, Text, Email, Chat, SoftPhone. Phone and Text bind to the device's real telephony apps when installed (GNOME Calls / Chatty — the working stack on FuriOS and postmarketOS); the shell's built-in dialer is only the fallback, so the two always correlate with whatever stack actually places calls and texts on that device.
+  - **Calendar**
+  - **Tools** (folder) → browser (labeled with its own name), Calculator, Camera, Photos
+  - Members that don't resolve to an installed app are skipped; empty folders are not created; slots compact (no gaps).
+  - **Every seeded name is a real rename**: seeding writes each label into `app_labels`, so drawer, search, and folders show the same names as home.
+  - Seeding also hides stock clutter (shell-redundant apps like GNOME Settings, Software, Calls, phosh-mobile-settings) — hidden apps stay reachable via search.
+- **Screen-fraction anchoring**: the widget block is centered on the **1/4 line** of the screen; the slot list is centered on the **2/3 line**.
+- Widgets above the slots, in default order: **time, date, weather, battery** — individually toggleable, manually orderable, each with a configurable tap action (open default app / refresh weather / open chosen app). Weather is **on** by default. Date renders `Mon, Jul 20`.
 - Alignment configurable (left/center/right); default **centered**.
-- Long-press on home → configuration (slot editing), not a wallpaper picker.
+- Long-press on home → **edit mode** (slot editing), not a wallpaper picker: per-slot ✕ / ↑ / ↓ / rename, "Add app" (drawer pick mode) and "New folder" while under 8 slots, plus Settings and Done entries. Widgets stay visible.
 
 ## App drawer
 
-- Full-screen text list, **search auto-focused** on open.
+- **Bottom sheet, ~85% of screen height** — the top ~15% stays free so the drawer reads as a sheet, not a full-screen takeover. **Search lives at the bottom** where the thumb is. The keyboard opens only when the search field is tapped — never automatically.
+- **Search results anchor at the bottom**, directly above the search field (and above the on-screen keyboard when open), within thumb reach: a short result set sits at the bottom of the list; a set that overflows the view reads from the top. The drawer rises above the keyboard, never behind it.
+- Drawer rows use a **smaller type size** than home slots.
 - Search can **auto-launch the single result**; `!query` falls back to web search.
-- Sort modes: default, A–Z, A–Z incognito, install date, size, usage frequency.
+- Sort: a single toggle cycling **A–Z ↔ install date** (default A–Z). No size or usage sorts.
 - A–Z character jump strip on the right edge.
-- **Hidden apps**: hideable per-app; optional hiding of home items from search and folder members from the main drawer.
-- Per-app rename labels (folder members show their renamed label everywhere).
-- Drawer long-press → pin/hide/rename/uninstall actions.
+- Row order: folders first, then pinned apps (in pin order), then the rest per the active sort, then a synthetic **Launcher Settings** entry always last.
+- **Folder rows expand inline**: tapping a folder drops its members open directly under the row as an indented drop-down; tapping it again (or a swipe right) collapses it. On expand, the folder row plus its members scroll to sit vertically centered. The expansion survives list refreshes and collapses automatically if the folder disappears.
+- **Search-only items**: hidden apps, apps occupying home slots, and folder members are absent from the browse list but all surface in search results.
+- Other launchers/shells never appear in the drawer at all, not even in search.
+- Per-app rename labels (`app_labels`); the renamed label shows everywhere and search matches both the original and renamed name.
+- Long-press a row → one plain action list: App info, Rename, Add to folder, Hide/Show, **Disable for…**, Pin/Unpin, Move up/down. (No uninstall — package ops are distro-specific.)
+- Long-press an **expanded folder member** → the shared folder-member menu (see Folders) — identical on home and in the drawer.
+
+### Disable for… (notification muting)
+
+Mute an app's notifications for **1, 2, 4, or 8 hours**. While muted, the app's notifications are discarded by the notification daemon — no banner, no sound, not in the shade. The mute expires silently; no unmute action needed. Stored as `muted_apps: {app_id: until_epoch}`.
 
 ## Folders
 
-Create, rename, delete, manage membership, manual reorder. Folder opens as a text list overlay, same typography as home.
+Create, rename, delete, manage membership, manual reorder. **Folders expand as inline drop-downs** everywhere they appear:
+
+- **On home**: tapping a folder slot drops its members open directly under that slot — same typography as home slots, wrap-width rows following the home alignment, no title, no close chrome. The slot list stays vertically centered and grows/shrinks around the expansion; **the widget block stays visible**. Tapping the folder again or launching a member collapses it; a home re-render (config change, app list refresh) collapses it too. Other gestures act normally — they don't force-dismiss the folder.
+- **In the drawer**: members drop open indented under the folder row (see App drawer).
+- **Long-press a member** (home or drawer) → one shared action menu: App info, Rename, **Disable for…** (apps only), Move up, Move down, **Remove from folder** (the Linux analog of Android's uninstall row — package ops are distro-specific).
+- Expand/collapse uses a quick functional reveal (~120 ms); rows give pressed-state touch feedback. No nested folders.
+
+## Dialogs & menus
+
+Every dialog and action menu the shell draws (long-press menus, rename entries, confirm steps) follows the active theme's colors and the launcher font — no stock-toolkit styling. Text entries in dialogs commit on the keyboard's Enter/Done key, same as the confirm button.
 
 ## Gestures
 
 | Gesture | Action |
 |---|---|
-| Swipe left on home | Launch configured app (default: Camera) |
-| Swipe right on home | Launch configured app (default: Phone) |
+| Swipe left on home | Launch configured app (seeded: **Skippy**, resolved by app name — it installs as a PWA so its id varies; unbound if absent) |
+| Swipe right on home | Launch configured app (default: Camera) |
 | Swipe down | Notifications **or** search (user choice) |
-| Double-tap | Lock screen |
+| Double-tap | Lock screen (kept on Linux — Android dropped it only because it needed the accessibility service) |
 | Swipe up | Home / app switcher (system-level, via lisgd) |
 | Edge swipe left/right | Back (system-level, via lisgd) |
+
+Swipe left/right accept any app via `launch:<app_id>` bindings, alongside the fixed actions.
 
 System-level gestures (swipe up, edge swipes) belong to lisgd + IPC because they must work over any app. On-surface gestures (left/right/down/double-tap on home) are GTK gesture recognizers handled in-process by the launcher.
 
 ## Themes
 
-Six presets + custom solid colors. Backgrounds are **solid colors only** — never wallpaper images.
+Eight presets + custom solid colors. Backgrounds are **solid colors only** — never wallpaper images.
 
 | Preset | Mode | Background |
 |---|---|---|
@@ -58,20 +83,22 @@ Six presets + custom solid colors. Backgrounds are **solid colors only** — nev
 | Ocean | dark | `#0F1C2E` |
 | Paper | light | `#F3EEE2` |
 | Mist | light | `#E6EDF5` |
+| Aura | dark | `#0d0b14` |
+| Burgundy | dark | `#2A1018` |
 
-Extra named color: Burgundy `#2A1018`. Light/dark/system mode switch. Text size scaling and per-surface alignment.
+Light/dark/system mode switch. Text size scaling and per-surface alignment. **Theme changes apply instantly** — no preview/confirm step.
 
 ## Fonts
 
-Bundled options: **Space Mono (default)**, JetBrains Mono, JetBrains Mono Nerd, System Light, plus user-imported custom font. Font applies launcher-wide.
+Bundled options: **JetBrains Mono Nerd (default)**, Space Mono, JetBrains Mono, System Light, plus user-imported custom font. Font applies launcher-wide. The base type scale is deliberately small (home slots ~27pt, clock ~42pt, drawer rows ~13pt) — 20% below the original sizes.
 
 ## Backup / restore
 
-Versioned JSON export covering: home slots, folders + membership, pins, widget config + tap actions, theme, hidden apps, gestures, prefs. Restore never writes on invalid payload. A phone reflash should restore the launcher in one file.
+Versioned JSON export covering: home slots, folders + membership, pins, app rename labels, widget config + tap actions, theme, hidden apps, gestures, prefs. Excluded: PIN hash, launch counts, active mutes, custom font files. Restore never writes on invalid payload. A phone reflash should restore the launcher in one file.
 
 ## System surfaces
 
-Piercing WM *is* the system UI, so the shell owns every surface beyond the launcher. These extend the same design language and already exist in `launcher/src/`:
+XX-WM *is* the system UI, so the shell owns every surface beyond the launcher. These extend the same design language and already exist in `launcher/src/`:
 
 lock screen (6-digit PIN, fingerprint when hardware supports), notification shade + daemon, quick settings tiles, app switcher, call UI + dialer + SMS + contacts, first-boot wizard, power menu, volume/brightness HUD (wob), virtual keyboard (squeekboard with the PiercingXX Colemak layouts), display/power management.
 
@@ -98,7 +125,7 @@ Modeled on the Pixel's Focus Mode. The user picks a list of distracting apps; wh
 
 ### Settings scope
 
-The in-shell Settings page is **system-only**: the things a config file can't own — WiFi networks, Bluetooth pairing, cellular/APN, sound devices, battery/power, system updates, backup/restore actions, about. It replaces both GNOME Settings and phosh-mobile-settings for everything that applies to this shell. Every *shell* preference — theme, fonts, text size, alignment, home slots, widgets, gestures, sounds, DnD/Focus rules — lives in `~/.config/piercing-shell/` and is edited there (or through dedicated surfaces like home edit mode). The shell hot-reloads the config file, so editing it in a terminal is a first-class workflow.
+The in-shell Settings page is **system-only**: the things a config file can't own — WiFi networks, Bluetooth pairing, cellular/APN, sound devices, battery/power, system updates, backup/restore actions, about. It replaces both GNOME Settings and phosh-mobile-settings for everything that applies to this shell. Every *shell* preference — theme, fonts, text size, alignment, home slots, widgets, gestures, sounds, DnD/Focus rules — lives in `~/.config/xx-wm/` and is edited there (or through dedicated surfaces like home edit mode). The shell hot-reloads the config file, so editing it in a terminal is a first-class workflow.
 
 ## Non-goals
 

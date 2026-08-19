@@ -42,12 +42,10 @@ _CSS = b"""
 .lock-clock {
     font-size: 64pt;
     font-weight: 300;
-    font-family: 'Space Mono', monospace;
     color: #f4f4f4;
 }
 .lock-date {
     font-size: 16pt;
-    font-family: 'Space Mono', monospace;
     color: #9a9a9a;
 }
 .lock-dots {
@@ -59,19 +57,16 @@ _CSS = b"""
 }
 .lock-error {
     font-size: 12pt;
-    font-family: 'Space Mono', monospace;
     color: #ff6b6b;
 }
 .lock-lockout {
     font-size: 13pt;
-    font-family: 'Space Mono', monospace;
     color: #ff9a3c;
     min-height: 24px;
 }
 .lock-key {
     font-size: 22pt;
     font-weight: 300;
-    font-family: 'Space Mono', monospace;
     min-width: 110px;
     min-height: 88px;
     border-radius: 50%;
@@ -95,7 +90,6 @@ _CSS = b"""
 }
 .lock-unlock-btn {
     font-size: 14pt;
-    font-family: 'Space Mono', monospace;
     min-height: 60px;
     min-width: 200px;
     border-radius: 30px;
@@ -108,9 +102,20 @@ _CSS = b"""
 .lock-unlock-btn:disabled { opacity: 0.25; }
 .lock-fp-hint {
     font-size: 11pt;
-    font-family: 'Space Mono', monospace;
     color: #5a5a5a;
     margin-top: 8px;
+}
+.lock-hint {
+    font-size: 11pt;
+    color: #5a5a5a;
+    letter-spacing: 0.08em;
+}
+.lock-notif {
+    font-size: 11pt;
+    color: #9a9a9a;
+    background: transparent;
+    border: none;
+    padding: 4px 12px;
 }
 @keyframes shake {
     0%   { margin-left: 0; }
@@ -130,8 +135,25 @@ _KEYPAD: list[tuple[str, str]] = [
     ('',  ''),    ('0', ''),    ('←', ''),
 ]
 
-_MAX_PIN = 8
+_MAX_PIN = 64
 _FAIL_THRESHOLD = 5     # wrong attempts before first lockout
+_SWIPE_UNLOCK_VELOCITY = -300
+
+
+def lock_screen_lines(notifications: list[tuple[str, str]], mode: str,
+                      dnd_active: bool) -> list[str]:
+    """Lines shown on the lock surface (design.md "Lock screen"): app name +
+    summary only, `count` collapses to one line, hidden entirely while DnD
+    is active or the mode is off."""
+    if dnd_active or mode == 'off' or not notifications:
+        return []
+    if mode == 'count':
+        n = len(notifications)
+        return [f'{n} notification{"s" if n != 1 else ""}']
+    return [
+        ' — '.join(part for part in (app.strip(), summary.strip()) if part)
+        for app, summary in notifications
+    ]
 
 
 def _lockout_secs(fail_count: int) -> int:
@@ -143,8 +165,11 @@ def _lockout_secs(fail_count: int) -> int:
 
 
 class LockScreen(Gtk.Window):
-    def __init__(self, on_unlock: Callable[[], None]) -> None:
-        super().__init__(title='PiercingOS')
+    def __init__(self, on_unlock: Callable[[], None],
+                 get_notifications: Callable[[], list[tuple[str, str]]] | None = None,
+                 dnd_active_fn: Callable[[], bool] | None = None,
+                 on_open_shade: Callable[[], None] | None = None) -> None:
+        super().__init__(title='PiercingXX')
 
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)
@@ -159,6 +184,10 @@ class LockScreen(Gtk.Window):
             self.fullscreen()
 
         self._on_unlock   = on_unlock
+        self._get_notifications = get_notifications or (lambda: [])
+        self._dnd_active  = dnd_active_fn or (lambda: False)
+        self._on_open_shade = on_open_shade or (lambda: None)
+        self._open_shade_after_unlock = False
         self._config      = ShellConfig()
         self._pin         = ''
         self._fail_count  = 0
@@ -203,8 +232,10 @@ class LockScreen(Gtk.Window):
         top_pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         top_pane.set_hexpand(True)
         top_pane.set_vexpand(True)
-        sp1 = Gtk.Box(); sp1.set_vexpand(True)
-        sp2 = Gtk.Box(); sp2.set_vexpand(True)
+        sp1 = Gtk.Box()
+        sp1.set_vexpand(True)
+        sp2 = Gtk.Box()
+        sp2.set_vexpand(True)
         top_pane.append(sp1)
         top_pane.append(clock_box)
         top_pane.append(sp2)
@@ -269,14 +300,34 @@ class LockScreen(Gtk.Window):
         pin_box.append(self._unlock_btn)
         pin_box.append(self._fp_hint)
 
+        # Keypad hides behind a swipe-up reveal (design.md "Lock screen")
+        self._pin_revealer = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_UP,
+            transition_duration=200,
+            reveal_child=False,
+        )
+        self._pin_revealer.set_child(pin_box)
+
+        self._notif_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._notif_box.set_halign(Gtk.Align.CENTER)
+
+        self._swipe_hint = Gtk.Label(label='↑ swipe up to unlock')
+        self._swipe_hint.add_css_class('lock-hint')
+        self._swipe_hint.set_halign(Gtk.Align.CENTER)
+        self._swipe_hint.set_margin_bottom(32)
+
         bot_pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         bot_pane.set_hexpand(True)
         bot_pane.set_vexpand(True)
-        sp3 = Gtk.Box(); sp3.set_vexpand(True)
-        sp4 = Gtk.Box(); sp4.set_vexpand(True)
+        sp3 = Gtk.Box()
+        sp3.set_vexpand(True)
+        sp4 = Gtk.Box()
+        sp4.set_vexpand(True)
+        bot_pane.append(self._notif_box)
         bot_pane.append(sp3)
-        bot_pane.append(pin_box)
+        bot_pane.append(self._pin_revealer)
         bot_pane.append(sp4)
+        bot_pane.append(self._swipe_hint)
 
         paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
         paned.set_hexpand(True)
@@ -299,8 +350,59 @@ class LockScreen(Gtk.Window):
             GLib.idle_add(_apply)
         paned.connect('realize', _set_ratio)
 
+        # Upward swipe: no PIN → unlock directly; PIN set → reveal the keypad
+        swipe = Gtk.GestureSwipe.new()
+        swipe.set_touch_only(False)
+        swipe.connect('swipe', self._on_swipe)
+        root.add_controller(swipe)
+
         root.append(paned)
+        self._refresh_notifications()
         return root
+
+    def _on_swipe(self, _gesture: Gtk.GestureSwipe, _vx: float, vy: float) -> None:
+        if vy < _SWIPE_UNLOCK_VELOCITY:
+            self._swipe_up()
+
+    def _swipe_up(self) -> None:
+        if self._config.pin_hash is None:
+            self._unlock()
+            return
+        self._pin_revealer.set_reveal_child(True)
+        self._swipe_hint.set_visible(False)
+
+    def prepare(self) -> None:
+        """Reset to the locked resting state before each present()."""
+        self._pin = ''
+        self._refresh_dots()
+        self._open_shade_after_unlock = False
+        self._pin_revealer.set_reveal_child(False)
+        self._swipe_hint.set_visible(True)
+        self._refresh_notifications()
+
+    def _refresh_notifications(self) -> None:
+        child = self._notif_box.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self._notif_box.remove(child)
+            child = nxt
+        try:
+            notifications = self._get_notifications()
+        except Exception:
+            notifications = []
+        lines = lock_screen_lines(
+            notifications, self._config.lock_screen_notifications, self._dnd_active())
+        for line in lines:
+            btn = Gtk.Button(label=line)
+            btn.add_css_class('flat')
+            btn.add_css_class('lock-notif')
+            btn.connect('clicked', lambda _b: self._on_notification_tapped())
+            self._notif_box.append(btn)
+
+    def _on_notification_tapped(self) -> None:
+        # Prompt unlock; the shade opens once the user gets through
+        self._open_shade_after_unlock = True
+        self._swipe_up()
 
     def _make_key(self, digit: str, sub: str) -> Gtk.Button:
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -373,8 +475,12 @@ class LockScreen(Gtk.Window):
         if self._lockout_src is not None:
             GLib.source_remove(self._lockout_src)
             self._lockout_src = None
+        open_shade = self._open_shade_after_unlock
+        self._open_shade_after_unlock = False
         self._on_unlock()
         self.set_visible(False)
+        if open_shade:
+            self._on_open_shade()
 
     # ------------------------------------------------------------------
     # Lockout timer
@@ -413,6 +519,8 @@ class LockScreen(Gtk.Window):
             return
         if self._fp_running:
             return
+        if not self._fp_available():
+            return
         self._fp_running = True
         self._fp_hint.set_label('Checking fingerprint…')
         threading.Thread(target=self._fp_thread, daemon=True, name='fp-verify').start()
@@ -440,12 +548,26 @@ class LockScreen(Gtk.Window):
         return GLib.SOURCE_REMOVE
 
     def _update_fp_hint(self) -> None:
-        try:
-            subprocess.run(['fprintd-verify', '--help'],
-                           capture_output=True, timeout=1)
-            self._fp_hint.set_label('Touch fingerprint sensor to unlock')
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            self._fp_hint.set_label('')
+        self._fp_hint.set_label(
+            'Touch fingerprint sensor to unlock' if self._fp_available() else '')
+
+    _fp_usable: bool | None = None
+
+    @classmethod
+    def _fp_available(cls) -> bool:
+        """True only with a reachable fprintd sensor AND enrolled prints —
+        a merely installed fprintd binary must not produce the unlock hint."""
+        if cls._fp_usable is None:
+            user = os.environ.get('USER', os.environ.get('LOGNAME', 'user'))
+            try:
+                r = subprocess.run(['fprintd-list', user],
+                                   capture_output=True, timeout=3, text=True)
+                out = (r.stdout + r.stderr).lower()
+                cls._fp_usable = (r.returncode == 0 and 'finger' in out
+                                  and 'no fingers enrolled' not in out)
+            except (OSError, subprocess.SubprocessError):
+                cls._fp_usable = False
+        return cls._fp_usable
 
     # ------------------------------------------------------------------
     # Shake + clock

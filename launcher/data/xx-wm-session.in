@@ -1,0 +1,40 @@
+#!/bin/sh
+# Session launcher: starts the phoc compositor with PiercingOS shell as the client.
+# Reads ~/.config/xx-wm/config.json to propagate theme preference to GTK.
+
+_prefer_dark=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('$HOME/.config/xx-wm/config.json'))
+    print('1' if cfg.get('prefer_dark', True) else '0')
+except Exception:
+    print('1')
+" 2>/dev/null || echo '1')
+
+if [ "$_prefer_dark" = "1" ]; then
+    export ADWAITA_COLOR_SCHEME=prefer-dark
+    # GTK3 clients (squeekboard) need a real GTK3 theme name — 'Adw-dark'
+    # does not exist for them and silently falls back to light Adwaita
+    export GTK_THEME=Adwaita:dark
+else
+    export ADWAITA_COLOR_SCHEME=prefer-light
+    export GTK_THEME=Adwaita
+fi
+
+# Ensure Space Mono and JetBrains Mono are on the font path if installed into the overlay
+export FONTCONFIG_PATH="@datadir@/xx-wm/fonts:${FONTCONFIG_PATH:-/etc/fonts}"
+
+# Marks the real session — enables session-only behavior (app preloading)
+export XX_WM_SESSION=1
+
+# Phone behavior: every app opens maximized (full-screen), never floating.
+# phoc reads this from the sm.puri.phoc GSetting (not phoc.ini) — set it
+# before phoc starts. Persists in dconf, so this is idempotent.
+if command -v gsettings >/dev/null 2>&1 && \
+   gsettings list-schemas 2>/dev/null | grep -q '^sm\.puri\.phoc$'; then
+    gsettings set sm.puri.phoc auto-maximize true 2>/dev/null || true
+fi
+
+exec phoc \
+  -C @datadir@/xx-wm/phoc.ini \
+  -E "@bindir@/xx-wm"

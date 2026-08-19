@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-_CONFIG_PATH = Path.home() / '.config' / 'piercing-shell' / 'gestures.json'
+def _config_path() -> Path:
+    # Resolved per-instance so a redirected HOME (tests) is honored
+    return Path.home() / '.config' / 'xx-wm' / 'gestures.json'
 
 # Gesture slot → default action
 _DEFAULTS: dict[str, str] = {
@@ -14,8 +16,8 @@ _DEFAULTS: dict[str, str] = {
     'long_press_bottom':     'search',
     'double_tap_home':       'lock_screen',
     'long_press_home':       'settings',
-    'swipe_left_home':       'camera',
-    'swipe_right_home':      'dialer',
+    'swipe_left_home':       'none',
+    'swipe_right_home':      'camera',
     'squeeze':               'assistant',
     'fingerprint_swipe':     'notification_shade',
     'double_press_power':    'camera',
@@ -26,6 +28,13 @@ VALID_ACTIONS: frozenset[str] = frozenset({
     'search', 'lock_screen', 'settings', 'camera', 'dialer',
     'assistant', 'none',
 })
+
+
+def is_valid_action(action: str) -> bool:
+    """Fixed actions plus 'launch:<app_id>' bindings for arbitrary apps."""
+    if action in VALID_ACTIONS:
+        return True
+    return action.startswith('launch:') and len(action) > len('launch:')
 
 # Human-readable names for the settings UI
 ACTION_LABELS: dict[str, str] = {
@@ -60,25 +69,26 @@ GESTURE_LABELS: dict[str, str] = {
 
 class GestureConfig:
     def __init__(self) -> None:
+        self._path = _config_path()
         self._map: dict[str, str] = dict(_DEFAULTS)
         self._load()
 
     def _load(self) -> None:
-        if not _CONFIG_PATH.exists():
+        if not self._path.exists():
             return
         try:
-            raw = json.loads(_CONFIG_PATH.read_text(encoding='utf-8'))
+            raw = json.loads(self._path.read_text(encoding='utf-8'))
         except (OSError, json.JSONDecodeError):
             return
         if not isinstance(raw, dict):
             return
         for key, action in raw.items():
-            if key in _DEFAULTS and action in VALID_ACTIONS:
+            if key in _DEFAULTS and isinstance(action, str) and is_valid_action(action):
                 self._map[key] = action
 
     def save(self) -> None:
-        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _CONFIG_PATH.write_text(json.dumps(self._map, indent=2) + '\n', encoding='utf-8')
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json.dumps(self._map, indent=2) + '\n', encoding='utf-8')
 
     def get(self, gesture: str) -> str:
         return self._map.get(gesture, 'none')
@@ -86,7 +96,7 @@ class GestureConfig:
     def set(self, gesture: str, action: str) -> None:
         if gesture not in _DEFAULTS:
             raise ValueError(f'Unknown gesture: {gesture}')
-        if action not in VALID_ACTIONS:
+        if not is_valid_action(action):
             raise ValueError(f'Unknown action: {action}')
         self._map[gesture] = action
         self.save()

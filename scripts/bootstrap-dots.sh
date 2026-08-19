@@ -1,5 +1,5 @@
 #!/bin/sh
-# Piercing WM — piercing-dots phone-profile bootstrap
+# XX-WM — piercing-dots phone-profile bootstrap
 # Runs ON THE PHONE. Clones piercing-dots and applies its phone profile.
 #
 # Contract with piercing-dots (see repo handoff prompt):

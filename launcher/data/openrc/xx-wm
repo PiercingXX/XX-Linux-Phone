@@ -1,0 +1,27 @@
+#!/sbin/openrc-run
+# XX-WM shell session — OpenRC equivalent of the systemd user unit.
+# postmarketOS default images run OpenRC; supervise-daemon respawns on failure.
+
+name="xx-wm"
+description="XX-WM shell session"
+
+: "${XX_WM_USER:=user}"
+
+command="/usr/libexec/xx-wm-session"
+command_user="${XX_WM_USER}"
+command_background=false
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=0
+output_log="/var/log/xx-wm.log"
+error_log="/var/log/xx-wm.log"
+
+depend() {
+    need localmount
+    after bootmisc
+    want elogind
+}
+
+start_pre() {
+    checkpath -f -o "${XX_WM_USER}" "$output_log"
+}

@@ -1,6 +1,6 @@
 # Furi Phone FLX1 — test device
 
-FuriLabs FLX1. In hand, not yet used for Piercing WM testing.
+FuriLabs FLX1. In hand, not yet used for XX-WM testing.
 
 | Feature | Detail |
 |---|---|

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=XX-WM
+Comment=XX-WM — text-first Linux phone shell
+Exec=@libexecdir@/xx-wm-session
+Type=Application
+DesktopNames=XX-WM

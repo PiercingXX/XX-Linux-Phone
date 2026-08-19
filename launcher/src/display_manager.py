@@ -1,21 +1,23 @@
 """
 Display power management.
 
-Uses wlopm (wlr-output-power-management) to talk to phoc so the output is
-properly powered on/off.  State is always checked via wlopm rather than
-tracked internally — this handles phoc blanking the display on its own
-idle timer without us knowing.
+Backlight is driven with brightnessctl; wlopm (wlr-output-power-management) is
+used for DPMS when present but is optional. Blank state is tracked internally
+(self._blanked) — wlopm is not required to be installed, so we never depend on
+querying it to wake back up.
 
-Wake sources (evdev nodes carried from the previous test device — verify on
-the FP5 with `libinput list-devices` before trusting them):
-  - Power button  → event0 + event1
-  - Fingerprint   → event3
-  - Touch         → event2
+Wake sources and the output name are auto-detected, not hardcoded: every
+readable /dev/input/event* node is watched (reads are non-exclusive) and
+_on_event filters by code, so power/touch/volume wake the display whatever
+event number they land on and whatever the device. This replaces an earlier
+FP5-specific map (event0-3 / HWCOMPOSER-1) that trapped other devices dark.
 
 Hardware shortcuts (handled via evdev):
+  - Power short press                  → blank / wake (toggle)
   - Power long-press (≥600ms)          → on_power_menu()
   - Power + Volume Down simultaneously → on_screenshot()
   - Volume Up / Down                   → +5% / -5% media volume
+  - Touch (while blanked)              → wake
 """
 from __future__ import annotations
 
@@ -41,16 +43,45 @@ KEY_VOLUMEUP   = 115
 
 _POWER_LONG_PRESS_MS = 600   # ms hold to trigger power menu instead of blank
 
-# All devices that can wake the display or provide hardware shortcuts
-_WAKE_DEVS = [
-    '/dev/input/event0',   # qpnp_pon  — primary PMIC power button
-    '/dev/input/event1',   # gpio-keys — secondary power button + volume keys
-    '/dev/input/event2',   # synaptics_dsx — touchscreen (double-tap to wake)
-    '/dev/input/event3',   # uinput-fpc — fingerprint reader
-]
+# Wake devices and the output name used to be hardcoded per-device (the FP5's
+# event0-3 / HWCOMPOSER-1). That silently traps every other device in the dark:
+# the backlight blanks but the wrong input nodes / output name mean nothing can
+# wake it. Both are now auto-detected at runtime — see _all_event_devices() and
+# _detect_output().
+_IDLE_SECS = 60
 
-_WLOPM_OUTPUT = 'HWCOMPOSER-1'
-_IDLE_SECS    = 60
+
+def _all_event_devices() -> list[str]:
+    """Every readable /dev/input/event* node. Reading is non-exclusive (no
+    EVIOCGRAB), so watching them all is harmless — _on_event filters by code."""
+    import glob
+    return sorted(d for d in glob.glob('/dev/input/event*') if os.access(d, os.R_OK))
+
+
+def _detect_output() -> str:
+    """First output wlopm reports; '*' (all outputs) if it can't be parsed —
+    wlopm accepts '*' for on/off, so blanking still works either way."""
+    try:
+        out = subprocess.check_output(
+            ['wlopm'], env=_WL_ENV, timeout=2, text=True, stderr=subprocess.DEVNULL,
+        )
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1] in ('on', 'off'):
+                return parts[0]
+    except Exception:
+        pass
+    return '*'
+
+
+_WLOPM_OUTPUT: str | None = None
+
+
+def _output() -> str:
+    global _WLOPM_OUTPUT
+    if _WLOPM_OUTPUT is None:
+        _WLOPM_OUTPUT = _detect_output()
+    return _WLOPM_OUTPUT
 
 _WL_ENV = {
     **os.environ,
@@ -66,25 +97,13 @@ _WL_ENV = {
 def _wlopm(mode: str) -> bool:
     try:
         r = subprocess.run(
-            ['wlopm', f'--{mode}', _WLOPM_OUTPUT],
+            ['wlopm', f'--{mode}', _output()],
             env=_WL_ENV, timeout=3,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         return r.returncode == 0
     except Exception:
         return False
-
-
-def _display_is_on() -> bool:
-    """Query phoc via wlopm — always accurate regardless of who blanked it."""
-    try:
-        out = subprocess.check_output(
-            ['wlopm'], env=_WL_ENV, timeout=2, text=True,
-            stderr=subprocess.DEVNULL,
-        )
-        return f'{_WLOPM_OUTPUT} off' not in out
-    except Exception:
-        return True  # assume on if wlopm fails
 
 
 def _brightnessctl(*args: str) -> str | None:
@@ -149,6 +168,10 @@ class DisplayManager:
         self._idle_src: int | None    = None
         self._last_touch_time: float  = 0.0
         self._DOUBLE_TAP_MS = 600
+        # Source of truth for blank state. wlopm (if present) reports DPMS, but
+        # it is optional; brightnessctl-only devices have no queryable state, so
+        # we track it ourselves and never depend on _display_is_on() to wake.
+        self._blanked = False
 
         # Power button long-press tracking
         self._power_down_at: float | None = None   # monotonic time of key-down
@@ -158,9 +181,15 @@ class DisplayManager:
         self._power_held   = False
         self._voldown_held = False
 
-        for dev in _WAKE_DEVS:
+        # Watch every readable input node so power/touch/volume wake the
+        # display regardless of which event number the device landed on.
+        self._wake_devs = _all_event_devices()
+        for dev in self._wake_devs:
             _watch_evdev(dev, self._on_event)
 
+        # Safety: only ever blank the backlight if we actually have a way to
+        # wake it back up. With no readable input device, leave the screen on.
+        self._idle_enabled = bool(self._wake_devs)
         self.reset_idle()
 
     # ------------------------------------------------------------------
@@ -170,6 +199,9 @@ class DisplayManager:
     def reset_idle(self) -> None:
         if self._idle_src is not None:
             GLib.source_remove(self._idle_src)
+            self._idle_src = None
+        if not getattr(self, '_idle_enabled', True):
+            return
         self._idle_src = GLib.timeout_add_seconds(_IDLE_SECS, self._on_idle)
 
     # ------------------------------------------------------------------
@@ -185,10 +217,12 @@ class DisplayManager:
         bright = _brightnessctl('get')
         if bright and bright.isdigit() and int(bright) > 0:
             self._saved_brightness = int(bright)
+        self._blanked = True
         _wlopm('off')
         _brightnessctl('set', '0')
 
     def _wake(self) -> None:
+        self._blanked = False
         _wlopm('on')
         _brightnessctl('set', str(max(1, self._saved_brightness)))
         self.reset_idle()
@@ -215,15 +249,15 @@ class DisplayManager:
                 )
             elif value == 0:  # key up
                 self._power_held = False
-                elapsed_ms = (time.monotonic() - (self._power_down_at or 0)) * 1000
                 was_long = self._cancel_long_press()
                 if not was_long and not self._voldown_held:
-                    # Short press: blank/wake
-                    if _display_is_on():
+                    # Short press toggles blank/wake using our own state
+                    if not self._blanked:
                         if self._idle_src is not None:
                             GLib.source_remove(self._idle_src)
                             self._idle_src = None
                         self._blank()
+                        # Lock as the screen goes dark, so wake shows the lock
                         if self._on_wake:
                             GLib.idle_add(self._on_wake)
                     else:
@@ -253,19 +287,18 @@ class DisplayManager:
 
         # --- Fingerprint touch → wake if off, else try auth ---
         if path == '/dev/input/event3' and ev_type == EV_KEY and value == 1:
-            if not _display_is_on():
+            if self._blanked:
                 self._wake()
             elif self._on_fingerprint:
                 GLib.idle_add(self._on_fingerprint)
             return GLib.SOURCE_REMOVE
 
-        # --- Touchscreen: double-tap to wake + idle reset ---
+        # --- Touchscreen: single-tap wakes when blanked, else idle reset ---
         if ev_type == EV_ABS and code == ABS_MT_TRACKING_ID and value >= 0:
-            now = time.monotonic() * 1000
-            if not _display_is_on():
-                if now - self._last_touch_time < self._DOUBLE_TAP_MS:
-                    self._wake()
-                self._last_touch_time = now
+            if self._blanked:
+                # A blanked screen should wake on the first touch, not require
+                # a double-tap the user can't see to time
+                self._wake()
             else:
                 self._last_touch_time = 0.0
                 self.reset_idle()

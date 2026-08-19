@@ -1,0 +1,56 @@
+#!/bin/sh
+# Runs inside the phoc session. Start the on-screen keyboard (squeekboard,
+# with the PiercingXX Colemak layouts) before the shell; squeekboard shows
+# and hides itself on input-method activation, and the shade/lock windows
+# sit on higher layers.
+if command -v squeekboard >/dev/null 2>&1; then
+    squeekboard &
+fi
+
+# System-level gestures: lisgd reads the touchscreen evdev directly, so edge
+# swipes work while any app is focused — each binding feeds the shell IPC.
+# Override autodetection with PIERCING_TOUCH_DEV=/dev/input/eventN.
+if command -v lisgd >/dev/null 2>&1; then
+    _touch_dev=${PIERCING_TOUCH_DEV:-}
+    if [ -z "$_touch_dev" ]; then
+        # Detect a touchscreen by INPUT_PROP_DIRECT (0x2), not by name — the
+        # controller may be called FTSC1000 / Goodix / Elan, never "touch".
+        for _sys in /sys/class/input/event*; do
+            _props=$(cat "$_sys/device/properties" 2>/dev/null)
+            [ -z "$_props" ] && continue
+            if [ "$(( 0x$_props & 2 ))" -ne 0 ] 2>/dev/null; then
+                _touch_dev="/dev/input/$(basename "$_sys")"
+                break
+            fi
+        done
+    fi
+    if [ -n "$_touch_dev" ] && [ -r "$_touch_dev" ]; then
+        # Bottom-edge swipe up: a short flick raises the keyboard, a long
+        # swipe goes home. Distance field: S = short, L = long.
+        lisgd -d "$_touch_dev" \
+            -g "1,DU,B,S,R,@bindir@/xx-wm-ipc gesture.keyboard" \
+            -g "1,DU,B,L,R,@bindir@/xx-wm-ipc gesture.home" \
+            -g "1,UD,T,*,R,@bindir@/xx-wm-ipc gesture.shade" \
+            -g "1,LR,L,*,R,@bindir@/xx-wm-ipc gesture.back" \
+            -g "1,RL,R,*,R,@bindir@/xx-wm-ipc gesture.back" &
+    else
+        echo "xx-wm: no readable touchscreen for lisgd" >&2
+    fi
+fi
+
+# gtk4-layer-shell MUST be loaded before libgtk-4, or every layer surface
+# (shade, lock screen, switcher, call UI) silently falls back to a normal
+# decorated window and the home screen falls back to fullscreen. Python
+# imports GTK first, so preload the library. Path differs by distro/arch —
+# resolve it via ldconfig, then a multiarch glob.
+_ls_lib=$(ldconfig -p 2>/dev/null | awk '/libgtk4-layer-shell\.so\.0/ {print $NF; exit}')
+if [ -z "$_ls_lib" ]; then
+    for _p in /usr/lib/libgtk4-layer-shell.so.0 /usr/lib/*/libgtk4-layer-shell.so.0; do
+        [ -e "$_p" ] && _ls_lib="$_p" && break
+    done
+fi
+if [ -n "$_ls_lib" ]; then
+    export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$_ls_lib"
+fi
+
+exec @python@ @shell_dir@/main.py "$@"

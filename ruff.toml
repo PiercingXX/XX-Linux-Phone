@@ -1,0 +1,5 @@
+# Ruff configuration for XX-WM
+# Ignore E402 (module level import not at top) for GTK gi.require_version() pattern
+
+[lint]
+extend-ignore = ["E402"]

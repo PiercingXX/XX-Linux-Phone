@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Piercing Shell
+Name=XX-WM
 Comment=Text-first Linux phone shell
-Exec=@bindir@/piercing-shell
+Exec=@bindir@/xx-wm
 Terminal=false
 Categories=Utility;System;
 StartupNotify=true

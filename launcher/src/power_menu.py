@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import subprocess
-from typing import Callable
 
 import gi
 
@@ -22,7 +21,6 @@ _CSS = b"""
     background: rgba(0, 0, 0, 0.72);
 }
 .power-menu-btn {
-    font-family: 'Space Mono', monospace;
     font-size: 18pt;
     font-weight: 300;
     min-height: 80px;
@@ -98,21 +96,31 @@ class PowerMenu(Gtk.Window):
         card.set_margin_start(32)
         card.set_margin_end(32)
 
-        poweroff_btn = Gtk.Button(label='Power off')
-        poweroff_btn.add_css_class('power-menu-btn')
-        poweroff_btn.connect('clicked', lambda _: self._action('poweroff'))
+        suspend_btn = Gtk.Button(label='Suspend')
+        suspend_btn.add_css_class('power-menu-btn')
+        suspend_btn.connect('clicked', lambda _: self._action('suspend'))
+
+        lock_btn = Gtk.Button(label='Log out')
+        lock_btn.add_css_class('power-menu-btn')
+        lock_btn.connect('clicked', lambda _: self._logout())
 
         restart_btn = Gtk.Button(label='Restart')
         restart_btn.add_css_class('power-menu-btn')
         restart_btn.connect('clicked', lambda _: self._action('reboot'))
+
+        poweroff_btn = Gtk.Button(label='Power off')
+        poweroff_btn.add_css_class('power-menu-btn')
+        poweroff_btn.connect('clicked', lambda _: self._action('poweroff'))
 
         cancel_btn = Gtk.Button(label='Cancel')
         cancel_btn.add_css_class('power-menu-btn')
         cancel_btn.add_css_class('power-menu-cancel')
         cancel_btn.connect('clicked', lambda _: self._dismiss())
 
-        card.append(poweroff_btn)
+        card.append(suspend_btn)
+        card.append(lock_btn)
         card.append(restart_btn)
+        card.append(poweroff_btn)
         card.append(cancel_btn)
         scrim.append(card)
         return scrim
@@ -130,6 +138,14 @@ class PowerMenu(Gtk.Window):
             subprocess.Popen(['systemctl', cmd], close_fds=True)
         except FileNotFoundError:
             pass
+
+    def _logout(self) -> None:
+        # Quitting the shell ends the phoc session (phoc -E child exits),
+        # returning to the display manager — the shell's "log out".
+        self._dismiss()
+        app = self.get_application()
+        if app is not None:
+            app.quit()
 
     def _on_scrim_tap(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
         # Dismiss if tap lands outside the card widget

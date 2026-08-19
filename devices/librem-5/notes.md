@@ -1,6 +1,6 @@
 # Librem 5 — test device
 
-Purism Librem 5. In hand, not yet used for Piercing WM testing.
+Purism Librem 5. In hand, not yet used for XX-WM testing.
 
 | Feature | Detail |
 |---|---|
@@ -14,7 +14,7 @@ Purism Librem 5. In hand, not yet used for Piercing WM testing.
 
 ## Why it matters here
 
-- Already runs phoc — Piercing WM replaces Phosh *in place*: install launcher, point the session at our `piercing-session`, done. No flashing required.
+- Already runs phoc — XX-WM replaces Phosh *in place*: install launcher, point the session at our `xx-wm-session`, done. No flashing required.
 - apt-based, so it exercises the Debian path of our setup scripts (FuriOS is also Debian-based).
 - Weakest hardware of the three — the performance canary. If the launcher is smooth here, it's smooth everywhere.
 

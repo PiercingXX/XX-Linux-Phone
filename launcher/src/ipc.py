@@ -9,8 +9,8 @@ from gi.repository import GLib
 
 
 def _socket_path() -> str:
-    runtime = os.environ.get('XDG_RUNTIME_DIR', str(Path.home() / '.local' / 'share' / 'piercing-shell'))
-    return os.path.join(runtime, 'piercing-shell.sock')
+    runtime = os.environ.get('XDG_RUNTIME_DIR', str(Path.home() / '.local' / 'share' / 'xx-wm'))
+    return os.path.join(runtime, 'xx-wm.sock')
 
 
 class IPCServer:

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Send one command to the running shell's IPC socket (lisgd bindings, hooks).
+# Usage: xx-wm-ipc <command>   e.g. xx-wm-ipc gesture.home
+# GitHub.com/PiercingXX
+exec @python@ - "$1" <<'PYEOF'
+import os
+import socket
+import sys
+
+path = os.path.join(
+    os.environ.get('XDG_RUNTIME_DIR', ''), 'xx-wm.sock')
+try:
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(0.5)
+    sock.connect(path)
+    sock.send(sys.argv[1].encode('utf-8'))
+    sock.close()
+except OSError:
+    pass
+PYEOF

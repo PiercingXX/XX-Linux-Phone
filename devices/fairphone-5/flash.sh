@@ -15,8 +15,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOWNLOADS="$SCRIPT_DIR/downloads"
 
 # --- locate images ---
-BOOT_XZ=$(ls "$DOWNLOADS"/*-boot.img.xz 2>/dev/null | head -1)
-ROOTFS_XZ=$(ls "$DOWNLOADS"/*-fairphone-fp5.img.xz 2>/dev/null | grep -v boot | head -1)
+BOOT_XZ=""
+for f in "$DOWNLOADS"/*-boot.img.xz; do
+    [[ -e "$f" ]] && BOOT_XZ="$f" && break
+done
+ROOTFS_XZ=""
+for f in "$DOWNLOADS"/*-fairphone-fp5.img.xz; do
+    [[ "$f" == *boot* ]] && continue
+    [[ -e "$f" ]] && ROOTFS_XZ="$f" && break
+done
 
 if [[ -z "$BOOT_XZ" || -z "$ROOTFS_XZ" ]]; then
     echo "ERROR: images not found in $DOWNLOADS"

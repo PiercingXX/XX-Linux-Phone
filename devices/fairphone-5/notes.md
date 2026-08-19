@@ -47,7 +47,7 @@ Alpine Linux / musl, mainline kernel 6.15.x, package manager `apk`. Device coden
 
 ## Supporting packages (apk)
 
-`lisgd wob wvkbd wlopm grim wtype brightnessctl fprintd` plus `py3-gobject3 gtk4.0 libadwaita gtk4-layer-shell meson ninja rsync`. Verify exact names with `apk search` — Alpine naming differs from Debian.
+`lisgd wob squeekboard wlopm grim wtype brightnessctl fprintd` plus `py3-gobject3 gtk4.0 libadwaita gtk4-layer-shell meson ninja rsync`. Verify exact names with `apk search` — Alpine naming differs from Debian.
 
 ## Open questions (answer on device, Phase 3)
 

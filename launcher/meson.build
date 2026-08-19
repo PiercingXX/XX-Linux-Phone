@@ -1,6 +1,6 @@
 project(
-  'piercing-shell',
-  version: '0.1.0',
+  'xx-wm',
+  version: '0.1.1',
   meson_version: '>=0.60.0',
 )
 
@@ -13,10 +13,16 @@ bindir       = join_paths(prefix, get_option('bindir'))
 libexecdir   = join_paths(prefix, get_option('libexecdir'))
 datadir_abs  = join_paths(prefix, get_option('datadir'))
 
-shell_subdir = 'piercing-shell'
+shell_subdir = 'xx-wm'
 shell_datadir = join_paths(get_option('datadir'), shell_subdir)
 
-python.install_sources(
+# The shell is a flat set of modules, not an installable package: it uses
+# plain imports (`from window import ...`) and finds sibling assets via
+# Path(__file__).with_name(). So every .py must land in the SAME directory
+# as style.css (shell_datadir) and run as `python3 <shell_datadir>/main.py`,
+# which puts that directory on sys.path. Installing to site-packages breaks
+# both the flat imports and the asset lookups.
+install_data(
   [
     'src/main.py',
     'src/window.py',
@@ -38,8 +44,23 @@ python.install_sources(
     'src/config.py',
     'src/contacts.py',
     'src/als_brightness.py',
+    'src/home_launcher.py',
+    'src/default_layout.py',
+    'src/backup.py',
+    'src/update_checker.py',
+    'src/display_manager.py',
+    'src/power_menu.py',
+    'src/back_gesture.py',
+    'src/app_item_actions.py',
+    'src/calendar_grid.py',
+    'src/dnd.py',
+    'src/focus_mode.py',
+    'src/font_theme.py',
+    'src/sound.py',
+    'src/system_settings.py',
+    'src/weather.py',
   ],
-  subdir: shell_subdir,
+  install_dir: shell_datadir,
 )
 
 install_data(
@@ -52,14 +73,58 @@ install_data(
   install_dir: shell_datadir,
 )
 
-# Shell Python launcher (runs main.py) → $prefix/bin/piercing-shell
+install_data(
+  'data/sounds/ringtone.mp3',
+  'data/sounds/notify.wav',
+  'data/sounds/comm-on.wav',
+  'data/sounds/alert.wav',
+  install_dir: join_paths(shell_datadir, 'sounds'),
+)
+
+# PiercingXX Colemak layouts for squeekboard (vendored from
+# furi-phone-colemak-keyboard). install.sh symlinks this tree to
+# ~/.local/share/squeekboard/keyboards/ — squeekboard only reads the user
+# path. Subdirs are input-purpose variants squeekboard picks natively.
+install_data(
+  'data/squeekboard/us+colemak.yaml',
+  'data/squeekboard/us+colemak_wide.yaml',
+  install_dir: join_paths(shell_datadir, 'squeekboard'),
+)
+install_data(
+  'data/squeekboard/terminal/us+colemak.yaml',
+  'data/squeekboard/terminal/us+colemak_wide.yaml',
+  install_dir: join_paths(shell_datadir, 'squeekboard', 'terminal'),
+)
+install_data(
+  'data/squeekboard/email/us+colemak.yaml',
+  'data/squeekboard/email/us+colemak_wide.yaml',
+  install_dir: join_paths(shell_datadir, 'squeekboard', 'email'),
+)
+install_data(
+  'data/squeekboard/url/us+colemak.yaml',
+  'data/squeekboard/url/us+colemak_wide.yaml',
+  install_dir: join_paths(shell_datadir, 'squeekboard', 'url'),
+)
+
+# Shell Python launcher (runs main.py) → $prefix/bin/xx-wm
 launcher_conf = configuration_data()
 launcher_conf.set('python', python.full_path())
 launcher_conf.set('shell_dir', join_paths(prefix, shell_datadir))
+launcher_conf.set('bindir', bindir)
 
 configure_file(
-  input: 'data/piercing-shell.in',
-  output: 'piercing-shell',
+  input: 'data/xx-wm.in',
+  output: 'xx-wm',
+  configuration: launcher_conf,
+  install: true,
+  install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)
+
+# IPC client (lisgd bindings, wake hooks) → $prefix/bin/xx-wm-ipc
+configure_file(
+  input: 'data/xx-wm-ipc.in',
+  output: 'xx-wm-ipc',
   configuration: launcher_conf,
   install: true,
   install_dir: get_option('bindir'),
@@ -71,23 +136,24 @@ desktop_conf = configuration_data()
 desktop_conf.set('bindir', bindir)
 
 configure_file(
-  input: 'data/io.piercingxx.PiercingShell.desktop.in',
-  output: 'io.piercingxx.PiercingShell.desktop',
+  input: 'data/io.piercingxx.XXWM.desktop.in',
+  output: 'io.piercingxx.XXWM.desktop',
   configuration: desktop_conf,
   install: true,
   install_dir: join_paths(get_option('datadir'), 'applications'),
 )
 
-# Session launcher (phoc wrapper) → $prefix/libexec/piercing-session
-# Wayland session .desktop → $prefix/share/wayland-sessions/piercingos.session
+# Session launcher (phoc wrapper) → $prefix/libexec/xx-wm-session
+# Wayland session entry → $prefix/share/wayland-sessions/xx-wm.desktop
+# Display managers only scan *.desktop here — a .session suffix is ignored.
 session_conf = configuration_data()
 session_conf.set('bindir', bindir)
 session_conf.set('libexecdir', libexecdir)
 session_conf.set('datadir', datadir_abs)
 
 configure_file(
-  input: 'data/piercing-session.in',
-  output: 'piercing-session',
+  input: 'data/xx-wm-session.in',
+  output: 'xx-wm-session',
   configuration: session_conf,
   install: true,
   install_dir: get_option('libexecdir'),
@@ -95,8 +161,8 @@ configure_file(
 )
 
 configure_file(
-  input: 'data/piercingos.session.in',
-  output: 'piercingos.session',
+  input: 'data/xx-wm.desktop.in',
+  output: 'xx-wm.desktop',
   configuration: session_conf,
   install: true,
   install_dir: join_paths(get_option('datadir'), 'wayland-sessions'),
@@ -104,9 +170,22 @@ configure_file(
 
 # systemd user service
 configure_file(
-  input: 'data/systemd/piercing-shell.service',
-  output: 'piercing-shell.service',
+  input: 'data/systemd/xx-wm.service',
+  output: 'xx-wm.service',
   configuration: session_conf,
   install: true,
   install_dir: join_paths(get_option('datadir'), 'systemd', 'user'),
+)
+
+# OpenRC init script (postmarketOS default images)
+install_data(
+  'data/openrc/xx-wm',
+  install_dir: join_paths(get_option('sysconfdir'), 'init.d'),
+  install_mode: 'rwxr-xr-x',
+)
+
+# logind drop-in: let the shell own the power key instead of instant-poweroff
+install_data(
+  'data/logind/10-xx-wm-power.conf',
+  install_dir: join_paths(get_option('sysconfdir'), 'systemd', 'logind.conf.d'),
 )

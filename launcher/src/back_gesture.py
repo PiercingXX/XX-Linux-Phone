@@ -36,7 +36,6 @@ _ARROW_CSS = b"""
         border-radius: 40px;
         border: 1.5px solid rgba(255, 255, 255, 0.18);
         color: #ffffff;
-        font-family: "Space Mono", monospace;
         font-size: 30px;
         padding: 10px 18px;
     }

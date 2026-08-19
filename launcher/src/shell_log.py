@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def setup_logging() -> None:
-    log_dir = Path.home() / '.local' / 'share' / 'piercing-shell'
+    log_dir = Path.home() / '.local' / 'share' / 'xx-wm'
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / 'shell.log'
 
@@ -29,7 +29,7 @@ def setup_logging() -> None:
     root.addHandler(file_handler)
     root.addHandler(stderr_handler)
 
-    logging.getLogger('piercing').info('PiercingOS shell starting — log: %s', log_path)
+    logging.getLogger('piercing').info('PiercingXX shell starting — log: %s', log_path)
 
 
 def get_logger(name: str) -> logging.Logger:

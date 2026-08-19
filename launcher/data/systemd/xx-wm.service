@@ -1,12 +1,12 @@
 [Unit]
-Description=PiercingOS Shell
+Description=PiercingXX Shell
 Documentation=https://github.com/piercingxx/linux-phone
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=@bindir@/piercing-shell
+ExecStart=@bindir@/xx-wm
 Restart=on-failure
 RestartSec=2s
 # Ensure the shell inherits the Wayland display from the session

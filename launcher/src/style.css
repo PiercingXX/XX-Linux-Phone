@@ -1,13 +1,13 @@
 /* ── Uniform black background ───────────────────────────────────── */
 /* Set the one true background on the window; everything inside is  */
 /* transparent so there is a single colour across the whole screen. */
-window.piercing-shell {
+window.xx-wm {
   background-color: #000;
 }
-window.piercing-shell scrolledwindow,
-window.piercing-shell scrolledwindow > viewport,
-window.piercing-shell stack,
-window.piercing-shell paned {
+window.xx-wm scrolledwindow,
+window.xx-wm scrolledwindow > viewport,
+window.xx-wm stack,
+window.xx-wm paned {
   background: transparent;
   background-color: transparent;
 }
@@ -23,12 +23,12 @@ window.piercing-shell paned {
 }
 
 .display-clock {
-  font-size: 52pt;
+  font-size: 42pt;
   font-weight: 300;
 }
 
 .display-date {
-  font-size: 14pt;
+  font-size: 11pt;
   margin-bottom: 4px;
 }
 
@@ -46,10 +46,31 @@ window.piercing-shell paned {
 .settings-page list,
 .settings-page row,
 .settings-page scrolledwindow,
-entry {
+.settings-page entry {
   border-radius: 20px;
   border-width: 1px;
   border-style: solid;
+}
+
+/* Drawer search: flat text, no box chrome — text-first like every surface */
+entry.drawer-search,
+searchentry.drawer-search {
+  background: transparent;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  font-size: 13pt;
+  min-height: 44px;
+}
+entry.drawer-search image,
+searchentry.drawer-search image {
+  opacity: 0.4;
+}
+
+/* Single-line drawer rows */
+.app-name {
+  font-size: 13pt;
 }
 
 /* Home launcher scroll area — fully transparent so it matches the clock background */
@@ -84,7 +105,7 @@ entry {
 }
 
 .app-name {
-  font-size: 16pt;
+  font-size: 13pt;
   font-weight: 400;
 }
 
@@ -115,4 +136,28 @@ entry {
   padding: 1px 2px;
   border-radius: 4px;
   letter-spacing: 0;
+}
+.folder-member {
+  margin-left: 24px;
+}
+
+.menu-title {
+  font-size: 12.5pt;
+  font-weight: 600;
+  padding: 6px 10px;
+}
+
+.menu-action {
+  font-size: 12.5pt;
+  padding: 8px 10px;
+  border-radius: 0;
+}
+
+.action-menu contents {
+  padding: 6px;
+  border-radius: 0;
+}
+
+.paused {
+  opacity: 0.45;
 }

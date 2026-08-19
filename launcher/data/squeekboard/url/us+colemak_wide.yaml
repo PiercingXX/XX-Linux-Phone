@@ -1,0 +1,82 @@
+---
+outlines:
+    default:       { width: 53.76, height: 42 }
+    change-view:   { width: 77.52, height: 42 }
+    change-view-2: { width: 94.08, height: 42 }
+    large:         { width: 64.76, height: 42 }
+    spaceline:     { width: 157,   height: 42 }
+    special:       { width: 64.76, height: 42 }
+    special-2:     { width: 94.08, height: 42 }
+
+views:
+    base:
+        - "q w f p g j l u y ;"
+        - "a r s t d h n e i o"
+        - "show_upper z x c v b k m BackSpace"
+        - "show_numbers preferences space SlashLarge . Return"
+    upper:
+        - "Q W F P G J L U Y colon"
+        - "A R S T D H N E I O"
+        - "show_upper Z X C V B K M BackSpace"
+        - "show_numbers preferences space SlashLarge . Return"
+    numbers:
+        - "1 2 3 4 5 6 7 8 9 0"
+        - "@ # $ % & - _ + ( )"
+        - "show_symbols , \" ' : ; ! ? BackSpace"
+        - "show_letters preferences space SlashLarge . Return"
+    symbols:
+        - "~ ` | · √ π τ ÷ × ¶"
+        - "© ® £ € ¥ ^ ° * { }"
+        - "show_numbers_from_symbols \\ / < > = [ ] BackSpace"
+        - "show_letters preferences space SlashLarge . Return"
+
+buttons:
+    show_upper:
+        action:
+            locking:
+                lock_view: "upper"
+                unlock_view: "base"
+        outline: "change-view"
+        icon: "key-shift"
+    BackSpace:
+        outline: "special-2"
+        icon: "edit-clear-symbolic"
+        action: "erase"
+    preferences:
+        action: "show_prefs"
+        outline: "special"
+        icon: "keyboard-mode-symbolic"
+    show_numbers:
+        action:
+            set_view: "numbers"
+        outline: "change-view-2"
+        label: "123"
+    show_numbers_from_symbols:
+        action:
+            set_view: "numbers"
+        outline: "change-view"
+        label: "123"
+    show_letters:
+        action:
+            set_view: "base"
+        outline: "change-view-2"
+        label: "ABC"
+    show_symbols:
+        action:
+            set_view: "symbols"
+        outline: "change-view"
+        label: "*/="
+    .:
+        outline: "large"
+    SlashLarge:
+        outline: "large"
+        text: "/"
+    space:
+        outline: "spaceline"
+        text: " "
+    Return:
+        outline: "special-2"
+        icon: "key-enter"
+        keysym: "Return"
+    colon:
+        text: ":"

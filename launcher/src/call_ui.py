@@ -13,7 +13,7 @@ except ValueError:
 
 gi.require_version('Gtk', '4.0')
 
-from gi.repository import Gdk, GLib, Gio, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
@@ -22,7 +22,6 @@ _CALL_CSS = b"""
 .call-root {
     background: #000000;
     color: #f4f4f4;
-    font-family: 'Space Mono', monospace;
 }
 .call-caller {
     font-size: 28pt;
@@ -46,7 +45,6 @@ _CALL_CSS = b"""
 }
 .call-btn {
     font-size: 12pt;
-    font-family: 'Space Mono', monospace;
     min-width: 100px;
     min-height: 72px;
     border-radius: 20px;
@@ -84,7 +82,6 @@ _CALL_CSS = b"""
 }
 .call-bar-label {
     font-size: 11pt;
-    font-family: 'Space Mono', monospace;
     color: #f4f4f4;
 }
 """
@@ -124,7 +121,7 @@ class CallBar(Gtk.Window):
     """Persistent in-call bar shown at the top of home screen during an active call."""
 
     def __init__(self, on_expand: Callable[[], None]) -> None:
-        super().__init__(title='PiercingOS Call Bar')
+        super().__init__(title='PiercingXX Call Bar')
 
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)
@@ -179,7 +176,7 @@ class CallUI(Gtk.Window):
         on_decline: Callable[[], None] | None = None,
         on_hangup: Callable[[], None] | None = None,
     ) -> None:
-        super().__init__(title='PiercingOS Call')
+        super().__init__(title='PiercingXX Call')
 
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import gi
 import subprocess
 import threading
-from datetime import datetime, timezone
+from datetime import datetime
 
 gi.require_version('Gtk', '4.0')
 
@@ -14,7 +14,6 @@ _SMS_CSS = b"""
 .sms-root {
     background: #000000;
     color: #f4f4f4;
-    font-family: 'Space Mono', monospace;
 }
 .sms-header {
     font-size: 13pt;
@@ -52,7 +51,6 @@ _SMS_CSS = b"""
 }
 .sms-input {
     font-size: 13pt;
-    font-family: 'Space Mono', monospace;
     min-height: 52px;
     background: #111111;
     color: #f4f4f4;
@@ -62,7 +60,6 @@ _SMS_CSS = b"""
 }
 .sms-send {
     font-size: 13pt;
-    font-family: 'Space Mono', monospace;
     min-width: 64px;
     min-height: 52px;
     border-radius: 26px;

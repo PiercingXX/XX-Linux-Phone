@@ -22,7 +22,7 @@ _VCF_SEARCH_PATHS = [
     Path('/var/lib/gnome-contacts/contacts.vcf'),
 ]
 
-_LOCAL_JSON = Path.home() / '.local/share/piercing-shell/contacts.json'
+_LOCAL_JSON = Path.home() / '.local/share/xx-wm/contacts.json'
 
 
 class ContactBook:

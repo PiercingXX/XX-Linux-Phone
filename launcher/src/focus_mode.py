@@ -1,0 +1,110 @@
+"""
+Focus Mode — Pixel model (design.md "Focus Mode").
+
+The user picks distracting apps (`focus_apps`); while focus is active those
+apps render dimmed with a paused note, launching them is blocked, and their
+notifications are held silently, released in one batch when focus ends.
+"Take a break" suspends focus for 5/10/15 minutes and auto-resumes.
+Schedules reuse the DnD matcher. Focus and DnD are independent toggles.
+"""
+from __future__ import annotations
+
+import time as _time
+from datetime import datetime
+
+from config import ShellConfig
+from dnd import schedule_matches
+
+BREAK_MINUTES = (5, 10, 15)
+
+
+def _norm(app_id: str) -> str:
+    return app_id[:-8] if app_id.endswith('.desktop') else app_id
+
+
+class FocusState:
+    def __init__(self, config: ShellConfig) -> None:
+        self._config = config
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._config.data.get('focus_enabled', False))
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._config.data['focus_enabled'] = bool(enabled)
+        if not enabled:
+            self._config.data['focus_break_until'] = 0.0
+        self._config.save()
+
+    @property
+    def focus_apps(self) -> list[str]:
+        val = self._config.data.get('focus_apps', [])
+        if isinstance(val, list):
+            return [str(a) for a in val]
+        return []
+
+    def set_app_focused(self, app_id: str, focused: bool) -> None:
+        apps = [a for a in self.focus_apps if _norm(a) != _norm(app_id)]
+        if focused:
+            apps.append(app_id)
+        self._config.data['focus_apps'] = apps
+        self._config.save()
+
+    def is_focus_app(self, app_id: str) -> bool:
+        wanted = _norm(app_id)
+        return any(_norm(a) == wanted for a in self.focus_apps)
+
+    @property
+    def schedules(self) -> list[dict]:
+        val = self._config.data.get('focus_schedules', [])
+        return val if isinstance(val, list) else []
+
+    @property
+    def break_until(self) -> float:
+        try:
+            return float(self._config.data.get('focus_break_until', 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def on_break(self, now_ts: float | None = None) -> bool:
+        now_ts = _time.time() if now_ts is None else now_ts
+        return self.break_until > now_ts
+
+    def start_break(self, minutes: int, now_ts: float | None = None) -> None:
+        now_ts = _time.time() if now_ts is None else now_ts
+        self._config.data['focus_break_until'] = now_ts + minutes * 60
+        self._config.save()
+
+    def is_active(self, now: datetime | None = None,
+                  now_ts: float | None = None) -> bool:
+        """Focus in force: toggled on or scheduled, and not on a break."""
+        if self.on_break(now_ts):
+            return False
+        if self.enabled:
+            return True
+        return schedule_matches(self.schedules, now or datetime.now())
+
+    def is_paused_app(self, app_id: str | None,
+                      now: datetime | None = None,
+                      now_ts: float | None = None) -> bool:
+        if not app_id:
+            return False
+        return self.is_active(now, now_ts) and self.is_focus_app(app_id)
+
+
+class HeldNotifications:
+    """Queue for notifications held while their app is paused; released in
+    arrival order when focus ends or a break starts."""
+
+    def __init__(self) -> None:
+        self._held: list[tuple] = []
+
+    def hold(self, *notification: object) -> None:
+        self._held.append(tuple(notification))
+
+    def release_all(self) -> list[tuple]:
+        held, self._held = self._held, []
+        return held
+
+    def __len__(self) -> int:
+        return len(self._held)

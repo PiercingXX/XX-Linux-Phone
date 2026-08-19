@@ -3,3 +3,5 @@ launcher/build/
 launcher/stage/
 *.img.xz
 __pycache__/
+.skippy/
+.venv/
