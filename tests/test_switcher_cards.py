@@ -58,7 +58,7 @@ def test_empty_state_ignores_appless_manager() -> None:
     apps = AppSwitcher._apps_from_manager(FakeManager([]))
     # The empty-state path is chosen precisely when there are no cards.
     assert len(apps) == 0
-    assert AppSwitcher._empty_state_label() == 'No open apps'
+    assert AppSwitcher._empty_state_label() == _EMPTY_STATE_TEXT
 
 
 def test_cards_are_text_only() -> None:
