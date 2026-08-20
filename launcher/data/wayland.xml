@@ -1,0 +1,1348 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="wayland">
+  <copyright>
+    Copyright © 2008-2011 Kristian Høgsberg
+    Copyright © 2010-2011 Intel Corporation
+    Copyright © 2012-2013 Collabora, Ltd.
+
+    Permission is hereby granted, free of charge, to any person
+    obtaining a copy of this software and associated documentation files
+    (the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge,
+    publish, distribute, sublicense, and/or sell copies of the Software,
+    and to permit persons to whom the Software is furnished to do so,
+    subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the
+    next paragraph) shall be included in all copies or substantial
+    portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+    BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+    ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+  </copyright>
+
+  <interface name="wl_display" version="1">
+    <description summary="core global object">
+      The core global object.  This is a special singleton object.  It
+      is used for internal Wayland protocol features.
+    </description>
+
+    <request name="sync">
+      <description summary="asynchronous roundtrip">
+        The sync request asks the server to emit the 'done' event
+        on the returned wl_callback object.  Since requests are
+        handled in-order and events are delivered in-order, this can
+        be used as a barrier to ensure all previous requests to the
+        server have been processed.
+
+        The object returned by this request will be destroyed by the
+        compositor after the callback is fired and as such the client must not
+        attempt to use it after that point.
+
+        The callback_data passed in the callback is the event serial.
+      </description>
+      <arg name="callback" type="new_id" interface="wl_callback"
+           summary="callback object for the sync request"/>
+    </request>
+
+    <request name="get_registry">
+      <description summary="get global registry object">
+        This request creates a registry object that allows the client
+        to list the global objects available from the compositor.
+
+        It should be noted that the server side resources consumed by
+        this request should be released immediately when the client is
+        done with them.
+      </description>
+      <arg name="registry" type="new_id" interface="wl_registry"
+           summary="global registry object"/>
+    </request>
+
+    <event name="error">
+      <description summary="fatal error event">
+        The error event is sent out to the client when a non-recoverable
+        error has occurred.  The object_id argument is the object
+        where the error occurred, most often in response to a request
+        to that object.  The code identifies the error and is defined
+        by the object interface.  As such, each interface defines its
+        own set of error codes.  The meaning of the message is
+        defined by the interface.
+      </description>
+      <arg name="object_id" type="object" interface="wl_object"/>
+      <arg name="code" type="uint" summary="error code"/>
+      <arg name="message" type="string" summary="error message"/>
+    </event>
+
+    <event name="delete_id">
+      <description summary="acknowledge object ID deletion">
+        This event is used internally by the object ID management
+        logic.  When a client deletes an object that it had created,
+        the server will send this event to acknowledge that it has
+        seen the delete request.  When the client receives this event,
+        it will know that it can safely reuse the object ID.
+      </description>
+      <arg name="id" type="uint" summary="deleted object ID"/>
+    </event>
+  </interface>
+
+  <interface name="wl_registry" version="1">
+    <description summary="global registry object">
+      The singleton global registry object.  The server has a number of
+      global objects that are available to all clients.  These objects
+      typically represent an actual object in the server (for example,
+      an input device) or are singleton objects that provide extension
+      functionality.
+
+      When a client creates a registry object, the registry object
+      will emit a global event for each global in the registry.  Globals
+      are removed by sending a global_remove event to send "bind" requests
+      to the compositor.  The client must not bind more than once to the
+      same global.
+    </description>
+
+    <request name="bind">
+      <description summary="bind an object to the display">
+        Binds a new, client-created object to the server using the
+        specified name as the identifier.
+      </description>
+      <arg name="name" type="uint" summary="unique numeric name of the object"/>
+      <arg name="id" type="new_id" summary="bounded object"/>
+    </request>
+
+    <event name="global">
+      <description summary="announce global object">
+        Notify the client of global objects.
+
+        The event notifies the client that a global object with
+        the given name is now available, and it provides the high-level
+        interface name.  The name can be used to request the global
+        object later.
+      </description>
+      <arg name="name" type="uint" summary="numeric name of the global object"/>
+      <arg name="interface" type="string" summary="interface implemented by the object"/>
+      <arg name="version" type="uint" summary="interface version"/>
+    </event>
+
+    <event name="global_remove">
+      <description summary="announce removal of global object">
+        Notify the client of removed global objects.
+
+        This event notifies the client that the global identified
+        by name is no longer available.  If the client bound to
+        the global using the bind request, the client should now destroy
+        that object.
+      </description>
+      <arg name="name" type="uint" summary="numeric name of the global object"/>
+    </event>
+  </interface>
+
+  <interface name="wl_callback" version="1">
+    <description summary="callback object">
+      Clients can handle the 'done' event to get notified when
+      the related request is done.
+    </description>
+
+    <event name="done">
+      <description summary="done event">
+        Notify the client when the related request is done.
+      </description>
+      <arg name="callback_data" type="uint" summary="request-specific data for the callback"/>
+    </event>
+  </interface>
+
+  <interface name="wl_compositor" version="4">
+    <description summary="the compositor singleton">
+      A compositor.  This object is a singleton global.  The
+      compositor is responsible for combining the contents of multiple
+      surfaces into one final image presented to the user.
+    </description>
+
+    <request name="create_surface">
+      <description summary="create new surface">
+        Ask the compositor to create a new surface.
+      </description>
+      <arg name="id" type="new_id" interface="wl_surface" summary="the new surface"/>
+    </request>
+
+    <request name="create_region">
+      <description summary="create new region">
+        Ask the compositor to create a new region.
+      </description>
+      <arg name="id" type="new_id" interface="wl_region" summary="the new region"/>
+    </request>
+  </interface>
+
+  <interface name="wl_shm_pool" version="1">
+    <description summary="a shared memory pool">
+      The wl_shm_pool object encapsulates a piece of memory shared
+      between the compositor and the client.  On the server side, the
+      object is automatically destroyed when the wl_shm_pool.destroy
+      request is received.  wl_shm_pool objects are created by the
+      wl_shm.create_pool request.
+    </description>
+
+    <request name="create_buffer">
+      <description summary="create a buffer from the pool">
+        Create a wl_buffer object from the pool.
+      </description>
+      <arg name="id" type="new_id" interface="wl_buffer" summary="buffer to create"/>
+      <arg name="offset" type="int" summary="buffer byte offset within the pool"/>
+      <arg name="width" type="int" summary="buffer width, in pixels"/>
+      <arg name="height" type="int" summary="buffer height, in pixels"/>
+      <arg name="stride" type="int" summary="number of bytes from the beginning of one row to the beginning of the next row, including padding"/>
+      <arg name="format" type="uint" enum="wl_shm.format" summary="buffer pixel format"/>
+    </request>
+
+    <request name="destroy">
+      <description summary="destroy the pool">
+        Destroy the shared memory pool.
+      </description>
+    </request>
+
+    <request name="resize">
+      <description summary="alter the pool size">
+        Used to shrink the pool.
+      </description>
+      <arg name="size" type="int" summary="new size of the pool, in bytes"/>
+    </request>
+  </interface>
+
+  <interface name="wl_shm" version="1">
+    <description summary="shared memory support">
+      A singleton global object that provides support for shared
+      memory.
+    </description>
+
+    <enum name="error">
+      <entry name="invalid_format" value="0" summary="buffer format is not known"/>
+      <entry name="invalid_stride" value="1" summary="invalid size or stride during pool or buffer creation"/>
+      <entry name="invalid_fd" value="2" summary="mmap failed"/>
+    </enum>
+
+    <enum name="format">
+      <description summary="pixel formats">
+        This describes the memory layout of an individual buffer.
+      </description>
+      <entry name="argb8888" value="0" summary="32-bit ARGB format, [31:0] A:R:G:B 8:8:8:8 little endian"/>
+      <entry name="xrgb8888" value="1" summary="32-bit RGB format, [31:0] x:R:G:B 8:8:8:8 little endian"/>
+      <entry name="c8" value="0x20203843" summary="8-bit color index format, [7:0] C:I:I:I 1:2:2:2 little endian"/>
+      <entry name="rgb332" value="0x38424752" summary="8-bit RGB format, [7:0] R:G:B 3:3:2 little endian"/>
+      <entry name="bgr233" value="0x38524742" summary="8-bit BGR format, [7:0] B:G:R 2:3:3 little endian"/>
+      <entry name="xrgb4444" value="0x32315258" summary="16-bit xRGB format, [15:0] x:R:G:B 4:4:4:4 little endian"/>
+      <entry name="xbgr4444" value="0x32314258" summary="16-bit xBGR format, [15:0] x:B:G:R 4:4:4:4 little endian"/>
+      <entry name="rgb565" value="0x36314752" summary="16-bit RGB format, [15:0] R:G:B 5:6:5 little endian"/>
+      <entry name="bgr565" value="0x36314742" summary="16-bit BGR format, [15:0] B:G:R 5:6:5 little endian"/>
+      <entry name="rgb888" value="0x34324752" summary="24-bit RGB format, [23:0] R:G:B little endian"/>
+      <entry name="bgr888" value="0x34324742" summary="24-bit BGR format, [23:0] B:G:R little endian"/>
+      <entry name="xbgr8888" value="0x34324258" summary="32-bit xBGR format, [31:0] x:B:G:R 8:8:8:8 little endian"/>
+      <entry name="rgbx8888" value="0x38385252" summary="32-bit RGBx format, [31:0] R:G:B:x 8:8:8:8 little endian"/>
+      <entry name="bgrx8888" value="0x38385242" summary="32-bit BGRx format, [31:0] B:G:R:x 8:8:8:8 little endian"/>
+      <entry name="yuyv" value="0x56595559" summary="packed YUV format, [31:0] Cr0:Y1:Cb0:Y0 8:8:8:8 little endian"/>
+      <entry name="yvyu" value="0x55595659" summary="packed YUV format, [31:0] Cb0:Y1:Cr0:Y0 8:8:8:8 little endian"/>
+      <entry name="uyvy" value="0x59565955" summary="packed YUV format, [31:0] Y1:Cr0:Y0:Cb0 8:8:8:8 little endian"/>
+      <entry name="vyuy" value="0x59555956" summary="packed YUV format, [31:0] Y1:Cb0:Y0:Cr0 8:8:8:8 little endian"/>
+      <entry name="nv12" value="0x3231564e" summary="2 plane YCbCr Cr:Cb format, 2x2 subsampled Cr:Cb plane"/>
+      <entry name="nv21" value="0x3132564e" summary="2 plane YCbCr Cb:Cr format, 2x2 subsampled Cb:Cr plane"/>
+      <entry name="nv16" value="0x3631564e" summary="2 plane YCbCr Cr:Cb format, 2x1 subsampled Cr:Cb plane"/>
+      <entry name="nv61" value="0x3136564e" summary="2 plane YCbCr Cb:Cr format, 2x1 subsampled Cb:Cr plane"/>
+      <entry name="yuv410" value="0x39565559" summary="3 plane YCbCr format, 4x4 subsampled Cb (1) and Cr (2) planes"/>
+      <entry name="yvu410" value="0x39555659" summary="3 plane YCbCr format, 4x4 subsampled Cr (1) and Cb (2) planes"/>
+      <entry name="yuv411" value="0x31315559" summary="3 plane YCbCr format, 4x1 subsampled Cb (1) and Cr (2) planes"/>
+      <entry name="yvu411" value="0x31315659" summary="3 plane YCbCr format, 4x1 subsampled Cr (1) and Cb (2) planes"/>
+      <entry name="yuv420" value="0x32315559" summary="3 plane YCbCr format, 2x2 subsampled Cb (1) and Cr (2) planes"/>
+      <entry name="yvu420" value="0x32315659" summary="3 plane YCbCr format, 2x2 subsampled Cr (1) and Cb (2) planes"/>
+      <entry name="yuv444" value="0x34325559" summary="3 plane YCbCr format, non-subsampled Cb (1) and Cr (2) planes"/>
+      <entry name="yvu444" value="0x34325659" summary="3 plane YCbCr format, non-subsampled Cr (1) and Cb (2) planes"/>
+      <entry name="r8" value="0x20203852" summary="[7:0] R 8:0:0:0 little endian"/>
+      <entry name="r16" value="0x20363152" summary="[15:0] R little endian"/>
+      <entry name="rg88" value="0x38384752" summary="[15:0] R:G 8:8 little endian"/>
+      <entry name="gr88" value="0x38384747" summary="[15:0] G:R 8:8 little endian"/>
+      <entry name="rg1616" value="0x36314752" summary="[31:0] R:G 16:16 little endian"/>
+      <entry name="gr1616" value="0x36314747" summary="[31:0] G:R 16:16 little endian"/>
+      <entry name="xrgb16161616f" value="0x48345258" summary="[63:0] x:R:G:B 16:16:16:16 little endian"/>
+      <entry name="xbgr16161616f" value="0x48344258" summary="[63:0] x:B:G:R 16:16:16:16 little endian"/>
+      <entry name="abgr16161616f" value="0x48344241" summary="[63:0] A:B:G:R 16:16:16:16 little endian"/>
+      <entry name="argb16161616f" value="0x48345241" summary="[63:0] A:R:G:B 16:16:16:16 little endian"/>
+    </enum>
+
+    <request name="create_pool">
+      <description summary="create a shm pool">
+        Create a new wl_shm_pool object.
+      </description>
+      <arg name="id" type="new_id" interface="wl_shm_pool" summary="pool to create"/>
+      <arg name="fd" type="fd" summary="file descriptor for the pool"/>
+      <arg name="size" type="int" summary="pool size, in bytes"/>
+    </request>
+  </interface>
+
+  <interface name="wl_buffer" version="1">
+    <description summary="content buffer">
+      A buffer provides the content for a wl_surface. Buffers are
+      created by factory functions such as wl_shm_pool.create_buffer.
+    </description>
+
+    <request name="destroy">
+      <description summary="destroy a buffer">
+        Destroy a buffer. If and how you need to release the underlying
+        storage is defined by the buffer factory interface.
+      </description>
+    </request>
+
+    <event name="release">
+      <description summary="compositor releases buffer">
+        Sent when this wl_buffer is no longer used by the compositor.
+        The client is now free to reuse or destroy this buffer and its
+        backing storage.
+      </description>
+    </event>
+  </interface>
+
+  <interface name="wl_data_offer" version="3">
+    <description summary="offer to transfer data">
+      A wl_data_offer represents a piece of data offered for transfer
+      by another client (the source client).  It is used by the
+      data-device mechanism.
+    </description>
+
+    <request name="accept">
+      <description summary="accept one of the offered mime types">
+        Indicate that the client accepts wl_data_offer of the given
+        type, or NULL if not accepted.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the accept request"/>
+      <arg name="mime_type" type="string" allow-null="true" summary="mime type accepted by the client"/>
+    </request>
+
+    <request name="receive">
+      <description summary="request that the data be transferred">
+        To transfer the offered data, the client issues this request
+        and indicates the mime type it wants to receive.  The transfer
+        happens through the passed file descriptor (typically created
+        with the pipe system call).  The source client writes the data
+        in the mime type representation requested and then closes the
+        file descriptor.
+      </description>
+      <arg name="mime_type" type="string" summary="mime type desired by receiver"/>
+      <arg name="fd" type="fd" summary="file descriptor for data transfer"/>
+    </request>
+
+    <request name="destroy">
+      <description summary="destroy data offer">
+        Destroy the data offer.
+      </description>
+    </request>
+
+    <event name="offer">
+      <description summary="advertise offered mime type">
+        Sent immediately after creating the wl_data_offer object.  One
+        event per offered mime type.
+      </description>
+      <arg name="mime_type" type="string" summary="offered mime type"/>
+    </event>
+
+    <request name="finish" since="3">
+      <description summary="the offer will no longer be used">
+        Notifies the compositor that the drag destination successfully
+        finished the drag operation.
+      </description>
+    </request>
+
+    <request name="set_actions" since="3">
+      <description summary="set the available/preferred drag-and-drop actions">
+        Sets the actions that the destination side client supports for
+        this operation. This request should only be made by clients
+        that support drag-and-drop actions.
+      </description>
+      <arg name="dnd_actions" type="uint" summary="actions supported by the destination client"/>
+      <arg name="preferred_action" type="uint" summary="action preferred by the destination client"/>
+    </request>
+
+    <event name="source_actions" since="3">
+      <description summary="notify the source-side available actions">
+        This event indicates the actions offered by the data source.
+      </description>
+      <arg name="source_actions" type="uint" summary="actions offered by the data source"/>
+    </event>
+
+    <event name="action" since="3">
+      <description summary="notify the selected action">
+        This event indicates the action selected by the compositor after
+        matching the source/destination side actions.
+      </description>
+      <arg name="dnd_action" type="uint" summary="action selected by the compositor"/>
+    </event>
+  </interface>
+
+  <interface name="wl_data_source" version="3">
+    <description summary="offer to transfer data">
+      The wl_data_source object is the source side of a wl_data_offer.
+      It is created by the source client and used by the compositor to
+      present the data to the user.
+    </description>
+
+    <request name="offer">
+      <description summary="add an offered mime type">
+        This request adds a mime type to the set of mime types
+        advertised to targets.
+      </description>
+      <arg name="mime_type" type="string" summary="mime type offered by the data source"/>
+    </request>
+
+    <request name="destroy">
+      <description summary="destroy the data source">
+        Destroy the data source.
+      </description>
+    </request>
+
+    <event name="target">
+      <description summary="a target accepts an offered mime type">
+        Sent when a target accepts pointer_focus or motion events.
+      </description>
+      <arg name="mime_type" type="string" allow-null="true" summary="mime type accepted by the target"/>
+    </event>
+
+    <event name="send">
+      <description summary="send the data">
+        Request for data from the client.
+      </description>
+      <arg name="mime_type" type="string" summary="mime type for the data"/>
+      <arg name="fd" type="fd" summary="file descriptor for the data to send"/>
+    </event>
+
+    <event name="cancelled">
+      <description summary="selection was cancelled">
+        This data source is no longer valid.
+      </description>
+    </event>
+
+    <event name="dnd_drop_performed" since="3">
+      <description summary="the drag-and-drop operation physically finished">
+        The user performed the drop action.
+      </description>
+    </event>
+
+    <event name="dnd_finished" since="3">
+      <description summary="the drag-and-drop operation concluded">
+        The drop operation finished.
+      </description>
+    </event>
+
+    <event name="action" since="3">
+      <description summary="notify the selected action">
+        This event indicates the action selected by the compositor.
+      </description>
+      <arg name="dnd_action" type="uint" summary="action selected by the compositor"/>
+    </event>
+  </interface>
+
+  <interface name="wl_data_device" version="3">
+    <description summary="data transfer device">
+      There is one wl_data_device per seat that can be used to transfer
+      data between clients.
+    </description>
+
+    <request name="start_drag">
+      <description summary="start drag-and-drop operation">
+        This request asks the compositor to start a drag-and-drop
+        operation on behalf of the client.
+      </description>
+      <arg name="source" type="object" interface="wl_data_source" allow-null="true" summary="data source for the drag"/>
+      <arg name="origin" type="object" interface="wl_surface" summary="surface where the drag originates"/>
+      <arg name="icon" type="object" interface="wl_surface" allow-null="true" summary="drag-and-drop icon surface"/>
+      <arg name="serial" type="uint" summary="serial number of the implicit grab on the pointer"/>
+    </request>
+
+    <request name="set_selection">
+      <description summary="copy data to the selection">
+        This request asks the compositor to set the selection
+        to the data from the source on behalf of the client.
+      </description>
+      <arg name="source" type="object" interface="wl_data_source" allow-null="true" summary="data source for the selection"/>
+      <arg name="serial" type="uint" summary="serial number of the event that triggered this request"/>
+    </request>
+
+    <event name="data_offer">
+      <description summary="introduce a new wl_data_offer">
+        The data_offer event introduces a new wl_data_offer object,
+        which will subsequently be used in either the
+        data_device.enter event (for drag-and-drop) or the
+        data_device.selection event (for selections).
+      </description>
+      <arg name="id" type="new_id" interface="wl_data_offer" summary="the new data_offer object"/>
+    </event>
+
+    <event name="enter">
+      <description summary="initiate drag-and-drop session">
+        This event is sent when an active drag-and-drop pointer enters
+        the surface owned by the client.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the pointer enter"/>
+      <arg name="surface" type="object" interface="wl_surface" summary="client surface entered"/>
+      <arg name="x" type="fixed" summary="surface-local x coordinate"/>
+      <arg name="y" type="fixed" summary="surface-local y coordinate"/>
+      <arg name="id" type="object" interface="wl_data_offer" allow-null="true" summary="source data_offer object"/>
+    </event>
+
+    <event name="leave">
+      <description summary="end drag-and-drop session">
+        This event is sent when the drag-and-drop pointer leaves the
+        surface and the session ends.
+      </description>
+    </event>
+
+    <event name="motion">
+      <description summary="drag-and-drop session motion">
+        This event is sent when the drag-and-drop pointer moves.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="x" type="fixed" summary="surface-local x coordinate"/>
+      <arg name="y" type="fixed" summary="surface-local y coordinate"/>
+    </event>
+
+    <event name="drop">
+      <description summary="end drag-and-drop session successfully">
+        The event is sent when a drag-and-drop operation is ended
+        because the implicit grab is released.
+      </description>
+    </event>
+
+    <event name="selection">
+      <description summary="advertise a selection">
+        The selection event is sent out to notify the client of a new
+        wl_data_offer for the selection for this device.
+      </description>
+      <arg name="id" type="object" interface="wl_data_offer" allow-null="true" summary="selection data_offer object"/>
+    </event>
+
+    <request name="release" since="2">
+      <description summary="destroy data device">
+        This request destroys the data device.
+      </description>
+    </request>
+  </interface>
+
+  <interface name="wl_data_device_manager" version="3">
+    <description summary="data transfer interface">
+      The wl_data_device_manager is a singleton global object that
+      provides access to the inter-client data transfer mechanisms
+      such as copy-and-paste and drag-and-drop.
+    </description>
+
+    <request name="create_data_source">
+      <description summary="create a new data source">
+        Create a new data source.
+      </description>
+      <arg name="id" type="new_id" interface="wl_data_source" summary="data source to create"/>
+    </request>
+
+    <request name="get_data_device">
+      <description summary="create a new data device">
+        Create a new data device for a given seat.
+      </description>
+      <arg name="id" type="new_id" interface="wl_data_device" summary="data device to create"/>
+      <arg name="seat" type="object" interface="wl_seat" summary="seat associated with the data device"/>
+    </request>
+  </interface>
+
+  <interface name="wl_shell" version="1">
+    <description summary="create desktop-style surfaces">
+      This interface is implemented by the server and provides
+      desktop-style user interfaces.
+    </description>
+
+    <request name="get_shell_surface">
+      <description summary="create a shell surface from a surface">
+        Create a shell surface for an existing surface.
+      </description>
+      <arg name="id" type="new_id" interface="wl_shell_surface" summary="shell surface to create"/>
+      <arg name="surface" type="object" interface="wl_surface" summary="surface to be given the shell surface interface"/>
+    </request>
+  </interface>
+
+  <interface name="wl_shell_surface" version="1">
+    <description summary="desktop-style metadata interface">
+      An interface that may be implemented by a wl_surface, for
+      implementations that provide a desktop-style user interface.
+    </description>
+
+    <enum name="resize">
+      <entry name="none" value="0"/>
+      <entry name="top" value="1"/>
+      <entry name="bottom" value="2"/>
+      <entry name="left" value="4"/>
+      <entry name="top_left" value="5"/>
+      <entry name="bottom_left" value="6"/>
+      <entry name="right" value="8"/>
+      <entry name="top_right" value="9"/>
+      <entry name="bottom_right" value="10"/>
+    </enum>
+
+    <enum name="transient">
+      <entry name="inactive" value="0x1" summary="do not set keyboard focus"/>
+    </enum>
+
+    <enum name="fullscreen_method">
+      <entry name="default" value="0" summary="no preference, apply default policy"/>
+      <entry name="scale" value="1" summary="scale, crop, or blank"/>
+      <entry name="driver" value="2" summary="switch a driver to output"/>
+      <entry name="copy" value="3" summary="use a copy"/>
+    </enum>
+
+    <request name="ping">
+      <description summary="ping the surface">
+        Ping a surface to keep it alive.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the ping"/>
+    </request>
+
+    <request name="set_toplevel">
+      <description summary="set surface as a toplevel">
+        Map the surface as a toplevel surface.
+      </description>
+    </request>
+
+    <request name="set_transient">
+      <description summary="set the surface as a transient">
+        Map the surface relative to an existing surface.
+      </description>
+      <arg name="parent" type="object" interface="wl_surface" summary="parent surface"/>
+      <arg name="x" type="int" summary="surface-local x coordinate"/>
+      <arg name="y" type="int" summary="surface-local y coordinate"/>
+      <arg name="flags" type="uint" enum="transient" summary="transient surface mapping flags"/>
+    </request>
+
+    <request name="set_fullscreen">
+      <description summary="set the surface as fullscreen">
+        Map the surface as a fullscreen surface.
+      </description>
+      <arg name="method" type="uint" enum="fullscreen_method" summary="fullscreen method"/>
+      <arg name="framerate" type="uint" summary="framerate in mHz"/>
+      <arg name="output" type="object" interface="wl_output" allow-null="true" summary="output on which the surface is to be fullscreen"/>
+    </request>
+
+    <request name="set_popup">
+      <description summary="set the surface as popup">
+        Map the surface as a popup.
+      </description>
+      <arg name="seat" type="object" interface="wl_seat" summary="seat whose pointer is used"/>
+      <arg name="serial" type="uint" summary="serial number of the implicit grab on the pointer"/>
+      <arg name="parent" type="object" interface="wl_surface" summary="parent surface"/>
+      <arg name="x" type="int" summary="surface-local x coordinate"/>
+      <arg name="y" type="int" summary="surface-local y coordinate"/>
+      <arg name="flags" type="uint" enum="transient" summary="transient surface mapping flags"/>
+    </request>
+
+    <request name="set_maximized">
+      <description summary="set the surface as maximized">
+        Map the surface as a maximized surface.
+      </description>
+      <arg name="output" type="object" interface="wl_output" allow-null="true" summary="output on which the surface is to be maximized"/>
+    </request>
+
+    <event name="ping">
+      <description summary="ping client">
+        Ping a client to check it is responding.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the ping"/>
+    </event>
+
+    <event name="configure">
+      <description summary="suggest resize">
+        The configure event asks the client to resize its surface.
+      </description>
+      <arg name="edges" type="uint" enum="resize" summary="how the surface was resized"/>
+      <arg name="width" type="int" summary="new width of the surface"/>
+      <arg name="height" type="int" summary="new height of the surface"/>
+    </event>
+
+    <event name="popup_done">
+      <description summary="popup interaction is done">
+        The popup_done event is sent out when a popup grab is broken,
+        that is, when the user clicks a surface that doesn't belong to
+        the client owning the popup surface.
+      </description>
+    </event>
+  </interface>
+
+  <interface name="wl_surface" version="4">
+    <description summary="an onscreen surface">
+      A surface is a rectangular area that is displayed on the screen.
+      It has a location, size and pixel contents.
+    </description>
+
+    <request name="destroy">
+      <description summary="delete surface">
+        Deletes the surface and invalidates its object ID.
+      </description>
+    </request>
+
+    <request name="attach">
+      <description summary="set the surface contents">
+        Set a buffer as the content of this surface.
+      </description>
+      <arg name="buffer" type="object" interface="wl_buffer" allow-null="true" summary="buffer of surface contents"/>
+      <arg name="x" type="int" summary="surface-local x coordinate"/>
+      <arg name="y" type="int" summary="surface-local y coordinate"/>
+    </request>
+
+    <request name="damage">
+      <description summary="mark part of the surface damaged">
+        This request is used to describe the regions where the pending
+        buffer is different from the current surface contents.
+      </description>
+      <arg name="x" type="int" summary="surface-local x coordinate"/>
+      <arg name="y" type="int" summary="surface-local y coordinate"/>
+      <arg name="width" type="int" summary="width of damage rectangle"/>
+      <arg name="height" type="int" summary="height of damage rectangle"/>
+    </request>
+
+    <request name="frame">
+      <description summary="request a frame throttling hint">
+        Request a notification when it is a good time to start drawing a
+        new frame.
+      </description>
+      <arg name="callback" type="new_id" interface="wl_callback" summary="callback object for the frame request"/>
+    </request>
+
+    <request name="set_opaque_region">
+      <description summary="set opaque region">
+        This request sets the region of the surface that is considered
+        opaque.
+      </description>
+      <arg name="region" type="object" interface="wl_region" allow-null="true" summary="opaque region of the surface"/>
+    </request>
+
+    <request name="set_input_region">
+      <description summary="set input region">
+        This request sets the region of the surface for which the
+        server will process input events.
+      </description>
+      <arg name="region" type="object" interface="wl_region" allow-null="true" summary="input region of the surface"/>
+    </request>
+
+    <event name="enter">
+      <description summary="surface enters an output">
+        This is emitted whenever a surface's creation, movement, or
+        resizing results in some part of it being within the region of
+        an output.
+      </description>
+      <arg name="output" type="object" interface="wl_output" summary="output entered by the surface"/>
+    </event>
+
+    <event name="leave">
+      <description summary="surface leaves an output">
+        This is emitted whenever a surface's creation, movement, or
+        resizing results in it no longer having any part of it within
+        the region of an output.
+      </description>
+      <arg name="output" type="object" interface="wl_output" summary="output left by the surface"/>
+    </event>
+
+    <request name="set_buffer_transform" since="2">
+      <description summary="sets the buffer transformation">
+        This request sets an optional transformation on how the compositor
+        interprets the contents of the buffer attached to the surface.
+      </description>
+      <arg name="transform" type="int" enum="wl_output.transform" summary="transform for interpreting buffer contents"/>
+    </request>
+
+    <request name="set_buffer_scale" since="3">
+      <description summary="sets the buffer scaling factor">
+        This request sets an optional scaling factor on how the compositor
+        interprets the contents of the buffer attached to the window.
+      </description>
+      <arg name="scale" type="int" summary="positive scale for the buffer"/>
+    </request>
+
+    <request name="damage_buffer" since="4">
+      <description summary="mark part of the surface damaged using buffer coordinates">
+        This request is used to describe the regions where the pending
+        buffer is different from the current surface contents, and where
+        the damage is in buffer coordinates.
+      </description>
+      <arg name="x" type="int" summary="buffer-local x coordinate"/>
+      <arg name="y" type="int" summary="buffer-local y coordinate"/>
+      <arg name="width" type="int" summary="width of damage rectangle"/>
+      <arg name="height" type="int" summary="height of damage rectangle"/>
+    </request>
+
+    <request name="offset" since="5">
+      <description summary="set the surface content offset">
+        The offset request sets the offset of the surface contents
+        relative to the surface origin.
+      </description>
+      <arg name="x" type="int" summary="surface-local x coordinate"/>
+      <arg name="y" type="int" summary="surface-local y coordinate"/>
+    </request>
+  </interface>
+
+  <interface name="wl_seat" version="7">
+    <description summary="group of input devices">
+      A seat is a group of keyboards, pointer and touch devices. This
+      object is published as a global during start up, or when such a
+      device is hot plugged.
+    </description>
+
+    <enum name="capability">
+      <description summary="seat capabilities">
+        This is a bitmask of capabilities this seat has; if a member is
+        set, then it is present on the seat.
+      </description>
+      <entry name="pointer" value="1" summary="the seat has pointer devices"/>
+      <entry name="keyboard" value="2" summary="the seat has one or more keyboards"/>
+      <entry name="touch" value="4" summary="the seat has touch devices"/>
+    </enum>
+
+    <request name="get_pointer">
+      <description summary="return pointer object">
+        The ID provided will be initialized to the wl_pointer interface
+        for this seat.
+      </description>
+      <arg name="id" type="new_id" interface="wl_pointer" summary="seat pointer"/>
+    </request>
+
+    <request name="get_keyboard">
+      <description summary="return keyboard object">
+        The ID provided will be initialized to the wl_keyboard interface
+        for this seat.
+      </description>
+      <arg name="id" type="new_id" interface="wl_keyboard" summary="seat keyboard"/>
+    </request>
+
+    <request name="get_touch">
+      <description summary="return touch object">
+        The ID provided will be initialized to the wl_touch interface
+        for this seat.
+      </description>
+      <arg name="id" type="new_id" interface="wl_touch" summary="seat touch interface"/>
+    </request>
+
+    <event name="capabilities">
+      <description summary="seat capabilities changed">
+        This is emitted whenever a seat gains or loses the pointer,
+        keyboard or touch capabilities.
+      </description>
+      <arg name="capabilities" type="uint" enum="capability" summary="capabilities of the seat"/>
+    </event>
+
+    <event name="name" since="2">
+      <description summary="unique identifier for this seat">
+        In a multiseat configuration this can be used to distinguish
+        different seats.
+      </description>
+      <arg name="name" type="string" summary="seat identifier"/>
+    </event>
+
+    <request name="release" since="5">
+      <description summary="release the seat object">
+        Using this request a client can tell the server that it is not
+        going to use the seat object anymore.
+      </description>
+    </request>
+  </interface>
+
+  <interface name="wl_pointer" version="7">
+    <description summary="pointer input device">
+      The wl_pointer interface represents one or more input devices,
+      such as mice, which belong to the seat.
+    </description>
+
+    <enum name="error">
+      <entry name="role" value="0" summary="given wl_pointer has previously been used"/>
+    </enum>
+
+    <request name="set_cursor">
+      <description summary="set the pointer surface">
+        Set the pointer surface, i.e., the surface that contains the
+        pointer image (cursor).
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the enter event"/>
+      <arg name="surface" type="object" interface="wl_surface" allow-null="true" summary="pointer surface"/>
+      <arg name="hotspot_x" type="int" summary="surface-local x coordinate"/>
+      <arg name="hotspot_y" type="int" summary="surface-local y coordinate"/>
+    </request>
+
+    <request name="release" since="3">
+      <description summary="release the pointer object">
+        Using this request a client can tell the server that it is not
+        going to use the pointer object anymore.
+      </description>
+    </request>
+
+    <event name="enter">
+      <description summary="pointer entered a surface">
+        The enter event is sent to the client when the pointer enters
+        the surface.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the enter event"/>
+      <arg name="surface" type="object" interface="wl_surface" summary="surface entered by the pointer"/>
+      <arg name="surface_x" type="fixed" summary="surface-local x coordinate"/>
+      <arg name="surface_y" type="fixed" summary="surface-local y coordinate"/>
+    </event>
+
+    <event name="leave">
+      <description summary="pointer left a surface">
+        The leave event is sent to the client when the pointer leaves
+        the surface.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the leave event"/>
+      <arg name="surface" type="object" interface="wl_surface" summary="surface left by the pointer"/>
+    </event>
+
+    <event name="motion">
+      <description summary="pointer motion event">
+        The motion event is sent to the client when the pointer moves.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="surface_x" type="fixed" summary="surface-local x coordinate"/>
+      <arg name="surface_y" type="fixed" summary="surface-local y coordinate"/>
+    </event>
+
+    <event name="button">
+      <description summary="pointer button event">
+        The button event is sent to the client when a button press or
+        release is detected.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the button event"/>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="button" type="uint" summary="button that produced the event"/>
+      <arg name="state" type="uint" enum="button_state" summary="physical state of the button"/>
+    </event>
+
+    <enum name="button_state">
+      <description summary="physical button state">
+        Describes the physical state of a button that produced the button
+        event.
+      </description>
+      <entry name="released" value="0" summary="the button is not pressed"/>
+      <entry name="pressed" value="1" summary="the button is pressed"/>
+    </enum>
+
+    <event name="axis">
+      <description summary="axis change event">
+        The axis event is sent when the pointer's scroll wheel or other
+        axis is moved.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="axis" type="uint" enum="axis" summary="axis type"/>
+      <arg name="value" type="fixed" summary="length of vector in surface-local coordinate space"/>
+    </event>
+
+    <enum name="axis">
+      <description summary="axis types">
+        Describes the axis types of scroll events.
+      </description>
+      <entry name="vertical_scroll" value="0" summary="vertical axis"/>
+      <entry name="horizontal_scroll" value="1" summary="horizontal axis"/>
+    </enum>
+
+    <event name="frame" since="5">
+      <description summary="end of a pointer event sequence">
+        Indicates the end of a set of events that logically belong
+        together.
+      </description>
+    </event>
+
+    <event name="axis_source" since="5">
+      <description summary="axis source event">
+        Source information for scroll events.
+      </description>
+      <arg name="axis_source" type="uint" enum="axis_source" summary="source of the axis event"/>
+    </event>
+
+    <enum name="axis_source">
+      <entry name="wheel" value="0" summary="a physical wheel"/>
+      <entry name="finger" value="1" summary="finger on a trackpad"/>
+      <entry name="continuous" value="2" summary="continuous axis"/>
+    </enum>
+
+    <event name="axis_stop" since="5">
+      <description summary="axis stop event">
+        Stop notification for scroll events.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="axis" type="uint" enum="axis" summary="axis type"/>
+    </event>
+
+    <event name="axis_discrete" since="5">
+      <description summary="axis click event">
+        Discrete step information for scroll events.
+      </description>
+      <arg name="axis" type="uint" enum="axis" summary="axis type"/>
+      <arg name="discrete" type="int" summary="number of steps"/>
+    </event>
+  </interface>
+
+  <interface name="wl_keyboard" version="7">
+    <description summary="keyboard input device">
+      The wl_keyboard interface represents one or more keyboards
+      associated with a seat.
+    </description>
+
+    <enum name="keymap_format">
+      <description summary="keyboard mapping format">
+        This specifies the format of the keymap provided to the
+        client with the wl_keyboard.keymap event.
+      </description>
+      <entry name="no_keymap" value="0" summary="no keymap; client must understand how to interpret the raw keycode"/>
+      <entry name="xkb_v1" value="1" summary="libxkbcommon compatible; to determine the xkb keycode, clients must add the keycode subtracted from 8 to the base keymap"/>
+    </enum>
+
+    <request name="release" since="3">
+      <description summary="release the keyboard object"/>
+    </request>
+
+    <event name="keymap">
+      <description summary="keyboard mapping">
+        This event provides a file descriptor to the client which can be
+        memory-mapped to provide a keyboard mapping description.
+      </description>
+      <arg name="format" type="uint" enum="keymap_format" summary="keymap format"/>
+      <arg name="fd" type="fd" summary="keymap file descriptor"/>
+      <arg name="size" type="uint" summary="keymap size, in bytes"/>
+    </event>
+
+    <event name="enter">
+      <description summary="enter event">
+        Notification that this seat's keyboard focus is on a certain
+        surface.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the enter event"/>
+      <arg name="surface" type="object" interface="wl_surface" summary="surface gaining keyboard focus"/>
+      <arg name="keys" type="array" summary="the currently pressed keys"/>
+    </event>
+
+    <event name="leave">
+      <description summary="leave event">
+        Notification that this seat's keyboard focus is no longer on
+        a certain surface.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the leave event"/>
+      <arg name="surface" type="object" interface="wl_surface" summary="surface that lost keyboard focus"/>
+    </event>
+
+    <event name="key">
+      <description summary="key event">
+        A key was pressed or released.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the key event"/>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="key" type="uint" summary="key that produced the event"/>
+      <arg name="state" type="uint" enum="key_state" summary="physical state of the key"/>
+    </event>
+
+    <enum name="key_state">
+      <description summary="physical key state">
+        Describes the physical state of a key that produced the key event.
+      </description>
+      <entry name="released" value="0" summary="key is not pressed"/>
+      <entry name="pressed" value="1" summary="key is pressed"/>
+    </enum>
+
+    <event name="modifiers">
+      <description summary="modifier and group state">
+        Notifies clients that the modifier and/or group state has
+        changed.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the modifiers event"/>
+      <arg name="mods_depressed" type="uint" summary="depressed modifiers"/>
+      <arg name="mods_latched" type="uint" summary="latched modifiers"/>
+      <arg name="mods_locked" type="uint" summary="locked modifiers"/>
+      <arg name="group" type="uint" summary="keyboard layout"/>
+    </event>
+
+    <event name="repeat_info" since="4">
+      <description summary="repeat rate and delay">
+        Informs the client about the keyboard's repeat rate and delay.
+      </description>
+      <arg name="rate" type="int" summary="the rate of repeating keys in characters per second"/>
+      <arg name="delay" type="int" summary="delay in milliseconds before a repeating key starts repeating"/>
+    </event>
+  </interface>
+
+  <interface name="wl_touch" version="7">
+    <description summary="touchscreen input device">
+      The wl_touch interface represents a touchscreen associated with a
+      seat.
+    </description>
+
+    <request name="release" since="3">
+      <description summary="release the touch object"/>
+    </request>
+
+    <event name="down">
+      <description summary="touch down event and beginning of a touch sequence">
+        A new touch point has appeared on the surface.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the touch down event"/>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="surface" type="object" interface="wl_surface" summary="surface touched"/>
+      <arg name="id" type="int" summary="the unique ID of this touch point"/>
+      <arg name="x" type="fixed" summary="surface-local x coordinate"/>
+      <arg name="y" type="fixed" summary="surface-local y coordinate"/>
+    </event>
+
+    <event name="up">
+      <description summary="end of a touch event sequence">
+        The touch point has disappeared.
+      </description>
+      <arg name="serial" type="uint" summary="serial number of the touch up event"/>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="id" type="int" summary="the unique ID of this touch point"/>
+    </event>
+
+    <event name="motion">
+      <description summary="update of touch point">
+        A touch point has changed coordinates.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="id" type="int" summary="the unique ID of this touch point"/>
+      <arg name="x" type="fixed" summary="surface-local x coordinate"/>
+      <arg name="y" type="fixed" summary="surface-local y coordinate"/>
+    </event>
+
+    <event name="frame">
+      <description summary="end of touch frame">
+        Indicates the end of a set of events that belong together.
+      </description>
+    </event>
+
+    <event name="cancel">
+      <description summary="touch session cancelled">
+        Sent if the compositor decides the touch stream is a global
+        gesture.
+      </description>
+    </event>
+
+    <event name="shape" since="6">
+      <description summary="update shape of touch point">
+        Sent when a touchpoint has changed its shape.
+      </description>
+      <arg name="id" type="int" summary="the unique ID of this touch point"/>
+      <arg name="major" type="fixed" summary="length of the major axis of the ellipse"/>
+      <arg name="minor" type="fixed" summary="length of the minor axis of the ellipse"/>
+    </event>
+
+    <event name="orientation" since="6">
+      <description summary="update orientation of touch point">
+        Sent when a touchpoint has changed its orientation.
+      </description>
+      <arg name="id" type="int" summary="the unique ID of this touch point"/>
+      <arg name="orientation" type="fixed" summary="angle between the major axis and the positive surface y-axis"/>
+    </event>
+  </interface>
+
+  <interface name="wl_output" version="4">
+    <description summary="compositor output region">
+      An output describes part of the compositor geometry.  The
+      compositor works in the 'compositor coordinate system'.
+    </description>
+
+    <enum name="subpixel">
+      <description summary="subpixel geometry information">
+        This enumeration describes how the physical pixels on an output
+        are laid out.
+      </description>
+      <entry name="unknown" value="0" summary="unknown geometry"/>
+      <entry name="none" value="1" summary="no geometry"/>
+      <entry name="horizontal_rgb" value="2" summary="horizontal RGB"/>
+      <entry name="horizontal_bgr" value="3" summary="horizontal BGR"/>
+      <entry name="vertical_rgb" value="4" summary="vertical RGB"/>
+      <entry name="vertical_bgr" value="5" summary="vertical BGR"/>
+    </enum>
+
+    <enum name="transform">
+      <description summary="transform">
+        This describes transformations that apply to the coordinate
+        space.
+      </description>
+      <entry name="normal" value="0" summary="no transform"/>
+      <entry name="90" value="1" summary="90 degrees counter-clockwise"/>
+      <entry name="180" value="2" summary="180 degrees counter-clockwise"/>
+      <entry name="270" value="3" summary="270 degrees counter-clockwise"/>
+      <entry name="flipped" value="4" summary="180 degree flip around a vertical axis"/>
+      <entry name="flipped_90" value="5" summary="flip and rotate 90 degrees counter-clockwise"/>
+      <entry name="flipped_180" value="6" summary="flip and rotate 180 degrees counter-clockwise"/>
+      <entry name="flipped_270" value="7" summary="flip and rotate 270 degrees counter-clockwise"/>
+    </enum>
+
+    <event name="geometry">
+      <description summary="properties of the output">
+        The geometry event describes geometric properties of the output.
+      </description>
+      <arg name="x" type="int" summary="x position within the global compositor space"/>
+      <arg name="y" type="int" summary="y position within the global compositor space"/>
+      <arg name="physical_width" type="int" summary="width in millimeters of the output"/>
+      <arg name="physical_height" type="int" summary="height in millimeters of the output"/>
+      <arg name="subpixel" type="int" enum="subpixel" summary="subpixel orientation of the output"/>
+      <arg name="make" type="string" summary="textual description of the manufacturer"/>
+      <arg name="model" type="string" summary="textual description of the model"/>
+      <arg name="transform" type="int" enum="transform" summary="transform that maps framebuffer to output"/>
+    </event>
+
+    <event name="mode">
+      <description summary="advertise available modes for the output">
+        The mode event describes an available mode for the output.
+      </description>
+      <arg name="flags" type="uint" enum="mode" summary="bitfield of mode flags"/>
+      <arg name="width" type="int" summary="width of the mode in hardware units"/>
+      <arg name="height" type="int" summary="height of the mode in hardware units"/>
+      <arg name="refresh" type="int" summary="vertical refresh rate in mHz"/>
+    </event>
+
+    <enum name="mode">
+      <description summary="mode information">
+        These flags describe properties of an output mode.
+      </description>
+      <entry name="current" value="0x1" summary="indicates this is the current mode"/>
+      <entry name="preferred" value="0x2" summary="indicates this is the preferred mode"/>
+    </enum>
+
+    <event name="done">
+      <description summary="sent all information about output">
+        This event is sent after all other properties have been
+        sent after binding to the output object.
+      </description>
+    </event>
+
+    <event name="scale" since="2">
+      <description summary="output scale properties">
+        This event contains scaling factor information.
+      </description>
+      <arg name="factor" type="int" summary="scaling factor of output"/>
+    </event>
+
+    <request name="release" since="3">
+      <description summary="release the output object">
+        Using this request a client can tell the server that it is not
+        going to use the output object anymore.
+      </description>
+    </request>
+
+    <event name="name" since="4">
+      <description summary="name of this output">
+        The name is a UTF-8 string with no convention defined for
+        its contents.
+      </description>
+      <arg name="name" type="string" summary="output name"/>
+    </event>
+
+    <event name="description" since="4">
+      <description summary="human-readable description of this output">
+        This is a UTF-8 string.
+      </description>
+      <arg name="description" type="string" summary="output description"/>
+    </event>
+  </interface>
+
+  <interface name="wl_region" version="1">
+    <description summary="region interface">
+      A region object describes an area.
+    </description>
+
+    <request name="destroy">
+      <description summary="destroy region">
+        Destroy the region.  This will invalidate the object ID.
+      </description>
+    </request>
+
+    <request name="add">
+      <description summary="add rectangle to region">
+        Add the specified rectangle to the region.
+      </description>
+      <arg name="x" type="int" summary="region-local x coordinate"/>
+      <arg name="y" type="int" summary="region-local y coordinate"/>
+      <arg name="width" type="int" summary="rectangle width"/>
+      <arg name="height" type="int" summary="rectangle height"/>
+    </request>
+
+    <request name="subtract">
+      <description summary="subtract rectangle from region">
+        Subtract the specified rectangle from the region.
+      </description>
+      <arg name="x" type="int" summary="region-local x coordinate"/>
+      <arg name="y" type="int" summary="region-local y coordinate"/>
+      <arg name="width" type="int" summary="rectangle width"/>
+      <arg name="height" type="int" summary="rectangle height"/>
+    </request>
+  </interface>
+
+  <interface name="wl_subcompositor" version="1">
+    <description summary="sub-surface compositing">
+      The global interface exposing sub-surface compositing capabilities.
+    </description>
+
+    <request name="destroy">
+      <description summary="unbind from the subcompositor interface">
+        Informs the server that the client will not be using this
+        protocol object anymore.
+      </description>
+    </request>
+
+    <request name="get_subsurface">
+      <description summary="introduce a sub-surface interface for a surface">
+        Create a sub-surface interface for the given surface.
+      </description>
+      <arg name="id" type="new_id" interface="wl_subsurface" summary="the new sub-surface object ID"/>
+      <arg name="surface" type="object" interface="wl_surface" summary="the surface to manage"/>
+      <arg name="parent" type="object" interface="wl_surface" summary="the parent surface"/>
+    </request>
+  </interface>
+
+  <interface name="wl_subsurface" version="1">
+    <description summary="sub-surface interface to a wl_surface">
+      An additional interface to a wl_surface object, which has been
+      made a sub-surface.
+    </description>
+
+    <request name="destroy">
+      <description summary="remove sub-surface interface">
+        The sub-surface interface is removed from the wl_surface object
+        that was turned into a sub-surface.
+      </description>
+    </request>
+
+    <request name="set_position">
+      <description summary="reposition the sub-surface">
+        This schedules a sub-surface position change.
+      </description>
+      <arg name="x" type="int" summary="x coordinate in the parent surface"/>
+      <arg name="y" type="int" summary="y coordinate in the parent surface"/>
+    </request>
+
+    <request name="place_above">
+      <description summary="restack the sub-surface">
+        This sub-surface is taken from the stack, and put back just
+        above the reference surface.
+      </description>
+      <arg name="sibling" type="object" interface="wl_surface" summary="the reference surface"/>
+    </request>
+
+    <request name="place_below">
+      <description summary="restack the sub-surface">
+        The sub-surface is placed just below of the reference surface.
+      </description>
+      <arg name="sibling" type="object" interface="wl_surface" summary="the reference surface"/>
+    </request>
+
+    <request name="set_sync">
+      <description summary="set sub-surface to synchronized mode">
+        Change the commit behaviour of the sub-surface to synchronized
+        mode.
+      </description>
+    </request>
+
+    <request name="set_desync">
+      <description summary="set sub-surface to desynchronized mode">
+        Change the commit behaviour of the sub-surface to desynchronized
+        mode.
+      </description>
+    </request>
+  </interface>
+</protocol>
