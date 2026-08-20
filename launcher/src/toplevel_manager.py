@@ -93,11 +93,19 @@ class WaylandToplevelBackend:
         )
 
     def _on_fd_ready(self, _fd: int, _cond: int) -> bool:
+        from gi.repository import GLib
+
+        if _cond & GLib.IOCondition.HUP:
+            # Compositor closed the socket; stop watching instead of spinning
+            # on a dead fd forever.
+            log.error('wayland compositor connection closed (HUP)')
+            return False
         try:
             self._display.dispatch(block=False)
             self._display.flush()
         except Exception as exc:  # noqa: BLE001 - compositor went away
             log.error('wayland dispatch failed: %s', exc)
+            return False  # dispatch is unrecoverable; stop the fd-watch
         return True  # keep watching
 
     # -- protocol glue -----------------------------------------------------
