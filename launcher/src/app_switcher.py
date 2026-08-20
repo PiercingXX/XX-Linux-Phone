@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import gi
-import os
-import signal as _signal
-import subprocess
+from toplevel_manager import ToplevelManager
 
 _LAYER_SHELL = False
 try:
@@ -63,12 +61,12 @@ _SWIPE_DISMISS_THRESHOLD = 120  # px upward drag to dismiss a card
 
 
 class AppInfo:
-    __slots__ = ('app_id', 'title', 'pid')
+    __slots__ = ('app_id', 'handle', 'title')
 
-    def __init__(self, app_id: str, title: str, pid: int | None = None) -> None:
+    def __init__(self, app_id: str, title: str, handle: object | None = None) -> None:
         self.app_id = app_id
         self.title = title
-        self.pid = pid
+        self.handle = handle
 
 
 class AppSwitcher(Gtk.Window):
@@ -77,7 +75,7 @@ class AppSwitcher(Gtk.Window):
     Card swipe-up dismisses that app. Reveal/hide uses Gtk.Revealer (SLIDE_UP).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, manager: ToplevelManager | None = None) -> None:
         super().__init__(title='PiercingXX Switcher')
 
         if _LAYER_SHELL and LayerShell.is_supported():
@@ -92,7 +90,11 @@ class AppSwitcher(Gtk.Window):
         else:
             self.set_default_size(420, 320)
 
+        self._manager = manager if manager is not None else ToplevelManager()
         self._apps: list[AppInfo] = []
+        if self._manager.available:
+            self._wire_change(self._manager, self.refresh)
+        self.refresh()
 
         provider = Gtk.CssProvider()
         provider.load_from_data(_SWITCHER_CSS)
@@ -145,9 +147,35 @@ class AppSwitcher(Gtk.Window):
         return root
 
     def refresh(self, apps: list[AppInfo] | None = None) -> None:
-        if apps is not None:
-            self._apps = apps
+        if apps is None:
+            apps = self._apps_from_manager(self._manager)
+        self._apps = apps
         self._rebuild_cards()
+
+    @staticmethod
+    def _apps_from_manager(manager: ToplevelManager) -> list[AppInfo]:
+        """Headless seam: manager.list() -> the AppInfo records cards render from."""
+        return [
+            AppInfo(t.app_id, t.title, handle=t.handle)
+            for t in manager.list()
+        ]
+
+    @staticmethod
+    def _wire_change(manager: ToplevelManager, callback) -> None:
+        """Headless seam: register the switcher's refresh on manager changes."""
+        manager.on_change(callback)
+
+    @staticmethod
+    def _focus_app_with_manager(manager: ToplevelManager, app: AppInfo) -> None:
+        """Headless seam: activating a card dispatches to the manager."""
+        if app.handle is not None:
+            manager.activate(app.handle)
+
+    @staticmethod
+    def _kill_app_with_manager(manager: ToplevelManager, app: AppInfo) -> None:
+        """Headless seam: killing a card dispatches to the manager."""
+        if app.handle is not None:
+            manager.close(app.handle)
 
     def _rebuild_cards(self) -> None:
         child = self.card_box.get_first_child()
@@ -212,20 +240,12 @@ class AppSwitcher(Gtk.Window):
             self._rebuild_cards()
 
     def _focus_app(self, app: AppInfo) -> None:
-        if app.pid:
-            try:
-                subprocess.Popen(['wmctrl', '-ia', str(app.app_id)], close_fds=True)
-            except FileNotFoundError:
-                pass
+        self._focus_app_with_manager(self._manager, app)
         self.hide_switcher()
 
     def _kill_app(self, app: AppInfo) -> None:
-        if app.pid:
-            try:
-                os.kill(app.pid, _signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
-        self._apps = [a for a in self._apps if a.app_id != app.app_id]
+        self._kill_app_with_manager(self._manager, app)
+        self._apps = [a for a in self._apps if a.handle != app.handle]
         self._rebuild_cards()
 
     def _on_swipe(self, _g: Gtk.GestureSwipe, vel_x: float, vel_y: float) -> None:
