@@ -58,6 +58,7 @@ _SWITCHER_CSS = b"""
 """
 
 _SWIPE_DISMISS_THRESHOLD = 120  # px upward drag to dismiss a card
+_EMPTY_STATE_TEXT = 'No open apps'
 
 
 class AppInfo:
@@ -161,6 +162,21 @@ class AppSwitcher(Gtk.Window):
         ]
 
     @staticmethod
+    def _empty_state_label() -> str:
+        """Headless seam: the message shown when there are no open apps."""
+        return _EMPTY_STATE_TEXT
+
+    @staticmethod
+    def _card_title(app: AppInfo) -> str:
+        """Headless seam: the text-only label a card renders for an app."""
+        return app.title
+
+    @staticmethod
+    def _card_labels(apps: list[AppInfo]) -> list[str]:
+        """Headless seam: the ordered text labels the cards render from."""
+        return [AppSwitcher._card_title(a) for a in apps]
+
+    @staticmethod
     def _wire_change(manager: ToplevelManager, callback) -> None:
         """Headless seam: register the switcher's refresh on manager changes."""
         manager.on_change(callback)
@@ -185,7 +201,7 @@ class AppSwitcher(Gtk.Window):
             child = nxt
 
         if not self._apps:
-            empty = Gtk.Label(label='No open apps', xalign=0)
+            empty = Gtk.Label(label=_EMPTY_STATE_TEXT, xalign=0)
             empty.add_css_class('switcher-header')
             empty.set_margin_start(4)
             self.card_box.append(empty)
@@ -195,7 +211,7 @@ class AppSwitcher(Gtk.Window):
             self.card_box.append(self._make_card(app))
 
     def _make_card(self, app: AppInfo) -> Gtk.Widget:
-        name_label = Gtk.Label(label=app.title, wrap=True, max_width_chars=12)
+        name_label = Gtk.Label(label=self._card_title(app), wrap=True, max_width_chars=12)
         name_label.add_css_class('card-name')
         name_label.set_valign(Gtk.Align.END)
         name_label.set_vexpand(True)
