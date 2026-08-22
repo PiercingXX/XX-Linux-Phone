@@ -94,6 +94,24 @@ build_install() {
         echo "warn: piercing-dots phone profile not applied yet" >&2
 
     enable_service
+    add_input_group
+}
+
+# --- input group (20.3) -----------------------------------------------------
+# lisgd (touchscreen) and DisplayManager (power/volume keys) read evdev
+# directly; without membership in the `input` group they silently do nothing.
+# usermod -aG appends and is idempotent; we skip the call entirely when the
+# user is already a member so the "re-login" note only appears when it matters.
+add_input_group() {
+    user=$(id -un)
+    if id -nG "$user" 2>/dev/null | grep -qw input; then
+        return 0
+    fi
+    $SUDO usermod -aG input "$user" 2>/dev/null || {
+        echo "warn: could not add '$user' to the input group" >&2
+        return 1
+    }
+    echo "Added '$user' to the input group — re-login (or reboot) for it to take effect."
 }
 
 enable_service() {
