@@ -123,7 +123,7 @@ def test_tap_on_editable_keeps_keyboard(window):
     """A tap that lands on an editable widget (the drawer search entry) must
     not dismiss the OSK."""
     editable = window._TEST_GTK.Editable
-    hidden = []
+    calls = _install_dbus(window)
 
     class FakeStack:
         def pick(self, x, y, flags):
@@ -132,15 +132,17 @@ def test_tap_on_editable_keeps_keyboard(window):
 
     shell = types.SimpleNamespace(
         stack=FakeStack(),
-        _hide_keyboard=lambda: hidden.append(True),
+        # Route the dismissal through the real seam so the test proves the
+        # tap logic drives the actual D-Bus call, not a stubbed lambda.
+        _hide_keyboard=lambda: window._set_osk_visible(False),
     )
     window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
-    assert hidden == []
+    assert calls == []
 
 
 def test_tap_outside_editable_hides_keyboard(window):
     """A tap that lands on a non-editable widget hides the OSK (20.1)."""
-    hidden = []
+    calls = _install_dbus(window)
 
     class FakeStack:
         def pick(self, x, y, flags):
@@ -149,7 +151,11 @@ def test_tap_outside_editable_hides_keyboard(window):
 
     shell = types.SimpleNamespace(
         stack=FakeStack(),
-        _hide_keyboard=lambda: hidden.append(True),
+        _hide_keyboard=lambda: window._set_osk_visible(False),
     )
     window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
-    assert hidden == [True]
+    assert len(calls) == 1
+    name, path, iface, method, params = calls[0][:5]
+    assert (name, path, iface, method) == (
+        'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible')
+    assert params.value == (False,)

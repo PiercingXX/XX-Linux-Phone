@@ -55,8 +55,13 @@ def _set_osk_visible(visible: bool) -> None:
             GLib.Variant('(b)', (visible,)), None,
             Gio.DBusCallFlags.NONE, 500, None,
         )
-    except Exception:
-        pass
+    except Exception as error:
+        # A D-Bus failure (squeekboard absent, bus down) must not crash the
+        # shell, but it is a real fault on a data path — log it rather than
+        # silently dropping the show/hide request.
+        from shell_log import get_logger
+        get_logger('window').warning(
+            'set-OSK-visible(%s) over D-Bus failed: %s', visible, error)
 
 
 class ShellWindow(Adw.ApplicationWindow):
@@ -749,8 +754,13 @@ class ShellWindow(Adw.ApplicationWindow):
         """
         try:
             widget = self.stack.pick(x, y, Gtk.PickFlags.DEFAULT)
-        except Exception:
-            widget = None
+        except Exception as error:
+            # pick() failed — we cannot tell what the tap landed on, so do not
+            # guess by dismissing the OSK. Log it instead of masking the fault.
+            from shell_log import get_logger
+            get_logger('window').warning(
+                'tap-outside pick(%s, %s) failed: %s', x, y, error)
+            return
         if not isinstance(widget, Gtk.Editable):
             self._hide_keyboard()
 
