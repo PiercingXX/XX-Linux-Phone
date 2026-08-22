@@ -29,15 +29,36 @@ class TestHudApi:
         hud.set_application(app=None)
 
     def test_silent_absence_when_no_gtk(self):
-        """Without PyGObject the HUD keeps no window and every call is a no-op."""
+        """Headless: no window, every call a no-op. GTK-capable: overlay exists.
+
+        This asserts in BOTH branches so it cannot pass vacuously on a host
+        where PyGObject is available. Without GTK the HUD must keep no window
+        and every public call must no-op without raising; with GTK the overlay
+        window must actually be created (otherwise the HUD is silently dead
+        on a device that could display it).
+        """
+        hud = Hud()
         if not _HAS_GTK:
-            hud = Hud()
             assert hud._window is None
             # no-op must not raise and must not create a window
             hud.show_volume(100)
+            hud.show_brightness(17)
+            hud.set_application(app=None)
             assert hud._window is None
+        else:
+            # On a GTK-capable host the overlay must be created, not dropped.
+            assert hud._window is not None
 
     def test_api_surface(self):
-        """The call sites in T3/T4 depend on these three methods."""
+        """The call sites in T3/T4 depend on these three methods.
+
+        Beyond existing, each method must be callable on a live instance and
+        return None (fire-and-forget) without raising, so the call sites can
+        invoke them unconditionally.
+        """
         for name in ('show_volume', 'show_brightness', 'set_application'):
             assert callable(getattr(Hud, name)), f'Hud.{name} missing'
+        hud = Hud()
+        assert hud.show_volume(42) is None
+        assert hud.show_brightness(17) is None
+        assert hud.set_application(app=None) is None
