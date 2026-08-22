@@ -133,12 +133,14 @@ class NotificationShade(Gtk.Window):
     def __init__(self, dnd_state: object | None = None,
                  focus_state: object | None = None,
                  on_open_settings: object | None = None,
-                 on_power: object | None = None) -> None:
+                 on_power: object | None = None,
+                 hud: object | None = None) -> None:
         super().__init__(title='PiercingXX Shade')
         self._dnd = dnd_state
         self._focus = focus_state
         self._on_open_settings = on_open_settings
         self._on_power = on_power
+        self._hud = hud
         self._clock_timer_id: int | None = None
         self._cal_year_month: tuple[int, int] | None = None
 
@@ -165,7 +167,7 @@ class NotificationShade(Gtk.Window):
 
         self.list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list_box.add_css_class('text-list')
-        self.quick_actions = QuickActionsPanel(dnd_state=dnd_state, focus_state=focus_state)
+        self.quick_actions = QuickActionsPanel(dnd_state=dnd_state, focus_state=focus_state, hud=hud)
 
         self._revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,

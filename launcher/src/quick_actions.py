@@ -229,12 +229,17 @@ class QuickActionsPanel(Gtk.Box):
     """
 
     def __init__(self, dnd_state: object | None = None,
-                 focus_state: object | None = None) -> None:
+                 focus_state: object | None = None,
+                 hud: object | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add_css_class('qa-panel')
 
         self._dnd = dnd_state
         self._focus = focus_state
+        # Volume/brightness HUD overlay (plan T3/T4). Optional: when absent the
+        # sliders still adjust brightness/volume, just without an on-screen
+        # indicator (silent absence — see _show_brightness_hud).
+        self._hud = hud
         self._tile_buttons: dict[str, Gtk.ToggleButton] = {}
         self._tile_state: dict[str, bool] = {}
         self._state_labels: dict[str, Gtk.Label] = {}
@@ -372,7 +377,14 @@ class QuickActionsPanel(Gtk.Box):
             slider.set_hexpand(True)
             slider.set_draw_value(False)
             slider.set_value(getter())
-            slider.connect('value-changed', lambda s, fn=setter: fn(int(s.get_value())))
+            if label_text == 'Bright':
+                # Adjust brightness AND flash the current level on the HUD (T4).
+                slider.connect(
+                    'value-changed',
+                    lambda s: self._on_brightness_changed(int(s.get_value())))
+            else:
+                slider.connect(
+                    'value-changed', lambda s, fn=setter: fn(int(s.get_value())))
             row.append(lbl)
             row.append(slider)
             self.sliders_box.append(row)
@@ -381,6 +393,20 @@ class QuickActionsPanel(Gtk.Box):
                 self._bright_slider = slider
             else:
                 self._vol_slider = slider
+
+    def _on_brightness_changed(self, pct: int) -> None:
+        """Brightness slider moved: apply the level, then flash it on the HUD."""
+        _set_brightness_pct(pct)
+        self._show_brightness_hud(pct)
+
+    def _show_brightness_hud(self, pct: int) -> None:
+        """Flash the current brightness level on the HUD overlay (if one is wired).
+
+        Silent absence: without a HUD the brightness change already happened in
+        _on_brightness_changed; this is a fire-and-forget no-op, never a crash.
+        """
+        if self._hud is not None:
+            self._hud.show_brightness(pct)
 
     def _on_tile_toggled(self, btn: Gtk.ToggleButton, tile: _TileDef) -> None:
         if self._updating:

@@ -715,12 +715,17 @@ class ShellWindow(Adw.ApplicationWindow):
     def _ensure_shade(self) -> object:
         if self._shade is None:
             from notification_shade import NotificationShade
+            # The app (XXWMApplication) owns the Hud; the shade is created lazily
+            # after _show_shell sets _hud, so it is always present here. getattr
+            # keeps this safe even if the shade is ever built before the HUD.
+            hud = getattr(self.get_application(), '_hud', None)
             self._shade = NotificationShade(
                 dnd_state=self.dnd_state,
                 focus_state=self.focus_state,
                 on_open_settings=lambda: (
                     self.stack.set_visible_child_name('settings'), self.present()),
                 on_power=self._show_power_menu,
+                hud=hud,
             )
             self._shade.set_application(self.get_application())
         return self._shade
