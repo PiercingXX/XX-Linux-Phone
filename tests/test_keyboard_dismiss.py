@@ -1,0 +1,155 @@
+"""Tests for the 20.1 tap-outside OSK dismissal.
+
+The real Gtk event wiring -- a GestureClick on the shell stack that hides
+squeekboard when a tap lands on a non-editable widget -- needs a live Wayland
+session and is device-gated. The headless seam it drives is the D-Bus call
+``_set_osk_visible(visible)``, which both ``_show_keyboard()`` and
+``_hide_keyboard()`` route through. That seam is exercised here by stubbing the
+gi bindings before importing window.py, then asserting the SetVisible payload
+sent to squeekboard.
+"""
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
+
+
+@pytest.fixture(scope='module')
+def window():
+    """Import window.py once against a stable set of fake gi bindings.
+
+    window.py imports GTK at module level, so it cannot load in this headless
+    environment. We install fake gi modules into sys.modules first; window's
+    module-global Gtk/GLib/Gio then refer to these fakes for the whole module.
+    """
+    def require_version(namespace, version):
+        # window.py probes Gtk4LayerShell and treats ValueError as 'absent';
+        # the other GTK namespaces must import cleanly.
+        if namespace == 'Gtk4LayerShell':
+            raise ValueError('no layer shell')
+        return None
+
+    gi = types.ModuleType('gi')
+    gi.require_version = require_version
+    repo = types.ModuleType('gi.repository')
+    gi.repository = repo
+
+    def make(name):
+        return types.ModuleType(f'gi.repository.{name}')
+
+    adw, gdk, glib, gtk, pango, gio = (
+        make('Adw'), make('Gdk'), make('GLib'), make('Gtk'),
+        make('Pango'), make('Gio'),
+    )
+    # ShellWindow subclasses Adw.ApplicationWindow at class-definition time.
+    adw.ApplicationWindow = type('ApplicationWindow', (), {})
+    # _on_tap_outside checks `isinstance(widget, Gtk.Editable)`.
+    gtk.Editable = type('Editable', (), {})
+    gtk.PickFlags = types.SimpleNamespace(DEFAULT=0)
+
+    installed = {
+        'gi': gi, 'gi.repository': repo,
+        'gi.repository.Adw': adw, 'gi.repository.Gdk': gdk,
+        'gi.repository.GLib': glib, 'gi.repository.Gtk': gtk,
+        'gi.repository.Pango': pango, 'gi.repository.Gio': gio,
+    }
+    saved = {name: sys.modules.get(name) for name in installed}
+    sys.modules.update(installed)
+    try:
+        import window
+        window._TEST_GTK = gtk
+        window._TEST_GIO = gio
+        window._TEST_GLIB = glib
+        yield window
+    finally:
+        # Restore the previous modules so other test files are unaffected.
+        for name, mod in saved.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
+
+
+def _install_dbus(window):
+    """Give the fake Gio/GLib the attributes _set_osk_visible needs, and
+    return a recorder that captures the SetVisible payloads."""
+    gio = window._TEST_GIO
+    glib = window._TEST_GLIB
+    calls = []
+
+    class FakeBus:
+        def call_sync(self, *args):
+            calls.append(args)
+
+    gio.BusType = types.SimpleNamespace(SESSION='session')
+    gio.DBusCallFlags = types.SimpleNamespace(NONE=0)
+    gio.bus_get_sync = lambda *a, **k: FakeBus()
+
+    def variant(sig, value):
+        return types.SimpleNamespace(signature=sig, value=value)
+
+    glib.Variant = variant
+    return calls
+
+
+def test_hide_keyboard_sends_setvisible_false(window):
+    """_set_osk_visible(False) -- the seam _hide_keyboard() drives -- tells
+    squeekboard to disappear."""
+    calls = _install_dbus(window)
+    window._set_osk_visible(False)
+
+    assert len(calls) == 1
+    name, path, iface, method, params = calls[0][:5]
+    assert (name, path, iface, method) == (
+        'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible')
+    assert params.value == (False,)
+
+
+def test_show_keyboard_sends_setvisible_true(window):
+    """_set_osk_visible(True) -- the seam _show_keyboard() drives -- still
+    raises squeekboard after the 20.1 refactor."""
+    calls = _install_dbus(window)
+    window._set_osk_visible(True)
+
+    assert len(calls) == 1
+    params = calls[0][4]
+    assert params.value == (True,)
+
+
+def test_tap_on_editable_keeps_keyboard(window):
+    """A tap that lands on an editable widget (the drawer search entry) must
+    not dismiss the OSK."""
+    editable = window._TEST_GTK.Editable
+    hidden = []
+
+    class FakeStack:
+        def pick(self, x, y, flags):
+            # The search entry is an editable widget.
+            return editable()
+
+    shell = types.SimpleNamespace(
+        stack=FakeStack(),
+        _hide_keyboard=lambda: hidden.append(True),
+    )
+    window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
+    assert hidden == []
+
+
+def test_tap_outside_editable_hides_keyboard(window):
+    """A tap that lands on a non-editable widget hides the OSK (20.1)."""
+    hidden = []
+
+    class FakeStack:
+        def pick(self, x, y, flags):
+            # Home launcher / app list / settings are not editable.
+            return object()
+
+    shell = types.SimpleNamespace(
+        stack=FakeStack(),
+        _hide_keyboard=lambda: hidden.append(True),
+    )
+    window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
+    assert hidden == [True]

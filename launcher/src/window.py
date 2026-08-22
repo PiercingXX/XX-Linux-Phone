@@ -40,6 +40,25 @@ _UPDATE_NOTIF_ID = 999901
 _WEB_SEARCH_URL = 'https://duckduckgo.com/?q='
 
 
+def _set_osk_visible(visible: bool) -> None:
+    """Toggle squeekboard's visibility over D-Bus (headless seam for 20.1).
+
+    Both _show_keyboard() and _hide_keyboard() route through here. It is the
+    headless seam the tap-outside test drives: monkeypatching Gio's
+    bus_get_sync lets a test assert the SetVisible payload without a display.
+    """
+    from gi.repository import Gio
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        bus.call_sync(
+            'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible',
+            GLib.Variant('(b)', (visible,)), None,
+            Gio.DBusCallFlags.NONE, 500, None,
+        )
+    except Exception:
+        pass
+
+
 class ShellWindow(Adw.ApplicationWindow):
     def __init__(self, application: Adw.Application) -> None:
         super().__init__(application=application, title='PiercingXX')
@@ -192,6 +211,13 @@ class ShellWindow(Adw.ApplicationWindow):
         swipe.connect('swipe', self._on_stack_swipe)
         self.stack.add_controller(swipe)
         self._swipe_navigated = False
+
+        # Tap-outside → hide the OSK (20.1): a tap that lands on a non-editable
+        # widget means the user is done typing, so drop squeekboard.
+        tap = Gtk.GestureClick.new()
+        tap.set_touch_only(False)
+        tap.connect('pressed', self._on_tap_outside)
+        self.stack.add_controller(tap)
 
         root.append(self.stack)
         return root
@@ -706,16 +732,27 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _show_keyboard(self) -> None:
         """Force the on-screen keyboard up via squeekboard's D-Bus interface."""
-        from gi.repository import Gio
+        _set_osk_visible(True)
+
+    def _hide_keyboard(self) -> None:
+        """Hide squeekboard when focus leaves an editable widget (20.1)."""
+        _set_osk_visible(False)
+
+    def _on_tap_outside(self, _gesture: Gtk.GestureClick, _n_press: int,
+                        x: float, y: float) -> None:
+        """Hide squeekboard when a tap lands outside any editable widget.
+
+        The shell's only editable widget is the drawer search entry; a tap
+        anywhere else (home, the app list, settings) means the user is done
+        typing, so drop the OSK instead of leaving it floating (20.1). This
+        lives in the shell's focus handling, not per-surface hacks.
+        """
         try:
-            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            bus.call_sync(
-                'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible',
-                GLib.Variant('(b)', (True,)), None,
-                Gio.DBusCallFlags.NONE, 500, None,
-            )
+            widget = self.stack.pick(x, y, Gtk.PickFlags.DEFAULT)
         except Exception:
-            pass
+            widget = None
+        if not isinstance(widget, Gtk.Editable):
+            self._hide_keyboard()
 
     def _show_switcher(self) -> None:
         if self._switcher is None:
