@@ -141,6 +141,23 @@ def _set_volume(delta: str) -> None:
         pass
 
 
+def _get_volume_pct() -> int:
+    """Current default-sink volume as a 0-100 int. Falls back to 50 on any
+    failure so the HUD still shows a level rather than crashing on a device
+    without pactl."""
+    try:
+        out = subprocess.check_output(
+            ['pactl', 'get-sink-volume', '@DEFAULT_SINK@'],
+            text=True, timeout=2, stderr=subprocess.DEVNULL,
+        )
+        for token in out.split():
+            if token.endswith('%'):
+                return max(0, min(100, int(token.rstrip('%'))))
+    except Exception:
+        pass
+    return 50
+
+
 # ---------------------------------------------------------------------------
 # DisplayManager
 # ---------------------------------------------------------------------------
@@ -158,11 +175,15 @@ class DisplayManager:
         on_power_menu: Callable[[], None] | None = None,
         on_screenshot: Callable[[], None] | None = None,
         on_fingerprint: Callable[[], None] | None = None,
+        hud: object | None = None,
     ) -> None:
         self._on_wake        = on_wake
         self._on_power_menu  = on_power_menu
         self._on_screenshot  = on_screenshot
         self._on_fingerprint = on_fingerprint
+        # Volume/brightness HUD overlay (plan T3/T4). Optional: when absent the
+        # volume keys still adjust audio, just without an on-screen indicator.
+        self._hud = hud
 
         self._saved_brightness: int   = 200
         self._idle_src: int | None    = None
@@ -273,6 +294,7 @@ class DisplayManager:
                     self._trigger_screenshot()
                 else:
                     _set_volume('-5%')
+                    self._show_volume_hud()
                     self.reset_idle()
             elif value == 0:
                 self._voldown_held = False
@@ -282,6 +304,7 @@ class DisplayManager:
         if ev_type == EV_KEY and code == KEY_VOLUMEUP:
             if value == 1:
                 _set_volume('+5%')
+                self._show_volume_hud()
                 self.reset_idle()
             return GLib.SOURCE_REMOVE
 
@@ -324,6 +347,11 @@ class DisplayManager:
             GLib.idle_add(self._on_screenshot)
         else:
             _take_screenshot()
+
+    def _show_volume_hud(self) -> None:
+        """Flash the current volume level on the HUD overlay (if one is wired)."""
+        if self._hud is not None:
+            self._hud.show_volume(_get_volume_pct())
 
 
 # ---------------------------------------------------------------------------

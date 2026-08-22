@@ -75,13 +75,20 @@ class XXWMApplication(Adw.Application):
         # Must be started after shell window exists so on_wake can show lock screen.
         from display_manager import DisplayManager, _take_screenshot
         from power_menu import PowerMenu
+        from hud import Hud
         self._power_menu = PowerMenu()
         self._power_menu.set_application(self)
+        # Volume/brightness HUD overlay (plan T3/T4): flashes a level on the
+        # layer-shell window after a hardware key press. Silent no-op when GTK
+        # is unavailable, so wiring it in can never break a headless device.
+        self._hud = Hud()
+        self._hud.set_application(self)
         self._display_mgr = DisplayManager(
             on_wake=self._shell._show_lock_screen,
             on_power_menu=self._power_menu.show_menu,
             on_screenshot=_take_screenshot,
             on_fingerprint=self._shell.try_fingerprint_unlock,
+            hud=self._hud,
         )
         self._shell._display_mgr = self._display_mgr
 

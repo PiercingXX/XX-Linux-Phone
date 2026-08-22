@@ -69,11 +69,11 @@ install_deps() {
     echo "Installing build and runtime dependencies..."
     if [ "$PKG" = apk ]; then
         pkg_install py3-gobject3 gtk4.0 libadwaita gtk4-layer-shell \
-            meson ninja rsync git squeekboard phoc lisgd wob wl-clipboard
+            meson ninja rsync git squeekboard phoc lisgd wl-clipboard
     else
         pkg_install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
             libgtk4-layer-shell0 meson ninja-build rsync git squeekboard \
-            phoc lisgd wob wl-clipboard
+            phoc lisgd wl-clipboard
     fi
 }
 
