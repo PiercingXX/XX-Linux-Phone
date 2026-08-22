@@ -1,23 +1,64 @@
 from __future__ import annotations
 
-import gi
-import os
-import signal as _signal
-import subprocess
+import logging
+
+from toplevel_manager import ToplevelManager
+
+log = logging.getLogger(__name__)
 
 _LAYER_SHELL = False
+_GTK_AVAILABLE = True
 try:
-    gi.require_version('Gtk4LayerShell', '1.0')
-    _LAYER_SHELL = True
-except ValueError:
-    pass
+    import gi
 
-gi.require_version('Gtk', '4.0')
+    gi.require_version('Gtk', '4.0')
+    from gi.repository import Gdk, GLib, Gtk
 
-from gi.repository import Gdk, GLib, Gtk
+    try:
+        gi.require_version('Gtk4LayerShell', '1.0')
+        from gi.repository import Gtk4LayerShell as LayerShell
+        _LAYER_SHELL = True
+    except ValueError:
+        pass
+except (ImportError, ValueError) as exc:
+    # GTK/PyGObject is unavailable (ImportError) or the required version is
+    # missing (ValueError). The switcher degrades to its static card and
+    # empty-state seams so the logic stays testable headlessly; the window
+    # itself is never constructed in this mode.
+    log.info('GTK unavailable; switcher degrades to headless seams: %s', exc)
+    _GTK_AVAILABLE = False
+    # Bind the GTK module names to None so that any code path that touches them
+    # in headless mode fails fast with a clear AttributeError instead of a
+    # NameError. The static headless seams below never reference these names;
+    # the window itself is never constructed while _GTK_AVAILABLE is False.
+    Gdk = None  # type: ignore[assignment,misc]
+    GLib = None  # type: ignore[assignment,misc]
+    Gtk = None  # type: ignore[assignment,misc]
+    LayerShell = None  # type: ignore[assignment,misc]
 
-if _LAYER_SHELL:
-    from gi.repository import Gtk4LayerShell as LayerShell
+
+class _WindowBase:
+    """Base class used only when GTK is unavailable (headless seam tests).
+
+    The switcher's logic is exercised headlessly through the static seams
+    (_apps_from_manager, _card_labels, _focus_app_with_manager, ...); the
+    Gtk.Window itself is never constructed in this mode. If construction is
+    nonetheless attempted, fail loudly with an actionable message rather than
+    letting super().__init__ raise a confusing AttributeError deep inside
+    AppSwitcher.__init__.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        raise RuntimeError(
+            'AppSwitcher cannot be constructed: GTK/PyGObject is unavailable '
+            'in this environment. Use the static headless seams '
+            '(AppSwitcher._apps_from_manager, _card_labels, '
+            '_focus_app_with_manager, _kill_app_with_manager) to exercise the '
+            'switcher logic without a display.'
+        )
+
+
+_AppSwitcherBase = Gtk.Window if _GTK_AVAILABLE else _WindowBase
 
 _SWITCHER_CSS = b"""
 .switcher-root {
@@ -60,24 +101,25 @@ _SWITCHER_CSS = b"""
 """
 
 _SWIPE_DISMISS_THRESHOLD = 120  # px upward drag to dismiss a card
+_EMPTY_STATE_TEXT = 'No open apps'
 
 
 class AppInfo:
-    __slots__ = ('app_id', 'title', 'pid')
+    __slots__ = ('app_id', 'handle', 'title')
 
-    def __init__(self, app_id: str, title: str, pid: int | None = None) -> None:
+    def __init__(self, app_id: str, title: str, handle: object | None = None) -> None:
         self.app_id = app_id
         self.title = title
-        self.pid = pid
+        self.handle = handle
 
 
-class AppSwitcher(Gtk.Window):
+class AppSwitcher(_AppSwitcherBase):
     """
     Slides up from the bottom edge on long swipe-up gesture.
     Card swipe-up dismisses that app. Reveal/hide uses Gtk.Revealer (SLIDE_UP).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, manager: ToplevelManager | None = None) -> None:
         super().__init__(title='PiercingXX Switcher')
 
         if _LAYER_SHELL and LayerShell.is_supported():
@@ -92,7 +134,11 @@ class AppSwitcher(Gtk.Window):
         else:
             self.set_default_size(420, 320)
 
+        self._manager = manager if manager is not None else ToplevelManager()
         self._apps: list[AppInfo] = []
+        if self._manager.available:
+            self._wire_change(self._manager, self.refresh)
+        self.refresh()
 
         provider = Gtk.CssProvider()
         provider.load_from_data(_SWITCHER_CSS)
@@ -145,9 +191,50 @@ class AppSwitcher(Gtk.Window):
         return root
 
     def refresh(self, apps: list[AppInfo] | None = None) -> None:
-        if apps is not None:
-            self._apps = apps
+        if apps is None:
+            apps = self._apps_from_manager(self._manager)
+        self._apps = apps
         self._rebuild_cards()
+
+    @staticmethod
+    def _apps_from_manager(manager: ToplevelManager) -> list[AppInfo]:
+        """Headless seam: manager.list() -> the AppInfo records cards render from."""
+        return [
+            AppInfo(t.app_id, t.title, handle=t.handle)
+            for t in manager.list()
+        ]
+
+    @staticmethod
+    def _empty_state_label() -> str:
+        """Headless seam: the message shown when there are no open apps."""
+        return _EMPTY_STATE_TEXT
+
+    @staticmethod
+    def _card_title(app: AppInfo) -> str:
+        """Headless seam: the text-only label a card renders for an app."""
+        return app.title
+
+    @staticmethod
+    def _card_labels(apps: list[AppInfo]) -> list[str]:
+        """Headless seam: the ordered text labels the cards render from."""
+        return [AppSwitcher._card_title(a) for a in apps]
+
+    @staticmethod
+    def _wire_change(manager: ToplevelManager, callback) -> None:
+        """Headless seam: register the switcher's refresh on manager changes."""
+        manager.on_change(callback)
+
+    @staticmethod
+    def _focus_app_with_manager(manager: ToplevelManager, app: AppInfo) -> None:
+        """Headless seam: activating a card dispatches to the manager."""
+        if app.handle is not None:
+            manager.activate(app.handle)
+
+    @staticmethod
+    def _kill_app_with_manager(manager: ToplevelManager, app: AppInfo) -> None:
+        """Headless seam: killing a card dispatches to the manager."""
+        if app.handle is not None:
+            manager.close(app.handle)
 
     def _rebuild_cards(self) -> None:
         child = self.card_box.get_first_child()
@@ -157,7 +244,7 @@ class AppSwitcher(Gtk.Window):
             child = nxt
 
         if not self._apps:
-            empty = Gtk.Label(label='No open apps', xalign=0)
+            empty = Gtk.Label(label=_EMPTY_STATE_TEXT, xalign=0)
             empty.add_css_class('switcher-header')
             empty.set_margin_start(4)
             self.card_box.append(empty)
@@ -167,7 +254,7 @@ class AppSwitcher(Gtk.Window):
             self.card_box.append(self._make_card(app))
 
     def _make_card(self, app: AppInfo) -> Gtk.Widget:
-        name_label = Gtk.Label(label=app.title, wrap=True, max_width_chars=12)
+        name_label = Gtk.Label(label=self._card_title(app), wrap=True, max_width_chars=12)
         name_label.add_css_class('card-name')
         name_label.set_valign(Gtk.Align.END)
         name_label.set_vexpand(True)
@@ -212,20 +299,12 @@ class AppSwitcher(Gtk.Window):
             self._rebuild_cards()
 
     def _focus_app(self, app: AppInfo) -> None:
-        if app.pid:
-            try:
-                subprocess.Popen(['wmctrl', '-ia', str(app.app_id)], close_fds=True)
-            except FileNotFoundError:
-                pass
+        self._focus_app_with_manager(self._manager, app)
         self.hide_switcher()
 
     def _kill_app(self, app: AppInfo) -> None:
-        if app.pid:
-            try:
-                os.kill(app.pid, _signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
-        self._apps = [a for a in self._apps if a.app_id != app.app_id]
+        self._kill_app_with_manager(self._manager, app)
+        self._apps = [a for a in self._apps if a.handle != app.handle]
         self._rebuild_cards()
 
     def _on_swipe(self, _g: Gtk.GestureSwipe, vel_x: float, vel_y: float) -> None:

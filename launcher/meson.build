@@ -73,6 +73,14 @@ install_data(
   install_dir: shell_datadir,
 )
 
+# Vendored Wayland protocol XML (core + wlr foreign-toplevel-management).
+# Used by the shell's pywayland client to bind globals at runtime.
+install_data(
+  'data/wayland.xml',
+  'data/wlr-foreign-toplevel-management-unstable-v1.xml',
+  install_dir: shell_datadir,
+)
+
 install_data(
   'data/sounds/ringtone.mp3',
   'data/sounds/notify.wav',
