@@ -155,10 +155,12 @@ if _HAS_GTK:
 class Hud:
     """Volume/brightness HUD overlay. Silent no-op when GTK or the layer shell is absent."""
 
-    def __init__(self) -> None:
+    def __init__(self, app=None) -> None:
         self._window = _HudWindow() if _HAS_GTK else None
         if self._window is None:
             _log.info('HUD disabled: PyGObject unavailable')
+        if app is not None:
+            self.set_application(app)
 
     def set_application(self, app) -> None:
         if self._window is not None:
