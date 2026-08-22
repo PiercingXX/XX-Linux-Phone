@@ -5,7 +5,11 @@
 set -e
 
 echo "=== Checking Python syntax ==="
-python3 -m py_compile launcher/src/*.py || {
+PYTHON="${PYTHON:-.venv/bin/python}"
+if [ ! -x "$PYTHON" ]; then
+    PYTHON=python3
+fi
+"$PYTHON" -m py_compile launcher/src/*.py || {
     echo "Python syntax check FAILED"
     exit 1
 }
@@ -21,8 +25,8 @@ else
 fi
 
 echo "=== Running pytest ==="
-if command -v pytest >/dev/null 2>&1; then
-    python3 -m pytest tests/ -q || {
+if command -v pytest >/dev/null 2>&1 || [ -x .venv/bin/pytest ]; then
+    "$PYTHON" -m pytest tests/ -q || {
         echo "pytest FAILED"
         exit 1
     }

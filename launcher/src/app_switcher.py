@@ -27,14 +27,35 @@ except (ImportError, ValueError) as exc:
     # itself is never constructed in this mode.
     log.info('GTK unavailable; switcher degrades to headless seams: %s', exc)
     _GTK_AVAILABLE = False
+    # Bind the GTK module names to None so that any code path that touches them
+    # in headless mode fails fast with a clear AttributeError instead of a
+    # NameError. The static headless seams below never reference these names;
+    # the window itself is never constructed while _GTK_AVAILABLE is False.
     Gdk = None  # type: ignore[assignment,misc]
-    GLib = None
-    Gtk = None
-    LayerShell = None
+    GLib = None  # type: ignore[assignment,misc]
+    Gtk = None  # type: ignore[assignment,misc]
+    LayerShell = None  # type: ignore[assignment,misc]
 
 
 class _WindowBase:
-    """Base class used only when GTK is unavailable (headless seam tests)."""
+    """Base class used only when GTK is unavailable (headless seam tests).
+
+    The switcher's logic is exercised headlessly through the static seams
+    (_apps_from_manager, _card_labels, _focus_app_with_manager, ...); the
+    Gtk.Window itself is never constructed in this mode. If construction is
+    nonetheless attempted, fail loudly with an actionable message rather than
+    letting super().__init__ raise a confusing AttributeError deep inside
+    AppSwitcher.__init__.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        raise RuntimeError(
+            'AppSwitcher cannot be constructed: GTK/PyGObject is unavailable '
+            'in this environment. Use the static headless seams '
+            '(AppSwitcher._apps_from_manager, _card_labels, '
+            '_focus_app_with_manager, _kill_app_with_manager) to exercise the '
+            'switcher logic without a display.'
+        )
 
 
 _AppSwitcherBase = Gtk.Window if _GTK_AVAILABLE else _WindowBase
