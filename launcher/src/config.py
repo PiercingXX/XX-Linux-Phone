@@ -71,6 +71,7 @@ DEFAULT_CONFIG = {
     'update_snooze_until': 0.0,
     'home_slots': [],
     'search_auto_launch': False,
+    'preload_gesture_apps': False,
     'default_layout_applied': False,
     'app_labels': {},
     'muted_apps': {},
@@ -379,6 +380,16 @@ class ShellConfig:
         self.save()
 
     @property
+    def preload_gesture_apps(self) -> bool:
+        """Opt-in warm-up of swipe-bound apps at session start. Default off:
+        preloading is counter to the minimalism directive on weak hardware."""
+        return bool(self.data.get('preload_gesture_apps', DEFAULT_CONFIG['preload_gesture_apps']))
+
+    def set_preload_gesture_apps(self, enabled: bool) -> None:
+        self.data['preload_gesture_apps'] = bool(enabled)
+        self.save()
+
+    @property
     def widgets(self) -> dict[str, dict]:
         """Widget config merged over defaults; unknown keys ignored."""
         defaults = DEFAULT_CONFIG['widgets']
@@ -428,6 +439,18 @@ class ShellConfig:
         self.data['custom_background'] = color
         self.save()
         return True
+
+
+def should_preload_gesture_apps(config: 'ShellConfig', real_session: bool) -> bool:
+    """Gate for the session-start app preload (20.4).
+
+    Preloading warms swipe-bound apps into RAM so a gesture opens a resident
+    process instead of cold-starting it. It is counter to the minimalism
+    directive on weak hardware, so it only runs in a real XX-WM session
+    (never under a host shell over Phosh) AND with the opt-in
+    ``preload_gesture_apps`` config key set (default off).
+    """
+    return bool(real_session) and config.preload_gesture_apps
 
 
 def install_custom_font(config: 'ShellConfig', path: str,
