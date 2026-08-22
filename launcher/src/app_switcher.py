@@ -1,21 +1,43 @@
 from __future__ import annotations
 
-import gi
+import logging
+
 from toplevel_manager import ToplevelManager
 
+log = logging.getLogger(__name__)
+
 _LAYER_SHELL = False
+_GTK_AVAILABLE = True
 try:
-    gi.require_version('Gtk4LayerShell', '1.0')
-    _LAYER_SHELL = True
-except ValueError:
-    pass
+    import gi
 
-gi.require_version('Gtk', '4.0')
+    gi.require_version('Gtk', '4.0')
+    from gi.repository import Gdk, GLib, Gtk
 
-from gi.repository import Gdk, GLib, Gtk
+    try:
+        gi.require_version('Gtk4LayerShell', '1.0')
+        from gi.repository import Gtk4LayerShell as LayerShell
+        _LAYER_SHELL = True
+    except ValueError:
+        pass
+except (ImportError, ValueError) as exc:
+    # GTK/PyGObject is unavailable (ImportError) or the required version is
+    # missing (ValueError). The switcher degrades to its static card and
+    # empty-state seams so the logic stays testable headlessly; the window
+    # itself is never constructed in this mode.
+    log.info('GTK unavailable; switcher degrades to headless seams: %s', exc)
+    _GTK_AVAILABLE = False
+    Gdk = None  # type: ignore[assignment,misc]
+    GLib = None
+    Gtk = None
+    LayerShell = None
 
-if _LAYER_SHELL:
-    from gi.repository import Gtk4LayerShell as LayerShell
+
+class _WindowBase:
+    """Base class used only when GTK is unavailable (headless seam tests)."""
+
+
+_AppSwitcherBase = Gtk.Window if _GTK_AVAILABLE else _WindowBase
 
 _SWITCHER_CSS = b"""
 .switcher-root {
@@ -70,7 +92,7 @@ class AppInfo:
         self.handle = handle
 
 
-class AppSwitcher(Gtk.Window):
+class AppSwitcher(_AppSwitcherBase):
     """
     Slides up from the bottom edge on long swipe-up gesture.
     Card swipe-up dismisses that app. Reveal/hide uses Gtk.Revealer (SLIDE_UP).
