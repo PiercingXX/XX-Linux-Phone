@@ -23,6 +23,7 @@ def lock_screen_lines(notifications: list[tuple[str, str]], mode: str,
     return [
         ' — '.join(part for part in (app.strip(), summary.strip()) if part)
         for app, summary in notifications
+        if app.strip() or summary.strip()
     ]
 
 
