@@ -12,6 +12,10 @@ Purism Librem 5. In hand, not yet used for XX-WM testing.
 | Kernel | mainline (Purism-maintained patches) |
 | Killswitches | Hardware: WiFi/BT, modem, camera/mic |
 
+## phoc scale (20.5)
+
+Per-device phoc.ini fragment: `launcher/data/phoc/librem-5.ini` (output `DSI-1`, scale **2**). `install.sh` prompts for the device and copies the fragment over the installed `phoc.ini`.
+
 ## Why it matters here
 
 - Already runs phoc — XX-WM replaces Phosh *in place*: install launcher, point the session at our `xx-wm-session`, done. No flashing required.

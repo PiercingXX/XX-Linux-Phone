@@ -11,10 +11,14 @@ Fairphone 5 (`fairphone-fp5`) on postmarketOS. Primary bring-up target (todo.md 
 | GPU | Adreno 642L (Freedreno open-source driver, DRM/KMS via mainline) |
 | RAM | 8 GB LPDDR5 |
 | Storage | 256 GB UFS 3.1 |
-| Display | 6.46" OLED, 2340×1080, 90 Hz, 401 PPI → scale ~2.5 |
+| Display | 6.46\" OLED, 2340×1080, 90 Hz, 401 PPI → scale ~2.5 |
 | Fingerprint | Side-mounted (embedded in power button) — not yet working on pmos |
 | Battery | 4200 mAh, 30W charging |
 | USB-C | USB 3.1 Gen 1 |
+
+## phoc scale (20.5)
+
+Per-device phoc.ini fragment: `launcher/data/phoc/fairphone-5.ini` (output `DSI-1`, scale **2.5**). `install.sh` prompts for the device and copies the fragment over the installed `phoc.ini`; the tablet's `DSI-1` collision (scale 1.5) is resolved by this selection.
 
 ## OS: postmarketOS
 

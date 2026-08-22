@@ -73,6 +73,17 @@ install_data(
   install_dir: shell_datadir,
 )
 
+# Per-device phoc.ini scale fragments (20.5). install.sh picks one and copies
+# it over phoc.ini at install time; shipping them lets the fragments travel
+# with the package even when the repo is not present on the device.
+install_data(
+  'data/phoc/fairphone-5.ini',
+  'data/phoc/furiphone-flx1.ini',
+  'data/phoc/librem-5.ini',
+  'data/phoc/tablet.ini',
+  install_dir: join_paths(shell_datadir, 'phoc'),
+)
+
 # Vendored Wayland protocol XML (core + wlr foreign-toplevel-management).
 # Used by the shell's pywayland client to bind globals at runtime.
 install_data(

@@ -11,6 +11,10 @@ FuriLabs FLX1. In hand, not yet used for XX-WM testing.
 | Telephony | **Working VoLTE + WiFi calling** — the standout vs the other two |
 | Extras | IP68, NFC, fingerprint, headphone jack; Android app layer via their "vd" container |
 
+## phoc scale (20.5)
+
+Per-device phoc.ini fragment: `launcher/data/phoc/furiphone-flx1.ini` (output `HWCOMPOSER-1`, scale **3**). `install.sh` prompts for the device and copies the fragment over the installed `phoc.ini`.
+
 ## Why it matters here
 
 - The only test phone with daily-driver telephony (VoLTE). This is the device that proves the call UI / dialer / SMS surfaces against a real, complete modem stack.
