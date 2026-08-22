@@ -51,6 +51,7 @@ migration steps are ever required.
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `search_auto_launch` | bool | `false` | Launch immediately when a search narrows to one result (never for `!` queries). |
+| `preload_gesture_apps` | bool | `false` | Warm swipe-bound apps into RAM at session start so gestures open a resident process instead of cold-starting (the camera through the Android HAL can be slow). Opt-in — preloading is counter to the minimalism directive; only takes effect in a real session (`XX_WM_SESSION`). |
 
 ### Sounds & notifications
 

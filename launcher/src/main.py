@@ -62,9 +62,13 @@ class XXWMApplication(Adw.Application):
         _log.info('shell window presented')
 
         # Warm swipe-bound apps in the real session only — under a host
-        # shell (dev runs over Phosh) the preloads would grab the screen
+        # shell (dev runs over Phosh) the preloads would grab the screen.
+        # Also opt-in via config (default off): preloading is counter to the
+        # minimalism directive on weak hardware.
         import os
-        if os.environ.get('XX_WM_SESSION'):
+        from config import should_preload_gesture_apps
+        if should_preload_gesture_apps(
+                self._shell.config, bool(os.environ.get('XX_WM_SESSION'))):
             GLib.timeout_add_seconds(8, self._preload_gesture_apps)
 
         # Display power management: power button + fingerprint wake the screen.

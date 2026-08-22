@@ -93,7 +93,48 @@ build_install() {
     sh "$REPO_DIR/scripts/bootstrap-dots.sh" || \
         echo "warn: piercing-dots phone profile not applied yet" >&2
 
+    select_phoc_scale
     enable_service
+    add_input_group
+}
+
+# --- per-device phoc.ini scale (20.5) --------------------------------------
+# The tablet's panel reports as DSI-1 (wanting scale 1.5) and collides with
+# the FP5's DSI-1 (scale 2.5), so a single phoc.ini cannot serve both. Prompt
+# for the device and copy its fragment over the meson-installed default.
+# Cancelling the prompt keeps the default (FP5+FLX1) file.
+select_phoc_scale() {
+    dev=$(whiptail --backtitle "GitHub.com/PiercingXX" --title "Device" \
+        --menu "Which device is this? (sets phoc.ini scale)" 0 0 0 \
+        "fairphone-5"    "FP5 — DSI-1, scale 2.5" \
+        "furiphone-flx1" "FLX1 — HWCOMPOSER-1, scale 3" \
+        "librem-5"       "Librem 5 — DSI-1, scale 2" \
+        "tablet"         "x86 tablet — DSI-1, scale 1.5" \
+        3>&1 1>&2 2>&3) || return 0
+    frag="$REPO_DIR/launcher/data/phoc/$dev.ini"
+    if [ ! -f "$frag" ]; then
+        echo "warn: no phoc.ini fragment for '$dev' — keeping default" >&2
+        return 0
+    fi
+    $SUDO cp "$frag" /usr/share/xx-wm/phoc.ini || \
+        echo "warn: could not install phoc.ini fragment for '$dev'" >&2
+}
+
+# --- input group (20.3) -----------------------------------------------------
+# lisgd (touchscreen) and DisplayManager (power/volume keys) read evdev
+# directly; without membership in the `input` group they silently do nothing.
+# usermod -aG appends and is idempotent; we skip the call entirely when the
+# user is already a member so the "re-login" note only appears when it matters.
+add_input_group() {
+    user=$(id -un)
+    if id -nG "$user" 2>/dev/null | grep -qw input; then
+        return 0
+    fi
+    $SUDO usermod -aG input "$user" 2>/dev/null || {
+        echo "warn: could not add '$user' to the input group" >&2
+        return 1
+    }
+    echo "Added '$user' to the input group — re-login (or reboot) for it to take effect."
 }
 
 enable_service() {
