@@ -16,11 +16,20 @@ from __future__ import annotations
 import shutil
 from typing import Callable
 
-import gi
 
-gi.require_version('Gio', '2.0')
+def _gio() -> object:
+    """Import Gio lazily so the module is importable for pure-logic tests.
 
-from gi.repository import Gio
+    Gio (PyGObject) is only needed by the real resolver lookups below; the
+    seeding logic itself is injected-fake testable without it.
+    """
+    import gi
+
+    gi.require_version('Gio', '2.0')
+
+    from gi.repository import Gio
+
+    return Gio
 
 # Shell-redundant or noise apps hidden on first boot. Hidden apps stay
 # searchable in the drawer; this only removes them from the browse list.
@@ -76,6 +85,7 @@ _PHOTOS_CANDIDATES = [
 
 def _find_desktop_app(app_id: str) -> str | None:
     """Resolve a desktop id, tolerating a missing .desktop suffix."""
+    Gio = _gio()
     for candidate in (app_id, f'{app_id}.desktop'):
         try:
             if Gio.DesktopAppInfo.new(candidate) is not None:
@@ -93,6 +103,7 @@ def _find_cmd(cmd: list[str]) -> bool:
 
 def _find_browser() -> tuple[str, str] | None:
     """Default HTTP handler -> (desktop id, display name)."""
+    Gio = _gio()
     try:
         info = Gio.AppInfo.get_default_for_type('x-scheme-handler/http', True)
         if info:
@@ -107,6 +118,7 @@ def _find_by_name(name: str) -> str | None:
 
     Skippy installs as a PWA so its desktop id varies; the label is stable.
     """
+    Gio = _gio()
     wanted = name.strip().casefold()
     try:
         for info in Gio.AppInfo.get_all():
