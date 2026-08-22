@@ -23,7 +23,7 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" nam
 ## What's not done yet (device-gated)
 
 - Device bring-up: flashing, evdev paths, IIO sensor path, wlopm output name (`../devices/*/notes.md`)
-- lisgd/wob/squeekboard runtime verification, gesture threshold calibration, telephony testing
+- lisgd/squeekboard runtime verification, gesture threshold calibration, telephony testing
 - Waydroid init + microG + Android app installs (`../todo.md` Workstream 17.6/17.7)
 - App switcher live window list — phoc *does* implement `wlr-foreign-toplevel-management-unstable-v1` (verified on phoc 0.56 / wlroots 0.20); implementation in progress via `python-pywayland` (list/activate/close) plus `grim` snapshot caching for Android-style recents
 - Performance baseline — needs device testing (Librem 5 is the canary)
