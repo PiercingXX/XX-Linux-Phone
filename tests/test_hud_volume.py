@@ -56,12 +56,24 @@ class _FakeHud:
 
 @pytest.fixture
 def dm(monkeypatch):
-    """A DisplayManager with no input devices (no threads), no real pactl, and
-    a deterministic volume level."""
+    """A factory for DisplayManager with no input devices (no threads), no real
+    pactl, and a deterministic volume level.
+
+    _set_volume is stubbed to record its deltas rather than spawn pactl, so the
+    tests can assert that a volume key actually triggers an adjustment — not
+    just that the HUD was flashed. Returns a callable that builds a manager and
+    yields (mgr, volume_deltas)."""
     monkeypatch.setattr(display_manager, '_all_event_devices', lambda: [])
-    monkeypatch.setattr(display_manager, '_set_volume', lambda *a: None)
+    volume_deltas: list[str] = []
+    monkeypatch.setattr(
+        display_manager, '_set_volume', lambda delta: volume_deltas.append(delta)
+    )
     monkeypatch.setattr(display_manager, '_get_volume_pct', lambda: 37)
-    return display_manager.DisplayManager
+
+    def _build(**kwargs):
+        return display_manager.DisplayManager(**kwargs), volume_deltas
+
+    return _build
 
 
 def _vol_event(code: int, value: int = 1):
@@ -71,37 +83,43 @@ def _vol_event(code: int, value: int = 1):
 class TestVolumeKeyWiresHud:
     def test_constructor_accepts_hud(self, dm):
         """The real call site passes hud=; the constructor must take it."""
-        mgr = dm(hud=_FakeHud())
+        mgr, _deltas = dm(hud=_FakeHud())
         assert mgr._hud is not None
 
     def test_volume_up_flashes_hud(self, dm):
         hud = _FakeHud()
-        mgr = dm(hud=hud)
+        mgr, deltas = dm(hud=hud)
         mgr._on_event(*_vol_event(display_manager.KEY_VOLUMEUP))
+        assert deltas == ['+5%']
         assert hud.volume_calls == [37]
 
     def test_volume_down_flashes_hud(self, dm):
         hud = _FakeHud()
-        mgr = dm(hud=hud)
+        mgr, deltas = dm(hud=hud)
         mgr._on_event(*_vol_event(display_manager.KEY_VOLUMEDOWN))
+        assert deltas == ['-5%']
         assert hud.volume_calls == [37]
 
     def test_volume_up_and_down_both_flash(self, dm):
         hud = _FakeHud()
-        mgr = dm(hud=hud)
+        mgr, deltas = dm(hud=hud)
         mgr._on_event(*_vol_event(display_manager.KEY_VOLUMEUP))
         mgr._on_event(*_vol_event(display_manager.KEY_VOLUMEDOWN))
+        assert deltas == ['+5%', '-5%']
         assert hud.volume_calls == [37, 37]
 
     def test_no_hud_still_adjusts_volume_without_crashing(self, dm):
-        """Silent absence: without a HUD the volume key must not raise."""
-        mgr = dm(hud=None)
+        """Silent absence: without a HUD the volume key must still adjust the
+        sink volume and must not raise."""
+        mgr, deltas = dm(hud=None)
         mgr._on_event(*_vol_event(display_manager.KEY_VOLUMEUP))
         mgr._on_event(*_vol_event(display_manager.KEY_VOLUMEDOWN))
+        assert deltas == ['+5%', '-5%']
 
     def test_key_up_does_not_flash(self, dm):
         """Only the key-down edge flashes the HUD, not the release."""
         hud = _FakeHud()
-        mgr = dm(hud=hud)
+        mgr, deltas = dm(hud=hud)
         mgr._on_event(*_vol_event(display_manager.KEY_VOLUMEUP, value=0))
+        assert deltas == []
         assert hud.volume_calls == []
