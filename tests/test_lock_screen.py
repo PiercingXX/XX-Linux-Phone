@@ -7,6 +7,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
 gi = pytest.importorskip('gi')
+if not hasattr(gi, 'require_version'):
+    pytest.skip('PyGObject GTK bindings not available', allow_module_level=True)
 gi.require_version('Gtk', '4.0')
 
 from lock_screen import lock_screen_lines

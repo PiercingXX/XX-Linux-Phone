@@ -137,17 +137,25 @@ class TestBrightnessSliderWiresHud:
         assert applied == [42]
 
     def test_show_brightness_hud_noop_when_absent(self):
-        """_show_brightness_hud is a fire-and-forget no-op with no HUD wired."""
+        """_show_brightness_hud is a fire-and-forget no-op with no HUD wired:
+        it must not raise and must return None (never a value or a crash)."""
         panel = _bare_panel(hud=None)
-        panel._show_brightness_hud(75)  # must not raise
+        assert panel._show_brightness_hud(75) is None  # silent absence, no-op
 
     def test_slider_handler_routes_through_on_brightness_changed(self):
         """The brightness slider's value-changed handler must call
-        _on_brightness_changed (not just the bare setter), so the HUD is flashed.
-        We assert the handler wiring by checking the method exists and the
-        _build_sliders source routes Bright through it."""
-        assert callable(quick_actions.QuickActionsPanel._on_brightness_changed)
-        assert callable(quick_actions.QuickActionsPanel._show_brightness_hud)
+        _on_brightness_changed (not the bare setter), so the HUD is flashed.
+        The handler is wired in _build_sliders, which builds real GTK widgets
+        (not runnable headlessly), so we assert the source routes the Bright
+        slider's value-changed through self._on_brightness_changed."""
+        import inspect
+        src = inspect.getsource(quick_actions.QuickActionsPanel._build_sliders)
+        assert '_on_brightness_changed' in src
+        assert "'value-changed'" in src
+        # The Bright slider must route through the HUD-flashing handler, not the
+        # bare setter path used by the Volume slider.
+        bright_branch = src.split("if label_text == 'Bright':")[1].split('else:')[0]
+        assert '_on_brightness_changed' in bright_branch
 
 
 class TestWiringChainReachesPanel:
@@ -155,6 +163,11 @@ class TestWiringChainReachesPanel:
         """NotificationShade must forward hud= into QuickActionsPanel so the
         running app's HUD reaches the brightness slider."""
         import inspect
+        # Other test modules (e.g. test_hud_volume) replace sys.modules['gi']
+        # with a stub lacking require_version before tests run, so re-install
+        # the full fake here to make importing notification_shade's module-level
+        # GTK code resolve in this test regardless of collection order.
+        _install_fake_gi()
         from notification_shade import NotificationShade
         params = inspect.signature(NotificationShade.__init__).parameters
         assert 'hud' in params
