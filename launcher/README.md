@@ -10,6 +10,8 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" nam
 - **Notification shade** (`notification_shade.py`) — TOP layer, date/time header with inline month calendar (`calendar_grid.py`), Settings entry, in-process daemon (`notif_daemon.py`), tap-to-launch, swipe-to-dismiss, clear all, quick actions embedded.
 - **DnD & Focus** (`dnd.py`, `focus_mode.py`) — Pixel-model Do Not Disturb (schedules, starred contacts, repeat callers) and Focus Mode (paused apps, held notifications, take-a-break), wired through tiles, calls, and the notification path.
 - **Quick actions** (`quick_actions.py`) — WiFi, BT, mobile data, airplane, torch, DnD, Focus; brightness/volume sliders; hardware-gated tiles hide themselves.
+- **App switcher** (`app_switcher.py`, `toplevel_manager.py`) — live window list over `wlr-foreign-toplevel-management-unstable-v1`: `python-pywayland` on a GLib fd-watch (never blocks the GTK loop), protocol XMLs vendored under `data/`. Cards are app name + title text only; tap → activate, ✕ or swipe-up dismiss → close; own surfaces filtered out; graceful empty state when the compositor doesn't offer the protocol.
+- **Volume/brightness HUD** (`hud.py`) — in-shell overlay on the layer-shell OVERLAY layer: flashes the new volume/brightness level on hardware key presses, auto-hides after ~1 s. No external process involved, and it silently no-ops where GTK or the layer shell can't init.
 - **Sounds** (`sound.py`, `data/sounds/`) — ringtone loop + notification sound via paplay/pw-play, gated by config, DnD, mutes.
 - **Weather** (`weather.py`) — Open-Meteo current conditions, 15-min cache, silent offline fallback.
 - **System settings** (`system_settings.py`) — WiFi scan/connect (nmcli), Bluetooth scan/pair (BlueZ D-Bus), sound output picker (pactl), battery (UPower); the settings page is system-only — every shell preference lives in `~/.config/xx-wm/` (`../docs/config.md`).
@@ -19,13 +21,14 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" nam
 - **IPC server** (`ipc.py`) — Unix socket at `$XDG_RUNTIME_DIR/xx-wm.sock` (`lock`, `shade.*`, `switcher.*`, `gesture.*`, `welcome`).
 - **Modem monitor** (`modem_monitor.py`) — ModemManager DBus watcher for call events.
 - **Back arrow overlay** (`back_gesture.py`) — visual feedback only; gesture detection is lisgd's job, delivered via `gesture.*` IPC commands.
+- **Theming** — every surface derives its CSS from the active theme preset (`theme_css(preset)`); intentional semantic colors (danger red, warning orange, destructive tint) live as named constants in `config.py`.
+- **GDM Colemak OSK** (`data/gnome-osk/us.json`) — Colemak layout in GNOME Shell's osk-layouts JSON schema (derived from the squeekboard YAMLs, which remain the source of truth), installed to `datadir/xx-wm/gnome-osk/` with an install.sh step guarded to GDM hosts (stock `us.json` backed up before overwrite).
 
 ## What's not done yet (device-gated)
 
 - Device bring-up: flashing, evdev paths, IIO sensor path, wlopm output name (`../devices/*/notes.md`)
 - lisgd/squeekboard runtime verification, gesture threshold calibration, telephony testing
 - Waydroid init + microG + Android app installs (`../todo.md` Workstream 17.6/17.7)
-- App switcher live window list — phoc *does* implement `wlr-foreign-toplevel-management-unstable-v1` (verified on phoc 0.56 / wlroots 0.20); implementation in progress via `python-pywayland` (list/activate/close) plus `grim` snapshot caching for Android-style recents
 - Performance baseline — needs device testing (Librem 5 is the canary)
 
 ## Local build (dev machine)
@@ -84,7 +87,7 @@ ps -p 1                            # systemd or OpenRC?
 - Session launcher: `libexec/xx-wm-session` (phoc wrapper, sets GTK_THEME from config); the in-session `bin/xx-wm` starts squeekboard before the shell
 - systemd user service: `share/systemd/user/xx-wm.service` (`Restart=on-failure`); OpenRC: `data/openrc/xx-wm` → `/etc/init.d/` (postmarketOS default images)
 - Keyboard layouts: `data/squeekboard/` (PiercingXX Colemak, incl. terminal/email/url variants) → `datadir/xx-wm/squeekboard`, symlinked by install.sh to `~/.local/share/squeekboard/keyboards/`
-- phoc.ini: display scale per device (`devices/*/notes.md`); currently set for the FP5 (2.5)
+- phoc.ini: default `data/phoc.ini` plus per-device fragments under `data/phoc/` (`fairphone-5`, `furiphone-flx1`, `librem-5`, `tablet`) selected by install.sh; scale notes per device in `devices/*/notes.md`
 
 ## Fonts
 
