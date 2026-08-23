@@ -84,7 +84,7 @@ migration steps are ever required.
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `auto_lock_timeout` | int | `120` | Idle seconds before the lock screen; `0` disables. |
-| `pin_hash` | string | — | SHA-256 of the PIN (minimum 4 digits). Never exported in backups. |
+| `pin_hash` | string | — | SHA-256 of the PIN (minimum 6 digits). Never exported in backups. |
 | `apn` / `apn_user` / `apn_pass` | string | — | Mobile-data APN pushed to NetworkManager (Settings page owns these). |
 | `update_script` | string | PiercingXX menu path | Script run by "Update system". |
 | `update_last_check` / `update_snooze_until` | float | `0.0` | Daily update-check bookkeeping. |

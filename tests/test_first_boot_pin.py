@@ -1,0 +1,92 @@
+"""Wizard PIN minimum: 6 digits enforced at both gates — the typing-hint
+clear threshold (_pin_add) and the Next-button validation (_on_pin_next).
+Headless: the methods run against a namespace self + widget fakes, so no
+GObject is ever constructed (PyGObject forbids object.__new__ on widgets)."""
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
+
+
+class _FakeLabel:
+    def __init__(self):
+        self.text = ''
+        self.css: list[str] = []
+
+    def set_text(self, text):
+        self.text = text
+
+    def add_css_class(self, name):
+        if name not in self.css:
+            self.css.append(name)
+
+    def remove_css_class(self, name):
+        if name in self.css:
+            self.css.remove(name)
+
+
+class _FakeStack:
+    def __init__(self):
+        self.visible_child_name = None
+
+    def set_visible_child_name(self, name):
+        self.visible_child_name = name
+
+
+def _first_boot():
+    # Imported lazily: sibling test modules stub sys.modules['gi'] during
+    # collection; conftest restores the real bindings before tests run.
+    import first_boot
+    return first_boot
+
+
+def _wizard():
+    return types.SimpleNamespace(
+        _pin_buf='',
+        _pin_entered='',
+        _pin_dots=_FakeLabel(),
+        _pin_hint=_FakeLabel(),
+        _confirm_buf='',
+        _confirm_dots=_FakeLabel(),
+        _pin_error=_FakeLabel(),
+        _stack=_FakeStack(),
+    )
+
+
+class TestPinNextValidation:
+    @pytest.mark.parametrize('short_pin', ['1234', '12345'])
+    def test_rejects_fewer_than_six_digits(self, short_pin):
+        wizard = _wizard()
+        wizard._pin_buf = short_pin
+        _first_boot().FirstBootWizard._on_pin_next(wizard, None)
+        assert wizard._pin_hint.text == 'PIN must be at least 6 digits'
+        assert 'error' in wizard._pin_dots.css
+        assert wizard._stack.visible_child_name is None
+        assert wizard._pin_entered == ''
+
+    def test_accepts_exactly_six_digits(self):
+        wizard = _wizard()
+        wizard._pin_buf = '123456'
+        _first_boot().FirstBootWizard._on_pin_next(wizard, None)
+        assert wizard._stack.visible_child_name == 'pin_confirm'
+        assert wizard._pin_entered == '123456'
+        assert 'error' not in wizard._pin_dots.css
+
+
+class TestTypingHintThreshold:
+    def test_hint_persists_below_six_digits(self):
+        wizard = _wizard()
+        wizard._pin_hint.set_text('PIN must be at least 6 digits')
+        for digit in '12345':
+            _first_boot().FirstBootWizard._pin_add(wizard, digit)
+        assert wizard._pin_hint.text != ''
+
+    def test_hint_clears_on_sixth_digit(self):
+        wizard = _wizard()
+        wizard._pin_hint.set_text('PIN must be at least 6 digits')
+        for digit in '123456':
+            _first_boot().FirstBootWizard._pin_add(wizard, digit)
+        assert wizard._pin_hint.text == ''

@@ -292,7 +292,7 @@ class FirstBootWizard(Gtk.Window):
         skip_btn.connect('clicked', lambda _b: self._stack.set_visible_child_name('theme'))
 
         page.append(self._title_block(
-            'Set a PIN', 'At least 4 digits. Used to unlock your device.'))
+            'Set a PIN', 'At least 6 digits. Used to unlock your device.'))
         page.append(self._centered(self._pin_dots, self._pin_hint, keypad))
         page.append(next_btn)
         page.append(skip_btn)
@@ -368,7 +368,7 @@ class FirstBootWizard(Gtk.Window):
     def _pin_add(self, digit: str) -> None:
         self._pin_buf += digit
         self._pin_dots.set_text('●' * len(self._pin_buf))
-        if len(self._pin_buf) >= 4:
+        if len(self._pin_buf) >= 6:
             self._pin_hint.set_text('')
 
     def _pin_del(self) -> None:
@@ -579,9 +579,9 @@ class FirstBootWizard(Gtk.Window):
         self._theme_provider.load_from_data(theme_css(preset).encode('utf-8'))
 
     def _on_pin_next(self, _btn: Gtk.Widget) -> None:
-        if len(self._pin_buf) < 4:
+        if len(self._pin_buf) < 6:
             self._pin_dots.add_css_class('error')
-            self._pin_hint.set_text('PIN must be at least 4 digits')
+            self._pin_hint.set_text('PIN must be at least 6 digits')
             return
         self._pin_dots.remove_css_class('error')
         self._pin_entered = self._pin_buf
