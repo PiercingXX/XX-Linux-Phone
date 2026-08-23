@@ -125,6 +125,15 @@ install_data(
   install_dir: join_paths(shell_datadir, 'squeekboard', 'url'),
 )
 
+# PiercingXX Colemak layout adapted to GNOME Shell's OSK JSON format (24).
+# GDM's greeter OSK picks layouts from /usr/share/gnome-shell/osk-layouts/
+# by name; install.sh offers a guarded step to overwrite us.json there
+# (with backup). Shipping it lets that step work without the repo present.
+install_data(
+  'data/gnome-osk/us.json',
+  install_dir: join_paths(shell_datadir, 'gnome-osk'),
+)
+
 # Shell Python launcher (runs main.py) → $prefix/bin/xx-wm
 launcher_conf = configuration_data()
 launcher_conf.set('python', python.full_path())

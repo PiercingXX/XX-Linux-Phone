@@ -150,6 +150,60 @@ enable_service() {
     fi
 }
 
+# --- GDM Colemak OSK (24) ---------------------------------------------------
+# The GDM greeter runs GNOME Shell's own on-screen keyboard, which reads JSON
+# layouts from /usr/share/gnome-shell/osk-layouts/ — squeekboard layouts do
+# not apply there, so the login screen types QWERTY unless the stock US
+# layout is overwritten. Only offered when GDM is actually wired up as the
+# display manager — enabled, or at least shipped and selected by the distro
+# config; a bare binary with nothing pointing at it makes the entry inert.
+# pmOS/FuriOS phones don't run GDM anyway. Backs up the original once;
+# restoring is a plain cp.
+gdm_detected() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        # No systemd (postmarketOS/OpenRC): keep the old binary-only probe.
+        command -v gdm >/dev/null 2>&1 || command -v gdm3 >/dev/null 2>&1
+        return
+    fi
+    if ! command -v gdm >/dev/null 2>&1 && ! command -v gdm3 >/dev/null 2>&1; then
+        return 1
+    fi
+    if systemctl -q is-enabled gdm 2>/dev/null || systemctl -q is-enabled gdm3 2>/dev/null; then
+        return 0
+    fi
+    if systemctl cat gdm >/dev/null 2>&1 || systemctl cat gdm3 >/dev/null 2>&1; then
+        return 0
+    fi
+    grep -q gdm /etc/X11/default-display-manager 2>/dev/null && return 0
+    readlink /etc/systemd/system/display-manager.service 2>/dev/null | grep -q gdm
+}
+
+install_gdm_osk() {
+    src=/usr/share/xx-wm/gnome-osk/us.json
+    dst=/usr/share/gnome-shell/osk-layouts/us.json
+    bak="$dst.xx-wm-backup"
+    if [ ! -f "$src" ]; then
+        echo "warn: $src missing — run Install or Update first" >&2
+        return 1
+    fi
+    if ! whiptail --backtitle "GitHub.com/PiercingXX" \
+        --title "GDM Colemak keyboard" --yesno \
+        "This OVERWRITES the stock GNOME Shell US on-screen keyboard with the Colemak layout.\n\nThe original is backed up once to:\n  $bak\n\nRestore QWERTY later with:\n  sudo cp $bak $dst\n\nContinue?" 0 0; then
+        return 0
+    fi
+    if [ ! -f "$bak" ]; then
+        $SUDO cp "$dst" "$bak" || {
+            echo "warn: could not back up $dst" >&2
+            return 1
+        }
+    fi
+    $SUDO cp "$src" "$dst" || {
+        echo "warn: could not install the Colemak GDM OSK layout" >&2
+        return 1
+    }
+    msg_box "GDM now types Colemak on the login screen.\nRestore QWERTY with:\n  sudo cp $bak $dst"
+}
+
 do_install() {
     install_deps
     if build_install; then
@@ -170,13 +224,19 @@ do_update() {
 }
 
 menu() {
-    whiptail --backtitle "GitHub.com/PiercingXX" --title "XX-WM" \
-        --menu "Run options in order:" 0 0 0 \
+    set -- \
         "Install"             "Install XX-WM (deps, build, service)" \
         "Update"              "Pull latest and reinstall" \
-        "Install phone apps"  "Browser, calculator, Tailscale, Skippy, Waydroid..." \
+        "Install phone apps"  "Browser, calculator, Tailscale, Skippy, Waydroid..."
+    if gdm_detected; then
+        set -- "$@" \
+            "GDM Colemak OSK"    "Colemak on the GDM login screen (overwrites stock US)"
+    fi
+    set -- "$@" \
         "Reboot"              "Reboot the system" \
-        "Exit"                "Exit the installer" 3>&1 1>&2 2>&3
+        "Exit"                "Exit the installer"
+    whiptail --backtitle "GitHub.com/PiercingXX" --title "XX-WM" \
+        --menu "Run options in order:" 0 0 0 "$@" 3>&1 1>&2 2>&3
 }
 
 while true; do
@@ -186,6 +246,7 @@ while true; do
         "Install")            do_install ;;
         "Update")             do_update ;;
         "Install phone apps") sh "$REPO_DIR/scripts/apps.sh" "$PKG" "$SUDO" || true ;;
+        "GDM Colemak OSK")    install_gdm_osk ;;
         "Reboot")             $SUDO reboot ;;
         "Exit")               exit 0 ;;
         *)                    exit 0 ;;
