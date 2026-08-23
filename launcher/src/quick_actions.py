@@ -99,6 +99,40 @@ def _nm_set(prop: str, value: bool) -> None:
         pass
 
 
+_NM_DEV_WIFI = 2  # NetworkManager DeviceType
+
+
+def _nm_has_wifi_device() -> bool:
+    """False also covers NM being down, so the Hotspot tile hides entirely."""
+    bus = _dbus_system()
+    if not bus:
+        return False
+    try:
+        devices = bus.call_sync(
+            'org.freedesktop.NetworkManager',
+            '/org/freedesktop/NetworkManager',
+            'org.freedesktop.DBus.Properties', 'Get',
+            GLib.Variant('(ss)', ('org.freedesktop.NetworkManager', 'Devices')),
+            GLib.VariantType('(v)'),
+            Gio.DBusCallFlags.NONE, 800, None,
+        ).unpack()[0]
+        for dev_path in devices:
+            dtype = bus.call_sync(
+                'org.freedesktop.NetworkManager', dev_path,
+                'org.freedesktop.DBus.Properties', 'Get',
+                GLib.Variant('(ss)',
+                             ('org.freedesktop.NetworkManager.Device',
+                              'DeviceType')),
+                GLib.VariantType('(v)'),
+                Gio.DBusCallFlags.NONE, 800, None,
+            ).unpack()[0]
+            if int(dtype) == _NM_DEV_WIFI:
+                return True
+    except GLib.Error:
+        return False
+    return False
+
+
 def _bluez_get() -> bool | None:
     bus = _dbus_system()
     if not bus:
@@ -146,6 +180,152 @@ def _toggle_torch(enabled: bool) -> None:
             bright.write_text(str(max_val if enabled else 0))
         except OSError:
             pass
+
+
+_HOTSPOT_CONN = 'Hotspot'  # the name NM auto-creates for `device wifi hotspot`
+
+
+def _toggle_hotspot(enabled: bool) -> None:
+    cmd = (['nmcli', 'device', 'wifi', 'hotspot'] if enabled else
+           ['nmcli', 'connection', 'down', _HOTSPOT_CONN])
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, close_fds=True)
+    except OSError:
+        pass
+
+
+def _get_hotspot_state() -> bool | None:
+    try:
+        out = subprocess.check_output(
+            ['nmcli', '-t', '-f', 'NAME', 'connection', 'show', '--active'],
+            text=True, timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _HOTSPOT_CONN in {line.strip() for line in out.splitlines()}
+
+
+# --- Location (GeoClue2 authorization agent) ---
+
+# GeoClue2 has no enable/disable control on its Manager; access is granted
+# per-app through a registered authorization agent (the same lever GNOME Shell
+# and phosh pull). We export org.freedesktop.GeoClue2.Agent and hand out
+# accuracy only while enabled; MaxAccuracyLevel=0 also revokes live clients.
+_GEOCLUE_NAME = 'org.freedesktop.GeoClue2'
+_GEOCLUE_MGR_PATH = '/org/freedesktop/GeoClue2/Manager'
+_AGENT_IFACE = 'org.freedesktop.GeoClue2.Agent'
+_AGENT_PATH = '/org/xxwm/GeoClueAgent'
+_AGENT_XML = (
+    '<node>'
+    f'<interface name="{_AGENT_IFACE}">'
+    '<method name="AuthorizeApp">'
+    '<arg type="s" direction="in" name="app_id"/>'
+    '<arg type="u" direction="in" name="req_accuracy"/>'
+    '<arg type="u" direction="out" name="allowed_accuracy"/>'
+    '</method>'
+    '<property name="MaxAccuracyLevel" type="u" access="read"/>'
+    '</interface>'
+    '</node>'
+)
+
+# GClueAccuracyLevel: NONE=0 … EXACT=8
+_ACC_EXACT = 8
+
+
+class LocationState:
+    """GeoClue2 toggle without root. Registering as the agent is gated on
+    success: geoclue rejects unwhitelisted agents, and then this tile stays
+    hidden exactly like Torch without an LED."""
+
+    def __init__(self) -> None:
+        self.enabled = False
+        self._obj_id: int | None = None
+
+    def available(self) -> bool:
+        bus = _dbus_system()
+        if bus is None:
+            return False
+        try:
+            bus.call_sync(
+                _GEOCLUE_NAME, _GEOCLUE_MGR_PATH,
+                'org.freedesktop.DBus.Properties', 'Get',
+                GLib.Variant('(ss)', (_GEOCLUE_NAME + '.Manager', 'InUse')),
+                GLib.VariantType('(v)'),
+                Gio.DBusCallFlags.NONE, 800, None,
+            )
+        except GLib.Error:
+            return False
+        return self._register(bus)
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.enabled = bool(enabled)
+        bus = _dbus_system()
+        if bus is not None:
+            self._register(bus)
+            self._notify_max_accuracy(bus)
+
+    def _max_accuracy(self) -> int:
+        return _ACC_EXACT if self.enabled else 0
+
+    def _allow(self, req_accuracy: int) -> int:
+        return min(int(req_accuracy), _ACC_EXACT) if self.enabled else 0
+
+    def _register(self, bus: Gio.DBusConnection) -> bool:
+        if self._obj_id is not None:
+            return True
+        obj_id = None
+        try:
+            info = Gio.DBusNodeInfo.new_for_xml(_AGENT_XML)
+            obj_id = bus.register_object(
+                _AGENT_PATH, info.interfaces[0],
+                self._on_method_call, self._on_get_property, None)
+            bus.call_sync(
+                _GEOCLUE_NAME, _GEOCLUE_MGR_PATH,
+                _GEOCLUE_NAME + '.Manager', 'RegisterAgent',
+                GLib.Variant('(o)', (_AGENT_PATH,)), None,
+                Gio.DBusCallFlags.NONE, 2000, None,
+            )
+        except Exception:
+            if obj_id is not None:
+                try:
+                    bus.unregister_object(obj_id)
+                except Exception:
+                    pass
+            return False
+        self._obj_id = obj_id
+        return True
+
+    def _notify_max_accuracy(self, bus: Gio.DBusConnection) -> None:
+        if self._obj_id is None:
+            return
+        try:
+            bus.emit_signal(
+                None, _AGENT_PATH, 'org.freedesktop.DBus.Properties',
+                'PropertiesChanged',
+                GLib.Variant('(sa{sv}as)', (
+                    _AGENT_IFACE,
+                    {'MaxAccuracyLevel': GLib.Variant('u',
+                                                      self._max_accuracy())},
+                    [],
+                )),
+            )
+        except Exception:
+            pass
+
+    def _on_method_call(self, _conn, _sender, _path, _iface, method,
+                        params, invocation) -> None:
+        if method == 'AuthorizeApp':
+            req = params.unpack()[1]
+            invocation.return_value(GLib.Variant('(u)', (self._allow(req),)))
+            return
+        invocation.return_error_by_name(
+            'org.freedesktop.DBus.Error.UnknownMethod')
+
+    def _on_get_property(self, _conn, _sender, _path, _iface, prop):
+        if prop == 'MaxAccuracyLevel':
+            return GLib.Variant('u', self._max_accuracy())
+        return None
 
 
 def _get_brightness_pct() -> int:
@@ -221,7 +401,7 @@ _TILES: list[_TileDef] = [
     _TileDef('focus',    'Focus',    lambda: None,                        lambda _v: None,                         2),
     _TileDef('auto_br',  'Auto',     lambda: None,                        lambda _v: None,                         2),
     _TileDef('location', 'Location', lambda: None,                        lambda _v: None,                         2),
-    _TileDef('hotspot',  'Hotspot',  lambda: None,                        lambda _v: None,                         2),
+    _TileDef('hotspot',  'Hotspot',  _get_hotspot_state,                  _toggle_hotspot,                         2),
 ]
 
 
@@ -248,6 +428,7 @@ class QuickActionsPanel(Gtk.Box):
         self._state_labels: dict[str, Gtk.Label] = {}
         self._updating = False
         self._als = ALSBrightness()
+        self._location = LocationState()
 
         provider = Gtk.CssProvider()
         provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
@@ -263,13 +444,20 @@ class QuickActionsPanel(Gtk.Box):
     def _tiles(self) -> list[_TileDef]:
         tiles = []
         for tile in _TILES:
-            # Stub tiles stay hidden until something real backs them
-            if tile.key in ('location', 'hotspot'):
-                continue
+            # Hardware/service-gated tiles stay hidden without their backend
             if tile.key == 'auto_br' and not self._als.available():
                 continue
             if tile.key == 'torch' and not any(Path('/sys/class/leds').glob('*torch*')):
                 continue
+            if tile.key == 'hotspot' and not _nm_has_wifi_device():
+                continue
+            if tile.key == 'location':
+                if not self._location.available():
+                    continue
+                tile = tile._replace(
+                    get_state=lambda: bool(self._location.enabled),
+                    set_state=self._location.set_enabled,
+                )
             if tile.key == 'dnd':
                 if self._dnd is None:
                     continue
