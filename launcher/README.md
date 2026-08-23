@@ -6,7 +6,7 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" nam
 
 - **Home surface** (`window.py`, `home_launcher.py`) — BOTTOM layer. 8-slot home model with inline folder drop-downs, long-press edit mode, config-driven widget row (time/date/weather/battery with tap actions), gesture dispatch (`launch:<app_id>` bindings), config hot reload.
 - **App drawer** (`window.py`, `app_index.py`) — ~85% bottom sheet, bottom search with bottom-anchored results, A–Z jump strip, A–Z ↔ install-date sort, pinned-first ordering, inline folder rows, `!` web search, auto-launch option, long-press action menus (`app_item_actions.py`).
-- **Lock screen** (`lock_screen.py`) — OVERLAY layer, swipe-up unlock revealing the PIN keypad (4+ digits), escalating lockout, fingerprint, notification list (summary/count/off, DnD-aware).
+- **Lock screen** (`lock_screen.py`) — OVERLAY layer, swipe-up unlock revealing the PIN keypad (6+ digits), escalating lockout, fingerprint, notification list (summary/count/off, DnD-aware).
 - **Notification shade** (`notification_shade.py`) — TOP layer, date/time header with inline month calendar (`calendar_grid.py`), Settings entry, in-process daemon (`notif_daemon.py`), tap-to-launch, swipe-to-dismiss, clear all, quick actions embedded.
 - **DnD & Focus** (`dnd.py`, `focus_mode.py`) — Pixel-model Do Not Disturb (schedules, starred contacts, repeat callers) and Focus Mode (paused apps, held notifications, take-a-break), wired through tiles, calls, and the notification path.
 - **Quick actions** (`quick_actions.py`) — WiFi, BT, mobile data, airplane, torch, DnD, Focus; brightness/volume sliders; hardware-gated tiles hide themselves.
@@ -58,7 +58,8 @@ PATH="$PWD/.venv/bin:$PATH" sh scripts/check.sh
 ```
 
 shellcheck comes from the distro (`pacman -S shellcheck` / `apk add
-shellcheck`); the gate skips any tool that isn't on PATH rather than fail.
+shellcheck`); missing tools are reported as SKIPPED rather than failing the
+gate, and ruff resolves via the venv python first so it needn't be on PATH.
 
 ## Deploy to device
 

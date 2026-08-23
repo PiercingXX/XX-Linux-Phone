@@ -20,7 +20,7 @@ The default home screen: AMOLED black, centered, JetBrains Mono Nerd. A clock, t
 <tr><td><b>Ecosystem</b></td><td><a href="https://github.com/PiercingXX/piercing-dots">piercing-dots</a> for the terminal/dotfile layer; <a href="https://github.com/PiercingXX/debian-mini-mod">debian-mini-mod</a> minimal-install patterns</td></tr>
 </table>
 
-![The six theme presets side by side: AMOLED, Graphite, Forest, Ocean, Paper, and Mist](docs/images/theme-presets.jpg)
+![Six of the eight theme presets side by side: AMOLED, Graphite, Forest, Ocean, Paper, and Mist — the screenshot predates the Aura and Burgundy presets](docs/images/theme-presets.jpg)
 
 Eight built-in theme presets — AMOLED, Graphite, Forest, Ocean, Paper, Mist, Aura, and Burgundy — all solid colors, all text-first.
 
