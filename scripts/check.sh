@@ -1,6 +1,6 @@
 #!/bin/sh
 # XX-WM - Pre-commit gate script
-# Runs py_compile on all sources + pytest + shellcheck
+# Runs py_compile on all sources + ruff + pytest + shellcheck
 
 set -e
 
@@ -15,13 +15,20 @@ fi
 }
 
 echo "=== Running ruff ==="
-if command -v ruff >/dev/null 2>&1; then
-    ruff check launcher/src tests || {
+ruff_check() {
+    "$@" check launcher/src tests || {
         echo "ruff FAILED"
         exit 1
     }
+}
+if "$PYTHON" -m ruff --version >/dev/null 2>&1; then
+    ruff_check "$PYTHON" -m ruff
+elif [ -x .venv/bin/ruff ]; then
+    ruff_check .venv/bin/ruff
+elif command -v ruff >/dev/null 2>&1; then
+    ruff_check ruff
 else
-    echo "ruff not available, skipping"
+    echo "ruff SKIPPED - not found (install with: .venv/bin/pip install ruff)"
 fi
 
 echo "=== Running pytest ==="
@@ -50,7 +57,7 @@ if command -v shellcheck >/dev/null 2>&1; then
         fi
     done
 else
-    echo "shellcheck not available, skipping"
+    echo "shellcheck SKIPPED - not found (install from distro, e.g. pacman -S shellcheck)"
 fi
 
 echo "=== All checks passed ==="
