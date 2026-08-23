@@ -16,29 +16,34 @@ from gi.repository import Gdk, Gtk
 if _HAS_LAYER:
     from gi.repository import Gtk4LayerShell as LayerShell
 
-_CSS = b"""
-.power-menu-scrim {
-    background: rgba(0, 0, 0, 0.72);
-}
-.power-menu-btn {
+from config import ShellConfig, ThemePreset
+
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.power-menu-scrim {{
+    background: alpha({preset.background}, 0.72);
+}}
+.power-menu-btn {{
     font-size: 18pt;
     font-weight: 300;
     min-height: 80px;
     min-width: 260px;
     border-radius: 8px;
-    border: 1.5px solid rgba(255,255,255,0.12);
-    background: rgba(30, 30, 30, 0.95);
-    color: #f4f4f4;
+    border: 1.5px solid alpha({preset.foreground}, 0.12);
+    background: alpha({preset.surface}, 0.95);
+    color: {preset.foreground};
     padding: 0 24px;
-}
-.power-menu-btn:hover, .power-menu-btn:active {
-    background: rgba(50, 50, 50, 0.95);
-}
-.power-menu-cancel {
-    color: #9a9a9a;
-    border-color: rgba(255,255,255,0.06);
-    background: rgba(10,10,10,0.95);
-}
+}}
+.power-menu-btn:hover, .power-menu-btn:active {{
+    background: alpha({preset.surface_alt}, 0.95);
+    border-color: alpha({preset.accent}, 0.6);
+}}
+.power-menu-cancel {{
+    color: {preset.muted};
+    border-color: alpha({preset.foreground}, 0.06);
+    background: alpha({preset.background}, 0.95);
+}}
 """
 
 
@@ -67,7 +72,7 @@ class PowerMenu(Gtk.Window):
             self.fullscreen()
 
         css = Gtk.CssProvider()
-        css.load_from_data(_CSS)
+        css.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
         )

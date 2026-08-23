@@ -22,16 +22,18 @@ from gi.repository import Gdk, GLib, Gtk
 if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
 
-from config import ShellConfig
+from config import DANGER_RED, WARNING_ORANGE, ShellConfig, ThemePreset
 from lock_lines import _FAIL_THRESHOLD, _lockout_secs, lock_screen_lines
 
-_CSS = b"""
-.lock-root {
-    background: #000000;
-    color: #f4f4f4;
-}
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.lock-root {{
+    background: {preset.background};
+    color: {preset.foreground};
+}}
 .lock-root paned,
-.lock-root paned > separator {
+.lock-root paned > separator {{
     background: transparent;
     background-color: transparent;
     min-height: 0;
@@ -39,94 +41,94 @@ _CSS = b"""
     border: none;
     padding: 0;
     margin: 0;
-}
-.lock-clock {
+}}
+.lock-clock {{
     font-size: 64pt;
     font-weight: 300;
-    color: #f4f4f4;
-}
-.lock-date {
+    color: {preset.foreground};
+}}
+.lock-date {{
     font-size: 16pt;
-    color: #9a9a9a;
-}
-.lock-dots {
+    color: {preset.muted};
+}}
+.lock-dots {{
     font-size: 22pt;
     letter-spacing: 0.4em;
     font-family: monospace;
-    color: #f4f4f4;
+    color: {preset.foreground};
     min-height: 48px;
-}
-.lock-error {
+}}
+.lock-error {{
     font-size: 12pt;
-    color: #ff6b6b;
-}
-.lock-lockout {
+    color: {DANGER_RED};
+}}
+.lock-lockout {{
     font-size: 13pt;
-    color: #ff9a3c;
+    color: {WARNING_ORANGE};
     min-height: 24px;
-}
-.lock-key {
+}}
+.lock-key {{
     font-size: 22pt;
     font-weight: 300;
     min-width: 110px;
     min-height: 88px;
     border-radius: 50%;
-    background: #111111;
-    color: #f4f4f4;
+    background: {preset.surface};
+    color: {preset.foreground};
     border: none;
     padding: 0;
-}
-.lock-key:hover { background: #1e1e1e; }
-.lock-key:disabled { opacity: 0.25; }
-.lock-key.del {
+}}
+.lock-key:hover {{ background: {preset.surface_alt}; }}
+.lock-key:disabled {{ opacity: 0.25; }}
+.lock-key.del {{
     font-size: 18pt;
     background: transparent;
-    color: #9a9a9a;
-}
-.lock-key.del:hover { background: #111111; }
-.lock-sub {
+    color: {preset.muted};
+}}
+.lock-key.del:hover {{ background: {preset.surface_alt}; }}
+.lock-sub {{
     font-size: 8pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     margin-top: -2px;
-}
-.lock-unlock-btn {
+}}
+.lock-unlock-btn {{
     font-size: 14pt;
     min-height: 60px;
     min-width: 200px;
     border-radius: 30px;
     background: transparent;
-    color: #f4f4f4;
+    color: {preset.foreground};
     border: none;
     box-shadow: none;
-}
-.lock-unlock-btn:hover { background: rgba(255,255,255,0.08); }
-.lock-unlock-btn:disabled { opacity: 0.25; }
-.lock-fp-hint {
+}}
+.lock-unlock-btn:hover {{ background: alpha({preset.foreground}, 0.08); }}
+.lock-unlock-btn:disabled {{ opacity: 0.25; }}
+.lock-fp-hint {{
     font-size: 11pt;
-    color: #5a5a5a;
+    color: {preset.muted};
     margin-top: 8px;
-}
-.lock-hint {
+}}
+.lock-hint {{
     font-size: 11pt;
-    color: #5a5a5a;
+    color: {preset.muted};
     letter-spacing: 0.08em;
-}
-.lock-notif {
+}}
+.lock-notif {{
     font-size: 11pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     background: transparent;
     border: none;
     padding: 4px 12px;
-}
-@keyframes shake {
-    0%   { margin-left: 0; }
-    20%  { margin-left: -14px; }
-    40%  { margin-left: 14px; }
-    60%  { margin-left: -8px; }
-    80%  { margin-left: 8px; }
-    100% { margin-left: 0; }
-}
-.shake { animation: shake 0.35s ease; }
+}}
+@keyframes shake {{
+    0%   {{ margin-left: 0; }}
+    20%  {{ margin-left: -14px; }}
+    40%  {{ margin-left: 14px; }}
+    60%  {{ margin-left: -8px; }}
+    80%  {{ margin-left: 8px; }}
+    100% {{ margin-left: 0; }}
+}}
+.shake {{ animation: shake 0.35s ease; }}
 """
 
 _KEYPAD: list[tuple[str, str]] = [
@@ -172,7 +174,7 @@ class LockScreen(Gtk.Window):
         self._keypad_btns: list[Gtk.Button] = []
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(_CSS)
+        provider.load_from_data(theme_css(self._config.theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             provider,

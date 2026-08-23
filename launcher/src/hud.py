@@ -18,6 +18,8 @@ import logging
 
 _log = logging.getLogger('hud')
 
+from config import ShellConfig, ThemePreset
+
 _HAS_GTK = True
 try:
     import gi
@@ -41,28 +43,29 @@ _HUD_HOLD_MS          = 1000
 _HUD_FADE_STEPS       = 10
 _HUD_FADE_INTERVAL_MS = 20
 
-_HUD_CSS = b"""
-    .piercing-hud-box {
-        background: rgba(20, 20, 20, 0.82);
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+    .piercing-hud-box {{
+        background: alpha({preset.surface}, 0.82);
         border-radius: 16px;
-        border: 1.5px solid rgba(255, 255, 255, 0.18);
+        border: 1.5px solid alpha({preset.foreground}, 0.18);
         padding: 14px 22px;
-    }
-    .piercing-hud-label {
-        color: #ffffff;
+    }}
+    .piercing-hud-label {{
+        color: {preset.foreground};
         font-size: 40px;
         font-weight: 700;
-    }
-    .piercing-hud-level {
+    }}
+    .piercing-hud-level {{
         min-width: 180px;
         min-height: 8px;
         border-radius: 4px;
-        background: rgba(255, 255, 255, 0.18);
-    }
-    .piercing-hud-level > trough > progress {
-        background: #ffffff;
+        background: alpha({preset.foreground}, 0.18);
+    }}
+    .piercing-hud-level > trough > progress {{
+        background: {preset.foreground};
         border-radius: 4px;
-    }
+    }}
 """
 
 
@@ -91,7 +94,7 @@ if _HAS_GTK:
                 LayerShell.set_margin(self, LayerShell.Edge.TOP, 96)
 
             css = Gtk.CssProvider()
-            css.load_from_data(_HUD_CSS)
+            css.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
             Gtk.StyleContext.add_provider_for_display(
                 self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )

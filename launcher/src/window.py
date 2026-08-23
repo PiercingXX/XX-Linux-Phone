@@ -412,11 +412,11 @@ class ShellWindow(Adw.ApplicationWindow):
         return False
 
     def _build_home_page(self) -> Gtk.Widget:
-        from home_launcher import HomeLauncher, _HOME_CSS
+        from home_launcher import HomeLauncher, theme_css
         from gi.repository import Gdk
 
         css = Gtk.CssProvider()
-        css.load_from_data(_HOME_CSS)
+        css.load_from_data(theme_css(self.config.theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
         )

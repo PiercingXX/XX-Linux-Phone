@@ -24,21 +24,25 @@ from gi.repository import GLib, Gtk
 if _HAS_LAYER:
     from gi.repository import Gtk4LayerShell as LayerShell
 
+from config import ShellConfig, ThemePreset
+
 _EDGE_WIDTH = 28
 
 _ARROW_HOLD_MS          = 280
 _ARROW_FADE_STEPS       = 10
 _ARROW_FADE_INTERVAL_MS = 20
 
-_ARROW_CSS = b"""
-    .piercing-back-arrow {
-        background: rgba(20, 20, 20, 0.82);
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+    .piercing-back-arrow {{
+        background: alpha({preset.surface}, 0.82);
         border-radius: 40px;
-        border: 1.5px solid rgba(255, 255, 255, 0.18);
-        color: #ffffff;
+        border: 1.5px solid alpha({preset.foreground}, 0.18);
+        color: {preset.foreground};
         font-size: 30px;
         padding: 10px 18px;
-    }
+    }}
 """
 
 
@@ -65,7 +69,7 @@ class _ArrowOverlay(Gtk.Window):
         self.set_default_size(76, 64)
 
         css = Gtk.CssProvider()
-        css.load_from_data(_ARROW_CSS)
+        css.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )

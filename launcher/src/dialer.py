@@ -7,64 +7,67 @@ import subprocess
 gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, Gtk
+from config import ShellConfig, ThemePreset
 from contacts import Contact, ContactBook
 
-_DIALER_CSS = b"""
-.dialer-root {
-    background: #000000;
-    color: #f4f4f4;
-}
-.dialer-display {
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.dialer-root {{
+    background: {preset.background};
+    color: {preset.foreground};
+}}
+.dialer-display {{
     font-size: 28pt;
     font-weight: 300;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.05em;
-    color: #f4f4f4;
+    color: {preset.foreground};
     min-height: 72px;
-}
-.dialer-button {
+}}
+.dialer-button {{
     font-size: 20pt;
     font-weight: 300;
     min-width: 100px;
     min-height: 80px;
     border-radius: 50%;
-    background: #111111;
-    color: #f4f4f4;
+    background: {preset.surface};
+    color: {preset.foreground};
     border: none;
     padding: 0;
-}
-.dialer-button:hover { background: #1e1e1e; }
-.dialer-sub {
+}}
+.dialer-button:hover {{ background: {preset.surface_alt}; }}
+.dialer-sub {{
     font-size: 8pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     margin-top: -2px;
-}
-.call-button {
+}}
+.call-button {{
     font-size: 14pt;
     min-width: 100px;
     min-height: 80px;
     border-radius: 50%;
-    background: #f4f4f4;
-    color: #000000;
+    background: {preset.accent};
+    color: {preset.background};
     border: none;
-}
-.call-button:hover { background: #e0e0e0; }
-.del-button {
+}}
+.call-button:hover {{ background: mix({preset.accent}, {preset.background}, 0.85); }}
+.del-button {{
     font-size: 14pt;
     min-width: 100px;
     min-height: 80px;
     border-radius: 50%;
     background: transparent;
-    color: #9a9a9a;
+    color: {preset.muted};
     border: none;
-}
-.del-button:hover { background: #111111; }
-.contact-row {
+}}
+.del-button:hover {{ background: {preset.surface_alt}; }}
+.contact-row {{
     font-size: 14pt;
     padding: 12px 16px;
-}
-.contact-name { font-size: 14pt; color: #f4f4f4; }
-.contact-number { font-size: 10pt; color: #9a9a9a; }
+}}
+.contact-name {{ font-size: 14pt; color: {preset.foreground}; }}
+.contact-number {{ font-size: 10pt; color: {preset.muted}; }}
 """
 
 _KEYPAD: list[tuple[str, str]] = [
@@ -87,7 +90,7 @@ class Dialer(Gtk.Window):
         self._dnd = dnd_state
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(_DIALER_CSS)
+        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
         )

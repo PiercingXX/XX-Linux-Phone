@@ -10,46 +10,49 @@ gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gio, Gtk
 from als_brightness import ALSBrightness
+from config import ShellConfig, ThemePreset
 
 
-_QA_CSS = b"""
-.qa-panel {
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.qa-panel {{
     background: transparent;
-}
-.qa-tile {
+    color: {preset.foreground};
+}}
+.qa-tile {{
     min-width: 80px;
     min-height: 72px;
     border-radius: 16px;
-    background: #1a1a1a;
-    color: #9a9a9a;
+    background: {preset.surface};
+    color: {preset.muted};
     border: none;
     padding: 0;
-}
-.qa-tile.active {
-    background: #f4f4f4;
-    color: #000000;
-}
-.qa-tile:hover {
-    background: #242424;
-}
-.qa-tile.active:hover {
-    background: #e0e0e0;
-}
-.tile-label {
+}}
+.qa-tile.active {{
+    background: {preset.accent};
+    color: {preset.background};
+}}
+.qa-tile:hover {{
+    background: {preset.surface_alt};
+}}
+.qa-tile.active:hover {{
+    background: mix({preset.accent}, {preset.background}, 0.85);
+}}
+.tile-label {{
     font-size: 10pt;
     font-weight: 600;
     letter-spacing: 0.05em;
-}
-.tile-state {
+}}
+.tile-state {{
     font-size: 8pt;
     margin-top: 2px;
     opacity: 0.7;
-}
-.qa-slider-label {
+}}
+.qa-slider-label {{
     font-size: 10pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     min-width: 60px;
-}
+}}
 """
 
 
@@ -247,7 +250,7 @@ class QuickActionsPanel(Gtk.Box):
         self._als = ALSBrightness()
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(_QA_CSS)
+        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             provider,

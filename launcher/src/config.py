@@ -57,6 +57,11 @@ FONT_FAMILIES = {
     'jetbrains-mono-nerd': 'JetBrainsMono Nerd Font, JetBrains Mono, Monospace',
 }
 
+# Semantic colors that must not track the theme (universal meanings).
+DANGER_RED = '#ff6b6b'
+WARNING_ORANGE = '#ff9a3c'
+DESTRUCTIVE_TINT_BG = '#2a1010'
+
 DEFAULT_CONFIG = {
     'theme': 'amoled',
     'font': 'jetbrains-mono-nerd',

@@ -20,89 +20,92 @@ if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
 
 from quick_actions import QuickActionsPanel
+from config import DANGER_RED, ShellConfig, ThemePreset
 
 _NOTIF_IFACE = 'org.freedesktop.Notifications'
 _NOTIF_PATH = '/org/freedesktop/Notifications'
 
-_SHADE_CSS = b"""
-.shade-root {
-    background: rgba(0, 0, 0, 0.88);
-    color: #f4f4f4;
-}
-.shade-header {
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.shade-root {{
+    background: alpha({preset.background}, 0.88);
+    color: {preset.foreground};
+}}
+.shade-header {{
     font-size: 11pt;
     font-weight: 700;
     letter-spacing: 0.18em;
-    color: #9a9a9a;
-}
-.shade-power {
+    color: {preset.muted};
+}}
+.shade-power {{
     font-size: 15pt;
     font-weight: 400;
     letter-spacing: 0;
     min-width: 40px;
     padding: 0 8px;
-}
-.shade-power:hover {
-    color: #ff6b6b;
-}
-.notif-app {
+}}
+.shade-power:hover {{
+    color: {DANGER_RED};
+}}
+.notif-app {{
     font-size: 10pt;
-    color: #9a9a9a;
-}
-.notif-title {
+    color: {preset.muted};
+}}
+.notif-title {{
     font-size: 14pt;
     font-weight: 500;
-    color: #f4f4f4;
-}
-.notif-body {
+    color: {preset.foreground};
+}}
+.notif-body {{
     font-size: 11.5pt;
-    color: #c8c8c8;
-}
-.notif-row {
-    background: #111111;
+    color: alpha({preset.foreground}, 0.85);
+}}
+.notif-row {{
+    background: {preset.surface};
     border-radius: 16px;
     padding: 14px 18px;
     margin-bottom: 6px;
-}
-.notif-row:hover { background: #1a1a1a; }
-.dismiss-button {
+}}
+.notif-row:hover {{ background: {preset.surface_alt}; }}
+.dismiss-button {{
     font-size: 14pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     min-width: 36px;
     min-height: 36px;
     border-radius: 18px;
     padding: 0;
     background: transparent;
     border: none;
-}
-.dismiss-button:hover { background: #282828; }
-.shade-datetime {
+}}
+.dismiss-button:hover {{ background: {preset.surface_alt}; }}
+.shade-datetime {{
     font-size: 13pt;
     font-weight: 500;
-    color: #f4f4f4;
+    color: {preset.foreground};
     letter-spacing: 0.02em;
-}
-.cal-header {
+}}
+.cal-header {{
     font-size: 11pt;
-    color: #9a9a9a;
-}
-.cal-day {
+    color: {preset.muted};
+}}
+.cal-day {{
     font-size: 10.5pt;
-    color: #c8c8c8;
+    color: alpha({preset.foreground}, 0.85);
     min-width: 34px;
     min-height: 30px;
-}
-.cal-day.cal-today {
-    color: #000000;
-    background: #f4f4f4;
+}}
+.cal-day.cal-today {{
+    color: {preset.background};
+    background: {preset.accent};
     border-radius: 15px;
     font-weight: 700;
-}
-.cal-weekday {
+}}
+.cal-weekday {{
     font-size: 9pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     min-width: 34px;
-}
+}}
 """
 
 _SWIPE_DISMISS_THRESHOLD = 140  # pixels to trigger dismiss
@@ -160,7 +163,7 @@ class NotificationShade(Gtk.Window):
         self._next_id = 1
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(_SHADE_CSS)
+        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
         )

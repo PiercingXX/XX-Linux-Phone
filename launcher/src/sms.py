@@ -8,66 +8,69 @@ from datetime import datetime
 gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gtk
+from config import ShellConfig, ThemePreset
 from contacts import ContactBook, load_sms_history
 
-_SMS_CSS = b"""
-.sms-root {
-    background: #000000;
-    color: #f4f4f4;
-}
-.sms-header {
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.sms-root {{
+    background: {preset.background};
+    color: {preset.foreground};
+}}
+.sms-header {{
     font-size: 13pt;
     font-weight: 600;
-    color: #f4f4f4;
+    color: {preset.foreground};
     padding: 16px 20px;
-    border-bottom: 1px solid #1a1a1a;
-}
-.sms-list {
+    border-bottom: 1px solid {preset.border};
+}}
+.sms-list {{
     background: transparent;
     padding: 12px;
-}
-.bubble-out {
-    background: #f4f4f4;
-    color: #000000;
+}}
+.bubble-out {{
+    background: {preset.accent};
+    color: {preset.background};
     border-radius: 18px 18px 4px 18px;
     padding: 12px 16px;
     margin-left: 60px;
     margin-bottom: 4px;
     font-size: 13pt;
-}
-.bubble-in {
-    background: #1a1a1a;
-    color: #f4f4f4;
+}}
+.bubble-in {{
+    background: {preset.surface};
+    color: {preset.foreground};
     border-radius: 18px 18px 18px 4px;
     padding: 12px 16px;
     margin-right: 60px;
     margin-bottom: 4px;
     font-size: 13pt;
-}
-.bubble-time {
+}}
+.bubble-time {{
     font-size: 9pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     margin-bottom: 8px;
-}
-.sms-input {
+}}
+.sms-input {{
     font-size: 13pt;
     min-height: 52px;
-    background: #111111;
-    color: #f4f4f4;
+    background: {preset.surface};
+    color: {preset.foreground};
     border-radius: 26px;
-    border: 1px solid #2a2a2a;
+    border: 1px solid {preset.border};
     padding: 0 16px;
-}
-.sms-send {
+}}
+.sms-send {{
     font-size: 13pt;
     min-width: 64px;
     min-height: 52px;
     border-radius: 26px;
-    background: #f4f4f4;
-    color: #000000;
+    background: {preset.accent};
+    color: {preset.background};
     border: none;
-}
-.sms-send:hover { background: #e0e0e0; }
+}}
+.sms-send:hover {{ background: mix({preset.accent}, {preset.background}, 0.85); }}
 """
 
 
@@ -96,7 +99,7 @@ class SMSConversation(Gtk.Window):
         self._contact_book = ContactBook()
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(_SMS_CSS)
+        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
         )

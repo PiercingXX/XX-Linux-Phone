@@ -20,4 +20,4 @@ def apply_global_font(family: str) -> None:
         Gtk.StyleContext.add_provider_for_display(
             display, _provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     _provider.load_from_data(
-        f"window, popover {{ font-family: '{family}'; }}".encode())
+        f"window, popover {{ font-family: '{family}'; }}".encode('utf-8'))

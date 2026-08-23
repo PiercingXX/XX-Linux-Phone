@@ -18,92 +18,94 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
 
-from config import THEME_PRESETS, ShellConfig
+from config import THEME_PRESETS, ShellConfig, ThemePreset
 
-_WIZARD_CSS = b"""
-.wizard-root {
-    background: #000000;
-    color: #f4f4f4;
-}
-.wizard-title {
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.wizard-root {{
+    background: {preset.background};
+    color: {preset.foreground};
+}}
+.wizard-title {{
     font-size: 22pt;
     font-weight: 300;
-    color: #f4f4f4;
-}
-.wizard-subtitle {
+    color: {preset.foreground};
+}}
+.wizard-subtitle {{
     font-size: 11pt;
-    color: #9a9a9a;
-}
-.wizard-label {
+    color: {preset.muted};
+}}
+.wizard-label {{
     font-size: 12pt;
-    color: #f4f4f4;
-}
-.pin-dots {
+    color: {preset.foreground};
+}}
+.pin-dots {{
     font-size: 18pt;
     letter-spacing: 0.3em;
     font-family: monospace;
-    color: #f4f4f4;
+    color: {preset.foreground};
     min-height: 36px;
-}
-.pin-key {
+}}
+.pin-key {{
     font-size: 17pt;
     font-weight: 300;
     min-width: 80px;
     min-height: 64px;
     border-radius: 50%;
-    background: #111111;
-    color: #f4f4f4;
+    background: {preset.surface};
+    color: {preset.foreground};
     border: none;
     padding: 0;
-}
-.pin-key:hover { background: #1e1e1e; }
-.pin-key.del {
+}}
+.pin-key:hover {{ background: {preset.surface_alt}; }}
+.pin-key.del {{
     font-size: 14pt;
     background: transparent;
-    color: #9a9a9a;
-}
-.pin-key.del:hover { background: #111111; }
-.pin-sub {
+    color: {preset.muted};
+}}
+.pin-key.del:hover {{ background: {preset.surface_alt}; }}
+.pin-sub {{
     font-size: 7pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     margin-top: -2px;
-}
-.wizard-next {
+}}
+.wizard-next {{
     font-size: 12pt;
     min-height: 48px;
     border-radius: 14px;
-    background: #f4f4f4;
-    color: #000000;
+    background: {preset.accent};
+    color: {preset.background};
     border: none;
-}
-.wizard-next:hover {
-    background: #e0e0e0;
-}
-.wizard-skip {
+}}
+.wizard-next:hover {{
+    background: mix({preset.accent}, {preset.background}, 0.85);
+}}
+.wizard-skip {{
     font-size: 11pt;
-    color: #9a9a9a;
-}
-.theme-row {
+    color: {preset.muted};
+}}
+.theme-row {{
     font-size: 12pt;
     min-height: 44px;
     border-radius: 12px;
     padding: 0 16px;
-}
+}}
 .tz-list,
-.tz-list row {
+.tz-list row {{
     background: transparent;
     color: inherit;
     font-size: 12pt;
-}
-.tz-list row {
+}}
+.tz-list row {{
     min-height: 40px;
     border-radius: 10px;
     padding: 0 12px;
-}
-.tz-list row:selected {
+}}
+.tz-list row:selected {{
     background: alpha(currentColor, 0.18);
     color: inherit;
-}
+}}
 """
 
 # Per-preset swatch rows for the theme step, generated from the palette
@@ -171,7 +173,7 @@ class FirstBootWizard(Gtk.Window):
         self._theme_provider = Gtk.CssProvider()
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(_WIZARD_CSS + _THEME_ROWS_CSS)
+        provider.load_from_data(theme_css(self._config.theme).encode('utf-8') + _THEME_ROWS_CSS)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             provider,
@@ -574,14 +576,7 @@ class FirstBootWizard(Gtk.Window):
             else:
                 row.remove_css_class('selected')
         preset = THEME_PRESETS[theme_key]
-        css = (
-            f'.wizard-root {{ background: {preset.background}; color: {preset.foreground}; }}'
-            f'.wizard-title {{ color: {preset.foreground}; }}'
-            f'.wizard-subtitle {{ color: {preset.muted}; }}'
-            f'.wizard-next {{ background: {preset.accent}; color: {preset.background}; }}'
-            f'.pin-entry {{ background: {preset.surface}; color: {preset.foreground}; border-color: {preset.border}; }}'
-        ).encode()
-        self._theme_provider.load_from_data(css)
+        self._theme_provider.load_from_data(theme_css(preset).encode('utf-8'))
 
     def _on_pin_next(self, _btn: Gtk.Widget) -> None:
         if len(self._pin_buf) < 4:

@@ -18,48 +18,51 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import GLib, Gtk
 
-_HOME_CSS = b"""
-.home-item-btn {
+from config import ThemePreset
+
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.home-item-btn {{
     background: transparent;
     border: none;
     border-radius: 0;
     padding: 18px 0;
-    color: #f4f4f4;
-}
-.home-item-btn:hover, .home-item-btn:active {
+}}
+.home-item-btn:hover, .home-item-btn:active {{
     background: transparent;
-    color: #9a9a9a;
-}
-.home-item-label {
+    color: {preset.muted};
+}}
+.home-item-label {{
     font-size: 27pt;
     font-weight: 300;
-}
-.home-folder-indicator {
+}}
+.home-folder-indicator {{
     font-size: 14pt;
     font-weight: 300;
-    color: #5a5a5a;
+    color: {preset.muted};
     margin-left: 6px;
-}
-.home-edit-label {
+}}
+.home-edit-label {{
     font-size: 18pt;
     font-weight: 300;
-}
-.home-edit-ctl {
+}}
+.home-edit-ctl {{
     font-size: 13pt;
     font-weight: 300;
     padding: 4px 12px;
     background: transparent;
     border: none;
-    color: #9a9a9a;
-}
-.home-edit-action {
+    color: {preset.muted};
+}}
+.home-edit-action {{
     font-size: 13pt;
     font-weight: 300;
     padding: 10px 0;
     background: transparent;
     border: none;
-    color: #9a9a9a;
-}
+    color: {preset.muted};
+}}
 """
 
 

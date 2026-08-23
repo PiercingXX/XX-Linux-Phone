@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from config import DANGER_RED, DESTRUCTIVE_TINT_BG, ShellConfig, ThemePreset
 from toplevel_manager import ToplevelManager
 
 log = logging.getLogger(__name__)
@@ -60,44 +61,45 @@ class _WindowBase:
 
 _AppSwitcherBase = Gtk.Window if _GTK_AVAILABLE else _WindowBase
 
-_SWITCHER_CSS = b"""
-.switcher-root {
-    background: rgba(0, 0, 0, 0.92);
-    color: #f4f4f4;
-}
-.switcher-header {
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.switcher-root {{
+    background: alpha({preset.background}, 0.92);
+    color: {preset.foreground};
+}}
+.switcher-header {{
     font-size: 11pt;
     font-weight: 700;
     letter-spacing: 0.18em;
-    color: #9a9a9a;
-}
-.app-card {
-    background: #111111;
+    color: {preset.muted};
+}}
+.app-card {{
+    background: {preset.surface};
     border-radius: 20px;
     padding: 20px 16px;
     min-width: 140px;
     min-height: 180px;
-}
-.app-card:hover, .app-card:focus { background: #1a1a1a; }
-.card-name {
+}}
+.app-card:hover, .app-card:focus {{ background: {preset.surface_alt}; }}
+.card-name {{
     font-size: 13pt;
     font-weight: 400;
-    color: #f4f4f4;
-}
-.card-kill {
+    color: {preset.foreground};
+}}
+.card-kill {{
     font-size: 12pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     min-width: 32px;
     min-height: 32px;
     border-radius: 16px;
     padding: 0;
     background: transparent;
     border: none;
-}
-.card-kill:hover {
-    background: #2a1010;
-    color: #ff6b6b;
-}
+}}
+.card-kill:hover {{
+    background: {DESTRUCTIVE_TINT_BG};
+    color: {DANGER_RED};
+}}
 """
 
 _SWIPE_DISMISS_THRESHOLD = 120  # px upward drag to dismiss a card
@@ -141,7 +143,7 @@ class AppSwitcher(_AppSwitcherBase):
         self.refresh()
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(_SWITCHER_CSS)
+        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
         )

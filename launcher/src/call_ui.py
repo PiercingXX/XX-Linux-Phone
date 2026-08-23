@@ -14,76 +14,79 @@ except ValueError:
 gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gtk
+from config import DESTRUCTIVE_TINT_BG, DANGER_RED, ShellConfig, ThemePreset
 
 if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
 
-_CALL_CSS = b"""
-.call-root {
-    background: #000000;
-    color: #f4f4f4;
-}
-.call-caller {
+
+def theme_css(preset: ThemePreset) -> str:
+    return f"""
+.call-root {{
+    background: {preset.background};
+    color: {preset.foreground};
+}}
+.call-caller {{
     font-size: 28pt;
     font-weight: 300;
-    color: #f4f4f4;
-}
-.call-number {
+    color: {preset.foreground};
+}}
+.call-number {{
     font-size: 14pt;
-    color: #9a9a9a;
-}
-.call-status {
+    color: {preset.muted};
+}}
+.call-status {{
     font-size: 12pt;
-    color: #9a9a9a;
+    color: {preset.muted};
     letter-spacing: 0.1em;
-}
-.call-timer {
+}}
+.call-timer {{
     font-size: 18pt;
     font-weight: 300;
-    color: #f4f4f4;
+    color: {preset.foreground};
     font-variant-numeric: tabular-nums;
-}
-.call-btn {
+}}
+.call-btn {{
     font-size: 12pt;
     min-width: 100px;
     min-height: 72px;
     border-radius: 20px;
     border: none;
     padding: 0;
-}
-.btn-accept {
-    background: #f4f4f4;
-    color: #000000;
-}
-.btn-accept:hover { background: #e0e0e0; }
-.btn-decline {
-    background: #1a1a1a;
-    color: #9a9a9a;
-}
-.btn-decline:hover { background: #242424; }
-.btn-hangup {
-    background: #1a1a1a;
-    color: #ff6b6b;
-}
-.btn-hangup:hover { background: #2a1010; }
-.btn-mute, .btn-speaker {
-    background: #1a1a1a;
-    color: #f4f4f4;
-}
-.btn-mute.active, .btn-speaker.active {
-    background: #f4f4f4;
-    color: #000000;
-}
-.btn-mute:hover, .btn-speaker:hover { background: #242424; }
-.call-bar-root {
-    background: #111111;
-    color: #f4f4f4;
+}}
+.btn-accept {{
+    background: {preset.accent};
+    color: {preset.background};
+}}
+.btn-accept:hover {{ background: mix({preset.accent}, {preset.background}, 0.85); }}
+.btn-decline {{
+    background: {preset.surface};
+    color: {preset.muted};
+}}
+.btn-decline:hover {{ background: {preset.surface_alt}; }}
+.btn-hangup {{
+    background: {DANGER_RED};
+    color: #ffffff;
+}}
+.btn-hangup:hover {{ background: {DESTRUCTIVE_TINT_BG}; }}
+.btn-mute, .btn-speaker {{
+    background: {preset.surface};
+    color: {preset.foreground};
+}}
+.btn-mute.active, .btn-speaker.active {{
+    background: {preset.accent};
+    color: {preset.background};
+}}
+.btn-mute:hover, .btn-speaker:hover {{ background: {preset.surface_alt}; }}
+.call-bar-root {{
+    background: {preset.surface};
+    color: {preset.foreground};
     padding: 8px 16px;
-}
-.call-bar-label {
+}}
+.call-bar-label {{
     font-size: 11pt;
-    color: #f4f4f4;
-}
+    color: {preset.foreground};
+}}
 """
 
 
@@ -136,7 +139,7 @@ class CallBar(Gtk.Window):
 
         self._on_expand = on_expand
         provider = Gtk.CssProvider()
-        provider.load_from_data(_CALL_CSS)
+        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
         )
@@ -199,7 +202,7 @@ class CallUI(Gtk.Window):
         self._timer_id: int | None = None
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(_CALL_CSS)
+        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
         )
