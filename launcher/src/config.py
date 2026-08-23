@@ -59,6 +59,7 @@ FONT_FAMILIES = {
 
 # Semantic colors that must not track the theme (universal meanings).
 DANGER_RED = '#ff6b6b'
+ON_DANGER_FG = '#ffffff'
 WARNING_ORANGE = '#ff9a3c'
 DESTRUCTIVE_TINT_BG = '#2a1010'
 

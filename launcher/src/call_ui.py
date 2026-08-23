@@ -14,7 +14,7 @@ except ValueError:
 gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gtk
-from config import DESTRUCTIVE_TINT_BG, DANGER_RED, ShellConfig, ThemePreset
+from config import DESTRUCTIVE_TINT_BG, DANGER_RED, ON_DANGER_FG, ShellConfig, ThemePreset
 
 if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
@@ -66,7 +66,7 @@ def theme_css(preset: ThemePreset) -> str:
 .btn-decline:hover {{ background: {preset.surface_alt}; }}
 .btn-hangup {{
     background: {DANGER_RED};
-    color: #ffffff;
+    color: {ON_DANGER_FG};
 }}
 .btn-hangup:hover {{ background: {DESTRUCTIVE_TINT_BG}; }}
 .btn-mute, .btn-speaker {{

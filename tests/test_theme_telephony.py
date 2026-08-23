@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
-from config import DESTRUCTIVE_TINT_BG, DANGER_RED, THEME_PRESETS
+from config import DESTRUCTIVE_TINT_BG, DANGER_RED, ON_DANGER_FG, THEME_PRESETS
 
 from _theme_contract import hardcoded_leftover, strip_palette
 
@@ -29,9 +29,9 @@ FIELDS_PER_MODULE = {
     ),
 }
 
-# White-on-red is call_ui's universal danger pair: the one deliberate
-# hardcoded literal in these sheets, exempt from the sweep here but pinned
-# by test_white_literal_confined_to_call_ui_danger_pair below.
+# White-on-red is call_ui's universal danger pair: the foreground half
+# comes from config.ON_DANGER_FG (not theme-tracked), so it still shows up
+# as a non-palette literal in rendered sheets and stays exempt here.
 DANGER_PAIR_LITERALS = {'#ffffff'}
 
 
@@ -80,7 +80,7 @@ def test_white_literal_confined_to_call_ui_danger_pair() -> None:
     # call_ui's sheet and must not track the theme or leak elsewhere.
     for key, preset in THEME_PRESETS.items():
         sheets = {name: theme_css(preset) for name, theme_css in _sheets().items()}
-        assert '#ffffff' in sheets['call_ui'].lower(), f'{key}/call_ui'
+        assert ON_DANGER_FG.lower() in sheets['call_ui'].lower(), f'{key}/call_ui'
         for name in ('dialer', 'sms'):
             css = strip_palette(sheets[name], preset)
             assert '#ffffff' not in css.lower(), f'{key}/{name}'
@@ -90,4 +90,5 @@ def test_call_ui_keeps_semantic_danger_pair() -> None:
     for key, preset in THEME_PRESETS.items():
         sheet = _sheets()['call_ui'](preset)
         assert DANGER_RED in sheet, f'{key}: danger red missing'
+        assert ON_DANGER_FG in sheet, f'{key}: on-danger foreground missing'
         assert DESTRUCTIVE_TINT_BG in sheet, f'{key}: destructive tint missing'
