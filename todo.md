@@ -86,7 +86,20 @@ Two-agent review (code reviewer + research audit) surfaced blocker/high defects 
 - **Docs/env** — burgundy added to docs/config.md theme list; README scripts layout completed; stale `contracts/` gitignored; venv gate repaired (suite runs again on this box).
 - **Test infra** — hud module tests made collection-order-independent; fake-gi seams pinned where tests drove imported modules.
 
-Device-gated follow-ups from this workstream: smoke-test `nmcli connection up … passwd-file` on a real NM; generate the wlr protocol module on device (`python -m pywayland.scanner`) or vendor it; exercise MM1 accept/hangup against a live modem; verify fp node detection names on hardware.
+Device-gated follow-ups from this workstream: smoke-test `nmcli connection up … passwd-file` on a real NM; ~~generate the wlr protocol module on device~~ (done in WS27 — vendored); exercise MM1 accept/hangup against a live modem; verify fp node detection names on hardware.
+
+---
+
+## Workstream 27 — Backlog build-out (done 2026-08-24, dev machine)
+
+Everything left that was buildable without a phone, from the WS26 deferred list and the review's LOW findings. Suite 472 → **566 passing**.
+
+- **System-gesture rebinding is real** — gesture_bindings.py generates the lisgd bindings from gestures.json at session start; defaults byte-pinned to the old hardcoded ones; invalid values fall back silently. Rebinding applies at next session start.
+- **wlr protocol module vendored** — launcher/src/wayland_proto/ carries scanner-generated classes (provenance headers + regen procedure); switcher backend now fails at connect instead of degrading on every device.
+- **Hot-reload reaches every surface** — shade/call/dialer/SMS/power menu take the window's live ShellConfig and re-theme on reload; theme=custom renders custom_background; dead snap-back handlers removed; WAYLAND_DISPLAY respected everywhere.
+- **Deferred repairs** — ipc watch-source leak; config tmp-orphan cleanup, type guards, skip-identical saves (eMMC wear), corrupt-file self-heal; style.css bare-hex/border invariants now literally clean; wizard .error class defined; lock-screen provider dedupe; backup accepts gesture verbs; apps.sh Exec escaping verified through GKeyFile.
+
+Open items needing a ruling: drawer-folder scaffolding is design.md-spec'd but unreachable (folder_slots never populated) — implement or amend design.md; main.py's second PowerMenu() still snapshot-themed; hud/back_gesture/app_switcher/quick_actions not yet in the retheme fan-out.
 
 ---
 
