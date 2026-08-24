@@ -18,7 +18,7 @@ from gi.repository import Gdk, GLib, Gtk, Pango
 if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
 
-from config import THEME_PRESETS, ShellConfig, ThemePreset
+from config import DANGER_RED, THEME_PRESETS, ShellConfig, ThemePreset
 # Single source of truth with the lock screen: a PIN longer than the lock
 # screen's entry cap could be set here but never typed back = permanent lockout
 from lock_screen import _MAX_PIN
@@ -49,6 +49,9 @@ def theme_css(preset: ThemePreset) -> str:
     font-family: monospace;
     color: {preset.foreground};
     min-height: 36px;
+}}
+.pin-dots.error {{
+    color: {DANGER_RED};
 }}
 .pin-key {{
     font-size: 17pt;

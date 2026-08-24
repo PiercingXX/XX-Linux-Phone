@@ -115,7 +115,8 @@ def _output() -> str:
 
 _WL_ENV = {
     **os.environ,
-    'WAYLAND_DISPLAY': 'wayland-0',
+    # Honor the session we were launched into; wayland-0 is only the fallback.
+    'WAYLAND_DISPLAY': os.environ.get('WAYLAND_DISPLAY') or 'wayland-0',
     'XDG_RUNTIME_DIR': f'/run/user/{os.getuid()}',
 }
 

@@ -35,6 +35,7 @@ class IPCServer:
     def __init__(self, handler: Callable[[str], None]) -> None:
         self._handler = handler
         self._sock: socket.socket | None = None
+        self._watch_id: int | None = None
         self._start()
 
     def _start(self) -> None:
@@ -55,7 +56,8 @@ class IPCServer:
         sock.setblocking(False)
         self._sock = sock
 
-        GLib.io_add_watch(sock.fileno(), GLib.IOCondition.IN, self._on_incoming, sock)
+        self._watch_id = GLib.io_add_watch(
+            sock.fileno(), GLib.IOCondition.IN, self._on_incoming, sock)
 
     def _on_incoming(self, _fd: int, _condition: GLib.IOCondition, srv: socket.socket) -> bool:
         try:
@@ -81,6 +83,11 @@ class IPCServer:
         return False
 
     def stop(self) -> None:
+        # Remove the watch before closing the fd so no callback can fire on
+        # a closed socket; the None reset guards a double stop.
+        if self._watch_id:
+            GLib.source_remove(self._watch_id)
+            self._watch_id = None
         if self._sock:
             try:
                 self._sock.close()

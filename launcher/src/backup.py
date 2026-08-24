@@ -149,11 +149,13 @@ def validate_backup(payload: dict) -> tuple[bool, str | None]:
     gestures = payload.get('gestures', {})
     if not isinstance(gestures, dict):
         return False, 'gestures must be a dict'
-    from gesture_config import _DEFAULTS, is_valid_action
+    # gesture_config's own slot/value rule: actions are valid everywhere,
+    # IPC verbs (gesture_bindings lisgd slots) only on the system-level slots.
+    from gesture_config import _DEFAULTS, _is_valid_value
     for key, action in gestures.items():
         if key not in _DEFAULTS:
             return False, f'unknown gesture: {key}'
-        if not isinstance(action, str) or not is_valid_action(action):
+        if not isinstance(action, str) or not _is_valid_value(key, action):
             return False, f'unknown gesture action: {action}'
 
     return True, None

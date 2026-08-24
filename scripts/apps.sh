@@ -48,11 +48,22 @@ ask() {
 pwa_desktop() {
     # pwa_desktop <id> <name> <url>
     _browser=$(find_browser) || { echo "warn: no browser for $2 PWA" >&2; return 1; }
+    # Encode the URL for a double-quoted Exec argument (Desktop Entry Spec):
+    # %% for field codes, then escape " ` $ \ with a backslash. Every
+    # backslash is doubled once more because the KeyFile layer consumes one
+    # level of \\ escapes before the Exec line is parsed; the same doubling
+    # keeps the unquoted heredoc below from expanding $ and ` as shell syntax.
+    _url=$(printf '%s' "$3" | sed \
+        -e 's/%/%%/g' \
+        -e 's/\\/\\\\\\\\/g' \
+        -e 's/"/\\\\"/g' \
+        -e 's/`/\\\\`/g' \
+        -e 's/\$/\\\\$/g')
     cat > "$APPDIR/$1.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=$2
-Exec=$_browser --new-window "$3"
+Exec=$_browser --new-window "$_url"
 Terminal=false
 Categories=Network;
 EOF

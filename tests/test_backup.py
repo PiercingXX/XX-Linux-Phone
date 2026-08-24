@@ -128,6 +128,60 @@ class TestMalformedPayloads:
         assert not restore_backup(fresh, payload or [])
 
 
+class TestGestureVerbSlots:
+    """gesture_bindings landed IPC verbs for the lisgd-driven slots, so
+    backups made after rebinding carry verb values. validate_backup must use
+    gesture_config's own slot/value rule instead of rejecting verbs."""
+
+    @staticmethod
+    def _payload(gestures):
+        return {'version': 1, 'home_slots': [], 'theme': 'amoled',
+                'font': 'jetbrains-mono-nerd', 'gestures': gestures}
+
+    @pytest.fixture
+    def fresh(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+        return ShellConfig()
+
+    def test_lisgd_slot_verb_validates_and_restores(self, fresh):
+        payload = self._payload({'swipe_up_short': 'gesture.switcher'})
+        ok, error = validate_backup(payload)
+        assert ok and error is None
+
+        assert restore_backup(fresh, payload)
+        from gesture_config import GestureConfig
+        assert GestureConfig().get('swipe_up_short') == 'gesture.switcher'
+
+    @pytest.mark.parametrize('slot,verb', [
+        ('swipe_up_short', 'gesture.switcher'),
+        ('swipe_up_long', 'gesture.home'),
+        ('swipe_down_top', 'gesture.shade'),
+        ('swipe_left_edge', 'gesture.back'),
+        ('swipe_left_edge', 'gesture.keyboard'),
+    ])
+    def test_every_lisgd_slot_accepts_every_verb(self, slot, verb):
+        ok, error = validate_backup(self._payload({slot: verb}))
+        assert ok and error is None
+
+    def test_actions_still_accepted_on_any_slot(self):
+        ok, error = validate_backup(self._payload({
+            'double_tap_home': 'camera',
+            'squeeze': 'launch:org.some.App.desktop',
+        }))
+        assert ok and error is None
+
+    def test_verb_on_non_system_slot_rejected(self):
+        ok, error = validate_backup(
+            self._payload({'double_tap_home': 'gesture.home'}))
+        assert not ok
+        assert 'unknown gesture action' in error
+
+    def test_garbage_still_rejected(self):
+        ok, error = validate_backup(self._payload({'swipe_up_short': 'explode'}))
+        assert not ok
+        assert 'unknown gesture action' in error
+
+
 class TestHostileFontFamily:
     """Defense-in-depth: a hostile custom_font_family must be cleaned at
     validation time so it can never reach CSS interpolation."""

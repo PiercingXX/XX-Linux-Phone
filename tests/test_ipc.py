@@ -21,13 +21,23 @@ class _FakeGLib:
 
     def __init__(self):
         self.pending_idles = []
+        self.live_sources = set()
+        self.removed_sources = []
+        self._next_source_id = 1
 
     def io_add_watch(self, *_args):
-        return 1
+        source_id = self._next_source_id
+        self._next_source_id += 1
+        self.live_sources.add(source_id)
+        return source_id
 
     def idle_add(self, cb, *args):
         self.pending_idles.append((cb, args))
         return 1
+
+    def source_remove(self, source_id):
+        self.live_sources.discard(source_id)
+        self.removed_sources.append(source_id)
 
     def drain_idles(self):
         while self.pending_idles:
@@ -43,6 +53,7 @@ def _install_fake_gi():
     glib_mod.IOCondition = _GLIB.IOCondition
     glib_mod.io_add_watch = _GLIB.io_add_watch
     glib_mod.idle_add = _GLIB.idle_add
+    glib_mod.source_remove = _GLIB.source_remove
 
     gi_mod = types.ModuleType('gi')
     gi_mod.require_version = lambda *_a, **_k: None
@@ -60,6 +71,8 @@ import ipc  # noqa: E402  (needs fake gi modules installed first)
 @pytest.fixture(autouse=True)
 def _glib():
     _GLIB.pending_idles.clear()
+    _GLIB.live_sources.clear()
+    _GLIB.removed_sources.clear()
     return _GLIB
 
 
@@ -121,6 +134,20 @@ class TestSocketSetup:
         make_server(lambda cmd: None)
         mode = stat.S_IMODE(os.stat(runtime / 'xx-wm.sock').st_mode)
         assert mode == 0o600
+
+
+class TestWatchLifecycle:
+    def test_stop_removes_io_watch_source(self, make_server, runtime):
+        server = make_server(lambda cmd: None)
+        assert _GLIB.live_sources
+        server.stop()
+        assert not _GLIB.live_sources
+
+    def test_stop_is_idempotent_source_removed_once(self, make_server, runtime):
+        server = make_server(lambda cmd: None)
+        server.stop()
+        server.stop()
+        assert len(_GLIB.removed_sources) == 1
 
 
 class TestDispatchLoop:

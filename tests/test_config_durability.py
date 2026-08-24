@@ -47,12 +47,95 @@ class TestAtomicSave:
 
         after = json.loads(config.config_path.read_text(encoding='utf-8'))
         assert after == before
+        assert list(config.config_dir.glob('*.tmp')) == []
 
     def test_saved_file_mode_is_0600(self, tmp_path):
         config = _config(tmp_path)
         config.set_pin('123456')
         mode = stat.S_IMODE(os.stat(config.config_path).st_mode)
         assert mode == 0o600
+
+
+class TestSkipUnchangedSave:
+    """eMMC wear guard: save() must not touch the flash when the serialized
+    payload is byte-identical to what's on disk. launch_counts legitimately
+    changes per launch — those writes still happen."""
+
+    @pytest.fixture
+    def _replace_spy(self, monkeypatch):
+        """Count os.replace calls (one per real disk write) while passing
+        them through to the real filesystem."""
+        calls: list[tuple] = []
+        real_replace = os.replace
+
+        def _spy(src, dst, **kwargs):
+            calls.append((src, dst))
+            return real_replace(src, dst, **kwargs)
+
+        monkeypatch.setattr(os, 'replace', _spy)
+        return calls
+
+    def test_second_identical_save_performs_no_write(self, tmp_path, _replace_spy):
+        config = _config(tmp_path)
+        config.data['theme'] = 'ocean'
+        config.save()
+        assert len(_replace_spy) == 1  # baseline: first save writes
+        on_disk = config.config_path.read_text(encoding='utf-8')
+
+        config.save()  # no mutation since the last save
+        assert len(_replace_spy) == 1  # skipped: no second write
+        assert config.config_path.read_text(encoding='utf-8') == on_disk
+        assert list(config.config_dir.glob('*.tmp')) == []  # no orphan tmp
+
+    def test_mutated_payload_still_writes(self, tmp_path, _replace_spy):
+        config = _config(tmp_path)
+        config.save()
+        assert len(_replace_spy) == 1
+
+        config.record_launch('notes.desktop')  # launch_counts changed
+        assert len(_replace_spy) == 2
+
+        config.data['theme'] = 'forest'
+        config.save()
+        assert len(_replace_spy) == 3
+
+    def test_repeated_launches_of_same_app_write_only_once(self, tmp_path, _replace_spy):
+        config = _config(tmp_path)
+        config.record_launch('notes.desktop')
+        assert len(_replace_spy) == 1
+
+        config.record_launch('notes.desktop')  # count grew → payload differs
+        assert len(_replace_spy) == 2
+
+    def test_externally_edited_file_is_rewritten(self, tmp_path, _replace_spy):
+        """Read-compare (not a cached flag): an external edit makes the next
+        save write again even with unchanged in-memory data."""
+        config = _config(tmp_path)
+        config.save()
+        assert len(_replace_spy) == 1
+
+        config.config_path.write_text('{}\n', encoding='utf-8')
+        config.save()  # same in-memory data, but disk content differs
+        assert len(_replace_spy) == 2
+        assert json.loads(config.config_path.read_text(encoding='utf-8')) != {}
+
+    def test_corrupt_file_on_disk_still_saves(self, tmp_path, _replace_spy):
+        """Invalid UTF-8 / garbage on disk must not kill save(): the write
+        path self-heals it (parity with load()'s tolerance of junk)."""
+        config = _config(tmp_path)
+        config.save()
+        config.config_path.write_bytes(b'\xff\xfe not json \x00')
+        config.data['theme'] = 'ocean'
+        config.save()
+        assert len(_replace_spy) == 2
+        assert json.loads(config.config_path.read_text(encoding='utf-8'))[
+            'theme'] == 'ocean'
+
+    def test_first_save_with_missing_file_writes(self, tmp_path, _replace_spy):
+        config = _config(tmp_path)
+        config.save()
+        assert len(_replace_spy) == 1
+        assert config.config_path.exists()
 
 
 class TestPinHashing:

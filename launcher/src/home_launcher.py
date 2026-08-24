@@ -68,7 +68,8 @@ def theme_css(preset: ThemePreset) -> str:
 
 _WAYDROID_ENV = {
     **_os.environ,
-    'WAYLAND_DISPLAY': 'wayland-0',
+    # Honor the session we were launched into; wayland-0 is only the fallback.
+    'WAYLAND_DISPLAY': _os.environ.get('WAYLAND_DISPLAY') or 'wayland-0',
     'XDG_RUNTIME_DIR': f'/run/user/{_os.getuid()}',
 }
 

@@ -259,6 +259,100 @@ class TestPinConfigIsLive:
         assert lock.unlocked == 1  # new PIN accepted
 
 
+class _RecordingProvider:
+    """Fake Gtk.CssProvider: records load_from_data payloads."""
+
+    def __init__(self, loads: list):
+        self._loads = loads
+
+    def load_from_data(self, data):
+        self._loads.append(data)
+
+
+class TestThemeProviderDedupe:
+    """LockScreen can be built repeatedly; the display-level theme provider
+    must be registered once and its data reloaded — stacking a new provider
+    per construction accumulates without bound (font_theme idiom)."""
+
+    @pytest.fixture
+    def lock_module(self, monkeypatch):
+        """Fresh lock_screen import bound to a recording fake gi stack.
+        The previous module binding is restored afterwards so later tests
+        never see the fakes baked into its globals."""
+        loads: list[bytes] = []
+        added: list[object] = []
+
+        gdk = types.ModuleType('gi.repository.Gdk')
+        gdk.Display = types.SimpleNamespace(get_default=lambda: object())
+        gtk = types.ModuleType('gi.repository.Gtk')
+        gtk.Window = type('Window', (), {})  # class LockScreen(Gtk.Window)
+        gtk.CssProvider = lambda: _RecordingProvider(loads)
+        gtk.StyleContext = types.SimpleNamespace(
+            add_provider_for_display=lambda _d, p, _prio: added.append(p))
+        gtk.STYLE_PROVIDER_PRIORITY_APPLICATION = 800
+        glib = types.ModuleType('gi.repository.GLib')
+
+        repo = types.ModuleType('gi.repository')
+        repo.Gdk, repo.Gtk, repo.GLib = gdk, gtk, glib
+        gi = types.ModuleType('gi')
+
+        def _require_version(namespace, _version):
+            if namespace == 'Gtk4LayerShell':
+                raise ValueError(f'{namespace} not available')
+
+        gi.require_version = _require_version
+        gi.repository = repo
+
+        monkeypatch.setitem(sys.modules, 'gi', gi)
+        monkeypatch.setitem(sys.modules, 'gi.repository', repo)
+        monkeypatch.setitem(sys.modules, 'gi.repository.Gdk', gdk)
+        monkeypatch.setitem(sys.modules, 'gi.repository.Gtk', gtk)
+        monkeypatch.setitem(sys.modules, 'gi.repository.GLib', glib)
+
+        saved = sys.modules.pop('lock_screen', None)
+        try:
+            import lock_screen
+            yield types.SimpleNamespace(
+                module=lock_screen, loads=loads, added=added)
+        finally:
+            if saved is not None:
+                sys.modules['lock_screen'] = saved
+            else:
+                sys.modules.pop('lock_screen', None)
+
+    def test_repeated_constructions_register_one_provider(self, lock_module):
+        from config import THEME_PRESETS
+        ls = lock_module.module
+        assert ls._theme_provider is None  # fresh module state
+
+        ls._apply_lock_theme(THEME_PRESETS['amoled'])
+        ls._apply_lock_theme(THEME_PRESETS['amoled'])  # second construction
+
+        assert len(lock_module.added) == 1  # registered once per display
+        assert len(lock_module.loads) == 2  # sheet data reloaded per build
+
+    def test_theme_change_reaches_the_shared_provider(self, lock_module):
+        from config import THEME_PRESETS
+        ls = lock_module.module
+        ls._apply_lock_theme(THEME_PRESETS['amoled'])
+        ls._apply_lock_theme(THEME_PRESETS['paper'])
+
+        latest = lock_module.loads[-1]
+        assert THEME_PRESETS['paper'].background.encode() in latest
+        assert THEME_PRESETS['amoled'].background.encode() not in latest
+
+    def test_headless_no_display_never_touches_providers(
+            self, lock_module, monkeypatch):
+        ls = lock_module.module
+        monkeypatch.setattr(ls.Gdk.Display, 'get_default', lambda: None)
+
+        ls._apply_lock_theme(__import__('config').THEME_PRESETS['amoled'])
+
+        assert ls._theme_provider is None
+        assert lock_module.added == []
+        assert lock_module.loads == []
+
+
 class TestFingerprintVerifyArgv:
     """S3 regression: fprintd-verify takes the finger via -f; the username is
     positional (defaulting to the invoking user). '-f <user>' can never match,

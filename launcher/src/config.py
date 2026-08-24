@@ -108,6 +108,10 @@ DEFAULT_CONFIG = {
     'weather_lon': None,
 }
 
+# Free-form string keys (docs/config.md); a container value here would
+# crash set_text() consumers when the settings page is built.
+_STRING_KEYS = ('apn', 'apn_user', 'apn_pass')
+
 
 class ShellConfig:
     def __init__(self) -> None:
@@ -132,18 +136,42 @@ class ShellConfig:
         if not isinstance(loaded, dict):
             return
 
-        self.data.update(loaded)
+        for key, value in loaded.items():
+            default = DEFAULT_CONFIG.get(key)
+            # A scalar under a list/dict default ("pinned": "foo") would be
+            # iterated char-by-char downstream; keep the default instead.
+            if isinstance(default, (list, dict)) and not isinstance(
+                    value, type(default)):
+                continue
+            if key in _STRING_KEYS and not isinstance(value, str):
+                continue
+            self.data[key] = value
 
     def save(self) -> None:
+        payload = json.dumps(self.data, indent=2) + '\n'
+        # eMMC wear guard: saves fire on every app launch and every settings
+        # touch, often with nothing actually changed. Skip the flash write
+        # when the serialized payload is already what's on disk; a mutated
+        # payload (launch_counts per launch) still writes normally.
+        try:
+            if self.config_path.read_text(encoding='utf-8') == payload:
+                return
+        except (OSError, ValueError):
+            pass  # missing, unreadable, or corrupt file — take the write path
         self.config_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = self.config_path.with_name(self.config_path.name + '.tmp')
         # 0600 at open(): the file never exists world-readable, even briefly.
         fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
-            fh.write(json.dumps(self.data, indent=2) + '\n')
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_path, self.config_path)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, self.config_path)
+        finally:
+            # After a successful replace the tmp name is gone, so this only
+            # ever deletes a mid-write orphan.
+            tmp_path.unlink(missing_ok=True)
         os.chmod(self.config_path, 0o600)
 
     @property

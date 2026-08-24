@@ -131,6 +131,28 @@ def theme_css(preset: ThemePreset) -> str:
 .shake {{ animation: shake 0.35s ease; }}
 """
 
+_theme_provider: Gtk.CssProvider | None = None
+
+
+def _apply_lock_theme(theme: ThemePreset) -> None:
+    """Display-level lock-screen sheet: register the provider once and reload
+    its data per construction. LockScreen can be built repeatedly, and a new
+    display-level provider per build would accumulate without bound — same
+    add-once discipline as font_theme.apply_global_font."""
+    global _theme_provider
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    if _theme_provider is None:
+        _theme_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            display,
+            _theme_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+        )
+    _theme_provider.load_from_data(theme_css(theme).encode('utf-8'))
+
+
 _KEYPAD: list[tuple[str, str]] = [
     ('1', ''),    ('2', 'ABC'), ('3', 'DEF'),
     ('4', 'GHI'), ('5', 'JKL'), ('6', 'MNO'),
@@ -177,13 +199,7 @@ class LockScreen(Gtk.Window):
         self._fp_running  = False
         self._keypad_btns: list[Gtk.Button] = []
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(self._config.theme).encode('utf-8'))
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
-        )
+        _apply_lock_theme(self._config.theme)
 
         self.set_child(self._build())
         self._refresh_clock()

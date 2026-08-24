@@ -69,6 +69,13 @@ def test_lock_sheet_keeps_semantic_colors():
     assert config.WARNING_ORANGE in css
 
 
+def test_wizard_sheet_styles_pin_error_with_danger_red():
+    _lock_screen, first_boot = _surfaces()
+    css = first_boot.theme_css(PRESETS['amoled'])
+    assert '.pin-dots.error' in css
+    assert config.DANGER_RED in css
+
+
 def test_themeable_colors_come_from_the_preset_not_constants():
     paper = PRESETS['paper']
     amoled = PRESETS['amoled']

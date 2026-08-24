@@ -1,9 +1,6 @@
-/* ── Uniform black background ───────────────────────────────────── */
-/* Set the one true background on the window; everything inside is  */
-/* transparent so there is a single colour across the whole screen. */
-window.xx-wm {
-  background-color: #000;
-}
+/* Everything inside the window stays transparent so the themed .shell-root
+   background is the single colour across the whole screen (WS22: the theme
+   pipeline owns every color; no static hexes here). */
 window.xx-wm scrolledwindow,
 window.xx-wm scrolledwindow > viewport,
 window.xx-wm stack,
@@ -111,12 +108,6 @@ entry {
 
 .app-subtitle {
   font-size: 10.5pt;
-}
-
-.nav-row {
-  border-top-width: 1px;
-  border-top-style: solid;
-  padding-top: 12px;
 }
 
 .nav-button,

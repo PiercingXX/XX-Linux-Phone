@@ -1,4 +1,5 @@
 """Tests for config.py - pure logic, no GTK imports."""
+import json
 from pathlib import Path
 
 import pytest
@@ -198,17 +199,67 @@ class TestShellConfig:
         config = ShellConfig()
         config.config_dir = tmp_path / 'config'
         config.config_path = config.config_dir / 'config.json'
-        
+
         # Write an old-style config
         config.data = {'theme': 'amoled', 'font': 'space-mono'}
         config.save()
-        
+
         # Load it back
         config.load()
-        
+
         assert config.theme.key == 'amoled'
         assert config.home_slots == []
         assert config.default_layout_applied is False
+
+
+class TestLoadTypeGuards:
+    """A hand-edited config with a scalar where a list/dict belongs must
+    fall back to the default at merge time, not leak into self.data."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+
+    def _config_with_disk_payload(self, tmp_path, payload):
+        config = ShellConfig()
+        config.config_dir = tmp_path / 'config'
+        config.config_path = config.config_dir / 'config.json'
+        config.config_dir.mkdir(parents=True, exist_ok=True)
+        config.config_path.write_text(json.dumps(payload), encoding='utf-8')
+        config.load()
+        return config
+
+    def test_corrupt_pinned_loads_default(self, tmp_path):
+        config = self._config_with_disk_payload(tmp_path, {'pinned': 'foo'})
+        assert config.data['pinned'] == []
+        assert config.pinned == []
+
+    @pytest.mark.parametrize('key,default', [
+        ('hidden_apps', []),
+        ('home_slots', []),
+        ('dnd_schedules', []),
+        ('focus_apps', []),
+        ('app_labels', {}),
+        ('muted_apps', {}),
+    ])
+    def test_corrupt_container_keys_load_defaults(self, tmp_path, key, default):
+        config = self._config_with_disk_payload(tmp_path, {key: 'foo'})
+        assert config.data[key] == default
+
+    def test_corrupt_widgets_load_full_default(self, tmp_path):
+        config = self._config_with_disk_payload(tmp_path, {'widgets': 42})
+        assert config.data['widgets'] == DEFAULT_CONFIG['widgets']
+
+    @pytest.mark.parametrize('key', ['apn', 'apn_user', 'apn_pass'])
+    def test_corrupt_string_keys_dropped(self, tmp_path, key):
+        config = self._config_with_disk_payload(tmp_path, {key: ['junk']})
+        assert config.data.get(key, '') == ''
+
+    def test_unknown_and_scalar_keys_pass_through(self, tmp_path):
+        payload = {'pin_hash': 'deadbeef', 'auto_lock_timeout': 30}
+        config = self._config_with_disk_payload(tmp_path, payload)
+        assert config.data['pin_hash'] == 'deadbeef'
+        assert config.data['auto_lock_timeout'] == 30
 
 
 if __name__ == '__main__':
