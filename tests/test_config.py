@@ -138,6 +138,61 @@ class TestShellConfig:
         assert 'a.app' not in config.muted_apps
         assert 'b.app' in config.muted_apps
 
+    def test_launch_counts_roundtrip(self, tmp_path):
+        config = ShellConfig()
+        config.config_dir = tmp_path / 'config'
+        config.config_path = config.config_dir / 'config.json'
+
+        config.record_launch('org.example.A')
+        config.record_launch('org.example.A')
+        config.record_launch('org.example.B')
+        config.load()
+
+        assert config.launch_counts == {'org.example.A': 2, 'org.example.B': 1}
+
+    def test_launch_counts_corrupt_values_skipped(self, tmp_path):
+        config = ShellConfig()
+        config.config_dir = tmp_path / 'config'
+        config.config_path = config.config_dir / 'config.json'
+
+        config.data = {
+            'launch_counts': {
+                'good.app': 3,
+                'numeric.str': '7',
+                'bad.str': 'bar',
+                'bad.none': None,
+                'bad.dict': {'deep': 1},
+                'bad.list': ['x'],
+            }
+        }
+        config.save()
+        config.load()
+
+        assert config.launch_counts == {'good.app': 3, 'numeric.str': 7}
+
+    def test_launch_counts_non_dict_yields_empty(self, tmp_path):
+        config = ShellConfig()
+        config.config_dir = tmp_path / 'config'
+        config.config_path = config.config_dir / 'config.json'
+
+        for junk in ([1, 2], 'nope', 42, None):
+            config.data = {'launch_counts': junk}
+            config.save()
+            config.load()
+            assert config.launch_counts == {}
+
+    def test_record_launch_recovers_from_corrupt_counts(self, tmp_path):
+        config = ShellConfig()
+        config.config_dir = tmp_path / 'config'
+        config.config_path = config.config_dir / 'config.json'
+
+        config.data = {'launch_counts': {'a.app': 'garbage'}}
+        config.save()
+        config.load()
+
+        config.record_launch('a.app')
+        assert config.launch_counts == {'a.app': 1}
+
     def test_migration_from_old_config(self, tmp_path):
         """Old configs without home_slots should work."""
         config = ShellConfig()

@@ -263,9 +263,15 @@ class ShellConfig:
     @property
     def launch_counts(self) -> dict[str, int]:
         val = self.data.get('launch_counts', {})
-        if isinstance(val, dict):
-            return {str(k): int(v) for k, v in val.items()}
-        return {}
+        if not isinstance(val, dict):
+            return {}
+        out: dict[str, int] = {}
+        for k, v in val.items():
+            try:
+                out[str(k)] = int(v)
+            except (TypeError, ValueError):
+                continue
+        return out
 
     def record_launch(self, app_id: str) -> None:
         counts = self.launch_counts
