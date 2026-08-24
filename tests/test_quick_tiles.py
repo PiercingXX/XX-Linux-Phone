@@ -1,11 +1,18 @@
-"""Tests for the Hotspot + Location shade tiles (WS25.5).
+"""Tests for the Hotspot + Location shade tiles (WS25.5 + review fixes).
 
-Hotspot toggles NM via nmcli (`device wifi hotspot` on, `connection down
-Hotspot` off) and hides unless NM reports a WiFi device (same D-Bus probe
-family as the WiFi tile). Location registers an org.freedesktop.GeoClue2.Agent
-and gates app access through it — GeoClue2's Manager has no enable/disable
-control, the agent authorization surface is the documented lever (the one
-GNOME Shell and phosh pull).
+Hotspot turns ON via nmcli (`device wifi hotspot`, NM auto-creates whatever
+profile it needs) but answers OFF/state/visibility entirely from NM's D-Bus
+view: the active connection of Type 'ap' is resolved by object path and torn
+down with Manager.DeactivateConnection. No profile-name assumption, no mixed
+transports — gate, state query, and toggle all share one view.
+
+Location registers an org.freedesktop.GeoClue2.Agent as a global master
+switch (not per-app policy): while ON every client is granted up to EXACT
+accuracy, while OFF MaxAccuracyLevel=0 denies everyone. Geoclue serves ONE
+agent system-wide, so registration is lazy (first enable), rejection (e.g.
+phosh's prompting agent owns the slot) hides the tile, disable unregisters to
+free the slot, and the daemon's name owner is watched so the tile never
+claims ON without a live registration across geoclue restarts.
 
 Both tiles must hide when their backing service is absent and must survive the
 service disappearing mid-session without crashing.
@@ -105,7 +112,7 @@ class _Bus:
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
-        return _Reply(reply)
+        return reply if isinstance(reply, _Reply) else _Reply(reply)
 
     def register_object(self, *args):
         self.registrations.append(args)
@@ -126,6 +133,9 @@ class _FakeLocation:
 
     def available(self):
         return self.available_flag
+
+    def is_active(self):
+        return bool(self.enabled)
 
     def set_enabled(self, value):
         self.enabled = bool(value)
@@ -169,6 +179,12 @@ def _pin_dbus_seams(monkeypatch):
             assert 'MaxAccuracyLevel' in xml
             return _FakeNodeInfo()
 
+    watches = []
+
+    def _watch_name(bus_type, name, flags, appeared, vanished):
+        watches.append((bus_type, name, flags, appeared, vanished))
+        return len(watches)
+
     glib = types.SimpleNamespace(
         Error=Exception,
         Variant=_RecordingVariant,
@@ -178,6 +194,10 @@ def _pin_dbus_seams(monkeypatch):
         DBusCallFlags=types.SimpleNamespace(NONE=0),
         DBusSignalFlags=types.SimpleNamespace(NONE=0),
         DBusNodeInfo=_FakeNodeInfo,
+        BusType=types.SimpleNamespace(SYSTEM='system'),
+        BusNameWatcherFlags=types.SimpleNamespace(NONE=0),
+        bus_watch_name=_watch_name,
+        _watches=watches,
     )
     monkeypatch.setattr(quick_actions, 'GLib', glib)
     monkeypatch.setattr(quick_actions, 'Gio', gio)
@@ -207,7 +227,7 @@ class TestHotspotGating:
         assert 'DeviceType' in src
 
 
-class TestHotspotToggleArgv:
+class TestHotspotToggleEnable:
     def test_enable_issues_nmcli_hotspot(self, monkeypatch):
         calls = []
         monkeypatch.setattr(subprocess, 'Popen',
@@ -215,42 +235,95 @@ class TestHotspotToggleArgv:
         quick_actions._toggle_hotspot(True)
         assert calls == [['nmcli', 'device', 'wifi', 'hotspot']]
 
-    def test_disable_downs_the_hotspot_connection(self, monkeypatch):
-        calls = []
-        monkeypatch.setattr(subprocess, 'Popen',
-                            lambda cmd, **k: calls.append(cmd))
-        quick_actions._toggle_hotspot(False)
-        assert calls == [['nmcli', 'connection', 'down', 'Hotspot']]
-
     def test_missing_nmcli_does_not_raise(self, monkeypatch):
         def _boom(cmd, **k):
             raise FileNotFoundError('nmcli')
         monkeypatch.setattr(subprocess, 'Popen', _boom)
+        quick_actions._toggle_hotspot(True)
+
+
+class TestHotspotDisableDBus:
+    _AC = '/org/freedesktop/NetworkManager/ActiveConnection/7'
+
+    def _bus_with_active(self, monkeypatch, actype='ap'):
+        _pin_dbus_seams(monkeypatch)
+        bus = _Bus(replies=[_Reply([self._AC]), _Reply(actype)])
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
+        return bus
+
+    def test_disable_deactivates_resolved_ap_connection(self, monkeypatch):
+        bus = self._bus_with_active(monkeypatch)
+        quick_actions._toggle_hotspot(False)
+        assert len(bus.calls) == 3
+        deactivate = bus.calls[-1]
+        assert deactivate[:4] == (
+            'org.freedesktop.NetworkManager',
+            '/org/freedesktop/NetworkManager',
+            'org.freedesktop.NetworkManager', 'DeactivateConnection')
+        assert deactivate[4].args == ('(o)', (self._AC,))
+
+    def test_disable_works_without_any_profile_named_hotspot(
+            self, monkeypatch):
+        bus = self._bus_with_active(monkeypatch)
+        assert getattr(quick_actions, '_HOTSPOT_CONN', None) is None
+        quick_actions._toggle_hotspot(False)
+        assert bus.calls[-1][3] == 'DeactivateConnection'
+        assert bus.calls[-1][4].args == ('(o)', (self._AC,))
+
+    def test_disable_ignores_client_wifi_connections(self, monkeypatch):
+        bus = self._bus_with_active(monkeypatch, actype='802-11-wireless')
+        quick_actions._toggle_hotspot(False)
+        assert all(call[3] != 'DeactivateConnection' for call in bus.calls)
+
+    def test_disable_without_active_connection_is_noop(self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        bus = _Bus(replies=[_Reply([])])
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
+        quick_actions._toggle_hotspot(False)
+        assert len(bus.calls) == 1
+
+    def test_disable_without_bus_never_raises(self, monkeypatch):
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: None)
         quick_actions._toggle_hotspot(False)
 
 
 class TestHotspotStateQuery:
-    def test_active_connection_reports_on(self, monkeypatch):
-        monkeypatch.setattr(subprocess, 'check_output',
-                            lambda cmd, **k: 'MyWifi\nHotspot\n')
+    def test_active_ap_connection_reports_on(self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        ac = '/org/freedesktop/NetworkManager/ActiveConnection/2'
+        bus = _Bus(replies=[_Reply([ac]), _Reply('ap')])
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
         assert quick_actions._get_hotspot_state() is True
 
-    def test_no_hotspot_connection_reports_off(self, monkeypatch):
-        monkeypatch.setattr(subprocess, 'check_output',
-                            lambda cmd, **k: 'MyWifi\n')
+    def test_client_wifi_only_reports_off(self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        ac = '/org/freedesktop/NetworkManager/ActiveConnection/2'
+        bus = _Bus(replies=[_Reply([ac]), _Reply('802-11-wireless')])
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
         assert quick_actions._get_hotspot_state() is False
 
-    def test_nmcli_failure_reports_unknown(self, monkeypatch):
-        def _fail(cmd, **k):
-            raise subprocess.CalledProcessError(1, 'nmcli')
-        monkeypatch.setattr(subprocess, 'check_output', _fail)
+    def test_nm_down_reports_unknown(self, monkeypatch):
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: None)
         assert quick_actions._get_hotspot_state() is None
 
-    def test_nmcli_missing_reports_unknown(self, monkeypatch):
-        def _missing(cmd, **k):
-            raise OSError('nmcli')
-        monkeypatch.setattr(subprocess, 'check_output', _missing)
+    def test_dbus_error_reports_unknown(self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        bus = _Bus(replies=[Exception('NM went away')])
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
         assert quick_actions._get_hotspot_state() is None
+
+    def test_gate_state_and_toggle_share_one_dbus_view(self):
+        """The visibility gate, the state query and the OFF toggle must all
+        answer from the same NM D-Bus view — no nmcli side channel."""
+        import inspect
+        assert '_dbus_system()' in inspect.getsource(
+            quick_actions._nm_has_wifi_device)
+        state_src = inspect.getsource(quick_actions._get_hotspot_state)
+        assert '_dbus_system' in state_src
+        assert '_active_hotspot_path' in state_src
+        assert 'nmcli' not in inspect.getsource(quick_actions._get_hotspot_state)
+        assert '_active_hotspot_path' in inspect.getsource(
+            quick_actions._toggle_hotspot)
 
 
 # --- Location gating --------------------------------------------------------
@@ -387,29 +460,275 @@ class TestLocationAgentMechanism:
         assert state.available() is False
         assert bus.registrations == []
 
-    def test_rejected_agent_stays_hidden_and_cleans_up(self, monkeypatch):
-        _pin_dbus_seams(monkeypatch)
-        """Geoclue rejects unwhitelisted agents: probe OK, RegisterAgent not."""
-        bus = _Bus(replies=[_Reply(False), Exception('Unauthorized')])
-        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
-        state = quick_actions.LocationState()
-        assert state.available() is False
-        assert len(bus.registrations) == 1
-        assert bus.unregistered == [1]
-
-    def test_accepted_registration_makes_tile_available(self, monkeypatch):
+    def test_probe_is_read_only_never_registers(self, monkeypatch):
         _pin_dbus_seams(monkeypatch)
         bus = _Bus(replies=[_Reply(False)])
         monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
         state = quick_actions.LocationState()
         assert state.available() is True
-        assert state.enabled is False
+        assert bus.registrations == []
+        assert all(call[3] != 'RegisterAgent' for call in bus.calls)
 
     def test_no_bus_toggle_keeps_intent_without_raising(self, monkeypatch):
         monkeypatch.setattr(quick_actions, '_dbus_system', lambda: None)
         state = quick_actions.LocationState()
         state.set_enabled(True)
         assert state.enabled is True
+        assert state.is_active() is False
+
+
+# --- lazy registration (one agent slot, claimed only on enable) --------------
+
+class TestLazyRegistration:
+    def _state_with_bus(self, monkeypatch, replies=None):
+        _pin_dbus_seams(monkeypatch)
+        bus = _Bus(replies=list(replies or []))
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
+        return quick_actions.LocationState(), bus
+
+    def test_first_enable_registers_lazily(self, monkeypatch):
+        state, bus = self._state_with_bus(monkeypatch)
+        assert bus.registrations == []
+        state.set_enabled(True)
+        registers = [call for call in bus.calls if call[3] == 'RegisterAgent']
+        assert len(registers) == 1
+        assert state.is_active() is True
+
+    def test_rejection_cleans_up_and_hides_tile(self, monkeypatch):
+        state, bus = self._state_with_bus(
+            monkeypatch, replies=[Exception('Unauthorized')])
+        state.set_enabled(True)
+        assert state.enabled is False
+        assert state.is_active() is False
+        assert len(bus.registrations) == 1
+        assert bus.unregistered == [1]
+        assert state.available() is False
+
+    def test_second_enable_after_slot_freed_retries(self, monkeypatch):
+        state, bus = self._state_with_bus(
+            monkeypatch, replies=[Exception('Unauthorized')])
+        state.set_enabled(True)
+        assert state.available() is False
+        state.set_enabled(True)
+        registers = [call for call in bus.calls if call[3] == 'RegisterAgent']
+        assert len(registers) == 2
+        assert state.is_active() is True
+        assert state.available() is True
+
+
+class TestDisableUnregistersAgent:
+    def test_off_revokes_then_unregisters_and_frees_slot(self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        bus = _Bus()
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
+        state = quick_actions.LocationState()
+        state.set_enabled(True)
+        state.set_enabled(False)
+
+        assert state.is_active() is False
+        unregister = bus.calls[-1]
+        assert unregister[:4] == (
+            'org.freedesktop.GeoClue2', '/org/freedesktop/GeoClue2/Manager',
+            'org.freedesktop.GeoClue2.Manager', 'UnregisterAgent')
+        assert unregister[4].args == ('(o)', (quick_actions._AGENT_PATH,))
+        revoke = [(sig[2], sig[3], sig[4]) for sig in bus.signals][-1]
+        assert revoke[2].args == ('(sa{sv}as)', (
+            'org.freedesktop.GeoClue2.Agent',
+            {'MaxAccuracyLevel': _RecordingVariant('u', 0)},
+            [],
+        ))
+        assert bus.unregistered == [1]
+
+    def test_off_leaves_daemon_available_for_a_future_enable(self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        bus = _Bus()
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
+        state = quick_actions.LocationState()
+        state.set_enabled(True)
+        state.set_enabled(False)
+        assert state.available() is True
+
+
+# --- geoclue owner watch (restart mid-session) -------------------------------
+
+class TestGeoclueOwnerWatch:
+    def _wired(self, monkeypatch, replies=None, owner=':1.50'):
+        _pin_dbus_seams(monkeypatch)
+        bus = _Bus(replies=list(replies or []))
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
+        state = quick_actions.LocationState()
+        _, name, _, appeared, vanished = quick_actions.Gio._watches[-1]
+        assert name == 'org.freedesktop.GeoClue2'
+        appeared(None, 'org.freedesktop.GeoClue2', owner)
+        return state, bus, appeared, vanished
+
+    def test_construction_watches_geoclue_name(self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        quick_actions.LocationState()
+        _, name, _, appeared, vanished = quick_actions.Gio._watches[-1]
+        assert name == 'org.freedesktop.GeoClue2'
+        assert callable(appeared)
+        assert callable(vanished)
+
+    def test_restart_resets_then_reregisters_while_on(self, monkeypatch):
+        state, bus, appeared, vanished = self._wired(monkeypatch)
+        state.set_enabled(True)
+        assert state.is_active() is True
+
+        vanished(None, 'org.freedesktop.GeoClue2')
+        assert state.is_active() is False
+        assert state.enabled is True
+
+        appeared(None, 'org.freedesktop.GeoClue2', ':1.99')
+        assert state.is_active() is True
+        registers = [call for call in bus.calls if call[3] == 'RegisterAgent']
+        assert len(registers) == 2
+        assert len(bus.registrations) == 2
+        assert all(reg[0] == quick_actions._AGENT_PATH
+                   for reg in bus.registrations)
+        assert bus.unregistered == [1]
+
+    def test_restart_with_slot_taken_leaves_tile_hidden(self, monkeypatch):
+        state, bus, appeared, vanished = self._wired(
+            monkeypatch, replies=[_Reply(False), Exception('Unauthorized')])
+        state.set_enabled(True)
+        assert state.is_active() is True
+
+        vanished(None, 'org.freedesktop.GeoClue2')
+        appeared(None, 'org.freedesktop.GeoClue2', ':1.99')
+        assert state.enabled is False
+        assert state.is_active() is False
+        assert state.available() is False
+        assert len(bus.registrations) == 2
+
+    def test_stays_unregistered_across_restart_while_off(self, monkeypatch):
+        state, bus, appeared, vanished = self._wired(monkeypatch)
+        state.set_enabled(True)
+        state.set_enabled(False)
+        assert any(call[3] == 'UnregisterAgent' for call in bus.calls)
+
+        vanished(None, 'org.freedesktop.GeoClue2')
+        appeared(None, 'org.freedesktop.GeoClue2', ':1.100')
+        registers = [call for call in bus.calls if call[3] == 'RegisterAgent']
+        assert len(registers) == 1
+        assert state.is_active() is False
+
+    def test_same_owner_repeat_appearance_does_not_reregister(
+            self, monkeypatch):
+        _, bus, appeared, _ = self._wired(monkeypatch, owner=':1.5')
+        appeared(None, 'org.freedesktop.GeoClue2', ':1.5')
+        assert bus.calls == []
+        assert bus.registrations == []
+
+
+# --- panel wiring for location honesty ---------------------------------------
+
+class _FakeBtn:
+    def __init__(self):
+        self.visible = True
+        self.active = False
+        self.css = []
+
+    def set_visible(self, value):
+        self.visible = value
+
+    def set_active(self, value):
+        self.active = value
+
+    def get_active(self):
+        return self.active
+
+    def add_css_class(self, css):
+        self.css.append(css)
+
+    def remove_css_class(self, css):
+        if css in self.css:
+            self.css.remove(css)
+
+
+class _FakeLabel:
+    def __init__(self):
+        self.text = ''
+
+    def set_text(self, text):
+        self.text = text
+
+
+class TestLocationPanelHonesty:
+    def _panel_with_btn(self, loc):
+        panel = _bare_panel(location=loc)
+        panel._tile_buttons = {'location': _FakeBtn()}
+        panel._state_labels = {'location': _FakeLabel()}
+        panel._tile_state = {}
+        panel._updating = False
+        return panel
+
+    def test_owner_change_hides_button_until_daemon_returns(self):
+        class _Loc:
+            def __init__(self):
+                self.ok = True
+                self.enabled = False
+
+            def available(self):
+                return self.ok
+
+            def is_active(self):
+                return self.enabled and self.ok
+
+            def set_enabled(self, value):
+                self.enabled = bool(value)
+
+        loc = _Loc()
+        panel = self._panel_with_btn(loc)
+        btn = panel._tile_buttons['location']
+
+        loc.ok = False
+        panel._on_location_changed()
+        assert btn.visible is False
+        assert panel._tile_state['location'] is False
+        assert panel._state_labels['location'].text == 'off'
+
+        loc.ok = True
+        loc.enabled = True
+        panel._on_location_changed()
+        assert btn.visible is True
+        assert panel._tile_state['location'] is True
+        assert panel._state_labels['location'].text == 'on'
+
+    def test_failed_enable_snaps_tile_back_off_immediately(
+            self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        monkeypatch.setattr(quick_actions, '_nm_has_wifi_device', lambda: True)
+        bus = _Bus(replies=[_Reply(False), Exception('Unauthorized')])
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
+        state = quick_actions.LocationState()
+        panel = self._panel_with_btn(state)
+        btn = panel._tile_buttons['location']
+        tiles = {t.key: t for t in panel._tiles()}
+
+        btn.set_active(True)
+        panel._on_tile_toggled(btn, tiles['location'])
+
+        assert state.available() is False
+        assert btn.active is False
+        assert 'active' not in btn.css
+        assert panel._state_labels['location'].text == 'off'
+
+    def test_successful_enable_marks_tile_on(self, monkeypatch):
+        _pin_dbus_seams(monkeypatch)
+        bus = _Bus()
+        monkeypatch.setattr(quick_actions, '_dbus_system', lambda: bus)
+        state = quick_actions.LocationState()
+        panel = self._panel_with_btn(state)
+        btn = panel._tile_buttons['location']
+        tiles = {t.key: t for t in panel._tiles()}
+
+        btn.set_active(True)
+        panel._on_tile_toggled(btn, tiles['location'])
+
+        assert btn.active is True
+        assert 'active' in btn.css
+        assert panel._state_labels['location'].text == 'on'
 
 
 # --- mid-session disappearance ----------------------------------------------

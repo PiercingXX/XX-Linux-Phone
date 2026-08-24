@@ -182,36 +182,84 @@ def _toggle_torch(enabled: bool) -> None:
             pass
 
 
-_HOTSPOT_CONN = 'Hotspot'  # the name NM auto-creates for `device wifi hotspot`
+_NM_ACTIVE_TYPE_AP = 'ap'  # ActiveConnection.Type while a hotspot is up
+
+
+def _active_hotspot_path(bus: Gio.DBusConnection) -> str | None:
+    """Resolve the active hotspot by NM's Type='ap', never by profile name:
+    the profile behind it may be renamed or auto-created. Raises GLib.Error
+    when NM is unreachable."""
+    conns = bus.call_sync(
+        'org.freedesktop.NetworkManager',
+        '/org/freedesktop/NetworkManager',
+        'org.freedesktop.DBus.Properties', 'Get',
+        GLib.Variant('(ss)', ('org.freedesktop.NetworkManager',
+                              'ActiveConnections')),
+        GLib.VariantType('(v)'),
+        Gio.DBusCallFlags.NONE, 800, None,
+    ).unpack()[0]
+    for path in conns:
+        actype = bus.call_sync(
+            'org.freedesktop.NetworkManager', path,
+            'org.freedesktop.DBus.Properties', 'Get',
+            GLib.Variant('(ss)',
+                         ('org.freedesktop.NetworkManager.Connection.Active',
+                          'Type')),
+            GLib.VariantType('(v)'),
+            Gio.DBusCallFlags.NONE, 800, None,
+        ).unpack()[0]
+        if actype == _NM_ACTIVE_TYPE_AP:
+            return path
+    return None
 
 
 def _toggle_hotspot(enabled: bool) -> None:
-    cmd = (['nmcli', 'device', 'wifi', 'hotspot'] if enabled else
-           ['nmcli', 'connection', 'down', _HOTSPOT_CONN])
+    if enabled:
+        try:
+            subprocess.Popen(['nmcli', 'device', 'wifi', 'hotspot'],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, close_fds=True)
+        except OSError:
+            pass
+        return
+    bus = _dbus_system()
+    if bus is None:
+        return
     try:
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, close_fds=True)
-    except OSError:
+        active = _active_hotspot_path(bus)
+    except GLib.Error:
+        return
+    if active is None:
+        return
+    try:
+        bus.call_sync(
+            'org.freedesktop.NetworkManager',
+            '/org/freedesktop/NetworkManager',
+            'org.freedesktop.NetworkManager', 'DeactivateConnection',
+            GLib.Variant('(o)', (active,)), None,
+            Gio.DBusCallFlags.NONE, 800, None,
+        )
+    except GLib.Error:
         pass
 
 
 def _get_hotspot_state() -> bool | None:
-    try:
-        out = subprocess.check_output(
-            ['nmcli', '-t', '-f', 'NAME', 'connection', 'show', '--active'],
-            text=True, timeout=2,
-        )
-    except (OSError, subprocess.SubprocessError):
+    bus = _dbus_system()
+    if bus is None:
         return None
-    return _HOTSPOT_CONN in {line.strip() for line in out.splitlines()}
+    try:
+        return _active_hotspot_path(bus) is not None
+    except GLib.Error:
+        return None
 
 
-# --- Location (GeoClue2 authorization agent) ---
+# --- Location (GeoClue2 master switch) ---
 
-# GeoClue2 has no enable/disable control on its Manager; access is granted
-# per-app through a registered authorization agent (the same lever GNOME Shell
-# and phosh pull). We export org.freedesktop.GeoClue2.Agent and hand out
-# accuracy only while enabled; MaxAccuracyLevel=0 also revokes live clients.
+# GeoClue2 has no enable/disable control on its Manager; clients negotiate
+# with a registered authorization agent (the same lever GNOME Shell and phosh
+# pull). This tile is a global master switch, not per-app policy: while ON
+# every client is granted up to EXACT accuracy, while OFF MaxAccuracyLevel=0
+# denies all clients (and revokes live ones).
 _GEOCLUE_NAME = 'org.freedesktop.GeoClue2'
 _GEOCLUE_MGR_PATH = '/org/freedesktop/GeoClue2/Manager'
 _AGENT_IFACE = 'org.freedesktop.GeoClue2.Agent'
@@ -234,15 +282,34 @@ _ACC_EXACT = 8
 
 
 class LocationState:
-    """GeoClue2 toggle without root. Registering as the agent is gated on
-    success: geoclue rejects unwhitelisted agents, and then this tile stays
-    hidden exactly like Torch without an LED."""
+    """GeoClue2 toggle without root.
 
-    def __init__(self) -> None:
+    Geoclue serves ONE agent system-wide, so registration is lazy (first
+    enable) and the slot is released on disable; if another agent owns the
+    slot (e.g. phosh's prompting agent) the tile hides. The daemon's name
+    owner is watched so state stays honest across geoclue restarts.
+    """
+
+    def __init__(self, on_change: Callable[[], None] | None = None) -> None:
         self.enabled = False
+        self.on_change = on_change
         self._obj_id: int | None = None
+        self._owner: str | None = None
+        self._rejected = False
+        try:
+            Gio.bus_watch_name(
+                Gio.BusType.SYSTEM, _GEOCLUE_NAME,
+                Gio.BusNameWatcherFlags.NONE,
+                self._on_owner_appeared, self._on_owner_vanished)
+        except Exception:
+            pass
 
     def available(self) -> bool:
+        """Read-only probe: daemon reachable and no live rejection. Never
+        registers — claiming the system's single agent slot must wait for an
+        explicit enable."""
+        if self._rejected:
+            return False
         bus = _dbus_system()
         if bus is None:
             return False
@@ -256,20 +323,44 @@ class LocationState:
             )
         except GLib.Error:
             return False
-        return self._register(bus)
+        return True
+
+    def is_active(self) -> bool:
+        # Honest ON requires a live registration with the current owner.
+        return self.enabled and self._obj_id is not None
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = bool(enabled)
         bus = _dbus_system()
-        if bus is not None:
-            self._register(bus)
+        if bus is None:
+            return
+        if self.enabled:
+            self._activate(bus)
+        else:
+            self._deactivate(bus)
+
+    def _activate(self, bus: Gio.DBusConnection) -> None:
+        if not self._register(bus):
+            self.enabled = False
+            self._rejected = True
+        else:
+            self._rejected = False
             self._notify_max_accuracy(bus)
+        self._fire_change()
 
-    def _max_accuracy(self) -> int:
-        return _ACC_EXACT if self.enabled else 0
+    def _deactivate(self, bus: Gio.DBusConnection) -> None:
+        # Revoke before releasing the slot so the daemon sees MaxAccuracyLevel=0.
+        self._notify_max_accuracy(bus)
+        self._unregister(bus)
+        self._fire_change()
 
-    def _allow(self, req_accuracy: int) -> int:
-        return min(int(req_accuracy), _ACC_EXACT) if self.enabled else 0
+    def _fire_change(self) -> None:
+        if self.on_change is None:
+            return
+        try:
+            self.on_change()
+        except Exception:
+            pass
 
     def _register(self, bus: Gio.DBusConnection) -> bool:
         if self._obj_id is not None:
@@ -295,6 +386,60 @@ class LocationState:
             return False
         self._obj_id = obj_id
         return True
+
+    def _unregister(self, bus: Gio.DBusConnection) -> None:
+        if self._obj_id is None:
+            return
+        try:
+            bus.call_sync(
+                _GEOCLUE_NAME, _GEOCLUE_MGR_PATH,
+                _GEOCLUE_NAME + '.Manager', 'UnregisterAgent',
+                GLib.Variant('(o)', (_AGENT_PATH,)), None,
+                Gio.DBusCallFlags.NONE, 2000, None,
+            )
+        except Exception:
+            pass
+        self._drop_export(bus)
+
+    def _drop_export(self, bus: Gio.DBusConnection | None) -> None:
+        if self._obj_id is None:
+            return
+        if bus is not None:
+            try:
+                bus.unregister_object(self._obj_id)
+            except Exception:
+                pass
+        self._obj_id = None
+
+    def _on_owner_appeared(self, _conn, _name, owner: str) -> None:
+        if owner == self._owner:
+            return
+        # A new owner means the old daemon (and our registration with it)
+        # died, even when no vanish was observed first.
+        self._drop_export(_dbus_system())
+        self._owner = owner
+        self._rejected = False
+        if self.enabled:
+            bus = _dbus_system()
+            if bus is not None:
+                self._activate(bus)
+                return
+        self._fire_change()
+
+    def _on_owner_vanished(self, _conn, _name) -> None:
+        if self._owner is None:
+            return
+        self._owner = None
+        was_registered = self._obj_id is not None
+        self._drop_export(_dbus_system())
+        if was_registered:
+            self._fire_change()
+
+    def _max_accuracy(self) -> int:
+        return _ACC_EXACT if self.enabled else 0
+
+    def _allow(self, req_accuracy: int) -> int:
+        return min(int(req_accuracy), _ACC_EXACT) if self.enabled else 0
 
     def _notify_max_accuracy(self, bus: Gio.DBusConnection) -> None:
         if self._obj_id is None:
@@ -428,7 +573,7 @@ class QuickActionsPanel(Gtk.Box):
         self._state_labels: dict[str, Gtk.Label] = {}
         self._updating = False
         self._als = ALSBrightness()
-        self._location = LocationState()
+        self._location = LocationState(on_change=self._on_location_changed)
 
         provider = Gtk.CssProvider()
         provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
@@ -455,7 +600,7 @@ class QuickActionsPanel(Gtk.Box):
                 if not self._location.available():
                     continue
                 tile = tile._replace(
-                    get_state=lambda: bool(self._location.enabled),
+                    get_state=lambda: bool(self._location.is_active()),
                     set_state=self._location.set_enabled,
                 )
             if tile.key == 'dnd':
@@ -610,6 +755,11 @@ class QuickActionsPanel(Gtk.Box):
                 tile.set_state(new_state)
             except Exception:
                 pass
+        if tile.key == 'location':
+            # Registration may have failed: show the actual state, never the
+            # requested one.
+            self._apply_tile_state(tile.key, self._location.is_active())
+            return
         self._apply_tile_ui(tile.key, new_state)
 
     def _toggle_auto_brightness(self, enabled: bool) -> None:
@@ -626,6 +776,15 @@ class QuickActionsPanel(Gtk.Box):
             self._als.stop()
             if hasattr(self, '_bright_slider'):
                 self._bright_slider.set_sensitive(True)
+
+    def _on_location_changed(self) -> None:
+        btn = self._tile_buttons.get('location')
+        if btn is None:
+            return
+        shown = self._location.available()
+        btn.set_visible(shown)
+        self._apply_tile_state('location',
+                               shown and self._location.is_active())
 
     def _refresh_all_states(self) -> bool:
         for tile in self._tiles():
