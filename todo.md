@@ -99,9 +99,24 @@ Everything left that was buildable without a phone, from the WS26 deferred list 
 - **Hot-reload reaches every surface** — shade/call/dialer/SMS/power menu take the window's live ShellConfig and re-theme on reload; theme=custom renders custom_background; dead snap-back handlers removed; WAYLAND_DISPLAY respected everywhere.
 - **Deferred repairs** — ipc watch-source leak; config tmp-orphan cleanup, type guards, skip-identical saves (eMMC wear), corrupt-file self-heal; style.css bare-hex/border invariants now literally clean; wizard .error class defined; lock-screen provider dedupe; backup accepts gesture verbs; apps.sh Exec escaping verified through GKeyFile.
 
-Open items needing a ruling: drawer-folder scaffolding is design.md-spec'd but unreachable (folder_slots never populated) — implement or amend design.md; main.py's second PowerMenu() still snapshot-themed; hud/back_gesture/app_switcher/quick_actions/lock_screen don't yet route through resolve_theme, so theme=custom renders only the main window's surfaces (visual-only gap, no crash); sync MM1 accept/hangup is bounded at 5s on the UI thread — async Gio is the real fix.
+Open items needing a ruling: drawer-folder scaffolding ~~is design.md-spec'd but unreachable~~ (done in WS28 — folders live); main.py's second PowerMenu() ~~still snapshot-themed~~ (done in WS28); hud/back_gesture/app_switcher/quick_actions/lock_screen ~~don't yet route through resolve_theme~~ (done in WS28 — construction-time; live re-theme fan-out for these remains); sync MM1 accept/hangup ~~bounded at 5s on the UI thread~~ (done in WS28 — async with exactly-once callbacks).
 
 ---
+
+## Workstream 28 — Feature completion (done 2026-08-24, dev machine)
+
+Closed every remaining planner-flagged item. Suite 566 → **622 passing**.
+
+- **Async call control** — accept/hangup via Gio async D-Bus with exactly-once (success, error) callbacks on every path incl. dispatch-time raises; UI transitions only on success; double-fire guarded; a wedged ModemManager can no longer freeze the shell.
+- **Custom themes render everywhere** — hud/app_switcher/back_gesture/quick_actions/lock_screen resolve through resolve_theme with injected live config; shade threads config into its panel; main.py's HUD/back-layer/power-menu all get the live instance.
+- **Drawer folders are live** — the dead folder_slots branch now populates: folders with installed members list first, members keep original indices for the shared menu, empty folders never appear, uninstalled members skip at render, stale open folders collapse on refresh.
+- **Settings Gestures card completes the story** — the four system lisgd slots are exposed: any valid action or IPC verb, Default restores per-slot defaults, verb bindings render readably.
+- **Repairs** — power-button PowerMenu live config; chmod re-tighten on identical-save skip; folder centering uses rendered members; MM1 completions exactly-once on any exception.
+
+Remaining known gaps (all recorded): live re-theme fan-out for secondary surfaces (construction-time correct today); quick_actions panel provider outside _retheme_surfaces; drawer-folder centering/scroll polish needs a real panel.
+
+---
+
 
 
 ## Tablet verification checklist (needs the x86 tablet, stable login)
