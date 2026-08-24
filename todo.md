@@ -9,7 +9,7 @@ You are Skippy, working on **XX-WM**: a minimalist, text-first Wayland launcher/
 - **Spec**: `design.md` wins. Where this file and design.md disagree, design.md is right; flag the conflict in your commit message.
 - **Style**: Python 3.12+, GTK4/libadwaita via `gi`, match the existing code's idiom. No comments unless the WHY is non-obvious. Text-first UI: no icon grids, no images, monochrome per theme.
 - **CSS invariants** (`launcher/src/style.css`): uniform background from the active theme on every surface; children transparent; no borders anywhere except inside `.settings-page`; the **configured font applies launcher-wide** via `font_theme.apply_global_font` (default JetBrains Mono Nerd — surfaces must not hardcode a family); invisible Paned separators. Don't regress these.
-- **Verify before every commit**: `sh scripts/check.sh` (py_compile + ruff + pytest + shellcheck — **287 passing as of 2026-08-23**). Note 25.1: on this dev box `check.sh` currently *skips* ruff and shellcheck silently — run `.venv/bin/ruff check launcher/src tests` by hand until that's fixed. If you add a runtime behavior, run the shell locally (`cd launcher && PYTHONPATH=src python3 src/main.py` — it falls back to a window when layer-shell is absent) and exercise the flow.
+- **Verify before every commit**: `sh scripts/check.sh` (py_compile + ruff + pytest + shellcheck — **313 passing as of 2026-08-23**; ruff resolves from the venv per 25.1, shellcheck is absent on this box and prints a loud `SKIPPED`). If you add a runtime behavior, run the shell locally (`cd launcher && PYTHONPATH=src python3 src/main.py` — it falls back to a window when layer-shell is absent) and exercise the flow.
 - **Commits**: one commit per task or coherent group, imperative subject, body says what changed and how it was verified. Never commit `__pycache__`, `build/`, or `devices/*/downloads/` (gitignored).
 - **Config compatibility**: `~/.config/xx-wm/config.json` may exist from earlier runs (and auto-migrates from `piercing-shell`). Every schema change needs a silent migration path (missing keys → defaults; never crash on old configs). `docs/config.md` is the public API reference — update it with every key change.
 - **Decisions already made** (don't relitigate): the product is **XX-WM** (renamed 2026-08-17; app id `io.piercingxx.XXWM`, binaries `xx-wm`/`xx-wm-ipc`/`xx-wm-session`); phoc is the compositor; lisgd owns system-level gestures via IPC; the keyboard is **squeekboard** with the PiercingXX Colemak layouts; the lock screen stays ours (no phrog/phosh code, ever); DnD and Focus Mode copy the **Pixel's** behavior; the in-shell Settings page is **system-only** — every shell preference lives in `~/.config/xx-wm/`; backgrounds are solid colors only, never wallpaper; `aura` stays as a Linux-only bonus theme; the volume/brightness HUD is **in-shell** (wob dropped, WS21.1); Android-launcher parity syncs (2026-07-20/21) are already folded into design.md — design.md is current.
@@ -17,7 +17,7 @@ You are Skippy, working on **XX-WM**: a minimalist, text-first Wayland launcher/
 
 ## Status — where things stand (2026-08-23)
 
-**Workstreams 1–24 are done and verified on master.** Master is clean, `sh scripts/check.sh` is green at 287 tests, and `.venv/bin/ruff check launcher/src tests` passes.
+**Workstreams 1–24 are done and verified on master.** Master is clean, `sh scripts/check.sh` is green at 313 tests, and `.venv/bin/ruff check launcher/src tests` passes.
 
 Original build plan 1–18 (see git history): 8-slot home model with inline folders and edit mode; one-handed drawer (85% sheet, bottom search/results, long-press menus, `!` web search); 8 themes + custom solid color; fonts incl. custom import; config-driven widget row with Open-Meteo weather; JSON backup/restore; sounds; gesture dispatch; install/deploy/apps scripts + OpenRC & systemd units; pytest suite + `check.sh` gate; lock screen v2; shade v2; Pixel-model DnD and Focus Mode; system-only Settings page; squeekboard + Colemak layouts; default app set scripting; first-boot walkthrough.
 
@@ -49,13 +49,26 @@ Small items surfaced by the 2026-08-23 repo review. None blocks the tablet check
 
 ## WS25 follow-ups (from 2026-08-23 review)
 
-Tracked from the post-review pass, none blocking:
+**Resolved 2026-08-23** in the post-review hardening pass (suite 287 → 313, ruff clean, gate green):
 
-- Location agent grants all apps while enabled (`app_id` unused) — docstring overstates per-app authorization (S2).
-- Geoclue restart mid-session leaves a stale agent registration / tile state (S2).
-- Refresh-path sync D-Bus fan-out grew (per-device NM loop + geoclue probe) — watch on underpowered devices (S2).
-- Hotspot OFF assumes a connection named "Hotspot"; state query uses nmcli while the gate uses D-Bus (S3).
-- Tablet checklist additions: verify geoclue revokes live clients on `MaxAccuracyLevel=0`; confirm XX-WM's agent doesn't displace phosh's prompting agent.
+- Location agent docstring overstated per-app authorization — corrected: the tile is a **global master switch** (ON grants every client up to EXACT accuracy, OFF denies all via `MaxAccuracyLevel=0`); per-app policy deliberately not built.
+- Geoclue restart mid-session left a stale agent registration / lying tile — fixed: the `org.freedesktop.GeoClue2` name owner is watched; an owner change drops the export, re-registers when the tile is ON, and tile state now derives from the live registration (`is_active()`), never from intent.
+- Agent-slot displacement — registration is lazy (first enable) and released on disable; the availability probe is read-only, so building the shade no longer claims the system's single geoclue agent slot.
+- Hotspot OFF assumed a profile literally named "Hotspot"; state query used nmcli while the gate used D-Bus — unified: the active hotspot is resolved via NM D-Bus `ActiveConnections` (`Type == 'ap'`), deactivated by object path, and state is answered from that same view. No profile-name assumption.
+
+Also landed in the same pass (found by the review, outside WS25):
+
+- Lock screen consulted a construction-time config snapshot — a PIN set out-of-band after startup was never enforced until shell restart. `LockScreen` now shares the window's live `ShellConfig`, so hot-reloaded PINs apply at decision time.
+- `fprintd-verify -f <username>` passed a username where fprintd(1) wants a finger name — fingerprint unlock could never succeed. Now bare `fprintd-verify`.
+- `launch_counts` crashed on corrupt/non-numeric config values — now skips bad entries per-item, same idiom as `muted_apps`.
+- `ipc.py` docstring listed a nonexistent `unlock` verb — corrected; the socket has no unlock path by design.
+
+Still open (watch items, none blocking):
+
+- Refresh-path sync D-Bus fan-out on the GTK main loop: `_nm_has_wifi_device()` does 1 + N Gets per refresh and `_active_hotspot_path()` adds one Get per active connection; fine today, revisit if the shade ever stalls on the underpowered tablet.
+- After a location-enable rejection the tile stays hidden until the geoclue owner changes or the shell restarts (matches hide-on-reject); auto-retry when a competing agent quits would need a panel-side re-probe trigger.
+- Hotspot toggle feedback is still optimistic for the ON direction (nmcli runs async; next refresh corrects) — OFF is now state-driven.
+- Tablet checklist additions: verify geoclue revokes live clients on `MaxAccuracyLevel=0`; confirm enable-time registration behaves against phosh's prompting agent on device.
 
 ---
 

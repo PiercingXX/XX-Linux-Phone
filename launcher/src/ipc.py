@@ -16,8 +16,12 @@ def _socket_path() -> str:
 class IPCServer:
     """
     Lightweight Unix-socket IPC server. Line-based protocol:
-      lock | unlock | shade.show | shade.hide | switcher.show | switcher.hide
-    Other surfaces or external scripts (e.g. wake hook) connect, send one line, disconnect.
+      lock | shade.show | shade.hide | switcher.show | switcher.hide |
+      gesture.back | gesture.home | gesture.shade | gesture.keyboard |
+      gesture.switcher | welcome
+    There is deliberately no unlock verb: the socket must never bypass the
+    lock screen. Other surfaces or external scripts (e.g. wake hook) connect,
+    send one line, disconnect.
     """
 
     def __init__(self, handler: Callable[[str], None]) -> None:
