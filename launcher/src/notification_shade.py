@@ -26,6 +26,36 @@ _NOTIF_IFACE = 'org.freedesktop.Notifications'
 _NOTIF_PATH = '/org/freedesktop/Notifications'
 
 
+def _session_bus() -> Gio.DBusConnection | None:
+    try:
+        return Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    except GLib.Error:
+        return None
+
+
+def _external_daemon_owns_notifications() -> bool:
+    """True when another process already owns org.freedesktop.Notifications.
+
+    Notify is a method call, never a broadcast: with mako/dunst owning the
+    name our in-process capture can never fire, so the shade must say so
+    instead of silently showing nothing.
+    """
+    bus = _session_bus()
+    if bus is None:
+        return False
+    try:
+        owner = bus.call_sync(
+            'org.freedesktop.DBus', '/org/freedesktop/DBus',
+            'org.freedesktop.DBus', 'GetNameOwner',
+            GLib.Variant('(s)', (_NOTIF_IFACE,)),
+            GLib.VariantType('(s)'),
+            Gio.DBusCallFlags.NONE, 800, None,
+        ).unpack()[0]
+    except GLib.Error:
+        return False
+    return bool(owner)
+
+
 def theme_css(preset: ThemePreset) -> str:
     return f"""
 .shade-root {{
@@ -160,7 +190,6 @@ class NotificationShade(Gtk.Window):
             self.set_default_size(420, 500)
 
         self._notifications: list[Notification] = []
-        self._next_id = 1
 
         provider = Gtk.CssProvider()
         provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
@@ -181,6 +210,7 @@ class NotificationShade(Gtk.Window):
         self.set_child(self._revealer)
 
         self._subscribe_dbus()
+        self._check_external_notif_daemon()
 
     def _build_content(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -265,6 +295,14 @@ class NotificationShade(Gtk.Window):
         notif_header.append(notif_label)
         notif_header.append(clear_btn)
 
+        # Honest empty state when an external daemon owns the notification
+        # name: one muted line reusing .notif-app instead of a silent void.
+        self._external_hint = Gtk.Label(
+            label='Notifications handled by external daemon', xalign=0)
+        self._external_hint.add_css_class('notif-app')
+        self._external_hint.set_margin_start(6)
+        self._external_hint.set_visible(False)
+
         scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_max_content_height(360)
@@ -289,6 +327,7 @@ class NotificationShade(Gtk.Window):
         root.append(self.quick_actions)
         root.append(sep)
         root.append(notif_header)
+        root.append(self._external_hint)
         root.append(scroller)
         root.append(close_btn)
         return root
@@ -368,12 +407,13 @@ class NotificationShade(Gtk.Window):
         self._calendar_box.append(grid)
 
     def _subscribe_dbus(self) -> None:
+        # Only NotificationClosed is a real broadcast: per the freedesktop
+        # spec Notify is a METHOD call aimed at whichever daemon owns
+        # org.freedesktop.Notifications, so it is never seen as a signal.
+        bus = _session_bus()
+        if bus is None:
+            return
         try:
-            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            bus.signal_subscribe(
-                None, _NOTIF_IFACE, 'Notify', _NOTIF_PATH,
-                None, Gio.DBusSignalFlags.NONE, self._on_dbus_notify, None,
-            )
             bus.signal_subscribe(
                 None, _NOTIF_IFACE, 'NotificationClosed', _NOTIF_PATH,
                 None, Gio.DBusSignalFlags.NONE, self._on_dbus_closed, None,
@@ -381,26 +421,20 @@ class NotificationShade(Gtk.Window):
         except GLib.Error:
             pass
 
-    def _on_dbus_notify(self, _c, _s, _p, _i, _sig, params, _ud) -> None:
-        try:
-            parts = params.unpack()
-            app_name = str(parts[0])
-            replaces_id = int(parts[1]) if parts[1] else 0
-            summary = str(parts[3])
-            body = str(parts[4])
-            hints = parts[6] if len(parts) > 6 else {}
-            desktop_entry = str(hints.get('desktop-entry', ''))
-            notif_id = replaces_id if replaces_id else self._next_id
-            self._next_id = max(self._next_id, notif_id) + 1
-            self.add_notification(notif_id, app_name, summary, body, desktop_entry)
-        except Exception:
-            pass
-
     def _on_dbus_closed(self, _c, _s, _p, _i, _sig, params, _ud) -> None:
         try:
             self.dismiss(int(params.unpack()[0]))
         except Exception:
             pass
+
+    def _check_external_notif_daemon(self) -> None:
+        if not _external_daemon_owns_notifications():
+            return
+        self._external_hint.set_visible(True)
+        from shell_log import get_logger
+        get_logger('notification_shade').info(
+            'org.freedesktop.Notifications owned by an external daemon — '
+            'shade cannot capture notifications')
 
     def add_notification(
         self,

@@ -3,24 +3,55 @@
 The running app (main.py) builds a Hud and passes it down the real call chain:
 XXWMApplication._hud -> ShellWindow._ensure_shade -> NotificationShade(hud=)
 -> QuickActionsPanel(hud=). The brightness slider's value-changed handler calls
-QuickActionsPanel._on_brightness_changed(pct), which applies the level via
-_set_brightness_pct and then flashes it on the HUD via _show_brightness_hud ->
-hud.show_brightness(pct).
+QuickActionsPanel._on_brightness_changed(pct), which queues a debounced apply
+(P3-G: one subprocess per drag, not per tick); when the trailing-edge timer
+fires, _flush_slider_apply applies the level via _set_brightness_pct and then
+flashes it on the HUD via _show_brightness_hud -> hud.show_brightness.
 
-This test drives that exact path — _on_brightness_changed -> _set_brightness_pct
-+ _show_brightness_hud -> hud.show_brightness — so it fails if the call is never
-made. It also pins the silent-absence contract: when no HUD is wired, moving the
-brightness slider must still apply the level and must not raise.
+This test drives that exact path — _on_brightness_changed -> (flush) ->
+_set_brightness_pct + _show_brightness_hud -> hud.show_brightness — so it
+fails if the call is never made. It also pins the silent-absence contract:
+when no HUD is wired, moving the brightness slider must still apply the level
+and must not raise.
 
 quick_actions imports gi.repository.Gdk/GLib/Gio/Gtk at module top level, but
-PyGObject is not installed in this environment. We inject minimal fake modules
-into sys.modules before importing, exactly like test_hud_volume does for GLib.
-The class body (real Gtk widget construction) is never run here — the wiring
-methods under test are exercised on a bare instance via object.__new__, which is
-the seam the slider handler actually calls.
+PyGObject may be absent here. We inject minimal fake modules into sys.modules
+before importing, exactly like test_quick_tiles does. The class body (real Gtk
+widget construction) is never run here — the wiring methods under test are
+exercised on a bare instance via object.__new__, which is the seam the slider
+handler actually calls.
 """
 import sys
 import types
+
+import pytest
+
+
+class _FakeTimerGLib:
+    """Controllable GLib timeout scheduler so debounce flushes are explicit."""
+
+    def __init__(self) -> None:
+        self.timeouts: dict[int, tuple[int, object, tuple]] = {}
+        self.removed: list[int] = []
+        self._next_id = 1
+
+    def timeout_add(self, ms, cb, *data):
+        tid = self._next_id
+        self._next_id += 1
+        self.timeouts[tid] = (ms, cb, data)
+        return tid
+
+    def source_remove(self, tid):
+        self.removed.append(tid)
+        self.timeouts.pop(tid, None)
+
+    def fire_all(self):
+        while self.timeouts:
+            _tid, (_ms, cb, data) = self.timeouts.popitem()
+            cb(*data)
+
+
+_TIMER_GLIB = _FakeTimerGLib()
 
 
 def _install_fake_gi() -> None:
@@ -28,9 +59,9 @@ def _install_fake_gi() -> None:
     glib = types.ModuleType('gi.repository.GLib')
     glib.SOURCE_REMOVE = False
     glib.SOURCE_CONTINUE = True
-    glib.timeout_add = lambda *a, **k: 1
+    glib.timeout_add = _TIMER_GLIB.timeout_add
     glib.timeout_add_seconds = lambda *a, **k: 1
-    glib.source_remove = lambda *a, **k: None
+    glib.source_remove = _TIMER_GLIB.source_remove
     glib.idle_add = lambda *a, **k: None
     glib.Error = Exception
     glib.Variant = lambda *a, **k: None
@@ -78,17 +109,34 @@ class _FakeHud:
 def _bare_panel(**kwargs) -> quick_actions.QuickActionsPanel:
     """A QuickActionsPanel without running the heavy GTK __init__.
 
-    The wiring methods under test (_on_brightness_changed / _show_brightness_hud)
-    depend only on self._hud and the module-level _set_brightness_pct, so a bare
-    instance exercises the exact seam the brightness slider handler calls without
-    constructing real GTK widgets.
+    The wiring methods under test (_on_brightness_changed / _flush_slider_apply
+    / _show_brightness_hud) depend only on self._hud, the debounce state and
+    the module-level _set_brightness_pct, so a bare instance exercises the
+    exact seam the brightness slider handler calls without constructing real
+    GTK widgets.
     """
     panel = object.__new__(quick_actions.QuickActionsPanel)
     panel._hud = kwargs.get('hud')
+    panel._slider_pending = {}
+    panel._slider_timers = {}
+    panel._syncing_sliders = False
+    panel._slider_appliers = {
+        'bright': panel._apply_brightness,
+        'vol': quick_actions._set_volume_pct,
+    }
     return panel
 
 
 class TestBrightnessSliderWiresHud:
+    @pytest.fixture(autouse=True)
+    def _clean_timers(self, monkeypatch):
+        # Which fake gi ends up bound depends on which test module first
+        # imports quick_actions during collection, so pin the exact seam.
+        monkeypatch.setattr(quick_actions, 'GLib', _TIMER_GLIB)
+        _TIMER_GLIB.timeouts.clear()
+        _TIMER_GLIB.removed.clear()
+        yield
+
     def test_constructor_accepts_hud(self):
         """The real call site (NotificationShade) passes hud=; it must be stored.
 
@@ -101,7 +149,7 @@ class TestBrightnessSliderWiresHud:
         assert 'hud' in params
 
     def test_brightness_change_applies_and_flashes_hud(self, monkeypatch):
-        """Moving the slider applies the level AND flashes it on the HUD."""
+        """A drag ending at 63 applies 63 AND flashes it on the HUD — once."""
         applied: list[int] = []
         monkeypatch.setattr(quick_actions, '_set_brightness_pct',
                             lambda pct: applied.append(pct))
@@ -109,18 +157,40 @@ class TestBrightnessSliderWiresHud:
         panel = _bare_panel(hud=hud)
 
         panel._on_brightness_changed(63)
+        assert applied == []  # nothing spawns until the debounce window closes
+
+        _TIMER_GLIB.fire_all()
 
         assert applied == [63]
         assert hud.brightness_calls == [63]
 
-    def test_brightness_change_flashes_each_move(self, monkeypatch):
+    def test_drag_ticks_collapse_to_one_apply_with_final_value(self, monkeypatch):
+        """N value-changed ticks inside one window → exactly one apply, and it
+        carries the final (trailing) value."""
+        applied: list[int] = []
+        monkeypatch.setattr(quick_actions, '_set_brightness_pct',
+                            lambda pct: applied.append(pct))
+        hud = _FakeHud()
+        panel = _bare_panel(hud=hud)
+
+        for pct in (10, 20, 30, 80):
+            panel._on_brightness_changed(pct)
+        _TIMER_GLIB.fire_all()
+
+        assert applied == [80]
+        assert hud.brightness_calls == [80]
+
+    def test_separate_drags_flash_each_final_level(self, monkeypatch):
+        """Two drags with a settled window between them flash twice."""
         monkeypatch.setattr(quick_actions, '_set_brightness_pct',
                             lambda pct: None)
         hud = _FakeHud()
         panel = _bare_panel(hud=hud)
 
         panel._on_brightness_changed(10)
+        _TIMER_GLIB.fire_all()
         panel._on_brightness_changed(80)
+        _TIMER_GLIB.fire_all()
 
         assert hud.brightness_calls == [10, 80]
 
@@ -133,6 +203,7 @@ class TestBrightnessSliderWiresHud:
         panel = _bare_panel(hud=None)
 
         panel._on_brightness_changed(42)
+        _TIMER_GLIB.fire_all()
 
         assert applied == [42]
 
@@ -142,20 +213,27 @@ class TestBrightnessSliderWiresHud:
         panel = _bare_panel(hud=None)
         assert panel._show_brightness_hud(75) is None  # silent absence, no-op
 
-    def test_slider_handler_routes_through_on_brightness_changed(self):
-        """The brightness slider's value-changed handler must call
-        _on_brightness_changed (not the bare setter), so the HUD is flashed.
-        The handler is wired in _build_sliders, which builds real GTK widgets
-        (not runnable headlessly), so we assert the source routes the Bright
-        slider's value-changed through self._on_brightness_changed."""
+    def test_slider_handlers_route_through_debounced_queue(self):
+        """Both sliders' value-changed handlers must route through the debounce
+        queue (one subprocess per drag), never straight at a setter. The
+        handler is wired in _build_sliders, which builds real GTK widgets (not
+        runnable headlessly), so we assert on the source."""
         import inspect
         src = inspect.getsource(quick_actions.QuickActionsPanel._build_sliders)
-        assert '_on_brightness_changed' in src
         assert "'value-changed'" in src
-        # The Bright slider must route through the HUD-flashing handler, not the
-        # bare setter path used by the Volume slider.
-        bright_branch = src.split("if label_text == 'Bright':")[1].split('else:')[0]
+        bright_branch = src.split("if key == 'bright':")[1].split('else:')[0]
+        volume_branch = src.split('else:')[1]
         assert '_on_brightness_changed' in bright_branch
+        assert '_on_volume_changed' in volume_branch
+        for setter in ('_set_brightness_pct', '_set_volume_pct'):
+            assert setter not in src
+
+    def test_debounce_window_is_the_module_constant(self):
+        """The trailing-edge window is the shared constant, so tuning it never
+        desyncs from the queued timers."""
+        import inspect
+        src = inspect.getsource(quick_actions.QuickActionsPanel._queue_slider_apply)
+        assert '_SLIDER_APPLY_DEBOUNCE_MS' in src
 
 
 class TestWiringChainReachesPanel:

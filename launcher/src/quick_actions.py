@@ -473,22 +473,26 @@ class LocationState:
         return None
 
 
+_SLIDER_DEFAULT_PCT = 50
+_SLIDER_APPLY_DEBOUNCE_MS = 200
+
+
 def _get_brightness_pct() -> int:
     try:
         out = subprocess.check_output(['brightnessctl', 'get'], text=True, timeout=1).strip()
         max_out = subprocess.check_output(['brightnessctl', 'max'], text=True, timeout=1).strip()
         current, max_val = int(out), int(max_out)
-        return int(current * 100 / max_val) if max_val else 50
+        return int(current * 100 / max_val) if max_val else _SLIDER_DEFAULT_PCT
     except Exception:
         pass
     for path in Path('/sys/class/backlight').glob('*/brightness'):
         try:
             current = int(path.read_text())
             max_val = int((path.parent / 'max_brightness').read_text())
-            return int(current * 100 / max_val) if max_val else 50
+            return int(current * 100 / max_val) if max_val else _SLIDER_DEFAULT_PCT
         except (OSError, ValueError):
             pass
-    return 50
+    return _SLIDER_DEFAULT_PCT
 
 
 def _set_brightness_pct(pct: int) -> None:
@@ -516,7 +520,7 @@ def _get_volume_pct() -> int:
                 return int(token.rstrip('%'))
     except Exception:
         pass
-    return 50
+    return _SLIDER_DEFAULT_PCT
 
 
 def _set_volume_pct(pct: int) -> None:
@@ -524,6 +528,11 @@ def _set_volume_pct(pct: int) -> None:
         subprocess.Popen(['pactl', 'set-sink-volume', '@DEFAULT_SINK@', f'{pct}%'], close_fds=True)
     except FileNotFoundError:
         pass
+
+
+def _read_slider_values() -> tuple[int, int]:
+    """One getter batch per expand: (brightness_pct, volume_pct)."""
+    return _get_brightness_pct(), _get_volume_pct()
 
 
 # --- Tile definitions ---
@@ -574,6 +583,13 @@ class QuickActionsPanel(Gtk.Box):
         self._updating = False
         self._als = ALSBrightness()
         self._location = LocationState(on_change=self._on_location_changed)
+        self._slider_pending: dict[str, int] = {}
+        self._slider_timers: dict[str, int] = {}
+        self._syncing_sliders = False
+        self._slider_appliers = {
+            'bright': self._apply_brightness,
+            'vol': _set_volume_pct,
+        }
 
         provider = Gtk.CssProvider()
         provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
@@ -702,36 +718,58 @@ class QuickActionsPanel(Gtk.Box):
         self.refresh_states()
 
     def _build_sliders(self) -> None:
-        for label_text, getter, setter in [
-            ('Bright', _get_brightness_pct, _set_brightness_pct),
-            ('Volume', _get_volume_pct,     _set_volume_pct),
-        ]:
+        for label_text, key in [('Bright', 'bright'), ('Volume', 'vol')]:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             lbl = Gtk.Label(label=label_text, xalign=0)
             lbl.add_css_class('qa-slider-label')
             slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
             slider.set_hexpand(True)
             slider.set_draw_value(False)
-            slider.set_value(getter())
-            if label_text == 'Bright':
-                # Adjust brightness AND flash the current level on the HUD (T4).
+            slider.set_value(_SLIDER_DEFAULT_PCT)
+            if key == 'bright':
+                # Adjust brightness AND flash the level on the HUD (T4).
                 slider.connect(
                     'value-changed',
                     lambda s: self._on_brightness_changed(int(s.get_value())))
             else:
                 slider.connect(
-                    'value-changed', lambda s, fn=setter: fn(int(s.get_value())))
+                    'value-changed',
+                    lambda s: self._on_volume_changed(int(s.get_value())))
             row.append(lbl)
             row.append(slider)
             self.sliders_box.append(row)
 
-            if label_text == 'Bright':
+            if key == 'bright':
                 self._bright_slider = slider
             else:
                 self._vol_slider = slider
 
     def _on_brightness_changed(self, pct: int) -> None:
-        """Brightness slider moved: apply the level, then flash it on the HUD."""
+        """Brightness slider moved: the trailing value is applied (with a HUD
+        flash) once per drag after the debounce window."""
+        self._queue_slider_apply('bright', pct)
+
+    def _on_volume_changed(self, pct: int) -> None:
+        self._queue_slider_apply('vol', pct)
+
+    def _queue_slider_apply(self, key: str, pct: int) -> None:
+        if self._syncing_sliders:
+            return
+        self._slider_pending[key] = pct
+        timer = self._slider_timers.get(key)
+        if timer is not None:
+            GLib.source_remove(timer)
+        self._slider_timers[key] = GLib.timeout_add(
+            _SLIDER_APPLY_DEBOUNCE_MS, self._flush_slider_apply, key)
+
+    def _flush_slider_apply(self, key: str) -> bool:
+        self._slider_timers.pop(key, None)
+        pct = self._slider_pending.pop(key, None)
+        if pct is not None:
+            self._slider_appliers[key](pct)
+        return False
+
+    def _apply_brightness(self, pct: int) -> None:
         _set_brightness_pct(pct)
         self._show_brightness_hud(pct)
 
@@ -739,7 +777,7 @@ class QuickActionsPanel(Gtk.Box):
         """Flash the current brightness level on the HUD overlay (if one is wired).
 
         Silent absence: without a HUD the brightness change already happened in
-        _on_brightness_changed; this is a fire-and-forget no-op, never a crash.
+        _apply_brightness; this is a fire-and-forget no-op, never a crash.
         """
         if self._hud is not None:
             self._hud.show_brightness(pct)
@@ -821,8 +859,16 @@ class QuickActionsPanel(Gtk.Box):
         self.sep.set_visible(expanded)
         self.sliders_box.set_visible(expanded)
         if expanded:
-            self._bright_slider.set_value(_get_brightness_pct())
-            self._vol_slider.set_value(_get_volume_pct())
+            self._sync_sliders_to_live_state()
+
+    def _sync_sliders_to_live_state(self) -> None:
+        # One getter batch per expand feeds every slider; the sync guard keeps
+        # the set_value round-trip from queueing a redundant apply.
+        bright, vol = _read_slider_values()
+        self._syncing_sliders = True
+        self._bright_slider.set_value(bright)
+        self._vol_slider.set_value(vol)
+        self._syncing_sliders = False
 
     def refresh_states(self) -> None:
         GLib.idle_add(self._refresh_all_states)
