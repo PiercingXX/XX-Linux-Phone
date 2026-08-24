@@ -5,3 +5,4 @@ launcher/stage/
 __pycache__/
 .skippy/
 .venv/
+contracts/

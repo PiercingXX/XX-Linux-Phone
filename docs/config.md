@@ -20,7 +20,7 @@ migration steps are ever required.
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `theme` | string | `"amoled"` | Preset key: `amoled`, `graphite`, `forest`, `ocean`, `paper`, `mist`, `aura` (Linux bonus), or `custom`. |
+| `theme` | string | `"amoled"` | Preset key: `amoled`, `graphite`, `forest`, `ocean`, `paper`, `mist`, `aura` (Linux bonus), `burgundy`, or `custom`. |
 | `custom_background` | string | — | `#RRGGBB` used when `theme` is `custom`; shades and text color are derived. Burgundy `#2A1018` is the blessed extra. |
 | `prefer_dark` | bool | `true` | Light/dark surface mode. |
 | `font` | string | `"jetbrains-mono-nerd"` | `system-light`, `space-mono`, `jetbrains-mono`, `jetbrains-mono-nerd`, or `custom`. |

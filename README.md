@@ -58,7 +58,7 @@ launcher/          ← the product: GTK4 layer-shell launcher + session files
 design.md          ← the UI spec — every surface, theme, and gesture
 docs/config.md     ← the config-file reference (the shell's public API)
 todo.md            ← the build plan
-scripts/           ← install.sh (whiptail TUI), deploy.sh (dev loop), apps.sh, check.sh gate
+scripts/           ← install.sh (whiptail TUI), deploy.sh (dev loop), apps.sh, check.sh gate, bootstrap-dots.sh (loud stub), reference/ (vendored)
 devices/           ← per-phone flash scripts and hardware notes (not the product)
 ```
 
