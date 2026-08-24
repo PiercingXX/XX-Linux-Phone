@@ -1,5 +1,9 @@
-"""Tests for the lock screen's notification line filtering (pure logic)."""
+"""Tests for the lock screen: notification line filtering (pure logic),
+live-config PIN decisions, and the fingerprint verify invocation."""
+import types
 from pathlib import Path
+
+import pytest
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
@@ -55,3 +59,253 @@ class TestLockoutSecs:
 
     def test_capped_at_five_minutes(self):
         assert _lockout_secs(_FAIL_THRESHOLD + 100) == 300
+
+
+class _FakeLabel:
+    def __init__(self):
+        self.text = ''
+        self.css: list[str] = []
+
+    def set_text(self, text):
+        self.text = text
+
+    def add_css_class(self, name):
+        if name not in self.css:
+            self.css.append(name)
+
+    def remove_css_class(self, name):
+        if name in self.css:
+            self.css.remove(name)
+
+
+class _FakeRevealer:
+    def __init__(self):
+        self.revealed = False
+
+    def set_reveal_child(self, value):
+        self.revealed = bool(value)
+
+
+class _FakeVisibility:
+    def __init__(self):
+        self.visible = True
+
+    def set_visible(self, value):
+        self.visible = bool(value)
+
+
+class _FakeNotifBox:
+    def get_first_child(self):
+        return None
+
+    def remove(self, _child):
+        pass
+
+    def append(self, _child):
+        pass
+
+
+class _LockHarness:
+    """Headless stand-in for the LockScreen widget surface (repo idiom: GTK
+    widgets are never constructed under pytest — see test_switcher_cards).
+    The real LockScreen decision methods run against this namespace self."""
+
+    def __init__(self, config):
+        self._config = config
+        self._pin = ''
+        self._fail_count = 0
+        self._lockout_src = None
+        self._open_shade_after_unlock = False
+        self._pin_revealer = _FakeRevealer()
+        self._swipe_hint = _FakeVisibility()
+        self.dots_label = _FakeLabel()
+        self.error_label = _FakeLabel()
+        self._notif_box = _FakeNotifBox()
+        self._get_notifications = lambda: []
+        self._dnd_active = lambda: False
+        self.visible = True
+        self.unlocked = 0
+
+    def _on_unlock(self):
+        self.unlocked += 1
+
+    def _on_open_shade(self):
+        pass
+
+    def set_visible(self, value):
+        self.visible = bool(value)
+
+    def _refresh_dots(self):
+        _lock_screen_module().LockScreen._refresh_dots(self)
+
+    def _refresh_notifications(self):
+        _lock_screen_module().LockScreen._refresh_notifications(self)
+
+    def _shake(self):
+        _lock_screen_module().LockScreen._shake(self)
+
+    def _unlock(self):
+        _lock_screen_module().LockScreen._unlock(self)
+
+
+def _lock_screen_module():
+    # Imported lazily: sibling test modules stub sys.modules['gi'] during
+    # collection; conftest restores the real bindings before tests run.
+    import lock_screen
+    return lock_screen
+
+
+def _set_pin_out_of_band(pin):
+    """The documented checklist workflow: edit ~/.config/xx-wm/config.json
+    out-of-band while the shell keeps running."""
+    writer = _lock_screen_module().ShellConfig()
+    writer.set_pin(pin)
+
+
+def _remove_pin_out_of_band():
+    writer = _lock_screen_module().ShellConfig()
+    del writer.data['pin_hash']
+    writer.save()
+
+
+def _hot_reload(config):
+    """Mirror window.ShellWindow._reload_config: the window resets its live
+    instance's data in place and re-reads the file from disk."""
+    from config import DEFAULT_CONFIG
+    config.data = dict(DEFAULT_CONFIG)
+    config.load()
+
+
+class TestPinConfigIsLive:
+    """S2 regression: the cached LockScreen must consult the CURRENT stored
+    pin_hash at every lock/unlock decision, not a construction-time snapshot."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+
+    @pytest.fixture(autouse=True)
+    def _no_real_glib_sources(self, monkeypatch):
+        monkeypatch.setattr(
+            _lock_screen_module().GLib, 'timeout_add', lambda *a, **k: 1)
+
+    def test_pin_added_after_startup_is_enforced_on_next_lock(self):
+        lock_screen = _lock_screen_module()
+        config = lock_screen.ShellConfig()
+        assert config.pin_hash is None
+        lock = _LockHarness(config)
+        lock_screen.LockScreen.prepare(lock)
+        lock_screen.LockScreen._swipe_up(lock)
+        assert lock.unlocked == 1  # baseline: no PIN → swipe unlocks directly
+
+        _set_pin_out_of_band('123456')
+        _hot_reload(config)
+        assert config.pin_hash is not None
+
+        lock.unlocked = 0
+        lock_screen.LockScreen.prepare(lock)
+        lock_screen.LockScreen._swipe_up(lock)
+        assert lock.unlocked == 0  # no longer unlocks directly…
+        assert lock._pin_revealer.revealed is True  # …it now demands the PIN
+
+        lock._pin = '999999'
+        lock_screen.LockScreen._check_pin(lock)
+        assert lock.unlocked == 0  # wrong PIN does not unlock
+        assert 'Incorrect PIN' in lock.error_label.text
+
+        lock._pin = '123456'
+        lock_screen.LockScreen._check_pin(lock)
+        assert lock.unlocked == 1  # correct PIN unlocks
+
+    def test_pin_removed_after_startup_unlocks_directly_again(self):
+        lock_screen = _lock_screen_module()
+        _set_pin_out_of_band('123456')
+        config = lock_screen.ShellConfig()
+        assert config.pin_hash is not None
+        lock = _LockHarness(config)
+        lock_screen.LockScreen._swipe_up(lock)
+        assert lock.unlocked == 0
+        assert lock._pin_revealer.revealed is True  # PIN enforced at start
+
+        _remove_pin_out_of_band()
+        _hot_reload(config)
+        assert config.pin_hash is None
+
+        lock._pin_revealer.revealed = False
+        lock_screen.LockScreen._swipe_up(lock)
+        assert lock.unlocked == 1  # follows NEW config: direct unlock
+        assert lock._pin_revealer.revealed is False  # keypad never demanded
+
+    def test_changed_pin_takes_effect_without_restart(self):
+        lock_screen = _lock_screen_module()
+        _set_pin_out_of_band('111111')
+        config = lock_screen.ShellConfig()
+        lock = _LockHarness(config)
+
+        lock._pin = '111111'
+        lock_screen.LockScreen._check_pin(lock)
+        assert lock.unlocked == 1  # old PIN valid against old hash
+
+        _set_pin_out_of_band('222222')
+        _hot_reload(config)
+
+        lock.unlocked = 0
+        lock._pin = '111111'
+        lock_screen.LockScreen._check_pin(lock)
+        assert lock.unlocked == 0  # old PIN rejected against the NEW hash
+
+        lock._pin = '222222'
+        lock_screen.LockScreen._check_pin(lock)
+        assert lock.unlocked == 1  # new PIN accepted
+
+
+class TestFingerprintVerifyArgv:
+    """S3 regression: fprintd-verify takes the finger via -f; the username is
+    positional (defaulting to the invoking user). '-f <user>' can never match,
+    so fingerprint unlock previously always failed."""
+
+    def test_verify_invocation_is_bare_fprintd_verify(self, monkeypatch):
+        lock_screen = _lock_screen_module()
+        calls = []
+
+        def _fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return types.SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(lock_screen.subprocess, 'run', _fake_run)
+        idle = []
+        monkeypatch.setattr(
+            lock_screen.GLib, 'idle_add',
+            lambda cb, *a: idle.append((cb, a)) or 1)
+
+        results = []
+        lock = types.SimpleNamespace(
+            _fp_running=False,
+            _fp_result=lambda matched: results.append(matched),
+        )
+        lock_screen.LockScreen._fp_thread(lock)
+
+        # Exact argv pin, mirroring the nmcli discipline in test_quick_tiles.
+        assert [cmd for cmd, _kw in calls] == [['fprintd-verify']]
+        assert calls[0][1] == {'timeout': 10, 'capture_output': True}
+
+        assert idle and idle[0][1] == (True,)
+        idle[0][0](True)
+        assert results == [True]
+
+    def test_verify_failure_still_reports_not_matched(self, monkeypatch):
+        lock_screen = _lock_screen_module()
+        monkeypatch.setattr(
+            lock_screen.subprocess, 'run',
+            lambda cmd, **k: types.SimpleNamespace(returncode=1))
+        idle = []
+        monkeypatch.setattr(
+            lock_screen.GLib, 'idle_add',
+            lambda cb, *a: idle.append((cb, a)) or 1)
+
+        lock = types.SimpleNamespace(
+            _fp_running=False,
+            _fp_result=lambda matched: None,
+        )
+        lock_screen.LockScreen._fp_thread(lock)
+        assert idle[0][1] == (False,)

@@ -144,6 +144,7 @@ _SWIPE_UNLOCK_VELOCITY = -300
 
 class LockScreen(Gtk.Window):
     def __init__(self, on_unlock: Callable[[], None],
+                 config: ShellConfig,
                  get_notifications: Callable[[], list[tuple[str, str]]] | None = None,
                  dnd_active_fn: Callable[[], bool] | None = None,
                  on_open_shade: Callable[[], None] | None = None) -> None:
@@ -166,7 +167,10 @@ class LockScreen(Gtk.Window):
         self._dnd_active  = dnd_active_fn or (lambda: False)
         self._on_open_shade = on_open_shade or (lambda: None)
         self._open_shade_after_unlock = False
-        self._config      = ShellConfig()
+        # Shared with the shell window: _reload_config refreshes that
+        # instance's data in place, so lock/unlock decisions below always see
+        # the current pin_hash — a private snapshot would enforce a dead PIN.
+        self._config      = config
         self._pin         = ''
         self._fail_count  = 0
         self._lockout_src: int | None = None
@@ -505,9 +509,8 @@ class LockScreen(Gtk.Window):
 
     def _fp_thread(self) -> None:
         try:
-            user = os.environ.get('USER', os.environ.get('LOGNAME', 'user'))
             r = subprocess.run(
-                ['fprintd-verify', '-f', user],
+                ['fprintd-verify'],
                 timeout=10, capture_output=True,
             )
             matched = r.returncode == 0

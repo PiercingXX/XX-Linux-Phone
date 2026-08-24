@@ -695,6 +695,7 @@ class ShellWindow(Adw.ApplicationWindow):
         from lock_screen import LockScreen
         self._lock_screen = LockScreen(
             on_unlock=self._dismiss_lock_screen,
+            config=self.config,
             get_notifications=lambda: self._ensure_shade().notifications_snapshot(),
             dnd_active_fn=lambda: self.dnd_state.is_active(),
             on_open_shade=self._show_shade,
