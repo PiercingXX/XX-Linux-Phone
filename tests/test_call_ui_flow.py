@@ -1,12 +1,15 @@
-"""CallUI button flow + CallBar show/hide contract (P2-D).
+"""CallUI button flow + CallBar show/hide contract (P2-D, W1-A async).
 
 window.py already calls ``CallBar.show_bar(number)`` / ``hide_bar()`` and
 constructs ``CallUI(on_accept=..., on_decline=...)``, so those signatures
-are pinned here. Widget construction never runs — instances are built with
-``object.__new__`` and fake labels/stacks, matching the test_quick_sliders
-idiom.
+are pinned here. Accept/Decline/Hangup run through the async transport
+seam: UI transitions happen only on the success callback, a pending-action
+flag guards double-fire, failures keep the surface consistent and log.
+Widget construction never runs — instances are built with ``object.__new__``
+and fake labels/stacks, matching the test_quick_sliders idiom.
 """
 import inspect
+import logging
 import sys
 import types
 from pathlib import Path
@@ -83,9 +86,10 @@ def _make_call_ui(accept_fn=None, hangup_fn=None):
     ui._on_accept = lambda: ui._events.append('accept')
     ui._on_decline = lambda: ui._events.append('decline')
     ui._on_hangup = lambda: ui._events.append('hangup')
-    ui._accept_fn = accept_fn or (lambda path: True)
-    ui._hangup_fn = hangup_fn or (lambda path: True)
+    ui._accept_fn = accept_fn or (lambda path, done: done(True, None))
+    ui._hangup_fn = hangup_fn or (lambda path, done: done(True, None))
     ui._incoming_call_path = '/org/freedesktop/ModemManager1/Call/3'
+    ui._pending_action = None
     ui._current_caller = 'Incoming call'
     ui._current_number = '+15550001111'
     ui._inc_caller = FakeLabel()
@@ -126,12 +130,14 @@ class TestWindowContract:
     def test_default_fns_delegate_to_modem_monitor(self, monkeypatch):
         seen = []
         monkeypatch.setattr(modem_monitor, 'accept_call',
-                            lambda p: seen.append(('accept', p)) or True)
+                            lambda p, done: seen.append(('accept', p)) or done(True, None))
         monkeypatch.setattr(modem_monitor, 'hangup_call',
-                            lambda p: seen.append(('hangup', p)) or False)
-        assert call_ui._default_accept('/mm1/Call/1') is True
-        assert call_ui._default_hangup('/mm1/Call/2') is False
+                            lambda p, done: seen.append(('hangup', p)) or done(False, 'boom'))
+        got = []
+        call_ui._default_accept('/mm1/Call/1', lambda ok, err: got.append(('a', ok, err)))
+        call_ui._default_hangup('/mm1/Call/2', lambda ok, err: got.append(('h', ok, err)))
         assert seen == [('accept', '/mm1/Call/1'), ('hangup', '/mm1/Call/2')]
+        assert got == [('a', True, None), ('h', False, 'boom')]
 
     def test_resolve_call_path_reads_monitor(self, monkeypatch):
         monkeypatch.setattr(modem_monitor, '_last_monitor', None)
@@ -139,15 +145,28 @@ class TestWindowContract:
 
 
 class TestAcceptFlow:
-    def test_accept_success_transitions_and_stops_sound(self):
-        paths = []
-        ui = _make_call_ui(accept_fn=lambda p: paths.append(p) or True)
+    def test_accept_success_transitions_exactly_once(self, monkeypatch):
+        monkeypatch.setattr(call_ui, '_set_audio_route', lambda earpiece: None)
+        dispatches = []
+        ui = _make_call_ui(
+            accept_fn=lambda p, done: dispatches.append(p) or done(True, None))
         ui.show_incoming('Mom', '+15550001111', '/org/freedesktop/ModemManager1/Call/3')
         ui._on_accept_clicked(None)
-        assert paths == ['/org/freedesktop/ModemManager1/Call/3']
+        assert dispatches == ['/org/freedesktop/ModemManager1/Call/3']
         assert ui._events == ['accept']
         assert ui._stack.visible == 'active'
         assert ui.hidden == 0
+
+    def test_transition_only_on_success_callback(self):
+        pending_cb = []
+        ui = _make_call_ui(accept_fn=lambda p, done: pending_cb.append(done))
+        ui.show_incoming('Mom', '+15550001111', '/org/freedesktop/ModemManager1/Call/3')
+        ui._on_accept_clicked(None)
+        assert ui._events == []
+        assert ui._stack.visible == 'incoming'
+        pending_cb.pop(0)(True, None)
+        assert ui._events == ['accept']
+        assert ui._stack.visible == 'active'
 
     def test_show_incoming_resolves_path_from_monitor(self, monkeypatch):
         class StubMonitor:
@@ -158,57 +177,109 @@ class TestAcceptFlow:
         assert ui._incoming_call_path == '/org/freedesktop/ModemManager1/Call/9'
         assert ui._inc_caller.get_text() == '+15550002222'
 
-    def test_accept_failure_stays_incoming(self):
-        ui = _make_call_ui(accept_fn=lambda p: False)
-        ui.show_incoming('Mom', '+15550001111')
-        ui._on_accept_clicked(None)
+    def test_accept_failure_stays_incoming_and_logs(self, caplog):
+        ui = _make_call_ui(accept_fn=lambda p, done: done(False, 'mm1 timed out'))
+        ui.show_incoming('Mom', '+15550001111', '/org/freedesktop/ModemManager1/Call/3')
+        with caplog.at_level(logging.WARNING):
+            ui._on_accept_clicked(None)
         assert 'accept' not in ui._events
         assert ui._stack.visible == 'incoming'
-        assert ui.presented >= 1
+        assert any('accept' in r.getMessage() and 'mm1 timed out' in r.getMessage()
+                   for r in caplog.records)
 
-    def test_accept_without_path_never_calls_transport(self):
-        called = []
-        ui = _make_call_ui(accept_fn=called.append)
-        ui._incoming_call_path = None
+    def test_double_tap_dispatches_once(self):
+        pending_cb = []
+        ui = _make_call_ui(accept_fn=lambda p, done: pending_cb.append(done))
         ui._on_accept_clicked(None)
-        assert called == []
+        ui._on_accept_clicked(None)
+        assert len(pending_cb) == 1
+        pending_cb.pop(0)(True, None)
+        assert ui._events == ['accept']
+        assert ui._pending_action is None  # guard released after completion
+
+    def test_pending_accept_blocks_decline_too(self):
+        pending_cb = []
+        ui = _make_call_ui(accept_fn=lambda p, done: pending_cb.append(done),
+                           hangup_fn=lambda p, done: pending_cb.append(done))
+        ui._on_accept_clicked(None)
+        ui._on_decline_clicked(None)
+        assert len(pending_cb) == 1
         assert ui._events == []
+
+    def test_accept_without_path_never_calls_transport(self, caplog):
+        dispatched = []
+        ui = _make_call_ui(accept_fn=lambda p, done: dispatched.append(p))
+        ui._incoming_call_path = None
+        with caplog.at_level(logging.WARNING):
+            ui._on_accept_clicked(None)
+        assert dispatched == []
+        assert ui._events == []
+
+    def test_stale_accept_after_remote_end_is_ignored(self, monkeypatch):
+        monkeypatch.setattr(call_ui, '_set_audio_route', lambda earpiece: None)
+        pending_cb = []
+        ui = _make_call_ui(accept_fn=lambda p, done: pending_cb.append(done))
+        ui._on_accept_clicked(None)
+        ui.end_call()  # remote hung up while the accept was in flight
+        pending_cb.pop(0)(True, None)
+        assert ui._events == []
+        assert ui.hidden == 1  # stayed ended; no resurrection of the call
 
 
 class TestDeclineFlow:
-    def test_decline_success_hides_and_stops_sound(self):
-        paths = []
-        ui = _make_call_ui(hangup_fn=lambda p: paths.append(p) or True)
+    def test_decline_success_hides_on_callback(self):
+        pending_cb = []
+        ui = _make_call_ui(hangup_fn=lambda p, done: pending_cb.append(done))
         ui._on_decline_clicked(None)
-        assert paths == ['/org/freedesktop/ModemManager1/Call/3']
+        assert ui._events == []
+        assert ui.hidden == 0
+        pending_cb.pop(0)(True, None)
         assert ui._events == ['decline']
         assert ui.hidden == 1
         assert ui._incoming_call_path is None
 
-    def test_decline_failure_keeps_surface(self):
-        ui = _make_call_ui(hangup_fn=lambda p: False)
-        ui._on_decline_clicked(None)
+    def test_decline_failure_keeps_surface_and_logs(self, caplog):
+        ui = _make_call_ui(hangup_fn=lambda p, done: done(False, 'No such object'))
+        with caplog.at_level(logging.WARNING):
+            ui._on_decline_clicked(None)
         assert ui._events == []
         assert ui.hidden == 0
         assert ui._incoming_call_path == '/org/freedesktop/ModemManager1/Call/3'
+        assert any('decline' in r.getMessage() and 'No such object' in r.getMessage()
+                   for r in caplog.records)
 
 
 class TestHangupFlow:
-    def test_hangup_success_ends_call(self, monkeypatch):
+    def test_hangup_success_ends_call_on_callback(self, monkeypatch):
         monkeypatch.setattr(call_ui, '_set_audio_route', lambda earpiece: None)
-        paths = []
-        ui = _make_call_ui(hangup_fn=lambda p: paths.append(p) or True)
+        pending_cb = []
+        ui = _make_call_ui(hangup_fn=lambda p, done: pending_cb.append(done))
         ui._on_hangup_clicked(None)
-        assert paths == ['/org/freedesktop/ModemManager1/Call/3']
+        assert ui._events == []
+        assert ui.hidden == 0
+        pending_cb.pop(0)(True, None)
         assert ui._events == ['hangup']
         assert ui.hidden == 1
         assert ui._incoming_call_path is None
 
-    def test_hangup_failure_stays_active(self):
-        ui = _make_call_ui(hangup_fn=lambda p: False)
-        ui._on_hangup_clicked(None)
+    def test_hangup_failure_stays_active_and_logs(self, caplog):
+        ui = _make_call_ui(hangup_fn=lambda p, done: done(False, 'call stuck'))
+        with caplog.at_level(logging.WARNING):
+            ui._on_hangup_clicked(None)
         assert ui._events == []
         assert ui.hidden == 0
+        assert any('hang up' in r.getMessage() and 'call stuck' in r.getMessage()
+                   for r in caplog.records)
+
+    def test_stale_hangup_after_remote_end_is_ignored(self, monkeypatch):
+        monkeypatch.setattr(call_ui, '_set_audio_route', lambda earpiece: None)
+        pending_cb = []
+        ui = _make_call_ui(hangup_fn=lambda p, done: pending_cb.append(done))
+        ui._on_hangup_clicked(None)
+        ui.end_call()  # remote beat us to it
+        pending_cb.pop(0)(True, None)
+        assert ui._events == []
+        assert ui.hidden == 1
 
 
 class TestCallBar:

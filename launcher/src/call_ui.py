@@ -125,19 +125,27 @@ def _resolve_call_path() -> str | None:
     return active_call_path()
 
 
-def _log_action_failure(action: str, call_path: str | None) -> None:
+# Completion contract shared with modem_monitor: (success, error_message).
+CallResultCallback = Callable[[bool, str | None], None]
+# Injectable transport seam: start the async action, deliver via callback.
+CallActionFn = Callable[[str, CallResultCallback], None]
+
+
+def _log_action_failure(action: str, call_path: str | None,
+                        error: str | None = None) -> None:
     from shell_log import get_logger
-    get_logger('call_ui').warning('failed to %s call (path=%s)', action, call_path)
+    detail = f': {error}' if error else ''
+    get_logger('call_ui').warning('failed to %s call (path=%s)%s', action, call_path, detail)
 
 
-def _default_accept(call_path: str) -> bool:
+def _default_accept(call_path: str, on_done: CallResultCallback) -> None:
     from modem_monitor import accept_call
-    return accept_call(call_path)
+    accept_call(call_path, on_done)
 
 
-def _default_hangup(call_path: str) -> bool:
+def _default_hangup(call_path: str, on_done: CallResultCallback) -> None:
     from modem_monitor import hangup_call
-    return hangup_call(call_path)
+    hangup_call(call_path, on_done)
 
 
 class CallBar(Gtk.Window):
@@ -226,8 +234,8 @@ class CallUI(Gtk.Window):
         on_accept: Callable[[], None] | None = None,
         on_decline: Callable[[], None] | None = None,
         on_hangup: Callable[[], None] | None = None,
-        accept_fn: Callable[[str], bool] | None = None,
-        hangup_fn: Callable[[str], bool] | None = None,
+        accept_fn: CallActionFn | None = None,
+        hangup_fn: CallActionFn | None = None,
         config: ShellConfig | None = None,
     ) -> None:
         super().__init__(title='PiercingXX Call')
@@ -253,6 +261,7 @@ class CallUI(Gtk.Window):
         # surface; the fallback keeps direct no-arg construction working.
         self._config = config if config is not None else ShellConfig()
         self._incoming_call_path: str | None = None
+        self._pending_action: str | None = None
         self._current_caller = ''
         self._current_number = ''
         self._muted = False
@@ -380,6 +389,7 @@ class CallUI(Gtk.Window):
 
     def show_incoming(self, caller: str, number: str, call_path: str | None = None) -> None:
         self._incoming_call_path = call_path or _resolve_call_path()
+        self._pending_action = None
         self._current_caller = caller
         self._current_number = number
         self._inc_caller.set_text(caller or number)
@@ -393,6 +403,7 @@ class CallUI(Gtk.Window):
         # Attached mid-call (answered before the UI appeared, or shell
         # started during the call): resolve the path so hangup can work.
         self._incoming_call_path = self._incoming_call_path or _resolve_call_path()
+        self._pending_action = None
         self._act_caller.set_text(caller or number)
         self._act_number.set_text(number if caller else '')
         self._call_start = datetime.now()
@@ -407,6 +418,9 @@ class CallUI(Gtk.Window):
             GLib.source_remove(self._timer_id)
             self._timer_id = None
         self._incoming_call_path = None
+        # Any in-flight accept/hangup reply is now stale; drop the guard so
+        # the next call starts with responsive buttons.
+        self._pending_action = None
         _set_audio_route(earpiece=False)
         self.hide()
 
@@ -417,27 +431,63 @@ class CallUI(Gtk.Window):
             self._act_timer.set_text(f'{mins}:{secs:02d}')
         return True
 
-    def _on_accept_clicked(self, _btn: Gtk.Button) -> None:
+    def _begin_call_action(
+        self,
+        action: str,
+        fn: CallActionFn,
+        finish: Callable[[str, bool, str | None], None],
+    ) -> None:
+        """
+        Dispatch an async call action with double-fire + staleness guards.
+
+        - One action in flight at a time: clicks while ``_pending_action`` is
+          set are ignored, so a wedged bus can't stack transitions.
+        - The completion callback only acts if the tracked call is still the
+          one that was dispatched (a remote hangup mid-flight invalidates it).
+        """
+        if self._pending_action is not None:
+            return
         path = self._incoming_call_path
-        if path is None or not self._accept_fn(path):
-            _log_action_failure('accept', path)
+        if path is None:
+            _log_action_failure(action, None, 'no active call')
+            return
+        self._pending_action = action
+
+        def _on_done(success: bool, error: str | None) -> None:
+            self._pending_action = None
+            if self._incoming_call_path != path:
+                return  # call ended/replaced while the request was in flight
+            finish(path, success, error)
+
+        fn(path, _on_done)
+
+    def _on_accept_clicked(self, _btn: Gtk.Button) -> None:
+        self._begin_call_action('accept', self._accept_fn, self._finish_accept)
+
+    def _finish_accept(self, call_path: str, success: bool, error: str | None) -> None:
+        if not success:
+            _log_action_failure('accept', call_path, error)
             return
         self._on_accept()
         self.show_active(self._current_caller, self._current_number)
 
     def _on_decline_clicked(self, _btn: Gtk.Button) -> None:
-        path = self._incoming_call_path
-        if path is None or not self._hangup_fn(path):
-            _log_action_failure('decline', path)
+        self._begin_call_action('decline', self._hangup_fn, self._finish_decline)
+
+    def _finish_decline(self, call_path: str, success: bool, error: str | None) -> None:
+        if not success:
+            _log_action_failure('decline', call_path, error)
             return
         self._on_decline()
         self._incoming_call_path = None
         self.hide()
 
     def _on_hangup_clicked(self, _btn: Gtk.Button) -> None:
-        path = self._incoming_call_path
-        if path is None or not self._hangup_fn(path):
-            _log_action_failure('hang up', path)
+        self._begin_call_action('hang up', self._hangup_fn, self._finish_hangup)
+
+    def _finish_hangup(self, call_path: str, success: bool, error: str | None) -> None:
+        if not success:
+            _log_action_failure('hang up', call_path, error)
             return
         self._on_hangup()
         self.end_call()

@@ -1,9 +1,11 @@
-"""ModemMonitor call-answer surface (P2-D).
+"""ModemMonitor call-answer surface (P2-D, W1-A async).
 
-Covers the slice's blocker fix: accept/hangup reach the MM1 Call object
-methods with the right paths, degrade to False without a bus or call, the
-per-call StateChanged subscriptions no longer grow without bound, and a
-failed bus init is logged instead of swallowed.
+Covers accept/hangup as async Gio D-Bus calls: dispatch reaches the MM1
+Call object methods with the right paths, the completion callback delivers
+(success, error) exactly once, local failures (no monitor / no live bus)
+deliver immediately without touching D-Bus, the per-call StateChanged
+subscriptions no longer grow without bound, and a failed bus init is
+logged instead of swallowed.
 
 Fakes are always reached through modem_monitor.GLib/Gio: sibling test
 modules also install fake gi packages at collection time, so sys.modules
@@ -68,6 +70,7 @@ class FakeBus:
         self.subs = []
         self.unsubs = []
         self.calls = []
+        self.pending = []  # completion callbacks awaiting the transport
         self._next = 1
 
     def signal_subscribe(self, sender, iface, signal, path, *_rest):
@@ -80,8 +83,20 @@ class FakeBus:
     def signal_unsubscribe(self, sid):
         self.unsubs.append(sid)
 
-    def call_sync(self, bus_name, path, iface, method, *_rest):
+    def call(self, bus_name, path, iface, method, *rest):
+        """Async-style Gio.DBusConnection.call: stash the completion cb."""
         self.calls.append((bus_name, path, iface, method))
+        self.pending.append(rest[-1])
+
+    def call_finish(self, _result):
+        if getattr(self, 'next_error', None) is not None:
+            raise modem_monitor.GLib.Error(self.next_error)
+
+    def complete_next(self, error: str | None = None) -> None:
+        """Deliver the oldest outstanding D-Bus reply (optionally failed)."""
+        self.next_error = error
+        self.pending.pop(0)(self, object())
+        self.next_error = None
 
 
 def _make_monitor(bus, monkeypatch):
@@ -133,42 +148,113 @@ def _state_changed(monitor, obj_path, new_state):
 
 
 class TestAcceptHangupDBus:
-    def test_accept_calls_mm1_accept_with_path(self, monkeypatch):
+    """Async accept/hangup: dispatch records the MM1 method, the completion
+    callback delivers (success, error) exactly once, and local failures
+    (no monitor / no live bus) deliver immediately without touching D-Bus."""
+
+    def test_accept_dispatches_async_and_delivers_success(self, monkeypatch):
         bus = FakeBus()
-        monkeypatch.setattr(modem_monitor.Gio, 'bus_get_sync', lambda *a, **k: bus)
-        assert modem_monitor.accept_call('/org/freedesktop/ModemManager1/Call/7') is True
+        _make_monitor(bus, monkeypatch)
+        delivered = []
+        modem_monitor.accept_call(
+            '/org/freedesktop/ModemManager1/Call/7',
+            lambda ok, err: delivered.append((ok, err)),
+        )
+        assert delivered == []  # nothing until the transport answers
         assert bus.calls == [(
             _MM1, '/org/freedesktop/ModemManager1/Call/7', _CALL_IFACE, 'Accept',
         )]
+        bus.complete_next()
+        assert delivered == [(True, None)]
 
-    def test_hangup_calls_mm1_hangup_with_path(self, monkeypatch):
+    def test_hangup_dispatches_async_and_delivers_success(self, monkeypatch):
         bus = FakeBus()
-        monkeypatch.setattr(modem_monitor.Gio, 'bus_get_sync', lambda *a, **k: bus)
-        assert modem_monitor.hangup_call('/org/freedesktop/ModemManager1/Call/9') is True
+        _make_monitor(bus, monkeypatch)
+        delivered = []
+        modem_monitor.hangup_call(
+            '/org/freedesktop/ModemManager1/Call/9',
+            lambda ok, err: delivered.append((ok, err)),
+        )
+        assert delivered == []
         assert bus.calls == [(
             _MM1, '/org/freedesktop/ModemManager1/Call/9', _CALL_IFACE, 'Hangup',
         )]
+        bus.complete_next()
+        assert delivered == [(True, None)]
 
-    def test_graceful_false_without_bus(self, monkeypatch, caplog):
-        def _no_bus(*a, **k):
-            raise modem_monitor.GLib.Error('no system bus')
-        monkeypatch.setattr(modem_monitor.Gio, 'bus_get_sync', _no_bus)
+    def test_no_monitor_delivers_immediate_failure(self, monkeypatch, caplog):
+        monkeypatch.setattr(modem_monitor, '_last_monitor', None)
+        delivered = []
         with caplog.at_level(logging.WARNING):
-            assert modem_monitor.accept_call('/org/freedesktop/ModemManager1/Call/1') is False
-            assert modem_monitor.hangup_call('/org/freedesktop/ModemManager1/Call/1') is False
+            modem_monitor.accept_call(
+                '/org/freedesktop/ModemManager1/Call/1',
+                lambda ok, err: delivered.append((ok, err)),
+            )
+            modem_monitor.hangup_call(
+                '/org/freedesktop/ModemManager1/Call/1',
+                lambda ok, err: delivered.append((ok, err)),
+            )
+        assert delivered == [(False, 'system bus unavailable'),
+                             (False, 'system bus unavailable')]
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings) == 2
 
-    def test_graceful_false_when_call_absent(self, monkeypatch, caplog):
+    def test_failed_bus_init_delivers_immediate_failure(self, monkeypatch):
+        glib, gio = modem_monitor.GLib, modem_monitor.Gio
+
+        def _fail(*a, **k):
+            raise glib.Error('system bus not reachable')
+
+        monkeypatch.setattr(glib, 'idle_add', lambda cb, *a: cb(*a) or 1)
+        monkeypatch.setattr(gio, 'bus_get_sync', _fail)
+        modem_monitor.ModemMonitor(lambda c, n: None, lambda c, n: None,
+                                   lambda: None)
+        delivered = []
+        modem_monitor.hangup_call('/org/freedesktop/ModemManager1/Call/2',
+                                  lambda ok, err: delivered.append((ok, err)))
+        assert delivered == [(False, 'system bus unavailable')]
+
+    def test_transport_error_surfaces_message(self, monkeypatch, caplog):
+        bus = FakeBus()
+        _make_monitor(bus, monkeypatch)
+        delivered = []
+        with caplog.at_level(logging.WARNING):
+            modem_monitor.hangup_call(
+                '/org/freedesktop/ModemManager1/Call/404',
+                lambda ok, err: delivered.append((ok, err)),
+            )
+            bus.complete_next(error='No such object')
+        assert delivered == [(False, 'No such object')]
+        assert any('Hangup' in r.getMessage() and 'No such object' in r.getMessage()
+                   for r in caplog.records)
+
+    def test_each_request_delivers_exactly_once(self, monkeypatch):
+        bus = FakeBus()
+        _make_monitor(bus, monkeypatch)
+        delivered = []
+
+        def _cb(ok, err):
+            delivered.append((ok, err))
+
+        modem_monitor.accept_call('/org/freedesktop/ModemManager1/Call/10', _cb)
+        modem_monitor.hangup_call('/org/freedesktop/ModemManager1/Call/11', _cb)
+        bus.complete_next(error='first failed')
+        bus.complete_next()
+        assert delivered == [(False, 'first failed'), (True, None)]
+
+    def test_sync_dispatch_failure_still_delivers_callback(self, monkeypatch):
         bus = FakeBus()
 
-        def _missing(*a, **k):
-            raise modem_monitor.GLib.Error('no such object')
-        bus.call_sync = _missing
-        monkeypatch.setattr(modem_monitor.Gio, 'bus_get_sync', lambda *a, **k: bus)
-        with caplog.at_level(logging.WARNING):
-            assert modem_monitor.hangup_call('/org/freedesktop/ModemManager1/Call/404') is False
-        assert any('Hangup' in r.getMessage() for r in caplog.records)
+        def _dead_transport(*a, **k):
+            raise modem_monitor.GLib.Error('connection is closed')
+
+        bus.call = _dead_transport
+        _make_monitor(bus, monkeypatch)
+        delivered = []
+        modem_monitor.accept_call('/org/freedesktop/ModemManager1/Call/12',
+                                  lambda ok, err: delivered.append((ok, err)))
+        assert delivered == [(False, 'connection is closed')]
+        assert bus.pending == []
 
 
 class TestSubscriptionLifecycle:

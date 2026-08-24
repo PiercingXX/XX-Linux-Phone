@@ -43,26 +43,58 @@ def active_call_path() -> str | None:
     return _last_monitor._active_call_path
 
 
-def accept_call(call_path: str) -> bool:
-    return _call_method(call_path, 'Accept')
+CallResultCallback = Callable[[bool, str | None], None]
 
 
-def hangup_call(call_path: str) -> bool:
-    return _call_method(call_path, 'Hangup')
+def accept_call(call_path: str, on_done: CallResultCallback) -> None:
+    """
+    Asynchronously Accept the call at ``call_path``.
+
+    ``on_done(success, error)`` fires exactly once on the main loop when the
+    MM1 method completes — or immediately on local failure (no monitor, no
+    live bus connection). The D-Bus round trip rides Gio's async machinery,
+    so a wedged ModemManager can never block the calling thread.
+    """
+    _call_method(call_path, 'Accept', on_done)
 
 
-def _call_method(call_path: str, method: str) -> bool:
+def hangup_call(call_path: str, on_done: CallResultCallback) -> None:
+    """Asynchronously Hangup; same delivery contract as :func:`accept_call`."""
+    _call_method(call_path, 'Hangup', on_done)
+
+
+def _call_method(call_path: str, method: str, on_done: CallResultCallback) -> None:
     from shell_log import get_logger
+
+    def _fail(message: str) -> None:
+        get_logger('modem_monitor').warning('%s %s failed: %s', call_path, method, message)
+        on_done(False, message)
+
+    monitor = _last_monitor
+    bus = monitor._bus if monitor is not None else None
+    if bus is None:
+        # No live system-bus connection (no monitor yet, or its bus init
+        # failed): fail immediately instead of stalling the UI thread.
+        _fail('system bus unavailable')
+        return
+
+    def _on_called(conn, result) -> None:
+        try:
+            conn.call_finish(result)
+        except GLib.Error as err:
+            _fail(getattr(err, 'message', None) or str(err))
+            return
+        on_done(True, None)
+
     try:
-        bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
-        bus.call_sync(
+        bus.call(
             _MM1, call_path, _CALL_IFACE, method, None, None,
-            Gio.DBusCallFlags.NONE, _CALL_TIMEOUT_MS, None,
+            Gio.DBusCallFlags.NONE, _CALL_TIMEOUT_MS, None, _on_called,
         )
-        return True
     except GLib.Error as err:
-        get_logger('modem_monitor').warning('%s %s failed: %s', call_path, method, err)
-        return False
+        # Dispatch itself failed (e.g. connection died between the check and
+        # the call): still honour the exactly-once callback contract.
+        _fail(getattr(err, 'message', None) or str(err))
 
 
 class ModemMonitor:
