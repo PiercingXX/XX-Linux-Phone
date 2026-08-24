@@ -7,6 +7,14 @@ from pathlib import Path
 
 from gi.repository import GLib
 
+from shell_log import get_logger
+
+_log = get_logger('ipc')
+
+# A client that connects but never sends must not stall the GLib main loop
+# (the watch callback runs on the UI thread), so reads are bounded.
+CONN_TIMEOUT_S = 0.25
+
 
 def _socket_path() -> str:
     runtime = os.environ.get('XDG_RUNTIME_DIR', str(Path.home() / '.local' / 'share' / 'xx-wm'))
@@ -31,6 +39,9 @@ class IPCServer:
 
     def _start(self) -> None:
         path = _socket_path()
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         try:
             os.unlink(path)
         except FileNotFoundError:
@@ -38,6 +49,8 @@ class IPCServer:
 
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.bind(path)
+        # Default umask would leave the socket traversable by other users.
+        os.chmod(path, 0o600)
         sock.listen(8)
         sock.setblocking(False)
         self._sock = sock
@@ -47,19 +60,24 @@ class IPCServer:
     def _on_incoming(self, _fd: int, _condition: GLib.IOCondition, srv: socket.socket) -> bool:
         try:
             conn, _ = srv.accept()
-            data = conn.recv(256).decode('utf-8', errors='replace').strip()
-            conn.close()
-            if data:
-                GLib.idle_add(self._dispatch, data)
         except OSError:
-            pass
+            return True
+        try:
+            conn.settimeout(CONN_TIMEOUT_S)
+            data = conn.recv(256).decode('utf-8', errors='replace').strip()
+        except OSError:
+            data = ''
+        finally:
+            conn.close()
+        if data:
+            GLib.idle_add(self._dispatch, data)
         return True
 
     def _dispatch(self, command: str) -> bool:
         try:
             self._handler(command)
         except Exception:
-            pass
+            _log.exception('ipc handler failed for %r', command)
         return False
 
     def stop(self) -> None:

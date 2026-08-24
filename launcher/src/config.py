@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,12 @@ DANGER_RED = '#ff6b6b'
 ON_DANGER_FG = '#ffffff'
 WARNING_ORANGE = '#ff9a3c'
 DESTRUCTIVE_TINT_BG = '#2a1010'
+
+# Stored pin_hash formats: legacy bare sha256 hex, or
+# pbkdf2$<iterations>$<salt_hex>$<hash_hex> (self-describing so the
+# iteration count can change without a migration).
+_PIN_HASH_PREFIX = 'pbkdf2$'
+_PBKDF2_ITERATIONS = 100_000
 
 DEFAULT_CONFIG = {
     'theme': 'amoled',
@@ -129,7 +136,15 @@ class ShellConfig:
 
     def save(self) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        self.config_path.write_text(json.dumps(self.data, indent=2) + '\n', encoding='utf-8')
+        tmp_path = self.config_path.with_name(self.config_path.name + '.tmp')
+        # 0600 at open(): the file never exists world-readable, even briefly.
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+            fh.write(json.dumps(self.data, indent=2) + '\n')
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, self.config_path)
+        os.chmod(self.config_path, 0o600)
 
     @property
     def theme(self) -> ThemePreset:
@@ -177,17 +192,44 @@ class ShellConfig:
     @property
     def pin_hash(self) -> str | None:
         value = self.data.get('pin_hash')
-        return str(value) if value else None
+        # Only a truly absent key means "no PIN"; an empty/corrupt value must
+        # fail closed (verify_pin rejects) rather than collapse to unlocked.
+        return str(value) if value is not None else None
 
     def set_pin(self, pin: str) -> None:
-        self.data['pin_hash'] = hashlib.sha256(pin.encode()).hexdigest()
+        salt = os.urandom(16)
+        digest = hashlib.pbkdf2_hmac('sha256', pin.encode(), salt, _PBKDF2_ITERATIONS)
+        self.data['pin_hash'] = (
+            f'{_PIN_HASH_PREFIX}{_PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}'
+        )
         self.save()
 
     def verify_pin(self, pin: str) -> bool:
         stored = self.pin_hash
         if stored is None:
             return True
-        return hmac.compare_digest(stored, hashlib.sha256(pin.encode()).hexdigest())
+        if stored.startswith(_PIN_HASH_PREFIX):
+            return self._verify_pbkdf2_pin(pin, stored)
+        # Bytes comparison: compare_digest rejects non-ASCII str inputs, and
+        # a tampered/corrupt stored value must fail closed, not raise.
+        legacy_ok = hmac.compare_digest(
+            stored.encode(), hashlib.sha256(pin.encode()).hexdigest().encode(),
+        )
+        if legacy_ok:
+            self.set_pin(pin)
+        return legacy_ok
+
+    @staticmethod
+    def _verify_pbkdf2_pin(pin: str, stored: str) -> bool:
+        try:
+            _, iterations, salt_hex, hash_hex = stored.split('$')
+            expected = bytes.fromhex(hash_hex)
+            digest = hashlib.pbkdf2_hmac(
+                'sha256', pin.encode(), bytes.fromhex(salt_hex), int(iterations),
+            )
+        except ValueError:
+            return False
+        return hmac.compare_digest(digest, expected)
 
     @property
     def auto_lock_timeout(self) -> int:
