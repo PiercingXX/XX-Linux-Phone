@@ -1,0 +1,82 @@
+"""Generate the lisgd bindings for system-level gestures.
+
+docs/config.md documents the system-level gesture slots as configurable
+via gestures.json; this module makes that real. At session start the xx-wm
+wrapper (data/xx-wm.in) runs this module and feeds each output line to
+lisgd as one -g value, so lisgd startup stays in exactly one place and no
+extra daemon exists.
+
+Valid values for the system-level slots are the IPC verbs main.py actually
+dispatches (_on_ipc_command; the ipc.py protocol line):
+
+    gesture.back  gesture.home  gesture.shade
+    gesture.keyboard  gesture.switcher
+
+Any other value — shell actions like `camera`, `launch:<app_id>`, `none`,
+or garbage — silently keeps that slot's default verb (config-compat
+invariant: an invalid gestures.json never changes device behavior).
+Rebinding takes effect at the next session start: lisgd reads the
+touchscreen evdev directly and is started once by the session wrapper;
+there is deliberately no live-reload path.
+"""
+from __future__ import annotations
+
+import argparse
+
+from gesture_config import IPC_VERBS, GestureConfig
+
+# slot -> lisgd geometry prefixes, in canonical order. Fields:
+# nfingers,swipe,startregion,endregion,distance,mode — R fires on release.
+# swipe_left_edge owns both edge directions, matching the pair the xx-wm
+# wrapper hardcoded before bindings became generated.
+_LISGD_GEOMETRY: dict[str, tuple[str, ...]] = {
+    'swipe_up_short': ('1,DU,B,S,R',),
+    'swipe_up_long': ('1,DU,B,L,R',),
+    'swipe_down_top': ('1,UD,T,*,R',),
+    'swipe_left_edge': ('1,LR,L,*,R', '1,RL,R,*,R'),
+}
+
+# slot -> verb fired when gestures.json says nothing (or nothing valid).
+# These reproduce today's device behavior exactly; pinned by
+# tests/test_gesture_bindings.py against the literal former bindings.
+DEFAULT_VERBS: dict[str, str] = {
+    'swipe_up_short': 'gesture.keyboard',
+    'swipe_up_long': 'gesture.home',
+    'swipe_down_top': 'gesture.shade',
+    'swipe_left_edge': 'gesture.back',
+}
+
+
+def resolve_verb(gc: GestureConfig, slot: str) -> str:
+    """Configured IPC verb for a system-level slot, or its default."""
+    value = gc.get(slot)
+    if value in IPC_VERBS:
+        return value
+    return DEFAULT_VERBS[slot]
+
+
+def generate_bindings(bindir: str, gc: GestureConfig | None = None) -> list[str]:
+    """One -g value per binding, in canonical order."""
+    gc = gc if gc is not None else GestureConfig()
+    ipc = f'{bindir}/xx-wm-ipc'
+    lines: list[str] = []
+    for slot, geometries in _LISGD_GEOMETRY.items():
+        verb = resolve_verb(gc, slot)
+        for geometry in geometries:
+            lines.append(f'{geometry},{ipc} {verb}')
+    return lines
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        '--bindir', required=True,
+        help='directory holding the installed xx-wm-ipc client')
+    args = parser.parse_args(argv)
+    for line in generate_bindings(args.bindir):
+        print(line)
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

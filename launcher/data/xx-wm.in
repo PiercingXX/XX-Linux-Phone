@@ -25,14 +25,25 @@ if command -v lisgd >/dev/null 2>&1; then
         done
     fi
     if [ -n "$_touch_dev" ] && [ -r "$_touch_dev" ]; then
-        # Bottom-edge swipe up: a short flick raises the keyboard, a long
-        # swipe goes home. Distance field: S = short, L = long.
-        lisgd -d "$_touch_dev" \
-            -g "1,DU,B,S,R,@bindir@/xx-wm-ipc gesture.keyboard" \
-            -g "1,DU,B,L,R,@bindir@/xx-wm-ipc gesture.home" \
-            -g "1,UD,T,*,R,@bindir@/xx-wm-ipc gesture.shade" \
-            -g "1,LR,L,*,R,@bindir@/xx-wm-ipc gesture.back" \
-            -g "1,RL,R,*,R,@bindir@/xx-wm-ipc gesture.back" &
+        # Bindings are generated from ~/.config/xx-wm/gestures.json by
+        # gesture_bindings.py (docs/config.md "gestures.json"): one -g
+        # value per line. With defaults the invocation is byte-identical
+        # to the previously hardcoded set — pinned by
+        # tests/test_gesture_bindings.py. The subshell keeps the wrapper's
+        # own positional parameters (forwarded to main.py below) intact.
+        # Rebinding applies at the next session start.
+        (
+            set --
+            while IFS= read -r _binding; do
+                set -- "$@" -g "$_binding"
+            done <<EOF
+$(@python@ @shell_dir@/gesture_bindings.py --bindir @bindir@)
+EOF
+            if [ "$#" -gt 0 ]; then
+                exec lisgd -d "$_touch_dev" "$@"
+            fi
+            echo "xx-wm: gesture binding generation failed" >&2
+        ) &
     else
         echo "xx-wm: no readable touchscreen for lisgd" >&2
     fi

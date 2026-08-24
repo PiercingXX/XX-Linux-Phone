@@ -29,12 +29,33 @@ VALID_ACTIONS: frozenset[str] = frozenset({
     'assistant', 'none',
 })
 
+# Slots materialized as system-level lisgd bindings at session start (see
+# gesture_bindings.py). These also accept an IPC verb as their gestures.json
+# value, so rebinding can retarget what lisgd fires over any focused app.
+LISGD_SLOTS: frozenset[str] = frozenset({
+    'swipe_up_short', 'swipe_up_long', 'swipe_down_top', 'swipe_left_edge',
+})
+
+# IPC gesture verbs the shell dispatches (main.py _on_ipc_command; the
+# ipc.py protocol line). The complete valid verb set for LISGD_SLOTS.
+IPC_VERBS: frozenset[str] = frozenset({
+    'gesture.back', 'gesture.home', 'gesture.shade',
+    'gesture.keyboard', 'gesture.switcher',
+})
+
 
 def is_valid_action(action: str) -> bool:
     """Fixed actions plus 'launch:<app_id>' bindings for arbitrary apps."""
     if action in VALID_ACTIONS:
         return True
     return action.startswith('launch:') and len(action) > len('launch:')
+
+
+def _is_valid_value(key: str, value: str) -> bool:
+    """Actions are valid everywhere; verbs only for system-level slots."""
+    if is_valid_action(value):
+        return True
+    return key in LISGD_SLOTS and value in IPC_VERBS
 
 # Human-readable names for the settings UI
 ACTION_LABELS: dict[str, str] = {
@@ -83,7 +104,7 @@ class GestureConfig:
         if not isinstance(raw, dict):
             return
         for key, action in raw.items():
-            if key in _DEFAULTS and isinstance(action, str) and is_valid_action(action):
+            if key in _DEFAULTS and isinstance(action, str) and _is_valid_value(key, action):
                 self._map[key] = action
 
     def save(self) -> None:
@@ -96,7 +117,7 @@ class GestureConfig:
     def set(self, gesture: str, action: str) -> None:
         if gesture not in _DEFAULTS:
             raise ValueError(f'Unknown gesture: {gesture}')
-        if not is_valid_action(action):
+        if not _is_valid_value(gesture, action):
             raise ValueError(f'Unknown action: {action}')
         self._map[gesture] = action
         self.save()

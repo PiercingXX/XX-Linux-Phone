@@ -97,12 +97,19 @@ Flat `{gesture: action}`. Valid actions: `home`, `app_switcher`,
 `launch:<app_id>` for any installed app (an uninstalled target behaves as
 `none`).
 
+Four slots are system-level: lisgd fires them even while an app is
+focused. Their bindings are generated at session start from this file,
+and their value may be an IPC verb — `gesture.home`, `gesture.shade`,
+`gesture.back`, `gesture.keyboard`, or `gesture.switcher` (exactly the
+gesture commands the shell dispatches). Any other value keeps that slot's
+default verb; rebinding applies at the next session start.
+
 | Gesture | Default | Notes |
 |---|---|---|
-| `swipe_down_top` | `notification_shade` | Or `search` — the design's swipe-down choice. |
-| `swipe_up_short` | `home` | System-level via lisgd. |
-| `swipe_up_long` | `app_switcher` | System-level via lisgd. |
-| `swipe_left_edge` | `back` | System-level via lisgd. |
+| `swipe_down_top` | `notification_shade` | In-shell honors any action (`search` is the design's swipe-down choice); the lisgd binding defaults to `gesture.shade`. Verb-rebindable. |
+| `swipe_up_short` | `home` | System-level via lisgd → `gesture.keyboard` by default. Verb-rebindable. |
+| `swipe_up_long` | `app_switcher` | System-level via lisgd → `gesture.home` by default. Verb-rebindable. |
+| `swipe_left_edge` | `back` | System-level via lisgd → `gesture.back` by default, on both edges. Verb-rebindable. |
 | `long_press_bottom` | `search` | |
 | `double_tap_home` | `lock_screen` | Kept on Linux deliberately. |
 | `long_press_home` | `settings` | The shell opens slot edit mode on this. |
