@@ -216,7 +216,12 @@ class ShellConfig:
             stored.encode(), hashlib.sha256(pin.encode()).hexdigest().encode(),
         )
         if legacy_ok:
-            self.set_pin(pin)
+            try:
+                self.set_pin(pin)
+            except OSError:
+                # Upgrade persist is best-effort: an unwritable config must
+                # not turn a correct PIN into a raised exception.
+                pass
         return legacy_ok
 
     @staticmethod

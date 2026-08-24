@@ -366,6 +366,9 @@ class CallUI(Gtk.Window):
     def show_active(self, caller: str, number: str) -> None:
         self._current_caller = caller
         self._current_number = number
+        # Attached mid-call (answered before the UI appeared, or shell
+        # started during the call): resolve the path so hangup can work.
+        self._incoming_call_path = self._incoming_call_path or _resolve_call_path()
         self._act_caller.set_text(caller or number)
         self._act_number.set_text(number if caller else '')
         self._call_start = datetime.now()
