@@ -30,7 +30,7 @@ from config import (
     THEME_PRESETS,
     _derive_shades,
 )
-from gesture_config import GestureConfig
+from gesture_config import GestureConfig, IPC_VERBS, VALID_ACTIONS
 from system_status import status_line
 
 _PAGE_ORDER = ['home', 'apps', 'settings']
@@ -39,6 +39,30 @@ _PAGE_ORDER = ['home', 'apps', 'settings']
 _GESTURE_TITLES = {
     'swipe_left_home': 'Swipe left',
     'swipe_right_home': 'Swipe right',
+}
+
+# System-level lisgd slots (design.md "Gestures"): they fire over any
+# focused app, so besides actions they accept the IPC verbs that
+# gesture_bindings.py materializes at session start.
+_SYSTEM_GESTURE_TITLES = {
+    'swipe_up_short': 'Swipe up (short)',
+    'swipe_up_long': 'Swipe up (long)',
+    'swipe_down_top': 'Swipe down (top)',
+    'swipe_left_edge': 'Edge swipe',
+}
+
+_ACTION_LABELS = {
+    'home': 'Home', 'app_switcher': 'App switcher',
+    'notification_shade': 'Notification shade', 'back': 'Back',
+    'search': 'Search', 'lock_screen': 'Lock screen', 'settings': 'Settings',
+    'camera': 'Camera', 'dialer': 'Dialer', 'assistant': 'Assistant',
+    'none': 'None',
+}
+
+_VERB_LABELS = {
+    'gesture.back': 'Back (system)', 'gesture.home': 'Home (system)',
+    'gesture.shade': 'Shade (system)', 'gesture.keyboard': 'Keyboard (system)',
+    'gesture.switcher': 'Switcher (system)',
 }
 
 # Swipe-up velocity split: a gentle/short flick raises the keyboard, a
@@ -155,6 +179,7 @@ class ShellWindow(Adw.ApplicationWindow):
         # the next drawer tap binds that app to the gesture instead of launching
         self._pick_gesture_key: str | None = None
         self._gesture_binding_labels: dict[str, Gtk.Label] = {}
+        self._system_gesture_labels: dict[str, Gtk.Label] = {}
         self._drawer_open_folder: int | None = None
         self._drawer_folder_header: Gtk.ListBoxRow | None = None
         self._last_search_results: list[AppEntry] = []
@@ -805,7 +830,7 @@ class ShellWindow(Adw.ApplicationWindow):
     def _show_switcher(self) -> None:
         if self._switcher is None:
             from app_switcher import AppSwitcher
-            self._switcher = AppSwitcher()
+            self._switcher = AppSwitcher(config=self.config)
             self._switcher.set_application(self.get_application())
         self._switcher.show_switcher()
 
@@ -893,6 +918,26 @@ class ShellWindow(Adw.ApplicationWindow):
                     ids.add(str(member['app_id']))
         return ids
 
+    def _drawer_folder_slots(self) -> list[tuple[int, dict, list[tuple[int, dict]]]]:
+        """Folder slots the drawer shows, in home-slot order (folders first).
+
+        Members keep their original folder-list indices so the shared member
+        menu edits the right entry; members whose app is not installed are
+        skipped at render, and empty folders never appear.
+        """
+        installed = {entry.app_id for entry in self.app_index.entries}
+        out: list[tuple[int, dict, list[tuple[int, dict]]]] = []
+        for idx, slot in enumerate(self.config.home_slots):
+            if slot.get('type') != 'folder':
+                continue
+            members = [
+                (m_idx, m) for m_idx, m in enumerate(slot.get('folder') or [])
+                if m.get('app_id') and str(m['app_id']) in installed
+            ]
+            if members:
+                out.append((idx, slot, members))
+        return out
+
     @staticmethod
     def _install_time(entry: AppEntry) -> float:
         try:
@@ -924,6 +969,8 @@ class ShellWindow(Adw.ApplicationWindow):
         action = self.gesture_config.get(key) or 'none'
         if action == 'none':
             return 'Not set'
+        if action in _VERB_LABELS:
+            return _VERB_LABELS[action]
         if action == 'camera':
             return 'Camera'
         if action.startswith('launch:'):
@@ -936,6 +983,8 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _refresh_gesture_labels(self) -> None:
         for key, label in self._gesture_binding_labels.items():
+            label.set_text(self._gesture_binding_text(key))
+        for key, label in self._system_gesture_labels.items():
             label.set_text(self._gesture_binding_text(key))
 
     def _build_gestures_card(self) -> Gtk.Widget:
@@ -966,7 +1015,49 @@ class ShellWindow(Adw.ApplicationWindow):
             row.append(change)
             row.append(clear)
             card.append(row)
+
+        for key, title in _SYSTEM_GESTURE_TITLES.items():
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+            name = Gtk.Label(label=title, xalign=0)
+            name.set_hexpand(True)
+
+            binding = Gtk.Label(label=self._gesture_binding_text(key), xalign=1)
+            binding.add_css_class('dim-label')
+            self._system_gesture_labels[key] = binding
+
+            change = Gtk.Button(label='Change')
+            change.add_css_class('flat')
+            change.add_css_class('action-link')
+            change.connect(
+                'clicked', lambda b, k=key, t=title: self._pick_system_gesture(b, k, t))
+
+            clear = Gtk.Button(label='Default')
+            clear.add_css_class('flat')
+            clear.add_css_class('dim-label')
+            clear.connect('clicked', lambda _b, k=key: self._reset_system_gesture(k))
+
+            row.append(name)
+            row.append(binding)
+            row.append(change)
+            row.append(clear)
+            card.append(row)
         return card
+
+    def _pick_system_gesture(self, anchor: Gtk.Widget, key: str, title: str) -> None:
+        choices = [(_ACTION_LABELS[a], lambda a=a: self._set_system_gesture(key, a))
+                   for a in sorted(VALID_ACTIONS)]
+        choices += [(_VERB_LABELS[v], lambda v=v: self._set_system_gesture(key, v))
+                    for v in sorted(IPC_VERBS)]
+        self.item_actions._show_action_menu(anchor, title, choices)
+
+    def _set_system_gesture(self, key: str, value: str) -> None:
+        self.gesture_config.set(key, value)
+        self._refresh_gesture_labels()
+
+    def _reset_system_gesture(self, key: str) -> None:
+        self.gesture_config.reset(key)
+        self._refresh_gesture_labels()
 
     def _pick_gesture_app(self, key: str, title: str) -> None:
         self._pick_gesture_key = key
@@ -1474,16 +1565,15 @@ class ShellWindow(Adw.ApplicationWindow):
 
         # Home folders stay on home — the drawer only lists apps that are
         # not already a slot or folder member (they remain searchable)
-        folder_slots: list[tuple[int, dict]] = []
-        if self._drawer_open_folder is not None and self._drawer_open_folder not in {
-            idx for idx, _slot in folder_slots
-        }:
+        folder_slots = self._drawer_folder_slots()
+        if (self._drawer_open_folder is not None
+                and self._drawer_open_folder not in {i for i, _s, _m in folder_slots}):
             self._drawer_open_folder = None
 
         expanded_members = 0
-        if self._drawer_open_folder is not None:
-            slot = self.config.home_slots[self._drawer_open_folder]
-            expanded_members = len(slot.get('folder') or [])
+        for i, _slot, members in folder_slots:
+            if i == self._drawer_open_folder:
+                expanded_members = len(members)
         row_offset = len(folder_slots) + expanded_members
 
         # Build letter→first-row-index map for A-Z jump strip
@@ -1500,14 +1590,14 @@ class ShellWindow(Adw.ApplicationWindow):
         # Folder drop-downs sit above the app rows (design.md "App drawer")
         self._drawer_folder_header = None
         insert_at = 0
-        for idx, slot in folder_slots:
+        for idx, slot, members in folder_slots:
             header = self._make_drawer_folder_row(slot, idx)
             if idx == self._drawer_open_folder:
                 self._drawer_folder_header = header
             self.apps_list.insert(header, insert_at)
             insert_at += 1
             if idx == self._drawer_open_folder:
-                for m_idx, member in enumerate(slot.get('folder') or []):
+                for m_idx, member in members:
                     self.apps_list.insert(
                         self._make_drawer_member_row(idx, m_idx, member), insert_at)
                     insert_at += 1
