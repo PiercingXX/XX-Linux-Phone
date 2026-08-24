@@ -1767,11 +1767,14 @@ class ShellWindow(Adw.ApplicationWindow):
         header = self._drawer_folder_header
         if header is None or self._drawer_open_folder is None:
             return GLib.SOURCE_REMOVE
-        slot = self.config.home_slots[self._drawer_open_folder]
         row_h = header.get_height()
         if row_h <= 0:
             return GLib.SOURCE_CONTINUE
-        block_h = row_h * (1 + len(slot.get('folder') or []))
+        # Size from rendered members only: uninstalled members are skipped
+        # at render, so counting the raw list would overshoot the block.
+        members = next((m for i, _s, m in self._drawer_folder_slots()
+                        if i == self._drawer_open_folder), [])
+        block_h = row_h * (1 + len(members))
         view_h = self.apps_scroller.get_height()
         alloc = header.get_allocation()
         block_h = min(block_h, view_h)

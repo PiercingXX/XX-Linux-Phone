@@ -83,7 +83,7 @@ class XXWMApplication(Adw.Application):
         # Volume/brightness HUD overlay (plan T3/T4): flashes a level on the
         # layer-shell window after a hardware key press. Silent no-op when GTK
         # is unavailable, so wiring it in can never break a headless device.
-        self._hud = Hud()
+        self._hud = Hud(config=self._shell.config)
         self._hud.set_application(self)
         self._display_mgr = DisplayManager(
             on_wake=self._shell._show_lock_screen,
@@ -96,7 +96,7 @@ class XXWMApplication(Adw.Application):
 
         # Arrow overlay for back gesture feedback (lisgd fires gesture.back via IPC)
         from back_gesture import BackGestureLayer
-        back = BackGestureLayer()
+        back = BackGestureLayer(config=self._shell.config)
         back.set_application(self)
         self._shell._back_layer = back
 

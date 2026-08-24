@@ -81,7 +81,9 @@ def _call_method(call_path: str, method: str, on_done: CallResultCallback) -> No
     def _on_called(conn, result) -> None:
         try:
             conn.call_finish(result)
-        except GLib.Error as err:
+        except Exception as err:  # noqa: BLE001 - exactly-once contract:
+            # any completion failure must reach the callback or the UI
+            # pending guard sticks until the next call resets it.
             _fail(getattr(err, 'message', None) or str(err))
             return
         on_done(True, None)
