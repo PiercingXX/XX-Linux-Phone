@@ -309,19 +309,35 @@ def test_activate_passes_bound_seat(harness: Harness) -> None:
 
 
 def test_graceful_degradation_without_wlr_protocol_module() -> None:
-    # pywayland present but the generated wlr protocol classes missing
-    # (upstream pywayland does not ship them): import must survive and the
-    # default backend factory must degrade to None instead of crashing.
+    # pywayland present but the generated wlr protocol classes missing from
+    # BOTH import sources -- no vendored launcher/src/wayland_proto package
+    # and no hand-installed pywayland.protocol module (upstream pywayland
+    # does not ship one): import must survive and the default backend
+    # factory must degrade to None instead of crashing.
     FakeGLib.fd_adds.clear()
+    vendored = (
+        'wayland_proto',
+        'wayland_proto.wayland',
+        'wayland_proto.wlr_foreign_toplevel_management_unstable_v1',
+    )
+    _absent = object()
+    saved_vendored = {name: sys.modules.get(name, _absent) for name in vendored}
     with Harness(list(ADVERTISED)):
         pw = sys.modules['pywayland']
         wlr_name = 'pywayland.protocol.wlr_foreign_toplevel_management_unstable_v1'
         sys.modules.pop(wlr_name, None)
         delattr(pw.protocol, 'wlr_foreign_toplevel_management_unstable_v1')  # type: ignore[attr-defined]
+        for name in vendored:
+            sys.modules[name] = None  # block the vendored package too
         sys.modules.pop('toplevel_manager', None)
         mod = importlib.import_module('toplevel_manager')
         assert mod._PYWAYLAND_AVAILABLE is False
         assert mod._make_default_backend() is None
+    for name, value in saved_vendored.items():
+        if value is _absent:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = value
 
 
 if __name__ == '__main__':

@@ -31,6 +31,7 @@ install_data(
     'src/app_switcher.py',
     'src/quick_actions.py',
     'src/gesture_config.py',
+    'src/gesture_bindings.py',
     'src/system_status.py',
     'src/first_boot.py',
     'src/call_ui.py',
@@ -90,6 +91,17 @@ install_data(
   'data/wayland.xml',
   'data/wlr-foreign-toplevel-management-unstable-v1.xml',
   install_dir: shell_datadir,
+)
+
+# Vendored pywayland protocol classes (generated from the XMLs above by the
+# pywayland scanner; upstream pywayland ships no wlr module). Installed as a
+# package subdirectory of shell_datadir so `import wayland_proto` resolves
+# with the shell dir on sys.path. See src/wayland_proto/README.md.
+install_data(
+  'src/wayland_proto/__init__.py',
+  'src/wayland_proto/wayland.py',
+  'src/wayland_proto/wlr_foreign_toplevel_management_unstable_v1.py',
+  install_dir: join_paths(shell_datadir, 'wayland_proto'),
 )
 
 install_data(

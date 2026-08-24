@@ -21,17 +21,29 @@ _OWN_APP_ID = 'io.piercingxx.XXWM'
 
 try:
     from pywayland.client import Display
-    from pywayland.protocol.wayland import WlSeat
-    from pywayland.protocol.wlr_foreign_toplevel_management_unstable_v1 import (
-        ZwlrForeignToplevelHandleV1,
-        ZwlrForeignToplevelManagerV1,
-    )
+
+    try:
+        # Prefer the protocol classes vendored in this repo (upstream
+        # pywayland ships no wlr-foreign-toplevel-management module).
+        from wayland_proto.wayland import WlSeat
+        from wayland_proto.wlr_foreign_toplevel_management_unstable_v1 import (
+            ZwlrForeignToplevelHandleV1,
+            ZwlrForeignToplevelManagerV1,
+        )
+    except ImportError:
+        # Fall back to an environment where the generated wlr module was
+        # installed into pywayland.protocol itself (e.g. hand-run scanner).
+        from pywayland.protocol.wayland import WlSeat
+        from pywayland.protocol.wlr_foreign_toplevel_management_unstable_v1 import (
+            ZwlrForeignToplevelHandleV1,
+            ZwlrForeignToplevelManagerV1,
+        )
 
     _PYWAYLAND_AVAILABLE = True
 except (ImportError, OSError):
     # OSError covers a pywayland install whose native libwayland is missing;
-    # ImportError covers pywayland builds without the generated wlr protocol
-    # module (upstream pywayland does not ship it).
+    # ImportError covers missing pywayland entirely and installs without the
+    # generated wlr protocol module in either location.
     _PYWAYLAND_AVAILABLE = False
     Display = None  # type: ignore[assignment,misc]
     WlSeat = None  # type: ignore[assignment,misc]
