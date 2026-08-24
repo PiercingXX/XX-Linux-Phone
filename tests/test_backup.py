@@ -126,3 +126,63 @@ class TestMalformedPayloads:
             payload = None
         assert payload is None
         assert not restore_backup(fresh, payload or [])
+
+
+class TestHostileFontFamily:
+    """Defense-in-depth: a hostile custom_font_family must be cleaned at
+    validation time so it can never reach CSS interpolation."""
+
+    HOSTILE = "Evil'; } window { background: url(http://x) } \\ `'"
+
+    @pytest.fixture
+    def fresh(self, tmp_path, monkeypatch):
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+        return ShellConfig()
+
+    def _payload(self):
+        return {'version': 1, 'home_slots': [], 'theme': 'custom',
+                'custom_background': '#112233',
+                'font': 'custom', 'custom_font_family': self.HOSTILE}
+
+    @pytest.mark.parametrize('hostile', [
+        "Evil'; } window { background: red } '",
+        'Back\\slash',
+        'Tick`Name',
+        'Semi;colon',
+        'Quote"Name',
+    ])
+    def test_validate_cleans_css_breakers(self, hostile):
+        payload = {'version': 1, 'home_slots': [], 'theme': 'custom',
+                   'custom_background': '#112233',
+                   'font': 'custom', 'custom_font_family': hostile}
+        ok, error = validate_backup(payload)
+        assert ok and error is None
+        cleaned = payload['custom_font_family']
+        assert cleaned
+        for ch in '\'"`\\;{}':
+            assert ch not in cleaned
+
+    def test_validate_rejects_non_string_family(self):
+        payload = {'version': 1, 'home_slots': [], 'theme': 'amoled',
+                   'font': 'custom', 'custom_font_family': 123}
+        ok, error = validate_backup(payload)
+        assert not ok
+        assert 'custom_font_family' in error
+
+    def test_restore_writes_sanitized_family(self, fresh):
+        payload = self._payload()
+        assert validate_backup(payload)[0]
+        assert restore_backup(fresh, payload)
+        family = fresh.data['custom_font_family']
+        assert family
+        for ch in '\'"`\\;{}':
+            assert ch not in family
+
+    def test_fully_hostile_family_falls_back_to_default(self, fresh):
+        from config import FONT_FAMILIES, DEFAULT_CONFIG
+        payload = {'version': 1, 'home_slots': [], 'theme': 'custom',
+                   'custom_background': '#112233',
+                   'font': 'custom', 'custom_font_family': '\';}{'}
+        assert validate_backup(payload)[0]
+        assert restore_backup(fresh, payload)
+        assert fresh.data['custom_font_family'] == FONT_FAMILIES[DEFAULT_CONFIG['font']]

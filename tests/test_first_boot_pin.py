@@ -90,3 +90,43 @@ class TestTypingHintThreshold:
         for digit in '123456':
             _first_boot().FirstBootWizard._pin_add(wizard, digit)
         assert wizard._pin_hint.text == ''
+
+
+class TestPinLengthCap:
+    """The wizard must share the lock screen's entry cap (_MAX_PIN): a longer
+    PIN could be set here but never typed back = permanent lockout."""
+
+    def _max_pin(self):
+        from lock_screen import _MAX_PIN
+        return _MAX_PIN
+
+    def test_wizard_uses_lock_screen_cap_constant(self):
+        first_boot = _first_boot()
+        from lock_screen import _MAX_PIN
+        assert first_boot._MAX_PIN is _MAX_PIN
+
+    def test_pin_buf_refuses_to_grow_past_cap(self):
+        wizard = _wizard()
+        fb = _first_boot()
+        cap = self._max_pin()
+        for digit in '1234567890' * 12:
+            fb.FirstBootWizard._pin_add(wizard, digit)
+        assert len(wizard._pin_buf) == cap
+
+    def test_confirm_buf_refuses_to_grow_past_cap(self):
+        wizard = _wizard()
+        fb = _first_boot()
+        cap = self._max_pin()
+        for digit in '1234567890' * 12:
+            fb.FirstBootWizard._confirm_add(wizard, digit)
+        assert len(wizard._confirm_buf) == cap
+
+    def test_delete_still_works_at_cap(self):
+        wizard = _wizard()
+        fb = _first_boot()
+        cap = self._max_pin()
+        wizard._pin_buf = '9' * cap
+        fb.FirstBootWizard._pin_del(wizard)
+        assert len(wizard._pin_buf) == cap - 1
+        fb.FirstBootWizard._pin_add(wizard, '7')
+        assert len(wizard._pin_buf) == cap

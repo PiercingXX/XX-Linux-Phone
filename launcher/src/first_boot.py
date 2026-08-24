@@ -19,6 +19,9 @@ if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
 
 from config import THEME_PRESETS, ShellConfig, ThemePreset
+# Single source of truth with the lock screen: a PIN longer than the lock
+# screen's entry cap could be set here but never typed back = permanent lockout
+from lock_screen import _MAX_PIN
 
 
 def theme_css(preset: ThemePreset) -> str:
@@ -366,6 +369,8 @@ class FirstBootWizard(Gtk.Window):
         return grid
 
     def _pin_add(self, digit: str) -> None:
+        if len(self._pin_buf) >= _MAX_PIN:
+            return
         self._pin_buf += digit
         self._pin_dots.set_text('●' * len(self._pin_buf))
         if len(self._pin_buf) >= 6:
@@ -377,6 +382,8 @@ class FirstBootWizard(Gtk.Window):
             self._pin_dots.set_text('●' * len(self._pin_buf))
 
     def _confirm_add(self, digit: str) -> None:
+        if len(self._confirm_buf) >= _MAX_PIN:
+            return
         self._confirm_buf += digit
         self._confirm_dots.set_text('●' * len(self._confirm_buf))
 

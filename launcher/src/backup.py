@@ -105,6 +105,13 @@ def validate_backup(payload: dict) -> tuple[bool, str | None]:
     if not isinstance(payload.get('font', ''), str):
         return False, 'font must be a string'
 
+    if 'custom_font_family' in payload:
+        family = payload['custom_font_family']
+        if not isinstance(family, str):
+            return False, 'custom_font_family must be a string'
+        from font_theme import sanitize_font_family
+        payload['custom_font_family'] = sanitize_font_family(family)
+
     try:
         scale = float(payload.get('text_size_scale', 1.0))
         if not (0.5 <= scale <= 2.0):

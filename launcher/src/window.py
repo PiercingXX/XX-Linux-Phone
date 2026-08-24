@@ -1808,29 +1808,39 @@ class ShellWindow(Adw.ApplicationWindow):
         self._apply_apn(apn, user, pwd)
         self._show_status('APN saved.')
 
+    @staticmethod
+    def _gsm_connection_name() -> str:
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+            for line in result.stdout.splitlines():
+                # Terse mode escapes ':' inside names as '\:'; TYPE is last
+                name, _, ctype = line.rpartition(':')
+                if ctype.strip() == 'gsm' and name:
+                    return name.replace('\\:', ':')
+        except (OSError, subprocess.SubprocessError) as error:
+            from shell_log import get_logger
+            get_logger('window').warning(
+                'GSM connection lookup failed (%s); using default name', error)
+        return 'mobile'
+
     def _apply_apn(self, apn: str, user: str, pwd: str) -> None:
         if not apn:
             return
         try:
-            from gi.repository import Gio
-            bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
-            # Get first active GSM connection from NetworkManager and update APN
-            _ = bus.call_sync(
-                'org.freedesktop.NetworkManager',
-                '/org/freedesktop/NetworkManager',
-                'org.freedesktop.NetworkManager',
-                'GetAllDevices',
-                None, None, Gio.DBusCallFlags.NONE, 2000, None,
-            )
-            # NetworkManager APN update is complex; write to /etc/ModemManager-gsm.conf fallback
             import subprocess
+            conn = self._gsm_connection_name()
             subprocess.Popen(
-                ['nmcli', 'connection', 'modify', 'mobile',
+                ['nmcli', 'connection', 'modify', conn,
                  'gsm.apn', apn, 'gsm.username', user, 'gsm.password', pwd],
                 close_fds=True,
             )
-        except Exception:
-            pass
+        except Exception as error:
+            from shell_log import get_logger
+            get_logger('window').warning('APN update failed: %s', error)
 
     def _on_call_incoming(self, caller: str, number: str) -> None:
         from call_ui import CallUI, CallBar
@@ -1839,7 +1849,7 @@ class ShellWindow(Adw.ApplicationWindow):
             self._call_ui = CallUI(on_accept=sound.stop, on_decline=sound.stop)
             self._call_ui.set_application(self.get_application())
         if self._call_bar is None:
-            self._call_bar = CallBar()
+            self._call_bar = CallBar(on_expand=self._expand_call_ui)
             self._call_bar.set_application(self.get_application())
         # DnD: only exceptions (starred, repeat caller) ring; everyone else
         # shows silently in the call UI. Exception check runs before this
@@ -1866,6 +1876,11 @@ class ShellWindow(Adw.ApplicationWindow):
             self._call_ui.end_call()
         if self._call_bar is not None:
             self._call_bar.hide_bar()
+
+    def _expand_call_ui(self) -> None:
+        # CallBar's expand button: re-present the full call surface
+        if self._call_ui is not None:
+            self._call_ui.present()
 
     def _make_app_row(self, entry: AppEntry) -> Gtk.ListBoxRow:
         display_name = self.config.label_for(entry.app_id, entry.name)
@@ -2012,11 +2027,9 @@ class ShellWindow(Adw.ApplicationWindow):
         filepath.write_text(json.dumps(backup, indent=2), encoding='utf-8')
         self._show_status(f'Backup exported to {filepath}')
     
-    def _on_restore_backup(self) -> None:
-        from backup import validate_backup, restore_backup
-        import json
+    def _build_restore_dialog(self) -> Gtk.FileChooserDialog:
         from gi.repository import Gtk as gtk
-        
+
         # Create a file chooser dialog
         dialog = gtk.FileChooserDialog(
             title='Restore from backup',
@@ -2029,37 +2042,54 @@ class ShellWindow(Adw.ApplicationWindow):
             '_Restore',
             gtk.ResponseType.OK,
         )
-        
+
         filter_json = gtk.FileFilter()
         filter_json.set_name('JSON files')
         filter_json.add_pattern('*.json')
         dialog.add_filter(filter_json)
-        
-        response = dialog.run()
-        
-        if response == gtk.ResponseType.OK:
-            filepath = dialog.get_filename()
-            dialog.destroy()
-            
-            try:
-                payload = json.loads(Path(filepath).read_text(encoding='utf-8'))
-            except (OSError, json.JSONDecodeError) as e:
-                self._show_status(f'Failed to read backup: {e}')
+        return dialog
+
+    def _on_restore_backup(self) -> None:
+        from gi.repository import Gtk as gtk
+
+        # dialog.run() is gone in GTK4; the response signal carries on
+        dialog = self._build_restore_dialog()
+
+        def _on_response(dlg: Gtk.FileChooserDialog, response: int) -> None:
+            filepath = dlg.get_filename()
+            dlg.destroy()
+            if response != gtk.ResponseType.OK:
                 return
-            
-            is_valid, error = validate_backup(payload)
-            if not is_valid:
-                self._show_status(f'Invalid backup: {error}')
-                return
-            
-            success = restore_backup(self.config, payload)
-            if success:
-                self._show_status('Backup restored successfully')
-                self._apply_config_change()
-            else:
-                self._show_status('Failed to restore backup')
+            self._restore_from_path(filepath)
+
+        dialog.connect('response', _on_response)
+        dialog.show()
+
+    def _restore_from_path(self, filepath: str | None) -> None:
+        from backup import restore_backup, validate_backup
+        import json
+
+        if not filepath:
+            self._show_status('No backup file selected.')
+            return
+
+        try:
+            payload = json.loads(Path(filepath).read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError) as e:
+            self._show_status(f'Failed to read backup: {e}')
+            return
+
+        is_valid, error = validate_backup(payload)
+        if not is_valid:
+            self._show_status(f'Invalid backup: {error}')
+            return
+
+        success = restore_backup(self.config, payload)
+        if success:
+            self._show_status('Backup restored successfully')
+            self._apply_config_change()
         else:
-            dialog.destroy()
+            self._show_status('Failed to restore backup')
     
     def _get_device_name(self) -> str:
         import platform
