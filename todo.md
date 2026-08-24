@@ -9,7 +9,7 @@ You are Skippy, working on **XX-WM**: a minimalist, text-first Wayland launcher/
 - **Spec**: `design.md` wins. Where this file and design.md disagree, design.md is right; flag the conflict in your commit message.
 - **Style**: Python 3.12+, GTK4/libadwaita via `gi`, match the existing code's idiom. No comments unless the WHY is non-obvious. Text-first UI: no icon grids, no images, monochrome per theme.
 - **CSS invariants** (`launcher/src/style.css`): uniform background from the active theme on every surface; children transparent; no borders anywhere except inside `.settings-page`; the **configured font applies launcher-wide** via `font_theme.apply_global_font` (default JetBrains Mono Nerd — surfaces must not hardcode a family); invisible Paned separators. Don't regress these.
-- **Verify before every commit**: `sh scripts/check.sh` (py_compile + ruff + pytest + shellcheck — **313 passing as of 2026-08-23**; ruff resolves from the venv per 25.1, shellcheck is absent on this box and prints a loud `SKIPPED`). If you add a runtime behavior, run the shell locally (`cd launcher && PYTHONPATH=src python3 src/main.py` — it falls back to a window when layer-shell is absent) and exercise the flow.
+- **Verify before every commit**: `sh scripts/check.sh` (py_compile + ruff + pytest + shellcheck — **472 passing as of 2026-08-24**, up from 313 pre-WS26; ruff resolves from the venv per 25.1, shellcheck is absent on this box and prints a loud `SKIPPED`). If you add a runtime behavior, run the shell locally (`cd launcher && PYTHONPATH=src python3 src/main.py` — it falls back to a window when layer-shell is absent) and exercise the flow.
 - **Commits**: one commit per task or coherent group, imperative subject, body says what changed and how it was verified. Never commit `__pycache__`, `build/`, or `devices/*/downloads/` (gitignored).
 - **Config compatibility**: `~/.config/xx-wm/config.json` may exist from earlier runs (and auto-migrates from `piercing-shell`). Every schema change needs a silent migration path (missing keys → defaults; never crash on old configs). `docs/config.md` is the public API reference — update it with every key change.
 - **Decisions already made** (don't relitigate): the product is **XX-WM** (renamed 2026-08-17; app id `io.piercingxx.XXWM`, binaries `xx-wm`/`xx-wm-ipc`/`xx-wm-session`); phoc is the compositor; lisgd owns system-level gestures via IPC; the keyboard is **squeekboard** with the PiercingXX Colemak layouts; the lock screen stays ours (no phrog/phosh code, ever); DnD and Focus Mode copy the **Pixel's** behavior; the in-shell Settings page is **system-only** — every shell preference lives in `~/.config/xx-wm/`; backgrounds are solid colors only, never wallpaper; `aura` stays as a Linux-only bonus theme; the volume/brightness HUD is **in-shell** (wob dropped, WS21.1); Android-launcher parity syncs (2026-07-20/21) are already folded into design.md — design.md is current.
@@ -71,6 +71,25 @@ Still open (watch items, none blocking):
 - Tablet checklist additions: verify geoclue revokes live clients on `MaxAccuracyLevel=0`; confirm enable-time registration behaves against phosh's prompting agent on device.
 
 ---
+
+## Workstream 26 — Post-review hardening (done 2026-08-24, dev machine)
+
+Two-agent review (code reviewer + research audit) surfaced blocker/high defects concentrated in the paths a phone lives or dies by. All dev-machine-fixable items landed in 8 commits; suite went 313 → **472 passing**, gate green.
+
+- **Incoming calls were dead on arrival** — `CallBar()` constructed without its required `on_expand` (TypeError before ringtone/UI), and nothing ever called MM1 Accept/Hangup. Fixed: real accept/hangup D-Bus calls wired through the buttons, CallBar show/hide contract satisfied.
+- **Dialing/SMS never transmitted** — invalid mmcli verbs (`--voice-call=`, create-without-send), verified against upstream mmcli source; now create→parse→start/send with failure surfaced instead of silently swallowed.
+- **Switcher backend could never connect** — five pywayland glue defects (bad import, inverted dispatcher registration, fd-watch never armed, missing wlr protocol module handling, phantom create_toplevel/seat-less activate) plus a stale app_id/title cache. Backend degrades honestly until the protocol module is generated on device.
+- **Lock/security core hardened** — atomic 0600 config saves (a torn write used to silently disable the PIN), salted PBKDF2 PIN storage with transparent legacy-sha256 upgrade, fail-closed corrupt hashes, IPC socket chmod 0600 + bounded reads (a silent local client used to freeze the UI thread) + logged dispatch errors.
+- **GTK4/API breakage** — backup restore's removed `Dialog.run()` converted to response-signal flow; hostile `custom_font_family` sanitized at source (startup-crash vector via restored backup); wizard PIN entry capped at the lock screen's `_MAX_PIN` (longer settable-but-unenterable PIN = lockout).
+- **Power/fingerprint/WiFi** — fired long-press no longer followed by instant blank; fingerprint node auto-detected from sysfs (`FP_INPUT_DEV` override, event3 fallback); WiFi PSK moved off nmcli's command line into a 0600 passwd-file.
+- **Shade/sliders** — one subprocess per drag (200ms trailing debounce) instead of per tick; single getter batch per expand; dead Notify signal subscription replaced by an honest external-daemon probe.
+- **Docs/env** — burgundy added to docs/config.md theme list; README scripts layout completed; stale `contracts/` gitignored; venv gate repaired (suite runs again on this box).
+- **Test infra** — hud module tests made collection-order-independent; fake-gi seams pinned where tests drove imported modules.
+
+Device-gated follow-ups from this workstream: smoke-test `nmcli connection up … passwd-file` on a real NM; generate the wlr protocol module on device (`python -m pywayland.scanner`) or vendor it; exercise MM1 accept/hangup against a live modem; verify fp node detection names on hardware.
+
+---
+
 
 ## Tablet verification checklist (needs the x86 tablet, stable login)
 
