@@ -10,8 +10,11 @@ D-Bus; sound through pactl; battery through UPower D-Bus.
 """
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from typing import Callable
 
@@ -69,19 +72,43 @@ def list_wifi(run: _RunFn = _run) -> list[WifiNetwork] | None:
     return parse_nmcli_wifi(result.stdout)
 
 
-def connect_wifi(ssid: str, password: str | None = None,
-                 run: _RunFn = _run) -> tuple[bool, str]:
-    cmd = ['nmcli', 'dev', 'wifi', 'connect', ssid]
-    if password:
-        cmd += ['password', password]
-    try:
-        result = run(cmd, timeout=45)
-    except (OSError, subprocess.TimeoutExpired):
-        return False, 'NetworkManager unavailable'
+def _wifi_result(ssid: str, result: subprocess.CompletedProcess) -> tuple[bool, str]:
     if result.returncode == 0:
         return True, f'Connected to {ssid}'
     detail = (result.stderr or result.stdout or '').strip().splitlines()
     return False, detail[-1] if detail else 'Connection failed'
+
+
+def connect_wifi(ssid: str, password: str | None = None,
+                 run: _RunFn = _run) -> tuple[bool, str]:
+    """Connect to `ssid`. Secrets go through nmcli's passwd-file channel
+    (nmcli(1): `connection up ... [passwd-file file]`, lines of the form
+    `802-11-wireless-security.psk:<password>`) so the PSK never appears in
+    argv, where any local user could read it via /proc/<pid>/cmdline. The
+    temp file is 0600 and removed on every path."""
+    if not password:
+        try:
+            result = run(['nmcli', 'dev', 'wifi', 'connect', ssid], timeout=45)
+        except (OSError, subprocess.TimeoutExpired):
+            return False, 'NetworkManager unavailable'
+        return _wifi_result(ssid, result)
+
+    fd, passwd_path = tempfile.mkstemp(prefix='xxwm-psk-')
+    try:
+        with os.fdopen(fd, 'w') as passwd_file:
+            passwd_file.write(f'802-11-wireless-security.psk:{password}\n')
+        try:
+            # Profile may already exist from a previous connect; only `up` matters.
+            run(['nmcli', 'connection', 'add', 'type', 'wifi',
+                 'con-name', ssid, 'ssid', ssid])
+            result = run(['nmcli', 'connection', 'up', ssid,
+                          'passwd-file', passwd_path], timeout=45)
+        except (OSError, subprocess.TimeoutExpired):
+            return False, 'NetworkManager unavailable'
+        return _wifi_result(ssid, result)
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(passwd_path)
 
 
 # ------------------------------------------------------------------ Sound

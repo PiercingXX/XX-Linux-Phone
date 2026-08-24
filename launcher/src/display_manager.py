@@ -12,6 +12,11 @@ _on_event filters by code, so power/touch/volume wake the display whatever
 event number they land on and whatever the device. This replaces an earlier
 FP5-specific map (event0-3 / HWCOMPOSER-1) that trapped other devices dark.
 
+The fingerprint reader node is resolved once at init: the FP_INPUT_DEV env
+var overrides, else /sys/class/input/*/name is scanned for reader
+identifiers (fingerprint/goodix/focaltech, case-insensitive);
+/dev/input/event3 remains the fallback when detection finds nothing.
+
 Hardware shortcuts (handled via evdev):
   - Power short press                  → blank / wake (toggle)
   - Power long-press (≥600ms)          → on_power_menu()
@@ -41,6 +46,8 @@ KEY_POWER     = 116
 KEY_VOLUMEDOWN = 114
 KEY_VOLUMEUP   = 115
 
+_FP_IDENTIFIERS = ('fingerprint', 'goodix', 'focaltech')
+
 _POWER_LONG_PRESS_MS = 600   # ms hold to trigger power menu instead of blank
 
 # Wake devices and the output name used to be hardcoded per-device (the FP5's
@@ -56,6 +63,29 @@ def _all_event_devices() -> list[str]:
     EVIOCGRAB), so watching them all is harmless — _on_event filters by code."""
     import glob
     return sorted(d for d in glob.glob('/dev/input/event*') if os.access(d, os.R_OK))
+
+
+def _detect_fp_node(sysfs_dir: str = '/sys/class/input') -> str:
+    """Fingerprint reader evdev node. FP_INPUT_DEV wins outright; else the
+    input device whose sysfs name matches a known reader identifier is mapped
+    to its event* child. Legacy /dev/input/event3 fallback keeps devices
+    where detection finds nothing working until verified per-device."""
+    override = os.environ.get('FP_INPUT_DEV')
+    if override:
+        return override
+    import glob
+    for name_path in sorted(glob.glob(os.path.join(sysfs_dir, 'input*', 'name'))):
+        try:
+            with open(name_path, encoding='utf-8', errors='replace') as f:
+                name = f.read().strip()
+        except OSError:
+            continue
+        if not any(tag in name.lower() for tag in _FP_IDENTIFIERS):
+            continue
+        events = sorted(glob.glob(os.path.join(os.path.dirname(name_path), 'event*')))
+        if events:
+            return '/dev/input/' + os.path.basename(events[0])
+    return '/dev/input/event3'
 
 
 def _detect_output() -> str:
@@ -197,6 +227,7 @@ class DisplayManager:
         # Power button long-press tracking
         self._power_down_at: float | None = None   # monotonic time of key-down
         self._power_long_src: int | None  = None   # GLib timer for long-press
+        self._power_long_fired = False             # menu already shown this press
 
         # Combo state: both keys must be logically held simultaneously
         self._power_held   = False
@@ -207,6 +238,8 @@ class DisplayManager:
         self._wake_devs = _all_event_devices()
         for dev in self._wake_devs:
             _watch_evdev(dev, self._on_event)
+
+        self._fp_node = _detect_fp_node()
 
         # Safety: only ever blank the backlight if we actually have a way to
         # wake it back up. With no readable input device, leave the screen on.
@@ -258,6 +291,7 @@ class DisplayManager:
         if ev_type == EV_KEY and code == KEY_POWER:
             if value == 1:  # key down
                 self._power_held = True
+                self._power_long_fired = False
                 self._power_down_at = time.monotonic()
                 # Check Power+VolDown combo immediately
                 if self._voldown_held:
@@ -309,7 +343,7 @@ class DisplayManager:
             return GLib.SOURCE_REMOVE
 
         # --- Fingerprint touch → wake if off, else try auth ---
-        if path == '/dev/input/event3' and ev_type == EV_KEY and value == 1:
+        if path == self._fp_node and ev_type == EV_KEY and value == 1:
             if self._blanked:
                 self._wake()
             elif self._on_fingerprint:
@@ -330,17 +364,20 @@ class DisplayManager:
 
     def _on_power_long_press(self) -> bool:
         self._power_long_src = None
+        self._power_long_fired = True
         if self._on_power_menu:
             GLib.idle_add(self._on_power_menu)
         return GLib.SOURCE_REMOVE
 
     def _cancel_long_press(self) -> bool:
-        """Cancel pending long-press timer. Returns True if it was pending (i.e. was long)."""
+        """Cancel a pending long-press timer. Returns True only when the
+        long-press already fired (power menu shown), so the key-up caller can
+        suppress the short-press blank; a timer cancelled before firing was
+        just a short press."""
         if self._power_long_src is not None:
             GLib.source_remove(self._power_long_src)
             self._power_long_src = None
-            return False  # cancelled before firing = was NOT a long press
-        return False
+        return self._power_long_fired
 
     def _trigger_screenshot(self) -> None:
         if self._on_screenshot:
