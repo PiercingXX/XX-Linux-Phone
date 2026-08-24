@@ -204,7 +204,11 @@ class NotificationShade(Gtk.Window):
 
         self.list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list_box.add_css_class('text-list')
-        self.quick_actions = QuickActionsPanel(dnd_state=dnd_state, focus_state=focus_state, hud=hud)
+        # The embedded panel shares this shade's LIVE config so its tiles and
+        # sliders resolve the same preset (theme == 'custom' included).
+        self.quick_actions = QuickActionsPanel(
+            dnd_state=dnd_state, focus_state=focus_state, hud=hud,
+            config=self._config)
 
         self._revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,

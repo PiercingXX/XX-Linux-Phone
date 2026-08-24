@@ -49,10 +49,14 @@ def theme_css(preset: ThemePreset) -> str:
 class _ArrowOverlay(Gtk.Window):
     """Brief ← flash that appears at the triggering edge after the gesture fires."""
 
-    def __init__(self, left: bool) -> None:
+    def __init__(self, left: bool, config: ShellConfig | None = None) -> None:
         super().__init__()
         self._anim_src: int | None = None
         self._fade_step = 0
+        # The shell threads its LIVE config so theme == 'custom' renders the
+        # derived palette; the fallback keeps direct construction working
+        # (pre-existing snapshot behavior).
+        self._config = config if config is not None else ShellConfig()
 
         self.set_decorated(False)
         self.set_resizable(False)
@@ -69,7 +73,7 @@ class _ArrowOverlay(Gtk.Window):
         self.set_default_size(76, 64)
 
         css = Gtk.CssProvider()
-        css.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
+        css.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
@@ -89,6 +93,17 @@ class _ArrowOverlay(Gtk.Window):
         self.set_child(box)
 
         self.set_opacity(0.0)
+
+    def _display_preset(self) -> ThemePreset:
+        """Preset this overlay renders with: window.resolve_theme over the
+        injected config, so theme == 'custom' derives its palette instead of
+        falling back to the default preset (W1-B). Lazy import: window.py
+        sits above this module in the shell stack, and a module-level import
+        would drag its GTK requirements into headless contexts that import
+        back_gesture for its pure theme_css sheet.
+        """
+        from window import resolve_theme
+        return resolve_theme(self._config)
 
     def flash(self) -> None:
         if self._anim_src is not None:
@@ -120,9 +135,13 @@ class _ArrowOverlay(Gtk.Window):
 class BackGestureLayer:
     """Arrow overlays for back gesture feedback. Triggered via IPC (lisgd → gesture.back)."""
 
-    def __init__(self) -> None:
-        self._left_arrow  = _ArrowOverlay(left=True)
-        self._right_arrow = _ArrowOverlay(left=False)
+    def __init__(self, config: ShellConfig | None = None) -> None:
+        # Live ShellConfig when the shell threads it; a fresh snapshot keeps
+        # direct no-arg construction working. Both arrows share it so their
+        # sheets resolve through window.resolve_theme.
+        self._config = config if config is not None else ShellConfig()
+        self._left_arrow  = _ArrowOverlay(left=True, config=self._config)
+        self._right_arrow = _ArrowOverlay(left=False, config=self._config)
 
     def set_application(self, app: Gtk.Application) -> None:
         self._left_arrow.set_application(app)

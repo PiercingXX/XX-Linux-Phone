@@ -74,10 +74,14 @@ if _HAS_GTK:
     class _HudWindow(Gtk.Window):
         """Centered overlay that flashes a level (volume or brightness) then fades."""
 
-        def __init__(self) -> None:
+        def __init__(self, config: ShellConfig | None = None) -> None:
             super().__init__()
             self._anim_src: int | None = None
             self._fade_step = 0
+            # The shell threads its LIVE config so theme == 'custom' renders
+            # the derived palette; the fallback keeps direct construction
+            # working (pre-existing snapshot behavior).
+            self._config = config if config is not None else ShellConfig()
 
             self.set_decorated(False)
             self.set_resizable(False)
@@ -94,7 +98,7 @@ if _HAS_GTK:
                 LayerShell.set_margin(self, LayerShell.Edge.TOP, 96)
 
             css = Gtk.CssProvider()
-            css.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
+            css.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
             Gtk.StyleContext.add_provider_for_display(
                 self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )
@@ -122,6 +126,17 @@ if _HAS_GTK:
             self.set_child(box)
 
             self.set_opacity(0.0)
+
+        def _display_preset(self) -> ThemePreset:
+            """Preset this overlay renders with: window.resolve_theme over
+            the injected config, so theme == 'custom' derives its palette
+            instead of falling back to the default preset (W1-B). Lazy
+            import: window.py sits above this module in the shell stack,
+            and a module-level import would drag GTK requirements into
+            headless contexts that import hud for its silent-absence path.
+            """
+            from window import resolve_theme
+            return resolve_theme(self._config)
 
         def show_level(self, pct: int) -> None:
             """Display a clamped 0-100 level and schedule the auto-hide fade."""
@@ -158,8 +173,12 @@ if _HAS_GTK:
 class Hud:
     """Volume/brightness HUD overlay. Silent no-op when GTK or the layer shell is absent."""
 
-    def __init__(self, app=None) -> None:
-        self._window = _HudWindow() if _HAS_GTK else None
+    def __init__(self, app=None, config: ShellConfig | None = None) -> None:
+        # Live ShellConfig when the shell threads it; a fresh snapshot keeps
+        # direct no-arg construction working. Held here and handed to the
+        # overlay so its sheet resolves through window.resolve_theme.
+        self._config = config if config is not None else ShellConfig()
+        self._window = _HudWindow(self._config) if _HAS_GTK else None
         if self._window is None:
             _log.info('HUD disabled: PyGObject unavailable')
         if app is not None:

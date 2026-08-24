@@ -567,7 +567,8 @@ class QuickActionsPanel(Gtk.Box):
 
     def __init__(self, dnd_state: object | None = None,
                  focus_state: object | None = None,
-                 hud: object | None = None) -> None:
+                 hud: object | None = None,
+                 config: ShellConfig | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add_css_class('qa-panel')
 
@@ -577,6 +578,10 @@ class QuickActionsPanel(Gtk.Box):
         # sliders still adjust brightness/volume, just without an on-screen
         # indicator (silent absence — see _show_brightness_hud).
         self._hud = hud
+        # The shade threads its LIVE config down so theme == 'custom' renders
+        # the derived palette; the fallback keeps direct no-arg construction
+        # working (pre-existing snapshot behavior).
+        self._config = config if config is not None else ShellConfig()
         self._tile_buttons: dict[str, Gtk.ToggleButton] = {}
         self._tile_state: dict[str, bool] = {}
         self._state_labels: dict[str, Gtk.Label] = {}
@@ -592,7 +597,7 @@ class QuickActionsPanel(Gtk.Box):
         }
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
+        provider.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
             provider,
@@ -601,6 +606,17 @@ class QuickActionsPanel(Gtk.Box):
 
         self._build()
         GLib.idle_add(self._refresh_all_states)
+
+    def _display_preset(self) -> ThemePreset:
+        """Preset this panel renders with: window.resolve_theme over the
+        injected config, so theme == 'custom' derives its palette instead of
+        falling back to the default preset (W1-B). Lazy import: window.py
+        sits above this module in the shell stack, and a module-level import
+        would drag its GTK requirements into headless contexts that import
+        quick_actions for its tile/slider logic.
+        """
+        from window import resolve_theme
+        return resolve_theme(self._config)
 
     def _tiles(self) -> list[_TileDef]:
         tiles = []

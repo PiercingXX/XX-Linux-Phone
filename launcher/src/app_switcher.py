@@ -121,8 +121,14 @@ class AppSwitcher(_AppSwitcherBase):
     Card swipe-up dismisses that app. Reveal/hide uses Gtk.Revealer (SLIDE_UP).
     """
 
-    def __init__(self, manager: ToplevelManager | None = None) -> None:
+    def __init__(self, manager: ToplevelManager | None = None,
+                 config: ShellConfig | None = None) -> None:
         super().__init__(title='PiercingXX Switcher')
+
+        # The shell window threads its LIVE config so theme == 'custom'
+        # renders the derived palette; the fallback keeps direct no-arg
+        # construction working (pre-existing snapshot behavior).
+        self._config = config if config is not None else ShellConfig()
 
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)
@@ -143,7 +149,7 @@ class AppSwitcher(_AppSwitcherBase):
         self.refresh()
 
         provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
+        provider.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
         )
@@ -169,6 +175,17 @@ class AppSwitcher(_AppSwitcherBase):
         key = Gtk.EventControllerKey.new()
         key.connect('key-pressed', self._on_key)
         self.add_controller(key)
+
+    def _display_preset(self) -> ThemePreset:
+        """Preset this surface renders with: window.resolve_theme over the
+        injected config, so theme == 'custom' derives its palette instead of
+        falling back to the default preset (W1-B). Lazy import: window.py
+        sits above this module in the shell stack, and a module-level import
+        would drag its GTK requirements into headless contexts that import
+        app_switcher for its static seams.
+        """
+        from window import resolve_theme
+        return resolve_theme(self._config)
 
     def _build_content(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

@@ -77,3 +77,21 @@ class TestHudApi:
         assert hud.show_volume(42) is None
         assert hud.show_brightness(17) is None
         assert hud.set_application(app=None) is None
+
+    def test_config_param_preserves_silent_absence(self):
+        """W1-B: Hud gains an optional live-config injection (custom-theme
+        rendering). It must not flip the headless contract — without GTK the
+        HUD stays window-less and every public call still no-ops; with GTK
+        the overlay must still actually be created."""
+        from config import ShellConfig
+        cfg = ShellConfig.__new__(ShellConfig)
+        cfg.data = {'theme': 'custom', 'custom_background': '#2A1018'}
+        hud = Hud(config=cfg)
+        if not _HAS_GTK:
+            assert hud._window is None
+            assert hud.show_volume(100) is None
+            assert hud.show_brightness(17) is None
+            assert hud.set_application(app=None) is None
+            assert hud._window is None
+        else:
+            assert hud._window is not None
