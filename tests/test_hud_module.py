@@ -4,10 +4,25 @@ The HUD is a GTK4 layer-shell overlay that flashes a volume/brightness level
 and auto-hides after ~1s. It must degrade silently when PyGObject or the
 layer-shell compositor seam is absent, so this module is importable and every
 public method no-ops headlessly. The tests below pin that headless contract
-deterministically — they run in this environment where PyGObject is not
-installed, and they also hold on a GTK-capable host.
+deterministically: a fake gi whose require_version always rejects pins the
+no-GTK branch regardless of which sibling modules clobbered sys.modules
+before collection reached this file.
 """
-from hud import Hud, _HAS_GTK, _HUD_HOLD_MS
+import sys
+
+
+def _install_headless_gi() -> None:
+    """Force hud.py's silent-absence path: `import gi` must raise ImportError
+    (None in sys.modules is CPython's canonical way to guarantee that), so no
+    sibling module's earlier fake can flip the branch this file asserts."""
+    sys.modules['gi'] = None
+
+
+_install_headless_gi()
+
+from hud import Hud, _HAS_GTK, _HUD_HOLD_MS  # noqa: E402
+
+assert _HAS_GTK is False
 
 
 class TestHudApi:
