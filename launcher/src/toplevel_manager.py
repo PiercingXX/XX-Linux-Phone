@@ -3,14 +3,14 @@
 Lists, activates and closes toplevel windows on a wlroots compositor (phoc).
 The pywayland interaction is isolated behind a backend so the manager's pure
 logic (own-app filtering, closed-handle pruning, ordering, dispatch) is
-testable without a compositor or pywayland installed. If pywayland or the
-protocol is unavailable the manager degrades to an empty state instead of
-crashing, so the switcher can still show "No open apps".
+testable without a compositor or pywayland installed. If pywayland, the
+generated protocol classes or the compositor connection are unavailable the
+manager degrades to an empty state instead of crashing, so the switcher can
+still show "No open apps".
 """
 
 from __future__ import annotations
 
-import importlib.util
 import logging
 from dataclasses import dataclass
 
@@ -19,19 +19,24 @@ log = logging.getLogger(__name__)
 # The shell's own surfaces must never appear in the switcher.
 _OWN_APP_ID = 'io.piercingxx.XXWM'
 
-_PYWAYLAND_AVAILABLE = (
-    importlib.util.find_spec('pywayland') is not None
-    and importlib.util.find_spec('pywayland.client') is not None
-)
-if _PYWAYLAND_AVAILABLE:
-    from pywayland.client import Client
+try:
+    from pywayland.client import Display
+    from pywayland.protocol.wayland import WlSeat
     from pywayland.protocol.wlr_foreign_toplevel_management_unstable_v1 import (
         ZwlrForeignToplevelHandleV1,
         ZwlrForeignToplevelManagerV1,
     )
-else:  # pragma: no cover - environment dependent
-    Client = None  # type: ignore[assignment,misc]
+
+    _PYWAYLAND_AVAILABLE = True
+except (ImportError, OSError):
+    # OSError covers a pywayland install whose native libwayland is missing;
+    # ImportError covers pywayland builds without the generated wlr protocol
+    # module (upstream pywayland does not ship it).
+    _PYWAYLAND_AVAILABLE = False
+    Display = None  # type: ignore[assignment,misc]
+    WlSeat = None  # type: ignore[assignment,misc]
     ZwlrForeignToplevelHandleV1 = None  # type: ignore[assignment,misc]
+    ZwlrForeignToplevelManagerV1 = None  # type: ignore[assignment,misc]
 
 
 @dataclass(frozen=True)
@@ -57,28 +62,30 @@ class WaylandToplevelBackend:
     """
 
     def __init__(self) -> None:
-        if Client is None:
+        if Display is None:
             raise RuntimeError('pywayland is not available')
-        self._client = Client()
+        self._display = Display()
         self._manager: object | None = None
+        self._seat: object | None = None
         self._handles: dict[object, object] = {}
+        self._info: dict[object, list[str]] = {}
         self._manager_cb = None
         self._fd_source = None
-        self._display = self._client.display
         self._connect()
 
     def _connect(self) -> None:
         try:
-            self._client.connect()
+            self._display.connect()
         except Exception as exc:
             raise RuntimeError(f'cannot connect to Wayland display: {exc}') from exc
         registry = self._display.get_registry()
-        registry.dispatcher[self._on_registry_global] = 'ZwlpRegistry'
-        registry.dispatcher[self._on_registry_global_remove] = 'ZwlpRegistry'
+        registry.dispatcher['global'] = self._on_registry_global
+        registry.dispatcher['global_remove'] = self._on_registry_global_remove
         self._display.dispatch(block=True)
         self._display.flush()
         if self._manager is None:
             raise RuntimeError('compositor does not offer wlr-foreign-toplevel-management')
+        self._arm_fd_watch()
 
     # -- GLib fd-watch -----------------------------------------------------
 
@@ -87,7 +94,7 @@ class WaylandToplevelBackend:
         gi.require_version('Gtk', '4.0')
         from gi.repository import GLib
 
-        fd = self._client.get_fd()
+        fd = self._display.get_fd()
         self._fd_source = GLib.unix_fd_add(
             fd, GLib.IOCondition.IN | GLib.IOCondition.HUP, self._on_fd_ready,
         )
@@ -110,50 +117,61 @@ class WaylandToplevelBackend:
 
     # -- protocol glue -----------------------------------------------------
 
-    def _on_registry_global(self, registry, _serial: int, name: int, interface: str, _version: int) -> None:
-        if interface == 'zwlr_foreign_toplevel_manager_v1':
-            self._manager = registry.bind(
-                name, ZwlrForeignToplevelManagerV1, 3,
-            )
-            self._manager.dispatcher[self._on_toplevel] = 'zwlr_foreign_toplevel_manager_v1'
-            self._manager.dispatcher[self._on_finished] = 'zwlr_foreign_toplevel_manager_v1'
-            self._manager.create_toplevel()
+    def _on_registry_global(self, registry, _serial: int, name: int, interface: str, version: int) -> None:
+        if interface == 'wl_seat':
+            self._seat = registry.bind(name, WlSeat, 1)
+        elif interface == 'zwlr_foreign_toplevel_manager_v1':
+            self._manager = registry.bind(name, ZwlrForeignToplevelManagerV1, min(3, version))
+            self._manager.dispatcher['toplevel'] = self._on_toplevel
+            self._manager.dispatcher['finished'] = self._on_finished
 
     def _on_registry_global_remove(self, _registry, _name: int) -> None:
         pass
 
-    def _on_toplevel(self, manager, toplevel: ZwlrForeignToplevelHandleV1) -> None:
+    def _on_toplevel(self, manager, toplevel) -> None:
         self._handles[id(toplevel)] = toplevel
-        toplevel.dispatcher[self._on_title] = 'zwlr_foreign_toplevel_handle_v1'
-        toplevel.dispatcher[self._on_app_id] = 'zwlr_foreign_toplevel_handle_v1'
-        toplevel.dispatcher[self._on_closed] = 'zwlr_foreign_toplevel_handle_v1'
-        toplevel.dispatcher[self._on_state] = 'zwlr_foreign_toplevel_handle_v1'
+        toplevel.dispatcher['title'] = self._on_title
+        toplevel.dispatcher['app_id'] = self._on_app_id
+        toplevel.dispatcher['state'] = self._on_state
+        toplevel.dispatcher['output_enter'] = self._on_output_enter
+        toplevel.dispatcher['output_leave'] = self._on_output_leave
+        toplevel.dispatcher['done'] = self._on_done
+        toplevel.dispatcher['closed'] = self._on_closed
         self._upsert(id(toplevel), '', '')
 
     def _on_title(self, toplevel, title: str) -> None:
-        self._upsert(id(toplevel), self._app_id_of(toplevel), title)
+        info = self._info.setdefault(id(toplevel), ['', ''])
+        info[1] = title
+        self._upsert(id(toplevel), info[0], info[1])
 
     def _on_app_id(self, toplevel, app_id: str) -> None:
-        self._upsert(id(toplevel), app_id, self._title_of(toplevel))
+        info = self._info.setdefault(id(toplevel), ['', ''])
+        info[0] = app_id
+        self._upsert(id(toplevel), info[0], info[1])
 
     def _on_state(self, toplevel, _state) -> None:
+        pass
+
+    def _on_output_enter(self, toplevel, _output) -> None:
+        pass
+
+    def _on_output_leave(self, toplevel, _output) -> None:
+        pass
+
+    def _on_done(self, toplevel) -> None:
         pass
 
     def _on_closed(self, toplevel) -> None:
         self._remove(id(toplevel))
         self._handles.pop(id(toplevel), None)
+        self._info.pop(id(toplevel), None)
 
     def _on_finished(self, _manager) -> None:
         # Compositor dropped the protocol; clear everything.
         for handle in list(self._handles):
             self._remove(handle)
         self._handles.clear()
-
-    def _app_id_of(self, toplevel) -> str:
-        return getattr(toplevel, 'app_id', '') or ''
-
-    def _title_of(self, toplevel) -> str:
-        return getattr(toplevel, 'title', '') or ''
+        self._info.clear()
 
     # -- manager hooks -----------------------------------------------------
 
@@ -175,9 +193,13 @@ class WaylandToplevelBackend:
 
     def activate(self, handle: object) -> None:
         toplevel = self._handles.get(handle)
-        if toplevel is not None:
-            toplevel.activate()
-            self._display.flush()
+        if toplevel is None:
+            return
+        if self._seat is None:
+            log.warning('cannot activate %r: no wl_seat bound', handle)
+            return
+        toplevel.activate(self._seat)
+        self._display.flush()
 
     def close(self, handle: object) -> None:
         toplevel = self._handles.get(handle)
