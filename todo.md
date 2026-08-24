@@ -99,7 +99,7 @@ Everything left that was buildable without a phone, from the WS26 deferred list 
 - **Hot-reload reaches every surface** — shade/call/dialer/SMS/power menu take the window's live ShellConfig and re-theme on reload; theme=custom renders custom_background; dead snap-back handlers removed; WAYLAND_DISPLAY respected everywhere.
 - **Deferred repairs** — ipc watch-source leak; config tmp-orphan cleanup, type guards, skip-identical saves (eMMC wear), corrupt-file self-heal; style.css bare-hex/border invariants now literally clean; wizard .error class defined; lock-screen provider dedupe; backup accepts gesture verbs; apps.sh Exec escaping verified through GKeyFile.
 
-Open items needing a ruling: drawer-folder scaffolding is design.md-spec'd but unreachable (folder_slots never populated) — implement or amend design.md; main.py's second PowerMenu() still snapshot-themed; hud/back_gesture/app_switcher/quick_actions not yet in the retheme fan-out.
+Open items needing a ruling: drawer-folder scaffolding is design.md-spec'd but unreachable (folder_slots never populated) — implement or amend design.md; main.py's second PowerMenu() still snapshot-themed; hud/back_gesture/app_switcher/quick_actions/lock_screen don't yet route through resolve_theme, so theme=custom renders only the main window's surfaces (visual-only gap, no crash); sync MM1 accept/hangup is bounded at 5s on the UI thread — async Gio is the real fix.
 
 ---
 
