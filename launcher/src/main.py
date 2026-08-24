@@ -76,7 +76,9 @@ class XXWMApplication(Adw.Application):
         from display_manager import DisplayManager, _take_screenshot
         from power_menu import PowerMenu
         from hud import Hud
-        self._power_menu = PowerMenu()
+        # Same live-config rule as window.py's own PowerMenu: without it this
+        # instance keeps snapshot theming while hot reloads reach the rest.
+        self._power_menu = PowerMenu(config=self._shell.config)
         self._power_menu.set_application(self)
         # Volume/brightness HUD overlay (plan T3/T4): flashes a level on the
         # layer-shell window after a hardware key press. Silent no-op when GTK

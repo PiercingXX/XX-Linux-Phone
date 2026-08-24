@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -156,6 +157,11 @@ class ShellConfig:
         # payload (launch_counts per launch) still writes normally.
         try:
             if self.config_path.read_text(encoding='utf-8') == payload:
+                # Content is identical, but an external chmod (e.g. a backup
+                # tool) may have loosened the mode since the last write;
+                # re-tighten without paying for the flash write.
+                if stat.S_IMODE(self.config_path.stat().st_mode) != 0o600:
+                    os.chmod(self.config_path, 0o600)
                 return
         except (OSError, ValueError):
             pass  # missing, unreadable, or corrupt file — take the write path

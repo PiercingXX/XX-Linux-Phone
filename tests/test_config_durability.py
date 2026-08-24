@@ -137,6 +137,43 @@ class TestSkipUnchangedSave:
         assert len(_replace_spy) == 1
         assert config.config_path.exists()
 
+    def test_skip_path_re_tightens_loosened_mode_without_rewrite(
+            self, tmp_path, _replace_spy):
+        """An external chmod (e.g. a backup tool leaving 0644) must not
+        persist just because the content is identical: the skip path
+        re-tightens the mode without paying for a flash write."""
+        config = _config(tmp_path)
+        config.data['theme'] = 'ocean'
+        config.save()
+        assert len(_replace_spy) == 1
+
+        os.chmod(config.config_path, 0o644)
+        config.save()  # identical payload, loosened mode
+        assert len(_replace_spy) == 1  # still skipped: no rewrite
+        mode = stat.S_IMODE(os.stat(config.config_path).st_mode)
+        assert mode == 0o600
+
+    def test_skip_path_with_tight_mode_makes_no_chmod_call(
+            self, tmp_path, _replace_spy, monkeypatch):
+        """The chmod-on-skip is conditional: an already-0600 file is left
+        entirely untouched (no syscall churn on every no-op save)."""
+        config = _config(tmp_path)
+        config.save()
+        assert len(_replace_spy) == 1
+
+        chmods: list[tuple] = []
+        real_chmod = os.chmod
+
+        def _spy(path, mode):
+            chmods.append((path, mode))
+            return real_chmod(path, mode)
+
+        monkeypatch.setattr(os, 'chmod', _spy)
+
+        config.save()  # identical payload, mode already 0600
+        assert len(_replace_spy) == 1
+        assert chmods == []
+
 
 class TestPinHashing:
     def test_pbkdf2_pin_roundtrip(self, tmp_path):
