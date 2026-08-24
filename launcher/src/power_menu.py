@@ -53,7 +53,7 @@ class PowerMenu(Gtk.Window):
     Triggered by long-pressing the power button (≥600ms).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: ShellConfig | None = None) -> None:
         super().__init__()
         self.set_decorated(False)
         self.set_resizable(False)
@@ -71,11 +71,15 @@ class PowerMenu(Gtk.Window):
             self.set_default_size(420, 860)
             self.fullscreen()
 
-        css = Gtk.CssProvider()
-        css.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
+        # The shell window threads its LIVE config so hot reloads reach this
+        # surface; the fallback keeps direct no-arg construction working.
+        self._config = config if config is not None else ShellConfig()
+        self._theme_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
+            Gdk.Display.get_default(), self._theme_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
         )
+        self.apply_theme()
 
         self.set_child(self._build())
 
@@ -88,6 +92,13 @@ class PowerMenu(Gtk.Window):
         key = Gtk.EventControllerKey.new()
         key.connect('key-pressed', self._on_key)
         self.add_controller(key)
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        """(Re)load this surface's display-level sheet. The shell window
+        passes the freshly resolved preset on hot-reload fan-out; standalone
+        falls back to the injected config's own preset."""
+        data = theme_css(preset if preset is not None else self._config.theme)
+        self._theme_provider.load_from_data(data.encode('utf-8'))
 
     def _build(self) -> Gtk.Widget:
         scrim = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import gi
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +20,16 @@ if _LAYER_SHELL:
 
 from app_index import AppEntry, AppIndex
 from app_item_actions import AppItemActions
-from config import DEFAULT_CONFIG, ShellConfig
+# _derive_shades is imported despite the underscore: the custom-theme
+# resolution below must follow the exact same shade rule as the canonical
+# presets, and duplicating it here would let the two drift apart.
+from config import (
+    DEFAULT_CONFIG,
+    ShellConfig,
+    ThemePreset,
+    THEME_PRESETS,
+    _derive_shades,
+)
 from gesture_config import GestureConfig
 from system_status import status_line
 
@@ -38,6 +49,46 @@ _LONG_SWIPE_UP_VEL = 900
 _UPDATE_NOTIF_ID = 999901
 
 _WEB_SEARCH_URL = 'https://duckduckgo.com/?q='
+
+_CUSTOM_HEX_RE = re.compile(r'#[0-9a-fA-F]{6}')
+
+
+def resolve_theme(config: ShellConfig) -> ThemePreset:
+    """Active ThemePreset, with theme == 'custom' resolved from the stored
+    custom_background color (docs/config.md "Appearance"): the color becomes
+    the background, surface shades derive via config's shade rule, and text/
+    accent come from the canonical dark or light preset by background
+    luminance — everything still derives from one preset (WS22).
+
+    A missing or garbage color silently falls back to the default preset
+    (config-compat invariant: old configs and junk never crash the shell).
+    """
+    if str(config.data.get('theme') or '') != 'custom':
+        return config.theme
+    color = config.custom_background or ''
+    # fullmatch, not ^...$: '$' also matches before a trailing newline, and
+    # a newline inside the color would leak into every themed CSS sheet.
+    if not _CUSTOM_HEX_RE.fullmatch(color):
+        return config.theme
+    surface, surface_alt, border = _derive_shades(color)
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+    text = THEME_PRESETS['amoled'] if luminance < 0.5 else THEME_PRESETS['paper']
+    return ThemePreset(
+        key='custom', name='Custom', background=color,
+        surface=surface, surface_alt=surface_alt, border=border,
+        foreground=text.foreground, muted=text.muted, accent=text.accent,
+    )
+
+
+def _back_env() -> dict[str, str]:
+    """Env for the back-key injection children (wtype/waydroid): target the
+    Wayland session the shell actually runs on, not a hardcoded wayland-0 —
+    same rule as display_manager._WL_ENV / home_launcher._WAYDROID_ENV."""
+    return {
+        'WAYLAND_DISPLAY': os.environ.get('WAYLAND_DISPLAY') or 'wayland-0',
+        'XDG_RUNTIME_DIR': f'/run/user/{os.getuid()}',
+    }
 
 
 def _set_osk_visible(visible: bool) -> None:
@@ -112,6 +163,7 @@ class ShellWindow(Adw.ApplicationWindow):
         self._shade: object | None = None
         self._switcher: object | None = None
         self._dialer: object | None = None
+        self._power_menu: object | None = None
         self._back_layer: object | None = None
 
         from modem_monitor import ModemMonitor
@@ -215,7 +267,6 @@ class ShellWindow(Adw.ApplicationWindow):
         swipe.set_touch_only(False)
         swipe.connect('swipe', self._on_stack_swipe)
         self.stack.add_controller(swipe)
-        self._swipe_navigated = False
 
         # Tap-outside → hide the OSK (20.1): a tap that lands on a non-editable
         # widget means the user is done typing, so drop squeekboard.
@@ -231,7 +282,6 @@ class ShellWindow(Adw.ApplicationWindow):
         # Vertical swipes match the PiercingXX Android launcher: up opens the
         # app drawer, down runs the configured action (default: shade)
         if abs(vel_y) > abs(vel_x) * 1.5:
-            self._swipe_navigated = True
             if vel_y > 300:
                 self._dispatch_gesture_action(
                     self.gesture_config.get('swipe_down_top') or 'notification_shade')
@@ -247,7 +297,6 @@ class ShellWindow(Adw.ApplicationWindow):
         current = self.stack.get_visible_child_name()
         # Swipe right in the drawer collapses an open folder drop-down first
         if current == 'apps' and vel_x > 200 and self._drawer_open_folder is not None:
-            self._swipe_navigated = True
             self._drawer_open_folder = None
             self._populate_apps(self.apps_search.get_text())
             return
@@ -258,7 +307,6 @@ class ShellWindow(Adw.ApplicationWindow):
             # Sideways on home is app-launch only (launcher parity) — an
             # unbound direction does nothing; the drawer is a swipe up away
             if abs(vel_x) > 200:
-                self._swipe_navigated = True
                 action = self.gesture_config.get(
                     'swipe_left_home' if vel_x < -200 else 'swipe_right_home')
                 if action != 'none':
@@ -267,17 +315,14 @@ class ShellWindow(Adw.ApplicationWindow):
         # Settings is a leaf page: a horizontal swipe from either edge is an
         # unconditional "back to home", so there is always a way out by gesture
         if current == 'settings' and abs(vel_x) > 200:
-            self._swipe_navigated = True
             self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
             self.stack.set_visible_child_name('home')
             return
         idx = _PAGE_ORDER.index(current) if current in _PAGE_ORDER else 0
         if vel_x < -200 and idx < len(_PAGE_ORDER) - 1:
-            self._swipe_navigated = True
             self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
             self.stack.set_visible_child_name(_PAGE_ORDER[idx + 1])
         elif vel_x > 200 and idx > 0:
-            self._swipe_navigated = True
             self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
             self.stack.set_visible_child_name(_PAGE_ORDER[idx - 1])
 
@@ -390,27 +435,6 @@ class ShellWindow(Adw.ApplicationWindow):
         except GLib.Error as error:
             self._show_status(f'Failed to launch: {error.message}')
 
-    def _on_stack_swipe_drag_end(
-        self, _gesture: Gtk.GestureSwipe, offset_x: float, offset_y: float
-    ) -> None:
-        # Called before `swipe` fires — defer snap-back check one idle tick
-        GLib.idle_add(self._maybe_snap_back, offset_x, offset_y)
-
-    def _maybe_snap_back(self, offset_x: float, offset_y: float) -> bool:
-        navigated = self._swipe_navigated
-        self._swipe_navigated = False
-        if navigated:
-            return False
-        # Horizontal drag that didn't become navigation → pulse opacity as feedback
-        if abs(offset_x) > 18 and abs(offset_x) > abs(offset_y):
-            self.stack.set_opacity(0.72)
-            GLib.timeout_add(160, self._restore_stack_opacity)
-        return False
-
-    def _restore_stack_opacity(self) -> bool:
-        self.stack.set_opacity(1.0)
-        return False
-
     def _build_home_page(self) -> Gtk.Widget:
         from home_launcher import HomeLauncher, theme_css
         from gi.repository import Gdk
@@ -509,8 +533,12 @@ class ShellWindow(Adw.ApplicationWindow):
         from dialer import Dialer
         if self._dialer and self._dialer.get_visible():
             return
-        d = Dialer(dnd_state=self.dnd_state)
+        d = Dialer(dnd_state=self.dnd_state, config=self.config)
         d.set_application(self.get_application())
+        # Lazy mid-session construction must render the CURRENT preset, not
+        # whatever the injected config resolved to at construction inside
+        # the surface (apply_theme() there is only a standalone fallback).
+        d.apply_theme(resolve_theme(self.config))
         d.present()
         self._dialer = d
 
@@ -552,7 +580,6 @@ class ShellWindow(Adw.ApplicationWindow):
     def _handle_back(self) -> None:
         """Called by BackGestureLayer on edge swipe from either side."""
         import subprocess
-        import os
         # 1. Dismiss notification shade if open
         if self._shade and self._shade.get_visible():
             self._shade.hide_shade()
@@ -572,8 +599,7 @@ class ShellWindow(Adw.ApplicationWindow):
             self.stack.set_visible_child_name('home')
             return
         # 5. Nothing shell-owned is open — send back to whatever is focused
-        env = {**os.environ, 'WAYLAND_DISPLAY': 'wayland-0',
-               'XDG_RUNTIME_DIR': f'/run/user/{os.getuid()}'}
+        env = {**os.environ, **_back_env()}
         try:
             subprocess.Popen(['wtype', '-k', 'Escape'], env=env,
                              close_fds=True, stdout=subprocess.DEVNULL,
@@ -727,18 +753,24 @@ class ShellWindow(Adw.ApplicationWindow):
                     self.stack.set_visible_child_name('settings'), self.present()),
                 on_power=self._show_power_menu,
                 hud=hud,
+                config=self.config,
             )
             self._shade.set_application(self.get_application())
+            # Same current-preset rule as _open_dialer: the shade can be
+            # built long after startup, under a hot-reloaded theme.
+            self._shade.apply_theme(resolve_theme(self.config))
         return self._shade
 
     def _show_shade(self) -> None:
         self._ensure_shade().show_shade()
 
     def _show_power_menu(self) -> None:
-        if getattr(self, '_power_menu', None) is None:
+        if self._power_menu is None:
             from power_menu import PowerMenu
-            self._power_menu = PowerMenu()
+            self._power_menu = PowerMenu(config=self.config)
             self._power_menu.set_application(self.get_application())
+            # Same current-preset rule as _open_dialer.
+            self._power_menu.apply_theme(resolve_theme(self.config))
         self._power_menu.show_menu()
 
     def _show_keyboard(self) -> None:
@@ -1295,10 +1327,10 @@ class ShellWindow(Adw.ApplicationWindow):
         row.append(control)
         return row
 
-    def _apply_theme(self) -> None:
+    def _apply_theme(self, preset: ThemePreset | None = None) -> None:
         from font_theme import apply_global_font
         apply_global_font(self.config.font_family)
-        theme = self.config.theme
+        theme = preset if preset is not None else resolve_theme(self.config)
         style_manager = Adw.StyleManager.get_default()
         if self.config.prefer_dark:
             style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
@@ -1780,6 +1812,18 @@ class ShellWindow(Adw.ApplicationWindow):
         self._populate_apps(self.apps_search.get_text())
         self._refresh_weather()
         self._setup_idle_timer()
+        self._retheme_surfaces()
+
+    def _retheme_surfaces(self) -> None:
+        """Fan the freshly resolved preset out to every constructed overlay
+        surface. They draw outside .shell-root with their own display-level
+        providers, so a hot-reloaded theme edit must reach each one; fonts
+        already propagate display-wide via font_theme's global provider."""
+        preset = resolve_theme(self.config)
+        for surface in (self._shade, self._dialer, self._call_ui,
+                        self._call_bar, self._power_menu):
+            if surface is not None:
+                surface.apply_theme(preset)
 
     def _setup_idle_timer(self) -> None:
         if self._idle_timer_id is not None:
@@ -1846,11 +1890,16 @@ class ShellWindow(Adw.ApplicationWindow):
         from call_ui import CallUI, CallBar
         import sound
         if self._call_ui is None:
-            self._call_ui = CallUI(on_accept=sound.stop, on_decline=sound.stop)
+            self._call_ui = CallUI(on_accept=sound.stop, on_decline=sound.stop,
+                                   config=self.config)
             self._call_ui.set_application(self.get_application())
+            # Same current-preset rule as _open_dialer.
+            self._call_ui.apply_theme(resolve_theme(self.config))
         if self._call_bar is None:
-            self._call_bar = CallBar(on_expand=self._expand_call_ui)
+            self._call_bar = CallBar(on_expand=self._expand_call_ui,
+                                     config=self.config)
             self._call_bar.set_application(self.get_application())
+            self._call_bar.apply_theme(resolve_theme(self.config))
         # DnD: only exceptions (starred, repeat caller) ring; everyone else
         # shows silently in the call UI. Exception check runs before this
         # call is recorded so the 15-minute repeat window looks at prior calls.

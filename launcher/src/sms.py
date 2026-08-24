@@ -125,21 +125,32 @@ class SMSConversation(Gtk.Window):
     Use open_conversation(number, display_name) to show.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: ShellConfig | None = None) -> None:
         super().__init__(title='Messages')
         self.set_default_size(420, 860)
 
         self._number = ''
         self._messages: list[Message] = []
         self._contact_book = ContactBook()
+        # The shell window threads its LIVE config so hot reloads reach this
+        # surface; the fallback keeps direct no-arg construction working.
+        self._config = config if config is not None else ShellConfig()
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
+        self._theme_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
+            Gdk.Display.get_default(), self._theme_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
         )
+        self.apply_theme()
 
         self.set_child(self._build())
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        """(Re)load this surface's display-level sheet. The shell window
+        passes the freshly resolved preset on hot-reload fan-out; standalone
+        falls back to the injected config's own preset."""
+        data = theme_css(preset if preset is not None else self._config.theme)
+        self._theme_provider.load_from_data(data.encode('utf-8'))
 
     def _build(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

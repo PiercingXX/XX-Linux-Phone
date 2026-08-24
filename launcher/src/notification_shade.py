@@ -167,13 +167,17 @@ class NotificationShade(Gtk.Window):
                  focus_state: object | None = None,
                  on_open_settings: object | None = None,
                  on_power: object | None = None,
-                 hud: object | None = None) -> None:
+                 hud: object | None = None,
+                 config: ShellConfig | None = None) -> None:
         super().__init__(title='PiercingXX Shade')
         self._dnd = dnd_state
         self._focus = focus_state
         self._on_open_settings = on_open_settings
         self._on_power = on_power
         self._hud = hud
+        # The shell window threads its LIVE config so hot reloads reach this
+        # surface; the fallback keeps direct no-arg construction working.
+        self._config = config if config is not None else ShellConfig()
         self._clock_timer_id: int | None = None
         self._cal_year_month: tuple[int, int] | None = None
 
@@ -191,11 +195,12 @@ class NotificationShade(Gtk.Window):
 
         self._notifications: list[Notification] = []
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
+        self._theme_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+            Gdk.Display.get_default(), self._theme_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
         )
+        self.apply_theme()
 
         self.list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list_box.add_css_class('text-list')
@@ -211,6 +216,13 @@ class NotificationShade(Gtk.Window):
 
         self._subscribe_dbus()
         self._check_external_notif_daemon()
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        """(Re)load this shade's display-level sheet. The shell window passes
+        the freshly resolved preset on hot-reload fan-out; standalone falls
+        back to the injected config's own preset."""
+        data = theme_css(preset if preset is not None else self._config.theme)
+        self._theme_provider.load_from_data(data.encode('utf-8'))
 
     def _build_content(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
