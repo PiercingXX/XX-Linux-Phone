@@ -120,6 +120,26 @@ def _set_audio_route(earpiece: bool) -> None:
             _pactl('set-sink-port', '@DEFAULT_SINK@', port)
 
 
+def _resolve_call_path() -> str | None:
+    from modem_monitor import active_call_path
+    return active_call_path()
+
+
+def _log_action_failure(action: str, call_path: str | None) -> None:
+    from shell_log import get_logger
+    get_logger('call_ui').warning('failed to %s call (path=%s)', action, call_path)
+
+
+def _default_accept(call_path: str) -> bool:
+    from modem_monitor import accept_call
+    return accept_call(call_path)
+
+
+def _default_hangup(call_path: str) -> bool:
+    from modem_monitor import hangup_call
+    return hangup_call(call_path)
+
+
 class CallBar(Gtk.Window):
     """Persistent in-call bar shown at the top of home screen during an active call."""
 
@@ -138,6 +158,7 @@ class CallBar(Gtk.Window):
             self.set_default_size(420, 48)
 
         self._on_expand = on_expand
+        self._shown = False
         provider = Gtk.CssProvider()
         provider.load_from_data(theme_css(ShellConfig().theme).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
@@ -162,6 +183,21 @@ class CallBar(Gtk.Window):
         root.append(expand_btn)
         return root
 
+    def show_bar(self, number: str) -> None:
+        text = number or 'In call'
+        if self._shown and self._label.get_text() == text:
+            return
+        self._label.set_text(text)
+        if not self._shown:
+            self._shown = True
+            self.present()
+
+    def hide_bar(self) -> None:
+        if not self._shown:
+            return
+        self._shown = False
+        self.hide()
+
     def update(self, caller: str, timer_text: str) -> None:
         self._label.set_text(f'{caller}  ·  {timer_text}')
 
@@ -178,6 +214,8 @@ class CallUI(Gtk.Window):
         on_accept: Callable[[], None] | None = None,
         on_decline: Callable[[], None] | None = None,
         on_hangup: Callable[[], None] | None = None,
+        accept_fn: Callable[[str], bool] | None = None,
+        hangup_fn: Callable[[str], bool] | None = None,
     ) -> None:
         super().__init__(title='PiercingXX Call')
 
@@ -196,6 +234,11 @@ class CallUI(Gtk.Window):
         self._on_accept = on_accept or (lambda: None)
         self._on_decline = on_decline or (lambda: None)
         self._on_hangup = on_hangup or (lambda: None)
+        self._accept_fn = accept_fn or _default_accept
+        self._hangup_fn = hangup_fn or _default_hangup
+        self._incoming_call_path: str | None = None
+        self._current_caller = ''
+        self._current_number = ''
         self._muted = False
         self._speakerphone = False
         self._call_start: datetime | None = None
@@ -311,13 +354,18 @@ class CallUI(Gtk.Window):
         page.append(hangup_btn)
         return page
 
-    def show_incoming(self, caller: str, number: str) -> None:
+    def show_incoming(self, caller: str, number: str, call_path: str | None = None) -> None:
+        self._incoming_call_path = call_path or _resolve_call_path()
+        self._current_caller = caller
+        self._current_number = number
         self._inc_caller.set_text(caller or number)
         self._inc_number.set_text(number if caller else '')
         self._stack.set_visible_child_name('incoming')
         self.present()
 
     def show_active(self, caller: str, number: str) -> None:
+        self._current_caller = caller
+        self._current_number = number
         self._act_caller.set_text(caller or number)
         self._act_number.set_text(number if caller else '')
         self._call_start = datetime.now()
@@ -331,6 +379,7 @@ class CallUI(Gtk.Window):
         if self._timer_id is not None:
             GLib.source_remove(self._timer_id)
             self._timer_id = None
+        self._incoming_call_path = None
         _set_audio_route(earpiece=False)
         self.hide()
 
@@ -342,13 +391,27 @@ class CallUI(Gtk.Window):
         return True
 
     def _on_accept_clicked(self, _btn: Gtk.Button) -> None:
+        path = self._incoming_call_path
+        if path is None or not self._accept_fn(path):
+            _log_action_failure('accept', path)
+            return
         self._on_accept()
+        self.show_active(self._current_caller, self._current_number)
 
     def _on_decline_clicked(self, _btn: Gtk.Button) -> None:
+        path = self._incoming_call_path
+        if path is None or not self._hangup_fn(path):
+            _log_action_failure('decline', path)
+            return
         self._on_decline()
+        self._incoming_call_path = None
         self.hide()
 
     def _on_hangup_clicked(self, _btn: Gtk.Button) -> None:
+        path = self._incoming_call_path
+        if path is None or not self._hangup_fn(path):
+            _log_action_failure('hang up', path)
+            return
         self._on_hangup()
         self.end_call()
 

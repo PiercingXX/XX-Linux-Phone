@@ -26,9 +26,43 @@ _STATE_RINGING_IN = 3
 _STATE_ACTIVE = 4
 _STATE_TERMINATED = 7
 
+_CALL_TIMEOUT_MS = 5_000
+
+_last_monitor: ModemMonitor | None = None
+
+
 # MM1 Number property returns the remote party URI (tel:+1234567890)
 def _strip_tel(number: str) -> str:
     return number.removeprefix('tel:').strip() or number
+
+
+def active_call_path() -> str | None:
+    """Object path of the call currently tracked by the monitor, if any."""
+    if _last_monitor is None:
+        return None
+    return _last_monitor._active_call_path
+
+
+def accept_call(call_path: str) -> bool:
+    return _call_method(call_path, 'Accept')
+
+
+def hangup_call(call_path: str) -> bool:
+    return _call_method(call_path, 'Hangup')
+
+
+def _call_method(call_path: str, method: str) -> bool:
+    from shell_log import get_logger
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        bus.call_sync(
+            _MM1, call_path, _CALL_IFACE, method, None, None,
+            Gio.DBusCallFlags.NONE, _CALL_TIMEOUT_MS, None,
+        )
+        return True
+    except GLib.Error as err:
+        get_logger('modem_monitor').warning('%s %s failed: %s', call_path, method, err)
+        return False
 
 
 class ModemMonitor:
@@ -50,9 +84,13 @@ class ModemMonitor:
         self._on_ended = on_ended
         self._bus: Gio.DBusConnection | None = None
         self._active_call_path: str | None = None
+        self._state_subs: dict[str, int] = {}
+        global _last_monitor
+        _last_monitor = self
         GLib.idle_add(self._init_bus)
 
     def _init_bus(self) -> bool:
+        from shell_log import get_logger
         try:
             self._bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
             self._bus.signal_subscribe(
@@ -65,8 +103,8 @@ class ModemMonitor:
                 None, Gio.DBusSignalFlags.NONE,
                 self._on_interfaces_removed, None,
             )
-        except GLib.Error:
-            pass
+        except GLib.Error as err:
+            get_logger('modem_monitor').warning('system bus unavailable: %s', err)
         return False
 
     def _on_interfaces_added(
@@ -86,8 +124,9 @@ class ModemMonitor:
             GLib.idle_add(self._on_incoming, 'Incoming call', number)
         elif state == _STATE_ACTIVE:
             GLib.idle_add(self._on_answered, 'Active call', number)
-        # Subscribe to StateChanged on this specific call object
-        self._bus.signal_subscribe(
+        if obj_path in self._state_subs or self._bus is None:
+            return
+        sub_id = self._bus.signal_subscribe(
             _MM1, _CALL_IFACE, 'StateChanged', obj_path,
             None, Gio.DBusSignalFlags.NONE,
             lambda _c, _s, _p, _i, _sig, params, _ud: self._on_state_changed(
@@ -95,18 +134,27 @@ class ModemMonitor:
             ),
             None,
         )
+        self._state_subs[obj_path] = sub_id
 
     def _on_state_changed(self, obj_path: str, number: str, params: object) -> None:
         _old, new_state, _reason = params.unpack()
         if new_state == _STATE_ACTIVE:
             GLib.idle_add(self._on_answered, '', number)
         elif new_state == _STATE_TERMINATED:
+            self._drop_subscription(obj_path)
             GLib.idle_add(self._on_ended)
+
+    def _drop_subscription(self, obj_path: str) -> None:
+        sub_id = self._state_subs.pop(obj_path, None)
+        if sub_id is not None and self._bus is not None:
+            self._bus.signal_unsubscribe(sub_id)
 
     def _on_interfaces_removed(
         self, _c, _sender, _path, _iface, _sig, params, _ud
     ) -> None:
         obj_path, removed = params.unpack()
-        if obj_path == self._active_call_path and _CALL_IFACE in removed:
+        if _CALL_IFACE in removed:
+            self._drop_subscription(obj_path)
+        if obj_path == self._active_call_path:
             self._active_call_path = None
             GLib.idle_add(self._on_ended)

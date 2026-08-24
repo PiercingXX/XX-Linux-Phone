@@ -3,10 +3,11 @@ from __future__ import annotations
 import gi
 import re
 import subprocess
+import threading
 
 gi.require_version('Gtk', '4.0')
 
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, GLib, Gtk
 from config import ShellConfig, ThemePreset
 from contacts import Contact, ContactBook
 
@@ -42,6 +43,12 @@ def theme_css(preset: ThemePreset) -> str:
     color: {preset.muted};
     margin-top: -2px;
 }}
+.dialer-status {{
+    font-size: 10pt;
+    color: {preset.muted};
+    min-height: 20px;
+    margin-bottom: 8px;
+}}
 .call-button {{
     font-size: 14pt;
     min-width: 100px;
@@ -76,6 +83,25 @@ _KEYPAD: list[tuple[str, str]] = [
     ('7', 'PQRS'),('8', 'TUV'),('9', 'WXYZ'),
     ('*', ''),   ('0', '+'),   ('#', ''),
 ]
+
+_CALL_PATH_RE = re.compile(r'/org/freedesktop/ModemManager1/Call/\d+')
+_MMCLI_TIMEOUT_S = 15
+
+
+def _run_mmcli(args: list[str]) -> tuple[bool, str]:
+    """Run mmcli; returns (success, stdout on success or error detail)."""
+    try:
+        proc = subprocess.run(
+            ['mmcli', *args], capture_output=True, text=True, timeout=_MMCLI_TIMEOUT_S,
+        )
+    except FileNotFoundError:
+        return False, 'mmcli not installed'
+    except subprocess.TimeoutExpired:
+        return False, 'mmcli timed out'
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or f'mmcli exited with status {proc.returncode}'
+        return False, detail
+    return True, proc.stdout
 
 
 class Dialer(Gtk.Window):
@@ -128,6 +154,9 @@ class Dialer(Gtk.Window):
         self._display.set_margin_start(8)
         self._display.set_margin_end(8)
 
+        self._status = Gtk.Label(label='', xalign=0)
+        self._status.add_css_class('dialer-status')
+
         # Contact suggestions (shown while typing)
         self._suggestions = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self._suggestions.add_css_class('text-list')
@@ -167,6 +196,7 @@ class Dialer(Gtk.Window):
         action_row.attach(del_btn, 2, 0, 1, 1)
 
         root.append(self._display)
+        root.append(self._status)
         root.append(self._suggestions)
         root.append(keypad)
         root.append(action_row)
@@ -287,8 +317,25 @@ class Dialer(Gtk.Window):
         self._initiate_call(self._digits)
 
     def _initiate_call(self, number: str) -> None:
-        # Try ModemManager via mmcli
-        try:
-            subprocess.Popen(['mmcli', '-m', '0', f'--voice-call={number}'], close_fds=True)
-        except FileNotFoundError:
-            pass
+        self._set_status(f'Calling {self._format_number(number)}…')
+        threading.Thread(target=self._place_call, args=(number,), daemon=True).start()
+
+    def _place_call(self, number: str) -> None:
+        # mmcli has no single dial verb: a call object must be created first,
+        # then started via the returned object path (-o selects Call objects).
+        ok, out = _run_mmcli(['-m', '0', f'--voice-create-call=number={number}'])
+        if not ok:
+            self._finish_dial(f'Call failed: {out.strip()}')
+            return
+        match = _CALL_PATH_RE.search(out)
+        if match is None:
+            self._finish_dial('Call failed: modem returned no call path')
+            return
+        ok, out = _run_mmcli(['-m', '0', '-o', match.group(0), '--start'])
+        self._finish_dial('Dialing…' if ok else f'Call failed: {out.strip()}')
+
+    def _finish_dial(self, message: str) -> None:
+        GLib.idle_add(self._set_status, message)
+
+    def _set_status(self, message: str) -> None:
+        self._status.set_text(message)

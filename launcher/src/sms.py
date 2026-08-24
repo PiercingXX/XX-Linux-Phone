@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gi
+import re
 import subprocess
 import threading
 from datetime import datetime
@@ -71,16 +72,50 @@ def theme_css(preset: ThemePreset) -> str:
     border: none;
 }}
 .sms-send:hover {{ background: mix({preset.accent}, {preset.background}, 0.85); }}
+.bubble-failed {{
+    background: {preset.surface};
+    color: {preset.muted};
+}}
 """
+
+_SMS_PATH_RE = re.compile(r'/org/freedesktop/ModemManager1/SMS/\d+')
+_MMCLI_TIMEOUT_S = 15
+
+
+def _run_mmcli(args: list[str]) -> tuple[bool, str]:
+    """Run mmcli; returns (success, stdout on success or error detail)."""
+    try:
+        proc = subprocess.run(
+            ['mmcli', *args], capture_output=True, text=True, timeout=_MMCLI_TIMEOUT_S,
+        )
+    except FileNotFoundError:
+        return False, 'mmcli not installed'
+    except subprocess.TimeoutExpired:
+        return False, 'mmcli timed out'
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or f'mmcli exited with status {proc.returncode}'
+        return False, detail
+    return True, proc.stdout
+
+
+def _payload_value(value: str) -> str:
+    # mmcli splits key=value payloads on commas outside quotes and its
+    # scanner cannot carry raw control chars or embedded quotes through a
+    # single-quoted value, so flatten whitespace and swap apostrophes for ’.
+    flattened = ''.join(ch if ch.isprintable() else '\x00' for ch in value)
+    collapsed = ' '.join(part for part in flattened.split('\x00') if part)
+    return collapsed.replace("'", '\u2019')
 
 
 class Message:
-    __slots__ = ('text', 'outgoing', 'timestamp')
+    __slots__ = ('text', 'outgoing', 'timestamp', 'failed')
 
-    def __init__(self, text: str, outgoing: bool, timestamp: datetime | None = None) -> None:
+    def __init__(self, text: str, outgoing: bool, timestamp: datetime | None = None,
+                 failed: bool = False) -> None:
         self.text = text
         self.outgoing = outgoing
         self.timestamp = timestamp or datetime.now()
+        self.failed = failed
 
 
 class SMSConversation(Gtk.Window):
@@ -167,20 +202,34 @@ class SMSConversation(Gtk.Window):
         if not text or not self._number:
             return
         self._input.set_text('')
-        self._send_sms(self._number, text)
         msg = Message(text, outgoing=True)
         self._messages.append(msg)
         self._append_bubble(msg)
         self._scroll_to_bottom()
+        threading.Thread(target=self._deliver, args=(msg, self._number), daemon=True).start()
 
-    def _send_sms(self, number: str, text: str) -> None:
-        try:
-            subprocess.Popen(
-                ['mmcli', '-m', '0', f'--messaging-create-sms=number={number},text={text}'],
-                close_fds=True,
-            )
-        except FileNotFoundError:
-            pass
+    def _deliver(self, msg: Message, number: str) -> None:
+        # mmcli only CREATES with --messaging-create-sms; the returned SMS
+        # object must then be sent explicitly (-s selects SMS objects).
+        payload = f"number='{_payload_value(number)}',text='{_payload_value(msg.text)}'"
+        ok, out = _run_mmcli(['-m', '0', f'--messaging-create-sms={payload}'])
+        match = _SMS_PATH_RE.search(out) if ok else None
+        if match is not None:
+            ok, out = _run_mmcli(['-m', '0', '-s', match.group(0), '--send'])
+        elif ok:
+            ok, out = False, 'modem returned no SMS path'
+        if not ok:
+            from shell_log import get_logger
+            get_logger('sms').warning('send to %s failed: %s', number, out)
+        GLib.idle_add(self._mark_sent, msg, ok)
+
+    def _mark_sent(self, msg: Message, sent: bool) -> bool:
+        if sent:
+            return False
+        msg.failed = True
+        if msg in self._messages:
+            self._rebuild_messages()
+        return False
 
     def _load_history(self) -> None:
         # Run mmcli history fetch in a background thread — avoids blocking the UI
@@ -235,9 +284,13 @@ class SMSConversation(Gtk.Window):
     def _append_bubble(self, msg: Message) -> None:
         bubble = Gtk.Label(label=msg.text, wrap=True, xalign=0 if not msg.outgoing else 1)
         bubble.add_css_class('bubble-out' if msg.outgoing else 'bubble-in')
+        stamp = msg.timestamp.strftime('%H:%M')
+        if msg.failed:
+            bubble.add_css_class('bubble-failed')
+            stamp += ' · not sent'
 
         time_label = Gtk.Label(
-            label=msg.timestamp.strftime('%H:%M'),
+            label=stamp,
             xalign=1 if msg.outgoing else 0,
         )
         time_label.add_css_class('bubble-time')
