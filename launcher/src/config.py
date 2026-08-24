@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,19 +27,19 @@ class ThemePreset:
 # Light themes use near-black text on light backgrounds
 def _derive_shades(bg: str) -> tuple[str, str, str]:
     """Derive surface/surface_alt/border shades from background color."""
-    # Simple approach: darken by ~10% for surface, ~15% for surface_alt, ~30% for border
-    # Parse hex and adjust
-    import re
     match = re.match(r'#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})', bg)
     if not match:
         return ('#111111', '#181818', '#2f2f2f')
-    r = int(match.group(1), 16)
-    
-    def darken(val: int, pct: float) -> str:
-        v = max(0, val - int(255 * pct))
-        return f'#{v:02x}{v:02x}{v:02x}'
-    
-    return (darken(r, 0.10), darken(r, 0.15), darken(r, 0.30))
+    rgb = tuple(int(match.group(i), 16) for i in (1, 2, 3))
+    # Near-black has no headroom to darken into; amoled's own trio is the
+    # canonical separation for that regime.
+    if max(rgb) <= 0x18:
+        return ('#111111', '#181818', '#2f2f2f')
+
+    def scale(factor: float) -> str:
+        return '#' + ''.join(f'{max(0, int(v * factor)):02x}' for v in rgb)
+
+    return (scale(0.82), scale(0.72), scale(0.55))
 
 THEME_PRESETS = {
     'amoled': ThemePreset('amoled', 'AMOLED', '#000000', '#111111', '#181818', '#2f2f2f', '#f4f4f4', '#9a9a9a', '#d8d8d8'),

@@ -170,6 +170,25 @@ class TestResolveTheme:
         assert _hex_sum(preset.surface_alt) < _hex_sum(preset.surface)
         assert _hex_sum(preset.surface) < _hex_sum(preset.background)
 
+    def test_custom_shades_preserve_hue(self):
+        # Red-channel-only derivation collapsed tinted backgrounds to gray.
+        preset = window.resolve_theme(
+            _config_with(theme='custom', custom_background='#001030'))
+        for field in ('surface', 'surface_alt', 'border'):
+            hexval = getattr(preset, field)
+            r, g, b = (int(hexval[i:i + 2], 16) for i in (1, 3, 5))
+            assert b > g > r, f'{field} lost the blue tint: {hexval}'
+
+    def test_near_black_custom_gets_amoled_separation(self):
+        # Pure black has no headroom to darken into; amoled's trio is the
+        # canonical separation for that regime.
+        preset = window.resolve_theme(
+            _config_with(theme='custom', custom_background='#000000'))
+        assert (preset.surface, preset.surface_alt, preset.border) == (
+            THEME_PRESETS['amoled'].surface,
+            THEME_PRESETS['amoled'].surface_alt,
+            THEME_PRESETS['amoled'].border)
+
     @pytest.mark.parametrize(
         'bad',
         [None, '', 'nothex', '#12345', '#1234567', '123456', '#GGHHII',
