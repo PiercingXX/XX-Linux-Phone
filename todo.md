@@ -1,165 +1,266 @@
-# XX-WM — Work Order (Skippy)
+# XX-WM — Smoke work order
 
-You are Skippy, working on **XX-WM**: a minimalist, text-first Wayland launcher/shell for Linux phones. Read `README.md` (identity), `design.md` (the UI spec — treat it as the contract), and `launcher/README.md` (code layout) before touching anything.
+You are Skippy, working on **XX-WM**: a minimalist, text-first Wayland shell for Linux phones. Read `README.md` (identity), `design.md` (the UI spec — treat it as the contract), and `launcher/README.md` (code layout) before touching anything.
 
-**Workstream 25 runs on the dev machine — no phone required.** The tablet checklist needs the x86 test tablet; device-gated work is quarantined at the bottom; do not attempt it.
+This file is the live work order. It is not a changelog. Git history holds the closed workstreams. Skippy implements from `docs/build-spec.md` (how); tick boxes here (what).
+
+**Sequence:** tablet first, then FLX1, then Librem 5. Fairphone 5 is parked. The tablet is up and SSH-able; drive as much as possible over SSH. Operator-at-glass steps are marked **GLASS**.
 
 ## Ground rules
 
-- **Spec**: `design.md` wins. Where this file and design.md disagree, design.md is right; flag the conflict in your commit message.
+- **Spec**: `design.md` wins. Where this file and design.md disagree, design.md is right; flag the conflict in the commit message.
 - **Style**: Python 3.12+, GTK4/libadwaita via `gi`, match the existing code's idiom. No comments unless the WHY is non-obvious. Text-first UI: no icon grids, no images, monochrome per theme.
-- **CSS invariants** (`launcher/src/style.css`): uniform background from the active theme on every surface; children transparent; no borders anywhere except inside `.settings-page`; the **configured font applies launcher-wide** via `font_theme.apply_global_font` (default JetBrains Mono Nerd — surfaces must not hardcode a family); invisible Paned separators. Don't regress these.
-- **Verify before every commit**: `sh scripts/check.sh` (py_compile + ruff + pytest + shellcheck — **472 passing as of 2026-08-24**, up from 313 pre-WS26; ruff resolves from the venv per 25.1, shellcheck is absent on this box and prints a loud `SKIPPED`). If you add a runtime behavior, run the shell locally (`cd launcher && PYTHONPATH=src python3 src/main.py` — it falls back to a window when layer-shell is absent) and exercise the flow.
-- **Commits**: one commit per task or coherent group, imperative subject, body says what changed and how it was verified. Never commit `__pycache__`, `build/`, or `devices/*/downloads/` (gitignored).
-- **Config compatibility**: `~/.config/xx-wm/config.json` may exist from earlier runs (and auto-migrates from `piercing-shell`). Every schema change needs a silent migration path (missing keys → defaults; never crash on old configs). `docs/config.md` is the public API reference — update it with every key change.
-- **Decisions already made** (don't relitigate): the product is **XX-WM** (renamed 2026-08-17; app id `io.piercingxx.XXWM`, binaries `xx-wm`/`xx-wm-ipc`/`xx-wm-session`); phoc is the compositor; lisgd owns system-level gestures via IPC; the keyboard is **squeekboard** with the PiercingXX Colemak layouts; the lock screen stays ours (no phrog/phosh code, ever); DnD and Focus Mode copy the **Pixel's** behavior; the in-shell Settings page is **system-only** — every shell preference lives in `~/.config/xx-wm/`; backgrounds are solid colors only, never wallpaper; `aura` stays as a Linux-only bonus theme; the volume/brightness HUD is **in-shell** (wob dropped, WS21.1); Android-launcher parity syncs (2026-07-20/21) are already folded into design.md — design.md is current.
-- **Minimalism directive**: the user has said the test tablet is underpowered — keep everything lightweight. Prefer text over textures, skip caches/preloads/snapshots unless explicitly reconfirmed.
+- **CSS invariants** (`launcher/src/style.css`): uniform background from the active theme on every surface; children transparent; no borders anywhere except inside `.settings-page`; the configured font applies launcher-wide via `font_theme.apply_global_font` (default JetBrains Mono Nerd — surfaces must not hardcode a family); invisible Paned separators. Don't regress these.
+- **Verify before every commit**: `sh scripts/check.sh` (py_compile + ruff + pytest + shellcheck). Recreate `.venv` with `--system-site-packages` if it is missing (`python3 -m venv --system-site-packages .venv && .venv/bin/pip install pytest ruff`). Missing shellcheck prints a loud `SKIPPED`; found-but-failing still fails. If you add a runtime behavior, exercise it — on the laptop (`cd launcher && PYTHONPATH=src python3 src/main.py`) and, once the tablet session is XX-WM, on the tablet.
+- **Commits**: one commit per task or coherent group, imperative subject, body says what changed and how it was verified. Never commit `__pycache__`, `build/`, or `devices/*/downloads/`.
+- **Config compatibility**: `~/.config/xx-wm/config.json` auto-migrates from `~/.config/piercing-shell` (rename, once, only if the xx-wm dir does not exist). Every schema change needs a silent migration path (missing keys → defaults; never crash on old configs). `docs/config.md` is the public API — update it with every key change.
+- **Decisions already made** (don't relitigate): product is **XX-WM** (app id `io.piercingxx.XXWM`, binaries `xx-wm` / `xx-wm-ipc` / `xx-wm-session`); phoc is the compositor; lisgd owns system-level gestures via IPC; keyboard is **squeekboard** with the PiercingXX Colemak layouts; the lock screen stays ours (no phrog/phosh code); DnD and Focus Mode copy the Pixel's behavior; in-shell Settings is **system-only**; backgrounds are solid colors only; `aura` stays as a Linux-only bonus theme; volume/brightness HUD is in-shell; design.md is current.
+- **Minimalism**: the tablet has **1.8 GiB RAM** and a 29 G eMMC. Prefer text over textures. Leave `preload_gesture_apps` off. Do **not** install Waydroid on the tablet.
 
-## Status — where things stand (2026-08-23)
+## Current state — 2026-09-04
 
-**Workstreams 1–24 are done and verified on master.** Master is clean, `sh scripts/check.sh` is green at 313 tests, and `.venv/bin/ruff check launcher/src tests` passes.
+The shell, session files, tests, and device fragments are in this repo. A meson install of `main` is **not** bootable (three runtime modules never got listed). The tablet is running the **pre-rename** stack, not XX-WM.
 
-Original build plan 1–18 (see git history): 8-slot home model with inline folders and edit mode; one-handed drawer (85% sheet, bottom search/results, long-press menus, `!` web search); 8 themes + custom solid color; fonts incl. custom import; config-driven widget row with Open-Meteo weather; JSON backup/restore; sounds; gesture dispatch; install/deploy/apps scripts + OpenRC & systemd units; pytest suite + `check.sh` gate; lock screen v2; shade v2; Pixel-model DnD and Focus Mode; system-only Settings page; squeekboard + Colemak layouts; default app set scripting; first-boot walkthrough.
+### Tablet (`dr3k@192.168.1.129`) — live snapshot
 
-Post-device-session workstreams 19–24, all landed since:
+| Fact | Value |
+|---|---|
+| OS | PiercingXX Arch (`PRETTY_NAME`), kernel 7.1.4-arch1-1, x86_64, systemd, Python 3.14.6 |
+| Memory / disk | 1.8 GiB RAM (~875 MiB available), 29 G eMMC, 10 G free |
+| Login | GDM (enabled). Graphical session is **PiercingXX**, not XX-WM |
+| Session | `/usr/libexec/piercing-session` → `phoc -C /usr/share/piercing-shell/phoc.ini -E /usr/bin/piercing-shell` |
+| Groups | `dr3k` is in `input` and `wheel` |
+| Sudo | password required. NOPASSWD only for `shutdown` / `reboot` |
+| Touch | `FTSC1000` on `/dev/input/event3`, `INPUT_PROP_DIRECT`. lisgd already bound to it |
+| Panel | DRM `DSI-1`. Installed piercing-shell `phoc.ini` already has `scale = 1.5` |
+| Backlight | `intel_backlight` present. **No IIO illuminance node** — Auto-brightness tile must stay hidden |
+| Wayland | `WAYLAND_DISPLAY=wayland-0` under `/run/user/1000`. IPC socket is `piercing-shell.sock` |
+| Config | `~/.config/piercing-shell/{config.json,gestures.json}` live. **No PIN.** `default_layout_applied: true`. Theme `amoled`, font `jetbrains-mono-nerd` (family **not** installed — `fc-list` has neither JetBrains nor Space Mono) |
+| Gestures (json) | design.md defaults, plus custom `swipe_left_home=launch:htop.desktop`, `swipe_right_home=launch:org.gnome.Nautilus.desktop`. lisgd is **not** honoring those action names (see 1.4) |
+| Stack present | phoc 0.56, gtk4 4.22, libadwaita 1.9, gtk4-layer-shell 1.3, python-gobject, python-pywayland 0.4.18, squeekboard, lisgd (source-built at `/usr/bin/lisgd`, not a pacman package), geoclue, NM, PipeWire, gnome-calculator, neovim, whiptail |
+| Stack absent | `xx-wm` binaries, firefox, waydroid, tailscale, fprintd, wlopm, wlr-randr |
+| Repo | no clone of this tree on the tablet. `~/piercing-dots` exists; its `install.sh` has **no** `--profile phone` |
+| logind | `/etc/systemd/logind.conf.d/10-piercing-power.conf` already ignores power keys |
 
-- **19 — App switcher, real window list.** `toplevel_manager.py` speaks `wlr-foreign-toplevel-management-unstable-v1` via `python-pywayland` on a GLib fd-watch; protocol XMLs vendored under `launcher/data/`. `app_switcher.py` populates from it (wmctrl gone), tap → activate, ✕/swipe-up → close, own surfaces filtered, graceful empty state. Text-only cards. Covered by `test_toplevel_manager.py`, `test_app_switcher_wiring.py`, `test_switcher_cards.py`, `test_protocol_vendoring.py`.
-- **20 — Session & input fixes.** Keyboard hides on tap-outside; power menu goes full-screen; `install.sh` adds the user to `input`; `preload_gesture_apps` gated off by default; per-device phoc.ini fragments under `launcher/data/phoc/` (tablet, FP5, FLX1, L5).
-- **21 — Volume/brightness HUD.** In-shell `hud.py` on the OVERLAY layer, theme-derived, ~1 s auto-hide, silent when GTK/layer-shell can't init. wob removed from `install.sh` and the README stack.
-- **22 — Theme-invariant sweep.** Every surface derives its CSS from the active `ThemePreset`. The only hardcoded hex left in `launcher/src/` is `config.py`'s preset table (legitimate) plus one intentional `#ffffff` on `.btn-hangup` in `call_ui.py` (see 25.4).
-- **23.2 / 23.3 — Docs & hygiene.** README, `launcher/README.md`, and `docs/config.md` are in lockstep with the code; every `DEFAULT_CONFIG` key is documented. `scripts/reference/linux-phone-mod/` already carries its own "vendored reference / not runnable" header, satisfying the 23.3 note requirement.
-- **24 — GDM Colemak OSK.** `launcher/data/gnome-osk/us.json` in GNOME's osk-layouts schema, installed by a GDM-guarded `install.sh` step that backs up the stock file. Covered by `test_gnome_osk.py`.
+SSH from this machine works with key auth. Import the graphical session with:
 
-**Everything that follows is the remaining work.**
+```sh
+export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0
+```
 
----
+`grim` can screenshot. `xx-wm-ipc` will work only after cutover (socket name `xx-wm.sock`).
 
-## Workstream 25 — Dev-machine cleanup (current, no phone required)
+### Phones
 
-Small items surfaced by the 2026-08-23 repo review. None blocks the tablet checklist; do them while a device isn't in hand.
-
-- [x] **25.1 `check.sh`: stop silently skipping ruff** — the gate probes `command -v ruff`, but ruff lives at `.venv/bin/ruff` and is not on PATH, so **every run since the venv was created has skipped linting** while printing "All checks passed". Resolve it the way the pytest branch already does: prefer `"$PYTHON" -m ruff` / `.venv/bin/ruff`, fall back to PATH. Ruff currently passes clean, so this is a gate hole, not a backlog of violations. Same question for shellcheck — it's absent on this box entirely; either vendor a check or make the skip loud (print `SKIPPED` in a way a reader won't mistake for a pass). **Done 2026-08-23:** ruff now tried via `$PYTHON -m ruff`, `.venv/bin/ruff`, then PATH; missing tools print loud `SKIPPED` lines (non-fatal), found-but-failing still fails — verified with `sh -n` plus a full gate run, ruff executing from the venv.
-- [x] **25.2 Retire the `device-testing-fixes` branch** *(supersedes the old 23.1 — its premise was wrong)* — the branch is **not** ahead of master. `origin/master...origin/device-testing-fixes` is 39/41, and `git diff origin/master origin/device-testing-fixes` is **pure deletion**: the branch is missing `hud.py`, `toplevel_manager.py`, `lock_lines.py`, the vendored protocol XMLs, the per-device phoc fragments, the gnome-osk layout, and 17 test files. Every device-bring-up fix it carried (`INPUT_PROP_DIRECT`, `LD_PRELOAD`, the auto-maximize GSetting, power-key ownership, the rebrand) is already on master via the laundry-bot history. **Merging it would revert shipped work.** Action: confirm with the user, then `git push origin --delete device-testing-fixes`. Do not merge. Do not push anything without asking. **Done 2026-08-23:** confirmed with the user and the branch is gone — no longer on origin or locally; nothing was merged, master untouched.
-- [x] **25.3 Resolve the PIN-length spec conflict** — `design.md:103` and `design.md:108` both say **6-digit PIN**; the code enforces a **4-digit minimum** (`first_boot.py:371`, `first_boot.py:582`) with a 64-digit cap (`lock_screen.py:_MAX_PIN`), and `docs/config.md:87` documents "minimum 4 digits". Two commits on the old branch (`17a9cb2` PIN minimum wording, `2192352` raise PIN cap) look like a deliberate change that never reached design.md. Ground rule says design.md wins, but this needs the user's call, not a unilateral fix. **Ask which is authoritative**, then make all three agree in one commit. Resolution (user call): enforce **6 digits** — code and docs now enforce it; design.md already did. **Done 2026-08-23:** both wizard gates raised 4→6; lock-screen entry path unchanged (hash compare only, stored short PINs still unlock); `docs/config.md` updated. Verified: ruff + new/updated pin tests.
-- [x] **25.4 Name the one remaining literal color** — `call_ui.py:69` sets `color: #ffffff` on `.btn-hangup` for contrast against `DANGER_RED`. It's semantically correct in every theme, so this is polish, not a bug: promote it to a named constant beside `DANGER_RED` in `config.py` (`ON_DANGER_FG`) so the WS22 invariant reads as absolute — grep for a bare hex outside `config.py` should return nothing. **Done 2026-08-23:** `ON_DANGER_FG` sits beside `DANGER_RED`, `.btn-hangup` uses it, bare-hex sweep outside `config.py` is clean. Verified: ruff + targeted pytest run.
-- [x] **25.5 Location & Hotspot tiles: implement or drop from the spec** — `design.md` lists both in the shade's expanded tier, but `quick_actions.py:215-224` defines them as no-op stubs and `_tiles()` unconditionally skips them ("stay hidden until something real backs them"). That's the honest interim state, but it's an undelivered spec line nobody is tracking. Decide: back them for real (Location via geoclue/`org.freedesktop.GeoClue2`, Hotspot via `nmcli device wifi hotspot`, both hardware/service-gated like Torch and Auto), or cut them from `design.md`'s tile list. Recommendation: implement Hotspot (NM already does the work, one nmcli call each way) and cut Location — a text-first shell has no consumer for a location toggle, and geoclue is a dependency the minimalism directive doesn't want. **Done 2026-08-23:** both tiles implemented (went past the rec to cut Location): Hotspot real via nmcli, gated on NM + a WiFi device; Location via the GeoClue2 Agent API with revoke on `MaxAccuracyLevel=0`, hidden when geoclue is absent or registration is rejected; stubs removed; ~26 new mocked tests. Verified: ruff + full suite (287).
-- [x] **25.6 README image caption drift** — the theme-preset screenshot caption says "six theme presets" while the body, `design.md`, and `config.py` all say eight (Aura and Burgundy came later). Either reshoot `docs/images/theme-presets.jpg` with all eight or reword the caption to say the shot predates Aura/Burgundy. Trivial; fold into whatever docs commit comes next. **Done 2026-08-23:** caption reworded to note the shot predates Aura/Burgundy. Verified in the README render.
-
----
-
-## WS25 follow-ups (from 2026-08-23 review)
-
-**Resolved 2026-08-23** in the post-review hardening pass (suite 287 → 313, ruff clean, gate green):
-
-- Location agent docstring overstated per-app authorization — corrected: the tile is a **global master switch** (ON grants every client up to EXACT accuracy, OFF denies all via `MaxAccuracyLevel=0`); per-app policy deliberately not built.
-- Geoclue restart mid-session left a stale agent registration / lying tile — fixed: the `org.freedesktop.GeoClue2` name owner is watched; an owner change drops the export, re-registers when the tile is ON, and tile state now derives from the live registration (`is_active()`), never from intent.
-- Agent-slot displacement — registration is lazy (first enable) and released on disable; the availability probe is read-only, so building the shade no longer claims the system's single geoclue agent slot.
-- Hotspot OFF assumed a profile literally named "Hotspot"; state query used nmcli while the gate used D-Bus — unified: the active hotspot is resolved via NM D-Bus `ActiveConnections` (`Type == 'ap'`), deactivated by object path, and state is answered from that same view. No profile-name assumption.
-
-Also landed in the same pass (found by the review, outside WS25):
-
-- Lock screen consulted a construction-time config snapshot — a PIN set out-of-band after startup was never enforced until shell restart. `LockScreen` now shares the window's live `ShellConfig`, so hot-reloaded PINs apply at decision time.
-- `fprintd-verify -f <username>` passed a username where fprintd(1) wants a finger name — fingerprint unlock could never succeed. Now bare `fprintd-verify`.
-- `launch_counts` crashed on corrupt/non-numeric config values — now skips bad entries per-item, same idiom as `muted_apps`.
-- `ipc.py` docstring listed a nonexistent `unlock` verb — corrected; the socket has no unlock path by design.
-
-Still open (watch items, none blocking):
-
-- Refresh-path sync D-Bus fan-out on the GTK main loop: `_nm_has_wifi_device()` does 1 + N Gets per refresh and `_active_hotspot_path()` adds one Get per active connection; fine today, revisit if the shade ever stalls on the underpowered tablet.
-- After a location-enable rejection the tile stays hidden until the geoclue owner changes or the shell restarts (matches hide-on-reject); auto-retry when a competing agent quits would need a panel-side re-probe trigger.
-- Hotspot toggle feedback is still optimistic for the ON direction (nmcli runs async; next refresh corrects) — OFF is now state-driven.
-- Tablet checklist additions: verify geoclue revokes live clients on `MaxAccuracyLevel=0`; confirm enable-time registration behaves against phosh's prompting agent on device.
+- **FLX1** — next after the tablet is green. Last notes: MediaTek Preloader/BROM, recover via mtkclient. FuriOS (Debian 13 / Halium), Phosh+phoc, working VoLTE. Do not `apt upgrade` held packages until FuriLabs fixes systemd 261-rc3 `systemd-sysusers`.
+- **Librem 5** — third. In hand, still Phosh. PureOS, weakest hardware (performance canary). Replace Phosh in place; no flash.
+- **Fairphone 5** — parked. Image + `flash.sh` ready; not in this sequence.
 
 ---
 
-## Workstream 26 — Post-review hardening (done 2026-08-24, dev machine)
+## Workstream 1 — Preflight (dev machine)
 
-Two-agent review (code reviewer + research audit) surfaced blocker/high defects concentrated in the paths a phone lives or dies by. All dev-machine-fixable items landed in 8 commits; suite went 313 → **472 passing**, gate green.
+Do this before touching the tablet session. None of these need the phone. Goal: `meson install` produces a bootable shell, `install.sh` can run on Arch, and the first login is not a double-session or a missing-module crash.
 
-- **Incoming calls were dead on arrival** — `CallBar()` constructed without its required `on_expand` (TypeError before ringtone/UI), and nothing ever called MM1 Accept/Hangup. Fixed: real accept/hangup D-Bus calls wired through the buttons, CallBar show/hide contract satisfied.
-- **Dialing/SMS never transmitted** — invalid mmcli verbs (`--voice-call=`, create-without-send), verified against upstream mmcli source; now create→parse→start/send with failure surfaced instead of silently swallowed.
-- **Switcher backend could never connect** — five pywayland glue defects (bad import, inverted dispatcher registration, fd-watch never armed, missing wlr protocol module handling, phantom create_toplevel/seat-less activate) plus a stale app_id/title cache. Backend degrades honestly until the protocol module is generated on device.
-- **Lock/security core hardened** — atomic 0600 config saves (a torn write used to silently disable the PIN), salted PBKDF2 PIN storage with transparent legacy-sha256 upgrade, fail-closed corrupt hashes, IPC socket chmod 0600 + bounded reads (a silent local client used to freeze the UI thread) + logged dispatch errors.
-- **GTK4/API breakage** — backup restore's removed `Dialog.run()` converted to response-signal flow; hostile `custom_font_family` sanitized at source (startup-crash vector via restored backup); wizard PIN entry capped at the lock screen's `_MAX_PIN` (longer settable-but-unenterable PIN = lockout).
-- **Power/fingerprint/WiFi** — fired long-press no longer followed by instant blank; fingerprint node auto-detected from sysfs (`FP_INPUT_DEV` override, event3 fallback); WiFi PSK moved off nmcli's command line into a 0600 passwd-file.
-- **Shade/sliders** — one subprocess per drag (200ms trailing debounce) instead of per tick; single getter batch per expand; dead Notify signal subscription replaced by an honest external-daemon probe.
-- **Docs/env** — burgundy added to docs/config.md theme list; README scripts layout completed; stale `contracts/` gitignored; venv gate repaired (suite runs again on this box).
-- **Test infra** — hud module tests made collection-order-independent; fake-gi seams pinned where tests drove imported modules.
+- [ ] **1.1 Install every runtime module.** `launcher/meson.build` ships `src/*.py` by hand and **omits** `hud.py`, `lock_lines.py`, and `toplevel_manager.py`. A meson install of `main` crashes in `_show_shell` (`from hud import Hud`), then again on lock and switcher. Add the three files. Add a test that the meson `install_data` Python set equals `launcher/src/*.py` plus the vendored `wayland_proto` package so this cannot regress. `scripts/check.sh` py_compile currently globs only `launcher/src/*.py` — also compile `launcher/src/wayland_proto/*.py`.
+- [ ] **1.2 Arch / pacman in `install.sh`.** The smoke tablet is Arch. The installer currently exits `Unsupported distro: need apk or apt.` Add a `pacman` path: deps (`python-gobject gtk4 libadwaita gtk4-layer-shell meson ninja rsync git squeekboard phoc python-pywayland wl-clipboard geoclue networkmanager`), `pkg_install` that does not hard-fail the menu, and **do not** try to `pacman -S lisgd` (not in Arch repos; already at `/usr/bin/lisgd` on this tablet; on a fresh Arch box print a loud skip with the `~mil/lisgd` build note). Install JetBrains Mono Nerd + Space Mono (pacman/AUR names as available; never fail the whole install on a font). Same font step on apk/apt as far as the distro packages allow.
+- [ ] **1.3 One shell per session.** `install.sh` `enable_service` always `systemctl --user enable xx-wm`. The user unit `ExecStart=` is `xx-wm` (the Python shell, not phoc). The wayland-session file already starts `xx-wm-session` → phoc → `xx-wm`. Enabling the user unit on a GDM host double-starts the shell. On systemd hosts that install the wayland-session file, **do not** enable the user unit. Keep the user unit installed for the “already inside a compositor” case, but it is opt-in. OpenRC still starts `xx-wm-session` (full session from init) — leave that, but stop hardcoding `/usr/libexec/xx-wm-session`; use the meson-configured libexec path or detect it.
+- [ ] **1.4 Gesture action names must reach lisgd.** `gestures.json` stores actions (`home`, `app_switcher`, `notification_shade`, `back`, `search`). `gesture_bindings.resolve_verb` only accepts IPC verbs, so every default action falls through to `DEFAULT_VERBS` (`swipe_up_short` → `gesture.keyboard`, `swipe_up_long` → `gesture.home`). The tablet’s live json already says short=home, long=app_switcher — and lisgd is firing keyboard/home instead. Map `home→gesture.home`, `app_switcher→gesture.switcher`, `notification_shade→gesture.shade`, `back→gesture.back`, `search→gesture.keyboard`. Keep explicit IPC verbs as-is. Invalid values still fall back to `DEFAULT_VERBS`. Update `tests/test_gesture_bindings.py` (the “byte-identical to former hardcoded” pin is now wrong for defaults that go through action names). Update `docs/config.md` so the lisgd column matches. **Do not** change the user’s custom `launch:` home-swipe bindings.
+- [ ] **1.5 `deploy.sh` must update the running shell.** It rsyncs to `${TARGET}:~/xx-wm/src/` and restarts a service. Meson installs to `/usr/share/xx-wm/` and the wrapper execs that path. The documented iterate loop is a no-op on an installed device. Rsync `launcher/src/` (and `style.css`, `wayland_proto/`) to `/usr/share/xx-wm/` (needs root — see 2.1). Restart: `systemctl --user restart xx-wm` only if that unit is the one running the shell; on the tablet GDM path, SIGHUP/kill the `python3 .../main.py` child of phoc, or restart the session. `--dry-run` must print the real paths. Default `XX_WM_USER` for this tablet is `dr3k`, not `user`.
+- [ ] **1.6 Session naming.** Install success text says “Select the PiercingOS session”. The desktop `Name=` is `XX-WM`. GDM will also still show **PiercingXX**. Make the message name the entry GDM actually lists (`XX-WM`). Do not rename the old piercing-shell session from this repo.
+- [ ] **1.7 Device prompt must not silently keep an FP5 scale.** Cancelling `select_phoc_scale` leaves the meson-installed default (`DSI-1` scale 2.5). That is wrong for this tablet. Require a selection, or detect `DSI-1` 1200×1920 and prefer `tablet`. The tablet fragment is `launcher/data/phoc/tablet.ini` (`DSI-1` @ 1.5).
+- [ ] **1.8 Live re-theme fan-out.** `_retheme_surfaces` only walks shade / dialer / call UI / call bar / power menu. HUD, app switcher, lock screen, back-gesture overlay, and the quick-actions panel provider are construction-time correct and then stale. Thread them in. Cover with `tests/test_theme_hot_reload.py`.
+- [ ] **1.9 Recreate the gate and record the real count.** There is no `.venv` on the laptop and no CI. Recreate it, run `sh scripts/check.sh`, put the actual pytest count in this file’s verify line. Fix anything the gate fails.
 
-Device-gated follow-ups from this workstream: smoke-test `nmcli connection up … passwd-file` on a real NM; ~~generate the wlr protocol module on device~~ (done in WS27 — vendored); exercise MM1 accept/hangup against a live modem; verify fp node detection names on hardware.
-
----
-
-## Workstream 27 — Backlog build-out (done 2026-08-24, dev machine)
-
-Everything left that was buildable without a phone, from the WS26 deferred list and the review's LOW findings. Suite 472 → **566 passing**.
-
-- **System-gesture rebinding is real** — gesture_bindings.py generates the lisgd bindings from gestures.json at session start; defaults byte-pinned to the old hardcoded ones; invalid values fall back silently. Rebinding applies at next session start.
-- **wlr protocol module vendored** — launcher/src/wayland_proto/ carries scanner-generated classes (provenance headers + regen procedure); switcher backend now fails at connect instead of degrading on every device.
-- **Hot-reload reaches every surface** — shade/call/dialer/SMS/power menu take the window's live ShellConfig and re-theme on reload; theme=custom renders custom_background; dead snap-back handlers removed; WAYLAND_DISPLAY respected everywhere.
-- **Deferred repairs** — ipc watch-source leak; config tmp-orphan cleanup, type guards, skip-identical saves (eMMC wear), corrupt-file self-heal; style.css bare-hex/border invariants now literally clean; wizard .error class defined; lock-screen provider dedupe; backup accepts gesture verbs; apps.sh Exec escaping verified through GKeyFile.
-
-Open items needing a ruling: drawer-folder scaffolding ~~is design.md-spec'd but unreachable~~ (done in WS28 — folders live); main.py's second PowerMenu() ~~still snapshot-themed~~ (done in WS28); hud/back_gesture/app_switcher/quick_actions/lock_screen ~~don't yet route through resolve_theme~~ (done in WS28 — construction-time; live re-theme fan-out for these remains); sync MM1 accept/hangup ~~bounded at 5s on the UI thread~~ (done in WS28 — async with exactly-once callbacks).
+Done when: `meson install` (staged prefix) contains `hud.py`, `lock_lines.py`, `toplevel_manager.py`; `sh -n scripts/install.sh` and the new meson-completeness test pass; `sh scripts/check.sh` is green.
 
 ---
 
-## Workstream 28 — Feature completion (done 2026-08-24, dev machine)
+## Workstream 2 — Tablet cutover
 
-Closed every remaining planner-flagged item. Suite 566 → **622 passing**.
+SSH: `dr3k@192.168.1.129`. Graphical session is still piercing-shell until 2.5.
 
-- **Async call control** — accept/hangup via Gio async D-Bus with exactly-once (success, error) callbacks on every path incl. dispatch-time raises; UI transitions only on success; double-fire guarded; a wedged ModemManager can no longer freeze the shell.
-- **Custom themes render everywhere** — hud/app_switcher/back_gesture/quick_actions/lock_screen resolve through resolve_theme with injected live config; shade threads config into its panel; main.py's HUD/back-layer/power-menu all get the live instance.
-- **Drawer folders are live** — the dead folder_slots branch now populates: folders with installed members list first, members keep original indices for the shared menu, empty folders never appear, uninstalled members skip at render, stale open folders collapse on refresh.
-- **Settings Gestures card completes the story** — the four system lisgd slots are exposed: any valid action or IPC verb, Default restores per-slot defaults, verb bindings render readably.
-- **Repairs** — power-button PowerMenu live config; chmod re-tighten on identical-save skip; folder centering uses rendered members; MM1 completions exactly-once on any exception.
+### Privileges (blocks 2.3+)
 
-Remaining known gaps (all recorded): live re-theme fan-out for secondary surfaces (construction-time correct today); quick_actions panel provider outside _retheme_surfaces; drawer-folder centering/scroll polish needs a real panel.
+- [ ] **2.1 Smoke sudoers.** `dr3k` has `(ALL) ALL` but not NOPASSWD. From this laptop, run `sh scripts/grant-tablet-sudo.sh` (or `sudo sh scripts/grant-tablet-sudo.sh` — it re-execs as `$SUDO_USER` so SSH keys still work). Type the tablet sudo password once. That installs `/etc/sudoers.d/xx-wm-smoke` (`NOPASSWD: ALL`). Revoke later with `sh scripts/grant-tablet-sudo.sh --revoke`. Do not store the sudo password in this repo.
+
+- [ ] **2.2 Put this tree on the tablet.** Clone or rsync to `dr3k@192.168.1.129:~/xx-wm` (unprivileged). This is the source for install and for later `deploy.sh`.
+
+- [ ] **2.3 Install XX-WM.** Deps + meson `--prefix=/usr` + **tablet** phoc fragment + squeekboard layout symlink + logind drop-in `10-xx-wm-power.conf` (alongside or replacing the piercing one; both ignore power keys — fine). **Do not** enable the systemd user unit (1.3). `input` group already applied. Confirm:
+  - `/usr/bin/xx-wm`, `/usr/bin/xx-wm-ipc`, `/usr/libexec/xx-wm-session`
+  - `/usr/share/wayland-sessions/xx-wm.desktop` with `Name=XX-WM`
+  - `/usr/share/xx-wm/{main,hud,lock_lines,toplevel_manager}.py` all present
+  - `/usr/share/xx-wm/phoc.ini` is the **tablet** fragment (`DSI-1` scale 1.5)
+  - `LD_PRELOAD` resolution in `xx-wm` finds `/usr/lib/libgtk4-layer-shell.so.0`
+
+- [ ] **2.4 GDM Colemak OSK.** GDM is enabled. Run the installer GDM step (backs up stock `us.json`). **GLASS**: at the greeter, OSK types Colemak.
+
+- [ ] **2.5 Switch the session. GLASS.** GDM currently starts PiercingXX. Pick **XX-WM** at the greeter (not PiercingXX, not GNOME, not Plasma, not Hyprland). Re-login. Agent can `sudo reboot` after AccountsService/`~/.dmrc` is pointed at `xx-wm` if the user would rather not tap the greeter — still confirm on the panel that the session is ours.
+
+- [ ] **2.6 Config migration.** First XX-WM start must rename `~/.config/piercing-shell` → `~/.config/xx-wm` (only if xx-wm dir is absent). Preserve home slots, custom swipe-left/right `launch:` bindings, theme `amoled`. No PIN was set — lock is swipe-to-unlock. `default_layout_applied` is true — **do not re-seed**. First-boot wizard will skip; replay the tour with `xx-wm --welcome` during smoke, and once with a throwaway config (or a moved `config.json`) to exercise the wizard itself.
+
+- [ ] **2.7 Single shell.** After re-login: one `phoc`, one `python3 /usr/share/xx-wm/main.py`, one `lisgd` talking to `xx-wm-ipc`, squeekboard running, IPC socket `$XDG_RUNTIME_DIR/xx-wm.sock`. **No** second `piercing-shell` / `piercing-ipc`. `gsettings get sm.puri.phoc auto-maximize` is `true`.
+
+Done when: SSH `pgrep -af xx-wm` shows the new shell, `WAYLAND_DISPLAY=wayland-0 grim` captures the XX-WM home surface, and piercing-shell is not in the process list.
 
 ---
 
+## Workstream 3 — Tablet smoke (agent SSH + GLASS)
 
+Run in one sitting once 2.7 is green. File fixes as found; do not stockpile. Agent: logs (`~/.local/share/xx-wm/shell.log`), `xx-wm-ipc`, `grim`, `journalctl --user`, process list. **GLASS** = a finger on the panel.
 
-## Tablet verification checklist (needs the x86 tablet, stable login)
+### Session & layers
 
-`dr3k@192.168.1.129` — user is now in `input`; needs a clean session. **This is the highest-value work the moment the tablet is up**: it's the only thing standing between "19–24 pass their unit tests" and "19–24 actually work". Run through in one sitting and file fixes as found:
+- [ ] lisgd bound to `event3` / `INPUT_PROP_DIRECT`. System gestures work **over a running app**, not just on home. **GLASS**
+- [ ] Short swipe-up → home (`gesture.home` after 1.4). Long swipe-up → switcher. Swipe down from top → shade. Edge swipes → back. **GLASS**
+- [ ] Custom `launch:htop.desktop` / Nautilus home-swipes still work. **GLASS**
+- [ ] Shade opens full-width. Apps auto-maximize (phoc GSetting).
+- [ ] Power key: short press blanks/wakes, long-press → power menu, menu is full-screen. logind is ignoring the key. **GLASS**
+- [ ] Keyboard: appears on entry tap only, hides on tap-outside, Colemak layout, terminal/email/url purpose variants switch. **GLASS**
+- [ ] Switcher lists / activates / closes **real** phoc toplevels (not the fake-protocol tests). **GLASS**
+- [ ] HUD on volume/brightness keys, auto-hides ~1 s. First real OVERLAY test for `hud.py`. **GLASS**
+- [ ] phoc.ini is the tablet fragment: `DSI-1` scale **1.5**, not 2.5.
 
-- [ ] lisgd running and bound to the touchscreen (`FTSC1000`, detected by `INPUT_PROP_DIRECT`) — system gestures work **over a running app**, not just on home
-- [ ] shade opens full-width; apps auto-maximize (`sm.puri.phoc auto-maximize` GSetting applied)
-- [ ] power key: short press blanks/wakes, long-press → power menu, menu is full-screen (20.2)
-- [ ] keyboard: appears on entry tap only, hides on tap-outside (20.1), Colemak layout active, terminal/email/url purpose variants switch
-- [ ] switcher lists/activates/closes real windows against live phoc toplevels (19) — the fake-protocol tests prove the wiring, not the protocol handshake
-- [ ] HUD appears on volume/brightness keys and auto-hides (21) — first real layer-shell OVERLAY test for `hud.py`
-- [ ] per-device phoc.ini picks the tablet fragment: `DSI-1` at scale **1.5**, not the FP5's 2.5 (20.5)
-- [ ] first-boot wizard fits the 1200×1920 panel at scale 1.5
-- [ ] every surface readable on a **light** theme (paper/mist) — the WS22 sweep was verified in tests and locally, never on the panel
-- [ ] GDM greeter types Colemak after the install.sh OSK step (24)
-- [ ] config hot-reload: edit `~/.config/xx-wm/config.json` over SSH, watch theme/slots apply live
+### First boot, lock, theme
 
-## Device-gated — needs a phone (do not attempt without one)
+- [ ] Wizard: move `config.json` aside once (or a throwaway user), confirm the wizard fits 1200×1920 @ 1.5, 6-digit PIN gate, theme pick, timezone, gesture tour. Restore the migrated config afterwards.
+- [ ] `xx-wm --welcome` replays the tour on top of the migrated config.
+- [ ] Lock: no PIN → swipe-up unlocks. Set a 6-digit PIN, confirm keypad only after swipe, confirm unlock, confirm a wrong PIN. Then leave it as the user wants (they had none).
+- [ ] Every surface readable on a **light** theme (paper, then mist), then back to amoled. Hot-reload: edit `~/.config/xx-wm/config.json` over SSH, watch theme/slots apply live — including HUD / lock / switcher / shade (1.8).
+- [ ] JetBrains Mono Nerd actually renders (1.2 fonts). If the family is missing, the clock/slots must still be readable on a fallback, and the gap is a bug in the font install step.
 
-- **Fairphone 5 bring-up** — image downloaded, `flash.sh` ready; needs the phone in fastboot. Then the full checklist in `devices/fairphone-5/notes.md`: output name/scale, evdev nodes, IIO sensors, WiFi-SSH deploy loop (USB data drops while charging), telephony (2G/3G calls + SMS via ModemManager — VoLTE not working on pmOS; use the FLX1 for that).
-- **FLX1 recovery + bring-up** — phone currently sits in MediaTek Preloader/BROM mode; recover via mtkclient first. Then the `devices/furiphone-flx1/notes.md` open questions: can the Phosh session be replaced cleanly; mmcli vs FuriOS custom modem layer; gtk4-layer-shell availability; the "vd" Android container vs a non-Phosh shell. **Do not `apt upgrade`** the held packages until FuriLabs fixes the systemd 261-rc3 `systemd-sysusers` postinst breakage (workaround on record: `|| true` in the failing `.postinst`, then `dpkg --configure -a`).
-- **Librem 5 session swap** — replace Phosh in place; also the performance-baseline canary (weakest hardware in the matrix).
-- **Telephony verification** — call UI / dialer / SMS against a real modem (FLX1 for VoLTE); DnD ring suppression (starred/repeat-caller exceptions) end-to-end; ringtone loop stop on every terminal call path.
-- **Runtime integration** — lisgd threshold calibration per panel; squeekboard on-screen typing + purpose-variant switching in real apps; fingerprint (FLX1 — FP5's doesn't work on pmOS); ALS auto-brightness tile on hardware with a real sensor.
-- **Waydroid + microG** (17.6/17.7) — install is scripted; everything after `waydroid init` is device work: microG image (waydroid_script/MinDroid — document exact steps in `devices/` notes), sign-in, install YouTube Music, Synology Drive/Photos/Chat, Google Calendar + Gmail (decision: via microG, not GNOME Online Accounts). Verify Waydroid-exported `.desktop` entries surface in our drawer.
-- **Skippy over Tailscale** (17.4) — verify the PWA `.desktop` entry against a live tailnet on-device.
-- **Browser check at port time** — Waterfox arm64 Linux build exists? (historically x86-only) → else Firefox ESR + `mobile-config-firefox` stands.
+### Shade, settings, folders
 
-## Blocked — needs the user (do NOT attempt)
+- [ ] Tiles: WiFi, BT, Data, Airplane always visible. Torch / Auto-brightness **hidden** on this hardware (no illuminance, likely no torch). Location (geoclue is installed) and Hotspot (NM + WiFi) appear in the expanded tier or honestly hide. Enabling Location, then `MaxAccuracyLevel=0` on disable, revokes live clients.
+- [ ] Brightness and volume sliders in the expanded tier; HUD flashes; one nmcli/pactl apply per drag (debounce), not per tick.
+- [ ] DnD and Focus tiles toggle; schedules round-trip through config.
+- [ ] Settings page: WiFi scan/connect (PSK via passwd-file, not argv), BT scan/pair, sound output, battery, APN fields, backup export/restore, About. Shell prefs are **not** on this page.
+- [ ] Drawer folders expand inline, members indent, empty/uninstalled members skip, expand centers the folder. **GLASS** — centering is the remaining panel polish.
+- [ ] Home edit mode: 8-slot cap, add/remove/rename/folder. **GLASS**
 
-- **piercing-dots phone profile** — separate agent, separate repo. This repo only consumes `install.sh --profile phone` via `scripts/bootstrap-dots.sh` (currently a loud stub — that's intentional).
-- **Snapshot thumbnails in the switcher** — only if the user reconfirms, against their minimalism directive (19.3). Capture-on-leave + cache is the path if they do.
-- **Publishing/releases** — none until first phone boot.
-- **Hyprland/Hyprgrass migration** — parked until Hyprgrass matures (README notes the intent; no work now).
+### IPC / iterate loop
 
-## Device facts (reference)
+- [ ] `xx-wm-ipc lock`, `gesture.shade`, `gesture.switcher`, `gesture.home`, `welcome` from SSH.
+- [ ] `PIERCING_DEVICE=192.168.1.129 XX_WM_USER=dr3k ./scripts/deploy.sh` updates `/usr/share/xx-wm` and the running shell (1.5). `--dry-run` first.
 
-- **Tablet:** panel reports as `DSI-1` 1200×1920 → scale **1.5** (collides with the FP5's `DSI-1` name — hence the per-device phoc fragments). Touchscreen **FTSC1000** on `event3`, detected by `INPUT_PROP_DIRECT` (0x2), not by name. `wlopm` **not** installed (DisplayManager tracks blank state internally). `lisgd` built from source (`~mil/lisgd`), not in Arch repos.
-- **phoc 0.56 / wlroots 0.20:** supports `wlr-foreign-toplevel-management`. Auto-maximize is the **`sm.puri.phoc auto-maximize` GSetting**, not a phoc.ini key. `gtk4-layer-shell` must be `LD_PRELOAD`ed before libgtk-4 or all layer surfaces silently float.
-- **FLX1:** in MediaTek Preloader/BROM mode, recoverable via mtkclient. FuriOS systemd 261-rc3 `systemd-sysusers` breaks apt postinsts (pipewire, wpasupplicant) — hold upgrades.
-- **FP5 (pmOS):** VoLTE not working; speaker/mic fragile; fingerprint dead; USB data drops while charging → WiFi SSH only; default user `user`.
+### What this box will not prove
+
+- Telephony, fingerprint, ALS curve — no modem, no fprintd, no illuminance. Re-run on FLX1.
+- Waydroid — 1.8 GiB RAM / 10 G free. Do not install it here.
+
+Done when: the session checklist is ticked or each failure has a filed fix in this repo, and a `grim` of home + shade + switcher is saved off-device.
+
+---
+
+## Workstream 4 — Tablet daily-driver extras
+
+Still the tablet. Keep it light.
+
+- [ ] **4.1 Browser.** Tablet is x86_64, so a Waterfox Linux build is allowed if it still exists; otherwise Firefox + mobile-config (Arch packages). Default browser via `xdg-settings`. Confirm it appears in the drawer and in the Tools folder if seeded.
+- [ ] **4.2 Tailscale.** Install (pacman or static tgz). `tailscale up` is **GLASS** / user auth. Then Skippy PWA: `apps.sh` 17.4 — host defaults to `skippy`; confirm the `.desktop` Exec escaping and that the entry launches. Needs the user’s tailnet.
+- [ ] **4.3 piercing-dots phone profile.** `scripts/bootstrap-dots.sh` is a loud stub until `./install.sh --profile phone` exists **in the piercing-dots repo**. Tablet already has `~/piercing-dots` without that flag. This repo only consumes the profile: kitty, nvim + `piercing-note`, yazi, bash+starship, maintenance script — POSIX, apk **and** apt **and** pacman, no x86/GNOME/systemd assumptions. Land the profile in piercing-dots, then unstub `bootstrap-dots.sh`. Notes default slot should resolve to `piercing-note` once that entry exists (today it is `org.gnome.TextEditor.desktop`).
+- [ ] **4.4 Calculator** is already installed. Camera / Photos / Calendar `.desktop` ids in the migrated layout must resolve or the slots must compact (no empty gaps, no empty folders).
+
+---
+
+## Workstream 5 — FLX1 recovery
+
+Needs the phone in hand and a USB cable. Agent cannot BROM-recover over WiFi.
+
+- [ ] **5.1 Recover from MediaTek Preloader/BROM via mtkclient.** User at the desk. Get to a bootable FuriOS with SSH.
+- [ ] **5.2 Record SSH:** user, IP / tailnet name, whether `sudo` is passwordless. Put it in `devices/furiphone-flx1/notes.md`.
+- [ ] **5.3 Do not `apt upgrade`.** systemd 261-rc3 `systemd-sysusers` breaks postinsts (pipewire, wpasupplicant). Workaround on record: `|| true` in the failing `.postinst`, then `dpkg --configure -a`. Hold until FuriLabs ships a fix.
+
+Done when: `ssh` into the FLX1 works and Phosh is still the session (we replace it next).
+
+---
+
+## Workstream 6 — FLX1 bring-up and daily-driver
+
+FuriOS is Debian-based (apt path of `install.sh`). Output fragment: `launcher/data/phoc/furiphone-flx1.ini` (`HWCOMPOSER-1` scale **3**).
+
+### Bring-up
+
+- [ ] **6.1 Can Phosh be replaced?** Before investing: does FuriOS pin `phosh.service` / the greeter? If the session cannot be swapped, stop and write the finding in `devices/furiphone-flx1/notes.md`.
+- [ ] **6.2 Packages.** `gtk4-layer-shell`, `python3-gi`, `phoc`, `squeekboard`, `lisgd`, `python3-pywayland` (or equivalent), ModemManager / `mmcli`. Note exact apt names.
+- [ ] **6.3 Install XX-WM** (apt path). Device prompt = `furiphone-flx1`. Same “do not enable user unit” rule as 1.3. `input` group. logind power drop-in.
+- [ ] **6.4 Hardware inventory** into `devices/furiphone-flx1/notes.md`: output name (`wlr-randr` or equivalent — may be `HWCOMPOSER-1`), evdev nodes (`libinput list-devices`), IIO sensors, fingerprint node (`fprintd` / sysfs; `FP_INPUT_DEV` override exists), backlight, torch.
+- [ ] **6.5 Session cutover.** Pick XX-WM, single shell, lisgd on the real touchscreen, scale 3 actually fits.
+
+### Telephony (this is the VoLTE device)
+
+- [ ] Modem stack is ModemManager (our surfaces speak mmcli / MM1). If FuriOS wraps a custom layer, document it and adapt — do not assume.
+- [ ] Incoming call: CallBar shows, ringtone loops, **Accept** and **Hangup** are real MM1 calls (async, UI transitions on success). Ringtone stops on every terminal path (accept, hangup, remote drop, ignore).
+- [ ] Outgoing dialer: create → parse D-Bus path → start. Failure is visible, not swallowed.
+- [ ] SMS send/receive against a live modem.
+- [ ] DnD: silence + shade still collects; starred contacts and repeat-caller (same number twice within 15 min) still ring. **GLASS** with a second phone.
+- [ ] Built-in dialer is fallback only; Comms folder Phone/Text should bind GNOME Calls / Chatty if those are what FuriOS actually uses.
+
+### Sensors, FP, ALS, keyboard
+
+- [ ] Fingerprint unlock (FLX1 has one; this is the device that can prove `fprintd-verify` with no username argv).
+- [ ] Auto-brightness tile on a real illuminance node; hide if absent.
+- [ ] lisgd threshold calibration on this panel. **GLASS**
+- [ ] squeekboard Colemak + purpose variants in real apps (SMS, browser URL, terminal). **GLASS**
+
+### Android layer
+
+- [ ] FuriOS **vd** container vs a non-Phosh shell — does it still launch? Document.
+- [ ] **Waydroid + microG** lives here, not on the tablet. `apps.sh` 17.6 installs the package; `waydroid init`, microG image (waydroid_script / MinDroid — exact steps in `devices/furiphone-flx1/notes.md`), sign-in, YouTube Music, Synology Drive/Photos/Chat, Google Calendar + Gmail **via microG** (not GNOME Online Accounts). Waydroid-exported `.desktop` entries appear in our drawer and in search.
+- [ ] Skippy PWA over the live tailnet. Same host as 4.2 unless the user says otherwise.
+
+### piercing-dots
+
+- [ ] `bootstrap-dots.sh --profile phone` on Debian. Same contract as 4.3.
+
+Done when: calls and SMS work on VoLTE, XX-WM is the session, and Waydroid apps show in the drawer.
+
+---
+
+## Workstream 7 — Librem 5 (performance canary)
+
+Third. PureOS, already phoc/Phosh, 3 GiB RAM / 32 G eMMC, 720×1440 → fragment `librem-5.ini` (`DSI-1` scale **2**). No flash.
+
+- [ ] **7.1 SSH + apt inventory.** GTK4 / libadwaita / gtk4-layer-shell versions, session mechanism (wayland-sessions vs `phosh.service` override), ModemManager, killswitches.
+- [ ] **7.2 Install XX-WM** (Debian path). Device prompt = `librem-5`. Replace Phosh in place: session file + disable phosh, do not leave both.
+- [ ] **7.3 Hardware notes** in `devices/librem-5/notes.md`: output name, evdev, IIO, modem.
+- [ ] **7.4 Full tablet-equivalent smoke** (Workstream 3 checklist) on this panel. If it janks here, it janks everywhere — treat stutter, input lag, and RAM as bugs, not “it’s a Librem.”
+- [ ] **7.5 Telephony** against this modem (no VoLTE expectation). Confirm our mmcli paths still work.
+- [ ] **7.6 piercing-dots** phone profile on PureOS.
+
+Done when: Phosh is gone, XX-WM is the session, and the canary smoke is written down (smooth / usable / not).
+
+---
+
+## Parked (do not attempt in this sequence)
+
+- **Fairphone 5 flash and bring-up** — image in `devices/fairphone-5/downloads/`, `flash.sh` ready. pmOS: VoLTE not working, fingerprint dead, USB data drops while charging (WiFi SSH only), default user `user`. Pick it up after Librem 5, not before.
+- **Switcher snapshot thumbnails** — against the minimalism directive; only if the user reconfirms. Capture-on-leave + cache if they do.
+- **Hyprland / Hyprgrass** — parked until Hyprgrass matures. Tablet already has hyprland session files; ignore them.
+- **Publishing / releases** — none until a phone (FLX1 or L5) has booted XX-WM as the daily session.
+- **Installing Waydroid on the tablet** — RAM/disk.
+
+## Blocked — needs the user
+
+- Tablet sudoers drop-in **or** running `install.sh` at the glass (2.1).
+- GDM session pick / first XX-WM login (2.5), unless AccountsService is pointed at `xx-wm` first.
+- FLX1 USB recovery (5.1).
+- piercing-dots `--profile phone` in the **piercing-dots** repo (4.3 / 6 / 7). This repo stays the consumer.
+- Tailscale login + Skippy host if not `skippy` (4.2).
+- Audiobookshelf URL (apps.sh 17.5) — skip if blank.
+
+## Device facts (quick reference)
+
+- **Tablet:** `dr3k@192.168.1.129`, Arch, GDM, `DSI-1` 1200×1920 scale **1.5**, touch `FTSC1000` `event3`, no wlopm, lisgd from source, 1.8 GiB RAM. Currently piercing-shell. `wlopm` not installed — DisplayManager tracks blank state internally. `gtk4-layer-shell` must be `LD_PRELOAD`ed before libgtk-4.
+- **phoc 0.56 / wlroots 0.20:** `wlr-foreign-toplevel-management` supported. Auto-maximize is GSetting `sm.puri.phoc auto-maximize`, not a phoc.ini key.
+- **FLX1:** FuriOS, `HWCOMPOSER-1` scale **3**, VoLTE, fingerprint, Halium, vd container. BROM recovery first. Hold apt upgrades.
+- **Librem 5:** PureOS, `DSI-1` scale **2**, Phosh-replace, performance canary.
 
 ## Suggested order
 
-25.1–25.6 — done, landed 2026-08-23 → **tablet checklist in one sitting the moment the tablet has a stable login** — that's the real gate on 19–24, and every unit test in the repo is a proxy for it. Device-gated work starts whenever a phone is in hand: FLX1 recovery first (it's the telephony device), FP5 flash second.
+1. Workstream 1 (preflight) on the laptop — especially 1.1, 1.2, 1.3, 1.4, 1.5. A tablet install before 1.1 is a wasted sitting.
+2. 2.1 privileges, then 2.2–2.7 cutover.
+3. Workstream 3 tablet smoke in one sitting; 4.1–4.2 while the tablet is the daily panel; 4.3 whenever piercing-dots lands.
+4. Workstream 5 FLX1 recovery (user + cable), then 6.
+5. Workstream 7 Librem 5.
+6. FP5 stays parked until that list is done.
