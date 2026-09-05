@@ -9,7 +9,7 @@ PYTHON="${PYTHON:-.venv/bin/python}"
 if [ ! -x "$PYTHON" ]; then
     PYTHON=python3
 fi
-"$PYTHON" -m py_compile launcher/src/*.py || {
+find launcher/src -name '*.py' -print0 | xargs -0 "$PYTHON" -m py_compile || {
     echo "Python syntax check FAILED"
     exit 1
 }

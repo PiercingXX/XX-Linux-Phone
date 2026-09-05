@@ -62,9 +62,12 @@ class ALSBrightness:
             return 255
         max_path = self._backlight_path.parent / 'max_brightness'
         try:
-            return int(max_path.read_text().strip())
+            value = int(max_path.read_text().strip())
         except (OSError, ValueError):
             return 255
+        # Some backlights report 0 at boot; a 0..0 range means the node is not
+        # ready, so fall back to a sane default rather than writing nonsense.
+        return value if value > 0 else 255
 
     def available(self) -> bool:
         return self._sensor_path is not None and self._backlight_path is not None

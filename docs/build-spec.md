@@ -5,7 +5,7 @@
 | **Title** | XX-WM smoke-ready build spec |
 | **Author** | Skippy / PiercingXX |
 | **Date** | 2026-09-04 |
-| **Status** | Draft |
+| **Status** | Draft — WS1 gate change landed (check.sh now compiles `wayland_proto/*.py`); work-order items 1.1–1.9 still open |
 | **Audience** | Skippy (implementation agent) — build from this document; do not guess |
 | **UI contract** | `design.md` wins on every UI disagreement |
 | **Work order** | `todo.md` remains the checkbox list. Do **not** restore WS1–28 history. Tick boxes as items land. After 1.9, write the real pytest count into that file’s verify line. |
