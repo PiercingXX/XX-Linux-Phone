@@ -103,15 +103,20 @@ Values may be an IPC verb (`gesture.home`, `gesture.shade`,
 `gesture.back`, `gesture.keyboard`, `gesture.switcher`) **or** the
 settings-UI action names `home`, `app_switcher`, `notification_shade`,
 `back`, `search` (mapped to those verbs). `launch:<app>` stays in-shell
-and does not replace the lisgd verb. Any other value keeps that slot's
-default verb; rebinding applies at the next session start.
+and does not replace the lisgd verb. Two fallbacks: missing or corrupt
+JSON loads schema defaults then `ACTION_TO_VERB` (short → `gesture.home`,
+long → `gesture.switcher`); a **valid unmapped** value (`camera`, `none`,
+`launch:…`) keeps that slot's `DEFAULT_VERBS` (legacy: short →
+`gesture.keyboard`, long → `gesture.home`). Garbage keys are dropped at
+load, so they take the schema-default path, not `DEFAULT_VERBS`.
+Rebinding applies at the next session start.
 
 | Gesture | Default | Notes |
 |---|---|---|
-| `swipe_down_top` | `notification_shade` | lisgd → `gesture.shade`. |
-| `swipe_up_short` | `home` | lisgd → `gesture.home`. Missing/invalid JSON still uses `gesture.keyboard`. |
-| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Missing/invalid JSON still uses `gesture.home`. |
-| `swipe_left_edge` | `back` | lisgd → `gesture.back` on both edges. |
+| `swipe_down_top` | `notification_shade` | lisgd → `gesture.shade`. Verb-rebindable. |
+| `swipe_up_short` | `home` | lisgd → `gesture.home`. Verb-rebindable. Missing/corrupt JSON uses this mapped default, not `gesture.keyboard`. |
+| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. Missing/corrupt JSON uses this mapped default, not `gesture.home`. |
+| `swipe_left_edge` | `back` | lisgd → `gesture.back` on both edges. Verb-rebindable. |
 | `long_press_bottom` | `search` | |
 | `double_tap_home` | `lock_screen` | Kept on Linux deliberately. |
 | `long_press_home` | `settings` | The shell opens slot edit mode on this. |

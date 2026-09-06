@@ -4,11 +4,11 @@
 |---|---|
 | **Title** | XX-WM smoke-ready build spec |
 | **Author** | Skippy / PiercingXX |
-| **Date** | 2026-09-04 |
-| **Status** | Draft — WS1 gate change landed (check.sh now compiles `wayland_proto/*.py`); work-order items 1.1–1.9 still open |
+| **Date** | 2026-09-06 |
+| **Status** | WS1 landed on main (`6a0b2c3`); 1b closed; check.sh 663 passed, 3 skipped; next is Workstream 2 |
 | **Audience** | Skippy (implementation agent) — build from this document; do not guess |
 | **UI contract** | `design.md` wins on every UI disagreement |
-| **Work order** | `todo.md` remains the checkbox list. Do **not** restore WS1–28 history. Tick boxes as items land. After 1.9, write the real pytest count into that file’s verify line. |
+| **Work order** | `todo.md` remains the checkbox list. Do **not** restore WS1–28 history. Tick boxes as items land. WS1 verify line is 660 passed, 3 skipped; 1b records a new count. |
 | **Repo** | `/media/Working-Storage/GitHub/Phone-Projects/linux/xx-wm` |
 
 This is the engineering plan to make a meson-installed session bootable, cut the x86 tablet over from piercing-shell to XX-WM, smoke it over SSH, then bring up FLX1 and the Librem 5. It is not a product vision doc.
@@ -17,19 +17,21 @@ This is the engineering plan to make a meson-installed session bootable, cut the
 
 ## Overview
 
-A meson install of `main` is not bootable: `launcher/meson.build` ships Python modules by hand and omits `hud.py`, `lock_lines.py`, and `toplevel_manager.py`. `scripts/install.sh` only knows apk/apt, always enables a systemd user unit whose `ExecStart=` is the Python shell (double-start under GDM), and on cancel of the device prompt leaves Fairphone-5 `DSI-1` scale 2.5. `gesture_bindings.resolve_verb` ignores action names stored in `gestures.json`, so the tablet’s live defaults fire the wrong IPC verbs. `scripts/deploy.sh` rsyncs to `~/xx-wm/src/`, which the installed wrapper never execs.
+Workstream 1 landed on main (`6a0b2c3`). A meson install of this tree ships `hud.py` / `lock_lines.py` / `toplevel_manager.py`; `install.sh` speaks pacman; the systemd user unit stays disabled when the wayland-session file exists; lisgd action names map through `ACTION_TO_VERB`; `deploy.sh` writes `/usr/share/xx-wm` and SIGUSR1s the python child; theme hot-reload fans out past the five original surfaces. Do not reopen 1.1–1.9.
 
-The tablet (`dr3k@192.168.1.129`, PiercingXX Arch, 1.8 GiB RAM, GDM → PiercingXX/`piercing-session` → phoc → `piercing-shell`) is up and SSH-able. Fairphone 5 is parked. Sequence is **tablet → FLX1 → Librem 5**.
+The tablet (`dr3k@192.168.1.129`, PiercingXX Arch, 1.8 GiB RAM, GDM → PiercingXX/`piercing-session` → phoc → `piercing-shell`) is still the pre-rename stack, up and SSH-able. Fairphone 5 is parked. Sequence is **tablet cutover → FLX1 → Librem 5**.
 
-This spec tells Skippy exactly which files, symbols, tests, verify commands, and rollback signs belong to each work item. Laptop preflight (Workstream 1) must finish before any tablet `meson install`. Device cutover is operational, not a code dump.
+This spec tells Skippy exactly which files, symbols, tests, verify commands, and rollback signs belong to each work item. Device cutover is operational, not a code dump. The table below is the hole list WS1 closed — not present-tense truth.
 
 ---
 
 ## Background & Motivation
 
-### Current state (repo)
+### Before WS1 (repo)
 
-| Piece | Path | Problem |
+Closed on `6a0b2c3`. Kept as the hole list so 1.1–1.9 stay the historical how.
+
+| Piece | Path | Problem (before WS1) |
 |---|---|---|
 | Meson Python set | `launcher/meson.build` `install_data([...])` | 36 of 39 `launcher/src/*.py` files. Missing `src/hud.py`, `src/lock_lines.py`, `src/toplevel_manager.py`. Runtime crash: `main.py` `_show_shell` → `from hud import Hud`. Next crashes: lock (`lock_lines`) and switcher (`toplevel_manager`). |
 | Vendored protocols | `launcher/src/wayland_proto/*.py` | Installed; `scripts/check.sh` py_compile does **not** compile them. |
@@ -69,7 +71,7 @@ export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 
 ### Pain
 
-Installing `main` onto this tablet today yields: missing-module crash at first `_show_shell`, GDM double-start if the user unit is enabled, scale 2.5 on a 1200×1920 panel if the device prompt is cancelled, lisgd firing keyboard/home instead of home/switcher, and a deploy loop that cannot update `/usr/share/xx-wm`.
+Before WS1, installing `main` onto this tablet yielded: missing-module crash at first `_show_shell`, GDM double-start if the user unit is enabled, scale 2.5 on a 1200×1920 panel if the device prompt is cancelled, lisgd firing keyboard/home instead of home/switcher, and a deploy loop that cannot update `/usr/share/xx-wm`. Those install-path holes are closed; the remaining pain is that the tablet session is still piercing-shell.
 
 ---
 
@@ -80,7 +82,7 @@ Installing `main` onto this tablet today yields: missing-module crash at first `
 1. A `meson install --prefix=/usr` tree contains every `launcher/src/*.py` plus `wayland_proto/*.py`, and `python3 /usr/share/xx-wm/main.py` can import `hud`, `lock_lines`, and `toplevel_manager`.
 2. `scripts/install.sh` runs on Arch (pacman), **disables** the systemd user unit when the wayland-session file is installed, requires or detects a phoc fragment (tablet = `DSI-1` @ 1.5), and tells the operator to pick **XX-WM**.
 3. lisgd system slots honor `gestures.json` action names. User `launch:` home-swipes are untouched.
-4. `scripts/deploy.sh` updates `/usr/share/xx-wm/` and the **running** shell (user-unit restart if that unit is active, else SIGUSR1 of the unique `python3 /usr/share/xx-wm/main.py` child; `xx-wm.in` respawns it). Default user `dr3k`. **The supervisor is `/usr/bin/xx-wm` from meson; `deploy.sh` never updates it.** Tablet `meson install` waits for 1.5 / PR 4.
+4. `scripts/deploy.sh` updates `/usr/share/xx-wm/` and the **running** shell (user-unit restart if that unit is active, else SIGUSR1 of the unique `python3 /usr/share/xx-wm/main.py` child; `xx-wm.in` respawns it). Default user `dr3k`. **The supervisor is `/usr/bin/xx-wm` from meson; `deploy.sh` never updates it.** 1.5 has landed; tablet `meson install` may proceed after 2.1/2.2.
 5. Theme hot-reload fans out to HUD, switcher, lock, back overlay, QA panel, and both PowerMenu instances.
 6. Tablet session cutover: single XX-WM shell, migrated config, no re-seed, no PIN invented.
 7. Tablet smoke over SSH + **GLASS** for touch. Then extras (browser, Tailscale, Skippy PWA; piercing-dots when the profile exists). Then FLX1 recovery + bring-up. Then Librem 5.
@@ -194,9 +196,11 @@ sequenceDiagram
 
 ## Workstream 1 — Preflight on the laptop
 
-**Blocker:** do not install on the tablet before **1.1**. Do not **meson-install** on the tablet before **1.5** (the supervisor lives in `/usr/bin/xx-wm`; `deploy.sh` cannot push it). 1.1–1.5 especially must land first.
+**Landed** on main (`6a0b2c3`). check.sh: 660 passed, 3 skipped. Do not reopen 1.1–1.9. Remaining laptop work is 1b (docs/tests).
 
-**Done when:** staged `meson install` contains `hud.py`, `lock_lines.py`, `toplevel_manager.py`; `sh -n scripts/install.sh` and the meson-completeness test pass; `sh scripts/check.sh` is green; `todo.md` verify line has the real pytest count.
+**Blocker (satisfied):** do not install on the tablet before **1.1**. Do not **meson-install** on the tablet before **1.5** (the supervisor lives in `/usr/bin/xx-wm`; `deploy.sh` cannot push it). 1.1–1.5 have landed.
+
+**Done when:** staged `meson install` contains `hud.py`, `lock_lines.py`, `toplevel_manager.py`; `sh -n scripts/install.sh` and the meson-completeness test pass; `sh scripts/check.sh` is green; `todo.md` verify line has the real pytest count. Met.
 
 ---
 

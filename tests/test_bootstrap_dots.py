@@ -17,12 +17,20 @@ def test_rm_rf_is_only_for_cache_clone():
     assert 'rm -rf "${HOME}/piercing-dots"' not in text
     assert '${HOME}/.cache/piercing-dots' in text
     assert re.search(r'rm -rf "\$DEST"', text)
-    # rm -rf must sit in the cache branch, not the existing-clone branch.
-    home_branch = text.split('if [ -d "${HOME}/piercing-dots" ]')[1]
-    home_branch, cache_branch = home_branch.split('else', 1)
-    assert 'rm -rf' not in home_branch
-    assert 'rm -rf' in cache_branch
-    assert '.cache/piercing-dots' in cache_branch
+    start = text.find('if [ -d "${HOME}/piercing-dots" ]')
+    assert start != -1
+    block = text[start:]
+    then_arm, rest = block.split('else', 1)
+    cache_arm, after = rest.split('\nfi', 1)
+    assert 'rm -rf' not in then_arm
+    dest_at = cache_arm.find('DEST="${HOME}/.cache/piercing-dots"')
+    rm_at = cache_arm.find('rm -rf')
+    assert dest_at != -1
+    assert rm_at != -1
+    assert dest_at < rm_at
+    assert 'rm -rf "$DEST"' in cache_arm
+    # Code after this if/fi must not grow an rm of the home clone.
+    assert 'rm -rf "${HOME}/piercing-dots"' not in after
 
 
 def test_script_syntax_parses():

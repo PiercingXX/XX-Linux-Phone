@@ -2,9 +2,9 @@
 
 You are Skippy, working on **XX-WM**: a minimalist, text-first Wayland shell for Linux phones. Read `README.md` (identity), `design.md` (the UI spec — treat it as the contract), and `launcher/README.md` (code layout) before touching anything.
 
-This file is the live work order. It is not a changelog. Git history holds the closed workstreams. Skippy implements from `docs/build-spec.md` (how); tick boxes here (what). **Start at Workstream 1b.** Workstream 1 is closed — do not reopen 1.1–1.9.
+This file is the live work order. It is not a changelog. Git history holds the closed workstreams. Skippy implements from `docs/build-spec.md` (how); tick boxes here (what). **Start at Workstream 2.** Workstream 1 and 1b are closed — do not reopen 1.1–1.14.
 
-**Sequence:** 1b (laptop docs/tests), then tablet cutover, then FLX1, then Librem 5. Fairphone 5 is parked. The tablet is up and SSH-able; drive as much as possible over SSH. Operator-at-glass steps are marked **GLASS**.
+**Sequence:** tablet cutover, then FLX1, then Librem 5. Fairphone 5 is parked. The tablet is up and SSH-able; drive as much as possible over SSH. Operator-at-glass steps are marked **GLASS**.
 
 ## Ground rules
 
@@ -19,9 +19,9 @@ This file is the live work order. It is not a changelog. Git history holds the c
 
 ## Current state — 2026-09-06
 
-Workstream 1 is on `main` (`6a0b2c3`). A meson install of **this** tree is bootable: `hud.py`, `lock_lines.py`, and `toplevel_manager.py` ship; `install.sh` speaks pacman (lisgd skipped, fonts non-fatal); the systemd user unit stays disabled when the wayland-session file exists; lisgd action names map through `ACTION_TO_VERB`; `deploy.sh` writes `/usr/share/xx-wm` and SIGUSR1s the python child; `xx-wm.in` supervises (wait 0 / 138 / 137) and migrates `piercing-shell` before lisgd; theme hot-reload fans out to HUD / lock / switcher / back overlay / QA / both PowerMenus. check.sh: 660 passed, 3 skipped.
+Workstream 1 is on `main` (`6a0b2c3`); 1b closed the review follow-up. A meson install of **this** tree is bootable: `hud.py`, `lock_lines.py`, and `toplevel_manager.py` ship; `install.sh` speaks pacman (lisgd skipped, fonts non-fatal); the systemd user unit stays disabled when the wayland-session file exists; lisgd action names map through `ACTION_TO_VERB`; `deploy.sh` writes `/usr/share/xx-wm` and SIGUSR1s the python child; `xx-wm.in` supervises (wait 0 / 138 / 137) and migrates `piercing-shell` before lisgd; theme hot-reload fans out to HUD / lock / switcher / back overlay / QA / both PowerMenus. check.sh: 663 passed, 3 skipped.
 
-The tablet is still the **pre-rename** stack (GDM → PiercingXX / piercing-shell), not XX-WM. Next: 1b on the laptop, then 2.1 privileges, then cutover. 1b is docs/tests, not a boot-path rewrite — finish **1.10** before reading the rest of `docs/build-spec.md` as present-tense truth, or you will redo WS1.
+The tablet is still the **pre-rename** stack (GDM → PiercingXX / piercing-shell), not XX-WM. Next: 2.1 privileges, then cutover.
 
 ### Tablet (`dr3k@192.168.1.129`) — live snapshot
 
@@ -84,25 +84,25 @@ Review of the WS1 landing (`6a0b2c3` vs `docs/build-spec.md`): the boot path is 
 
 `docs/build-spec.md` is still the how for Workstream 2+, but its Status/Overview still describe WS1 holes as current. **Do 1.10 first.**
 
-- [ ] **1.10 `docs/build-spec.md` must stop describing WS1 as open.** Status still says `work-order items 1.1–1.9 still open`. Overview and the "Current state (repo)" table still speak in the present tense about missing meson modules, apk/apt-only `install.sh`, unmapped gesture actions, `~/xx-wm/src/` deploy, and a five-surface re-theme walk. Set Status to: WS1 landed on main (`6a0b2c3`); check.sh 660 passed, 3 skipped; next is 1b then Workstream 2. Label that table **Before WS1** or past-tense it. Leave the live tablet snapshot (still piercing-shell). Do not restore WS1–28 history.
+- [x] **1.10 `docs/build-spec.md` must stop describing WS1 as open.** Status still says `work-order items 1.1–1.9 still open`. Overview and the "Current state (repo)" table still speak in the present tense about missing meson modules, apk/apt-only `install.sh`, unmapped gesture actions, `~/xx-wm/src/` deploy, and a five-surface re-theme walk. Set Status to: WS1 landed on main (`6a0b2c3`); check.sh 660 passed, 3 skipped; next is 1b then Workstream 2. Label that table **Before WS1** or past-tense it. Leave the live tablet snapshot (still piercing-shell). Do not restore WS1–28 history.
 
-- [ ] **1.11 `docs/config.md` lisgd fallbacks.** The notes on `swipe_up_short` / `swipe_up_long` say missing/invalid JSON still uses `gesture.keyboard` / `gesture.home`. That is `DEFAULT_VERBS`, which apply to **valid unmapped** values (`camera`, `none`, `launch:…`). Missing or corrupt JSON loads `_DEFAULTS` then `ACTION_TO_VERB` (`test_corrupt_config_file_falls_back` → `DEFAULT_BINDINGS`, short → `gesture.home`). Document both fallbacks. Restore "Verb-rebindable" on the four lisgd rows.
+- [x] **1.11 `docs/config.md` lisgd fallbacks.** The notes on `swipe_up_short` / `swipe_up_long` say missing/invalid JSON still uses `gesture.keyboard` / `gesture.home`. That is `DEFAULT_VERBS`, which apply to **valid unmapped** values (`camera`, `none`, `launch:…`). Missing or corrupt JSON loads `_DEFAULTS` then `ACTION_TO_VERB` (`test_corrupt_config_file_falls_back` → `DEFAULT_BINDINGS`, short → `gesture.home`). Document both fallbacks. Restore "Verb-rebindable" on the four lisgd rows.
 
-- [ ] **1.12 Pin the tablet's live home-swipes.** Spec 1.4 required `test_launch_home_swipes_do_not_change_lisgd`: json `swipe_left_home=launch:htop.desktop`, `swipe_right_home=launch:org.gnome.Nautilus.desktop` → `generate_bindings` still `DEFAULT_BINDINGS`. Today's test puts `launch:` on **`swipe_up_short`** (a lisgd slot) and only checks `gesture.keyboard`. Production is fine (`swipe_left_home` is not in `_LISGD_GEOMETRY`); the test does not pin the tablet. Assert all five `ACTION_TO_VERB` keys. Rename `TestDefaultByteEquivalence` / `test_defaults_match_former_hardcoded_bindings` to `TestDefaultActionNameMapping` / `test_defaults_map_action_names_to_verbs` and drop the "former hardcoded" module docstring.
+- [x] **1.12 Pin the tablet's live home-swipes.** Spec 1.4 required `test_launch_home_swipes_do_not_change_lisgd`: json `swipe_left_home=launch:htop.desktop`, `swipe_right_home=launch:org.gnome.Nautilus.desktop` → `generate_bindings` still `DEFAULT_BINDINGS`. Today's test puts `launch:` on **`swipe_up_short`** (a lisgd slot) and only checks `gesture.keyboard`. Production is fine (`swipe_left_home` is not in `_LISGD_GEOMETRY`); the test does not pin the tablet. Assert all five `ACTION_TO_VERB` keys. Rename `TestDefaultByteEquivalence` / `test_defaults_match_former_hardcoded_bindings` to `TestDefaultActionNameMapping` / `test_defaults_map_action_names_to_verbs` and drop the "former hardcoded" module docstring.
 
-- [ ] **1.13 Tighten string-presence tests.** `tests/test_session_wiring.py` `test_wrapper_supervises_python_instead_of_exec` passes on the lisgd `while IFS= read` plus comments that contain `138`/`137`. Pin the supervisor: `while :;`, `wait "$_child"`, `[ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]`, `[ "$_st" -eq 0 ] && exit 0`. `tests/test_bootstrap_dots.py` `test_rm_rf_is_only_for_cache_clone` treats everything after the first `else` as the cache branch (including after `fi`). Assert `rm -rf` sits between `DEST="${HOME}/.cache/piercing-dots"` and the closing `fi` of that if, never on `${HOME}/piercing-dots`. 2.3 runs this script; the tablet already has `~/piercing-dots`.
+- [x] **1.13 Tighten string-presence tests.** `tests/test_session_wiring.py` `test_wrapper_supervises_python_instead_of_exec` passes on the lisgd `while IFS= read` plus comments that contain `138`/`137`. Pin the supervisor: `while :;`, `wait "$_child"`, `[ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]`, `[ "$_st" -eq 0 ] && exit 0`. `tests/test_bootstrap_dots.py` `test_rm_rf_is_only_for_cache_clone` treats everything after the first `else` as the cache branch (including after `fi`). Assert `rm -rf` sits between `DEST="${HOME}/.cache/piercing-dots"` and the closing `fi` of that if, never on `${HOME}/piercing-dots`. 2.3 runs this script; the tablet already has `~/piercing-dots`.
 
-- [ ] **1.14 Config dir migration tests (spec 2.6, never landed).** `tests/test_config.py` `test_migration_from_old_config` only covers missing keys, not the piercing-shell **directory rename**. Add, with isolated `HOME`:
+- [x] **1.14 Config dir migration tests (spec 2.6, never landed).** `tests/test_config.py` `test_migration_from_old_config` only covers missing keys, not the piercing-shell **directory rename**. Add, with isolated `HOME`:
   - `test_migrates_legacy_dir_when_xx_wm_absent`: create `~/.config/piercing-shell/{config.json,gestures.json}` with `theme=amoled`, `default_layout_applied=true`, `swipe_left_home=launch:htop.desktop`; construct `ShellConfig()`; assert legacy gone, xx-wm present, theme/slots/flag preserved, gestures file moved, no `pin_hash` invented.
   - `test_does_not_migrate_when_xx_wm_exists`: both dirs present → piercing-shell left intact.
 
-Done when: those tests fail on a revert of the behavior they pin; `docs/config.md` matches `ACTION_TO_VERB` + `DEFAULT_VERBS`; `docs/build-spec.md` Status does not say 1.1–1.9 are open; `PATH="$PWD/.venv/bin:$PATH" sh scripts/check.sh` is green. Record the new pytest count here: check.sh: _ (fill in).
+Done when: those tests fail on a revert of the behavior they pin; `docs/config.md` matches `ACTION_TO_VERB` + `DEFAULT_VERBS`; `docs/build-spec.md` Status does not say 1.1–1.9 are open; `PATH="$PWD/.venv/bin:$PATH" sh scripts/check.sh` is green. check.sh: 663 passed, 3 skipped.
 
 ---
 
 ## Workstream 2 — Tablet cutover
 
-SSH: `dr3k@192.168.1.129`. Graphical session is still piercing-shell until 2.5. Finish 1.10 before treating `docs/build-spec.md` Overview as current. 2.3 still depends on 1.1, 1.2, 1.3, **1.5**, 1.6, 1.7 — those have landed.
+SSH: `dr3k@192.168.1.129`. Graphical session is still piercing-shell until 2.5. 2.3 still depends on 1.1, 1.2, 1.3, **1.5**, 1.6, 1.7 — those have landed.
 
 ### Privileges (blocks 2.3+)
 
@@ -283,8 +283,8 @@ Done when: Phosh is gone, XX-WM is the session, and the canary smoke is written 
 
 ## Suggested order
 
-1. **Workstream 1b** on the laptop (1.10 first). Do not reopen 1.1–1.9.
-2. 2.1 privileges, then 2.2–2.7 cutover. 1.12–1.14 do not block meson install; 2.3 still needs 1.1–1.5, which already landed.
+1. Workstream 1b is closed. Do not reopen 1.1–1.14.
+2. 2.1 privileges, then 2.2–2.7 cutover. 2.3 still needs 1.1–1.5, which already landed.
 3. If 2.1 is waiting on the user, land 4.1/4.2 **laptop** half (`scripts/apps.sh`: pacman Waterfox-if-repo-else-Firefox — not `firefox-esr` — Tailscale, `MemTotal < 3145728` Waydroid skip, `tests/test_apps_sh.py`). Do not run `apps.sh` on the tablet until 2.7.
 4. Workstream 3 tablet smoke in one sitting; remaining 4.1–4.2 at the glass; 4.3 whenever piercing-dots lands.
 5. Workstream 5 FLX1 recovery (user + cable), then 6.

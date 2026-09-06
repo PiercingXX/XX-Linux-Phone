@@ -212,6 +212,65 @@ class TestShellConfig:
         assert config.default_layout_applied is False
 
 
+class TestLegacyDirMigration:
+    """piercing-shell → xx-wm is a one-time directory rename, not a key merge."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_home(self, tmp_path, monkeypatch):
+        home = tmp_path / 'home'
+        home.mkdir()
+        monkeypatch.setenv('HOME', str(home))
+
+    def test_migrates_legacy_dir_when_xx_wm_absent(self):
+        home = Path.home()
+        legacy = home / '.config' / 'piercing-shell'
+        legacy.mkdir(parents=True)
+        slot = {
+            'type': 'app',
+            'label': 'Notes',
+            'app_id': 'org.gnome.TextEditor.desktop',
+        }
+        (legacy / 'config.json').write_text(json.dumps({
+            'theme': 'amoled',
+            'default_layout_applied': True,
+            'home_slots': [slot],
+        }), encoding='utf-8')
+        (legacy / 'gestures.json').write_text(json.dumps({
+            'swipe_left_home': 'launch:htop.desktop',
+        }), encoding='utf-8')
+
+        config = ShellConfig()
+        xx_wm = home / '.config' / 'xx-wm'
+        assert not (home / '.config' / 'piercing-shell').exists()
+        assert xx_wm.is_dir()
+        assert config.config_dir == xx_wm
+        assert config.theme.key == 'amoled'
+        assert config.default_layout_applied is True
+        assert config.home_slots == [slot]
+        gestures = json.loads((xx_wm / 'gestures.json').read_text(encoding='utf-8'))
+        assert gestures['swipe_left_home'] == 'launch:htop.desktop'
+        assert 'pin_hash' not in config.data
+        disk = json.loads((xx_wm / 'config.json').read_text(encoding='utf-8'))
+        assert 'pin_hash' not in disk or not disk.get('pin_hash')
+
+    def test_does_not_migrate_when_xx_wm_exists(self):
+        home = Path.home()
+        legacy = home / '.config' / 'piercing-shell'
+        xx_wm = home / '.config' / 'xx-wm'
+        legacy.mkdir(parents=True)
+        xx_wm.mkdir(parents=True)
+        (legacy / 'keep-me.json').write_text('{"from":"legacy"}', encoding='utf-8')
+        (xx_wm / 'config.json').write_text(
+            json.dumps({'theme': 'paper'}), encoding='utf-8')
+
+        config = ShellConfig()
+        assert legacy.is_dir()
+        assert (legacy / 'keep-me.json').read_text(encoding='utf-8') == (
+            '{"from":"legacy"}')
+        assert config.theme.key == 'paper'
+        assert not (xx_wm / 'keep-me.json').exists()
+
+
 class TestLoadTypeGuards:
     """A hand-edited config with a scalar where a list/dict belongs must
     fall back to the default at merge time, not leak into self.data."""

@@ -36,11 +36,10 @@ def test_no_bare_power_menu_construction_remains():
 
 def test_wrapper_supervises_python_instead_of_exec():
     src = WRAPPER.read_text(encoding='utf-8')
-    assert 'while' in src
-    assert 'trap' in src
-    assert 'TERM' in src
-    assert '138' in src
-    assert '137' in src
+    assert 'while :;' in src
+    assert 'wait "$_child"' in src
+    assert '[ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]' in src
+    assert '[ "$_st" -eq 0 ] && exit 0' in src
     assert 'exec @python@' not in src
 
 

@@ -1,8 +1,7 @@
 """Tests for gesture_bindings.py — generated lisgd system-level bindings.
 
-The default-generated invocation is pinned byte-for-byte against the
-bindings launcher/data/xx-wm.in hardcoded before they became generated:
-same commands, same order.
+Schema default action names map through ACTION_TO_VERB. DEFAULT_VERBS
+still apply when a slot's value is a valid unmapped action.
 """
 import json
 import os
@@ -38,8 +37,8 @@ def _isolate_config(tmp_path, monkeypatch):
                         lambda: tmp_path / 'gestures.json')
 
 
-class TestDefaultByteEquivalence:
-    def test_defaults_match_former_hardcoded_bindings(self):
+class TestDefaultActionNameMapping:
+    def test_defaults_map_action_names_to_verbs(self):
         assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
     def test_bindir_is_substituted(self):
@@ -89,9 +88,21 @@ class TestRebinding:
         }), encoding='utf-8')
         assert generate_bindings('/usr/bin')[0].endswith('gesture.keyboard')
 
+    def test_launch_home_swipes_do_not_change_lisgd(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_left_home': 'launch:htop.desktop',
+            'swipe_right_home': 'launch:org.gnome.Nautilus.desktop',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
+
     def test_action_to_verb_covers_settings_names(self):
-        assert ACTION_TO_VERB['home'] == 'gesture.home'
-        assert ACTION_TO_VERB['app_switcher'] == 'gesture.switcher'
+        assert ACTION_TO_VERB == {
+            'home': 'gesture.home',
+            'app_switcher': 'gesture.switcher',
+            'notification_shade': 'gesture.shade',
+            'back': 'gesture.back',
+            'search': 'gesture.keyboard',
+        }
 
     def test_invalid_values_fall_back_silently(self, tmp_path):
         (tmp_path / 'gestures.json').write_text(json.dumps({
