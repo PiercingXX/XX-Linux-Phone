@@ -315,11 +315,11 @@ class ShellWindow(Adw.ApplicationWindow):
                 self._dispatch_gesture_action(
                     self.gesture_config.get('swipe_down_top') or 'notification_shade')
             elif vel_y < -_LONG_SWIPE_UP_VEL:
-                # Long/fast swipe up → app drawer
+                # Long/fast swipe up → app drawer (installed apps)
                 self.stack.set_visible_child_name('apps')
             elif vel_y < -300:
-                # Short swipe up → on-screen keyboard
-                self._show_keyboard()
+                # Short swipe up → running-app switcher
+                self._show_switcher()
             return
         if abs(vel_y) > abs(vel_x):
             return

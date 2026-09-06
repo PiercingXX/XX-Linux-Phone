@@ -114,8 +114,8 @@ Rebinding applies at the next session start.
 | Gesture | Default | Notes |
 |---|---|---|
 | `swipe_down_top` | `notification_shade` | lisgd → `gesture.shade`. Verb-rebindable. |
-| `swipe_up_short` | `home` | lisgd → `gesture.home`. Verb-rebindable. Missing/corrupt JSON uses this mapped default, not `gesture.keyboard`. |
-| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. Missing/corrupt JSON uses this mapped default, not `gesture.home`. |
+| `swipe_up_short` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. A normal slide up from the bottom opens recents (activate / close). Missing/corrupt JSON uses this mapped default, not `gesture.keyboard`. |
+| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Same recents sheet as short — long vs short was too easy to miss on a phone. Verb-rebindable. |
 | `swipe_left_edge` | `back` | lisgd → `gesture.back` on both edges. Verb-rebindable. |
 | `long_press_bottom` | `search` | |
 | `double_tap_home` | `lock_screen` | Kept on Linux deliberately. |

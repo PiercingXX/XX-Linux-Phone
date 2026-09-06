@@ -136,11 +136,11 @@ Run in one sitting once 2.7 is green. File fixes as found; do not stockpile. Age
 ### Session & layers
 
 - [ ] lisgd bound to `event3` / `INPUT_PROP_DIRECT`. System gestures work **over a running app**, not just on home. **GLASS**
-- [ ] Short swipe-up → home (`gesture.home` after 1.4). Long swipe-up → switcher. Swipe down from top → shade. Edge swipes → back. **GLASS**
+- [ ] Short swipe-up → **app switcher** (changed 2026-09-06 — short-as-home was unusable). Long swipe-up → switcher too. Swipe down on the sheet dismisses. Swipe down from top → shade. Edge swipes → back. **GLASS**
 - [ ] Custom `launch:htop.desktop` / Nautilus home-swipes still work. **GLASS**
 - [ ] Shade opens full-width. Apps auto-maximize (phoc GSetting).
 - [ ] Power key: short press blanks/wakes, long-press → power menu, menu is full-screen. logind is ignoring the key. **GLASS**
-- [ ] Keyboard: appears on entry tap only, hides on tap-outside, Colemak layout, terminal/email/url purpose variants switch. **GLASS** — drawer Search was dead (layer-shell default NONE); `ON_DEMAND` deployed 2026-09-06. Re-tap Search to confirm.
+- [ ] Keyboard: appears on entry tap only, hides on tap-outside, Colemak layout, terminal/email/url purpose variants switch. **GLASS** — Search OSK `ON_DEMAND` deployed; session now pins `us+colemak` and ships `us.yaml` as Colemak so mru `us` is not QWERTY.
 - [ ] Switcher lists / activates / closes **real** phoc toplevels (not the fake-protocol tests). **GLASS**
 - [ ] HUD on volume/brightness keys, auto-hides ~1 s. First real OVERLAY test for `hud.py`. **GLASS**
 - [ ] phoc.ini is the tablet fragment: `DSI-1` scale **1.5**, not 2.5.

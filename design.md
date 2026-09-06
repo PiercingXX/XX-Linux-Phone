@@ -64,7 +64,7 @@ Every dialog and action menu the shell draws (long-press menus, rename entries, 
 | Swipe right on home | Launch configured app (default: Camera) |
 | Swipe down | Notifications **or** search (user choice) |
 | Double-tap | Lock screen (kept on Linux — Android dropped it only because it needed the accessibility service) |
-| Swipe up | Home / app switcher (system-level, via lisgd) |
+| Swipe up | App switcher / recents (system-level, via lisgd — short or long from the bottom). Swipe down on the sheet dismisses to home. |
 | Edge swipe left/right | Back (system-level, via lisgd) |
 
 Swipe left/right accept any app via `launch:<app_id>` bindings, alongside the fixed actions.

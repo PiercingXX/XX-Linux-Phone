@@ -124,6 +124,18 @@ install_data(
   'data/squeekboard/us+colemak_wide.yaml',
   install_dir: join_paths(shell_datadir, 'squeekboard'),
 )
+# squeekboard falls back to us.yaml when gsettings reports layout "us"
+# (mru-sources often stays us even when sources is us+colemak).
+install_data(
+  'data/squeekboard/us+colemak.yaml',
+  rename: 'us.yaml',
+  install_dir: join_paths(shell_datadir, 'squeekboard'),
+)
+install_data(
+  'data/squeekboard/us+colemak_wide.yaml',
+  rename: 'us_wide.yaml',
+  install_dir: join_paths(shell_datadir, 'squeekboard'),
+)
 install_data(
   'data/squeekboard/terminal/us+colemak.yaml',
   'data/squeekboard/terminal/us+colemak_wide.yaml',

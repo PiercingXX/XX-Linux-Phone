@@ -53,7 +53,7 @@ else
     pid=$(ps -u "$(id -un)" -o pid=,comm=,args= | while read -r p c rest; do
         [ "$c" = python3 ] || continue
         case $rest in
-            */usr/share/xx-wm/main.py*) printf '%s\n' "$p" ;;
+            */usr/share/xx-wm/main.py*) echo "$p" ;;
         esac
     done)
     if [ -n "$pid" ] && [ "$(echo "$pid" | wc -l)" -eq 1 ]; then

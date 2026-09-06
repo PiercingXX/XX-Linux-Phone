@@ -35,6 +35,15 @@ if command -v gsettings >/dev/null 2>&1 && \
     gsettings set sm.puri.phoc auto-maximize true 2>/dev/null || true
 fi
 
+# Colemak for both XKB clients and squeekboard (layout id us+colemak).
+# mru-sources often stays [('xkb','us')] after a piercing-shell migrate and
+# then the OSK loads QWERTY; pin both keys every session.
+if command -v gsettings >/dev/null 2>&1 && \
+   gsettings list-schemas 2>/dev/null | grep -q '^org\.gnome\.desktop\.input-sources$'; then
+    gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us+colemak')]" 2>/dev/null || true
+    gsettings set org.gnome.desktop.input-sources mru-sources "[('xkb', 'us+colemak')]" 2>/dev/null || true
+fi
+
 exec phoc \
   -C @datadir@/xx-wm/phoc.ini \
   -E "@bindir@/xx-wm"

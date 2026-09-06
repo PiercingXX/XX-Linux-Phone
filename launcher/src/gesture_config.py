@@ -10,7 +10,7 @@ def _config_path() -> Path:
 # Gesture slot → default action
 _DEFAULTS: dict[str, str] = {
     'swipe_down_top':        'notification_shade',
-    'swipe_up_short':        'home',
+    'swipe_up_short':        'app_switcher',
     'swipe_up_long':         'app_switcher',
     'swipe_left_edge':       'back',
     'long_press_bottom':     'search',
