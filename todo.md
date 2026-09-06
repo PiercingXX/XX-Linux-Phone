@@ -2,9 +2,9 @@
 
 You are Skippy, working on **XX-WM**: a minimalist, text-first Wayland shell for Linux phones. Read `README.md` (identity), `design.md` (the UI spec — treat it as the contract), and `launcher/README.md` (code layout) before touching anything.
 
-This file is the live work order. It is not a changelog. Git history holds the closed workstreams. Skippy implements from `docs/build-spec.md` (how); tick boxes here (what).
+This file is the live work order. It is not a changelog. Git history holds the closed workstreams. Skippy implements from `docs/build-spec.md` (how); tick boxes here (what). **Start at Workstream 1b.** Workstream 1 is closed — do not reopen 1.1–1.9.
 
-**Sequence:** tablet first, then FLX1, then Librem 5. Fairphone 5 is parked. The tablet is up and SSH-able; drive as much as possible over SSH. Operator-at-glass steps are marked **GLASS**.
+**Sequence:** 1b (laptop docs/tests), then tablet cutover, then FLX1, then Librem 5. Fairphone 5 is parked. The tablet is up and SSH-able; drive as much as possible over SSH. Operator-at-glass steps are marked **GLASS**.
 
 ## Ground rules
 
@@ -17,9 +17,11 @@ This file is the live work order. It is not a changelog. Git history holds the c
 - **Decisions already made** (don't relitigate): product is **XX-WM** (app id `io.piercingxx.XXWM`, binaries `xx-wm` / `xx-wm-ipc` / `xx-wm-session`); phoc is the compositor; lisgd owns system-level gestures via IPC; keyboard is **squeekboard** with the PiercingXX Colemak layouts; the lock screen stays ours (no phrog/phosh code); DnD and Focus Mode copy the Pixel's behavior; in-shell Settings is **system-only**; backgrounds are solid colors only; `aura` stays as a Linux-only bonus theme; volume/brightness HUD is in-shell; design.md is current.
 - **Minimalism**: the tablet has **1.8 GiB RAM** and a 29 G eMMC. Prefer text over textures. Leave `preload_gesture_apps` off. Do **not** install Waydroid on the tablet.
 
-## Current state — 2026-09-04
+## Current state — 2026-09-06
 
-The shell, session files, tests, and device fragments are in this repo. A meson install of `main` is **not** bootable (three runtime modules never got listed). The tablet is running the **pre-rename** stack, not XX-WM.
+Workstream 1 is on `main` (`6a0b2c3`). A meson install of **this** tree is bootable: `hud.py`, `lock_lines.py`, and `toplevel_manager.py` ship; `install.sh` speaks pacman (lisgd skipped, fonts non-fatal); the systemd user unit stays disabled when the wayland-session file exists; lisgd action names map through `ACTION_TO_VERB`; `deploy.sh` writes `/usr/share/xx-wm` and SIGUSR1s the python child; `xx-wm.in` supervises (wait 0 / 138 / 137) and migrates `piercing-shell` before lisgd; theme hot-reload fans out to HUD / lock / switcher / back overlay / QA / both PowerMenus. check.sh: 660 passed, 3 skipped.
+
+The tablet is still the **pre-rename** stack (GDM → PiercingXX / piercing-shell), not XX-WM. Next: 1b on the laptop, then 2.1 privileges, then cutover. 1b is docs/tests, not a boot-path rewrite — finish **1.10** before reading the rest of `docs/build-spec.md` as present-tense truth, or you will redo WS1.
 
 ### Tablet (`dr3k@192.168.1.129`) — live snapshot
 
@@ -36,7 +38,7 @@ The shell, session files, tests, and device fragments are in this repo. A meson 
 | Backlight | `intel_backlight` present. **No IIO illuminance node** — Auto-brightness tile must stay hidden |
 | Wayland | `WAYLAND_DISPLAY=wayland-0` under `/run/user/1000`. IPC socket is `piercing-shell.sock` |
 | Config | `~/.config/piercing-shell/{config.json,gestures.json}` live. **No PIN.** `default_layout_applied: true`. Theme `amoled`, font `jetbrains-mono-nerd` (family **not** installed — `fc-list` has neither JetBrains nor Space Mono) |
-| Gestures (json) | design.md defaults, plus custom `swipe_left_home=launch:htop.desktop`, `swipe_right_home=launch:org.gnome.Nautilus.desktop`. lisgd is **not** honoring those action names (see 1.4) |
+| Gestures (json) | design.md defaults, plus custom `swipe_left_home=launch:htop.desktop`, `swipe_right_home=launch:org.gnome.Nautilus.desktop`. Those `launch:` slots are **in-shell** (not lisgd). Live piercing-shell lisgd still uses the old verbs; after 2.5, XX-WM 1.4 mapping applies. Do **not** rewrite the custom home-swipes |
 | Stack present | phoc 0.56, gtk4 4.22, libadwaita 1.9, gtk4-layer-shell 1.3, python-gobject, python-pywayland 0.4.18, squeekboard, lisgd (source-built at `/usr/bin/lisgd`, not a pacman package), geoclue, NM, PipeWire, gnome-calculator, neovim, whiptail |
 | Stack absent | `xx-wm` binaries, firefox, waydroid, tailscale, fprintd, wlopm, wlr-randr |
 | Repo | no clone of this tree on the tablet. `~/piercing-dots` exists; its `install.sh` has **no** `--profile phone` |
@@ -76,9 +78,31 @@ Done when: `meson install` (staged prefix) contains `hud.py`, `lock_lines.py`, `
 
 ---
 
+## Workstream 1b — Review follow-up (laptop)
+
+Review of the WS1 landing (`6a0b2c3` vs `docs/build-spec.md`): the boot path is correct. Do **not** reopen 1.1–1.9. Do **not** meson-install the tablet for these items. None need the phone.
+
+`docs/build-spec.md` is still the how for Workstream 2+, but its Status/Overview still describe WS1 holes as current. **Do 1.10 first.**
+
+- [ ] **1.10 `docs/build-spec.md` must stop describing WS1 as open.** Status still says `work-order items 1.1–1.9 still open`. Overview and the "Current state (repo)" table still speak in the present tense about missing meson modules, apk/apt-only `install.sh`, unmapped gesture actions, `~/xx-wm/src/` deploy, and a five-surface re-theme walk. Set Status to: WS1 landed on main (`6a0b2c3`); check.sh 660 passed, 3 skipped; next is 1b then Workstream 2. Label that table **Before WS1** or past-tense it. Leave the live tablet snapshot (still piercing-shell). Do not restore WS1–28 history.
+
+- [ ] **1.11 `docs/config.md` lisgd fallbacks.** The notes on `swipe_up_short` / `swipe_up_long` say missing/invalid JSON still uses `gesture.keyboard` / `gesture.home`. That is `DEFAULT_VERBS`, which apply to **valid unmapped** values (`camera`, `none`, `launch:…`). Missing or corrupt JSON loads `_DEFAULTS` then `ACTION_TO_VERB` (`test_corrupt_config_file_falls_back` → `DEFAULT_BINDINGS`, short → `gesture.home`). Document both fallbacks. Restore "Verb-rebindable" on the four lisgd rows.
+
+- [ ] **1.12 Pin the tablet's live home-swipes.** Spec 1.4 required `test_launch_home_swipes_do_not_change_lisgd`: json `swipe_left_home=launch:htop.desktop`, `swipe_right_home=launch:org.gnome.Nautilus.desktop` → `generate_bindings` still `DEFAULT_BINDINGS`. Today's test puts `launch:` on **`swipe_up_short`** (a lisgd slot) and only checks `gesture.keyboard`. Production is fine (`swipe_left_home` is not in `_LISGD_GEOMETRY`); the test does not pin the tablet. Assert all five `ACTION_TO_VERB` keys. Rename `TestDefaultByteEquivalence` / `test_defaults_match_former_hardcoded_bindings` to `TestDefaultActionNameMapping` / `test_defaults_map_action_names_to_verbs` and drop the "former hardcoded" module docstring.
+
+- [ ] **1.13 Tighten string-presence tests.** `tests/test_session_wiring.py` `test_wrapper_supervises_python_instead_of_exec` passes on the lisgd `while IFS= read` plus comments that contain `138`/`137`. Pin the supervisor: `while :;`, `wait "$_child"`, `[ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]`, `[ "$_st" -eq 0 ] && exit 0`. `tests/test_bootstrap_dots.py` `test_rm_rf_is_only_for_cache_clone` treats everything after the first `else` as the cache branch (including after `fi`). Assert `rm -rf` sits between `DEST="${HOME}/.cache/piercing-dots"` and the closing `fi` of that if, never on `${HOME}/piercing-dots`. 2.3 runs this script; the tablet already has `~/piercing-dots`.
+
+- [ ] **1.14 Config dir migration tests (spec 2.6, never landed).** `tests/test_config.py` `test_migration_from_old_config` only covers missing keys, not the piercing-shell **directory rename**. Add, with isolated `HOME`:
+  - `test_migrates_legacy_dir_when_xx_wm_absent`: create `~/.config/piercing-shell/{config.json,gestures.json}` with `theme=amoled`, `default_layout_applied=true`, `swipe_left_home=launch:htop.desktop`; construct `ShellConfig()`; assert legacy gone, xx-wm present, theme/slots/flag preserved, gestures file moved, no `pin_hash` invented.
+  - `test_does_not_migrate_when_xx_wm_exists`: both dirs present → piercing-shell left intact.
+
+Done when: those tests fail on a revert of the behavior they pin; `docs/config.md` matches `ACTION_TO_VERB` + `DEFAULT_VERBS`; `docs/build-spec.md` Status does not say 1.1–1.9 are open; `PATH="$PWD/.venv/bin:$PATH" sh scripts/check.sh` is green. Record the new pytest count here: check.sh: _ (fill in).
+
+---
+
 ## Workstream 2 — Tablet cutover
 
-SSH: `dr3k@192.168.1.129`. Graphical session is still piercing-shell until 2.5.
+SSH: `dr3k@192.168.1.129`. Graphical session is still piercing-shell until 2.5. Finish 1.10 before treating `docs/build-spec.md` Overview as current. 2.3 still depends on 1.1, 1.2, 1.3, **1.5**, 1.6, 1.7 — those have landed.
 
 ### Privileges (blocks 2.3+)
 
@@ -239,6 +263,7 @@ Done when: Phosh is gone, XX-WM is the session, and the canary smoke is written 
 - **Hyprland / Hyprgrass** — parked until Hyprgrass matures. Tablet already has hyprland session files; ignore them.
 - **Publishing / releases** — none until a phone (FLX1 or L5) has booted XX-WM as the daily session.
 - **Installing Waydroid on the tablet** — RAM/disk.
+- **SMS theme fan-out** — `SMSConversation.apply_theme` exists but nothing constructs that window and `_retheme_surfaces` does not walk it. Wire a window ref when FLX1 SMS is opened from the shell (Workstream 6). Not a tablet item.
 
 ## Blocked — needs the user
 
@@ -258,9 +283,10 @@ Done when: Phosh is gone, XX-WM is the session, and the canary smoke is written 
 
 ## Suggested order
 
-1. Workstream 1 (preflight) on the laptop — especially 1.1, 1.2, 1.3, 1.4, 1.5. A tablet install before 1.1 is a wasted sitting.
-2. 2.1 privileges, then 2.2–2.7 cutover.
-3. Workstream 3 tablet smoke in one sitting; 4.1–4.2 while the tablet is the daily panel; 4.3 whenever piercing-dots lands.
-4. Workstream 5 FLX1 recovery (user + cable), then 6.
-5. Workstream 7 Librem 5.
-6. FP5 stays parked until that list is done.
+1. **Workstream 1b** on the laptop (1.10 first). Do not reopen 1.1–1.9.
+2. 2.1 privileges, then 2.2–2.7 cutover. 1.12–1.14 do not block meson install; 2.3 still needs 1.1–1.5, which already landed.
+3. If 2.1 is waiting on the user, land 4.1/4.2 **laptop** half (`scripts/apps.sh`: pacman Waterfox-if-repo-else-Firefox — not `firefox-esr` — Tailscale, `MemTotal < 3145728` Waydroid skip, `tests/test_apps_sh.py`). Do not run `apps.sh` on the tablet until 2.7.
+4. Workstream 3 tablet smoke in one sitting; remaining 4.1–4.2 at the glass; 4.3 whenever piercing-dots lands.
+5. Workstream 5 FLX1 recovery (user + cable), then 6.
+6. Workstream 7 Librem 5.
+7. FP5 stays parked until that list is done.
