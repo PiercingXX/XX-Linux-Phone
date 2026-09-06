@@ -21,7 +21,7 @@ This file is the live work order. It is not a changelog. Git history holds the c
 
 Workstream 1 is on `main` (`6a0b2c3`); 1b closed the review follow-up. A meson install of **this** tree is bootable: `hud.py`, `lock_lines.py`, and `toplevel_manager.py` ship; `install.sh` speaks pacman (lisgd skipped, fonts non-fatal); the systemd user unit stays disabled when the wayland-session file exists; lisgd action names map through `ACTION_TO_VERB`; `deploy.sh` writes `/usr/share/xx-wm` and SIGUSR1s the python child; `xx-wm.in` supervises (wait 0 / 138 / 137) and migrates `piercing-shell` before lisgd; theme hot-reload fans out to HUD / lock / switcher / back overlay / QA / both PowerMenus. check.sh: 669 passed, 3 skipped.
 
-The tablet is still the **pre-rename** stack (GDM → PiercingXX / piercing-shell), not XX-WM. Next: 2.1 privileges, then cutover.
+XX-WM is meson-installed on the tablet (`/usr/bin/xx-wm` supervisor loop, tablet `phoc.ini` DSI-1 scale 1.5, user unit disabled). AccountsService/`~/.dmrc` Session=`xx-wm`. Reboot issued 2026-09-06. Tablet pings; SSH key auth fails until a graphical login (likely sitting at the GDM greeter). **GLASS:** pick **XX-WM** (not PiercingXX). Rollback session id: `piercingxx`.
 
 ### Tablet (`dr3k@192.168.1.129`) — live snapshot
 
@@ -29,10 +29,10 @@ The tablet is still the **pre-rename** stack (GDM → PiercingXX / piercing-shel
 |---|---|
 | OS | PiercingXX Arch (`PRETTY_NAME`), kernel 7.1.4-arch1-1, x86_64, systemd, Python 3.14.6 |
 | Memory / disk | 1.8 GiB RAM (~875 MiB available), 29 G eMMC, 10 G free |
-| Login | GDM (enabled). Graphical session is **PiercingXX**, not XX-WM |
-| Session | `/usr/libexec/piercing-session` → `phoc -C /usr/share/piercing-shell/phoc.ini -E /usr/bin/piercing-shell` |
+| Login | GDM (enabled). AccountsService Session=`xx-wm`. Waiting on greeter login. |
+| Session | installed: `/usr/libexec/xx-wm-session` → phoc `-C /usr/share/xx-wm/phoc.ini` `-E /usr/bin/xx-wm`. Rollback desktop id: `piercingxx` |
 | Groups | `dr3k` is in `input` and `wheel` |
-| Sudo | password required. NOPASSWD only for `shutdown` / `reboot` |
+| Sudo | `/etc/sudoers.d/xx-wm-smoke` (`NOPASSWD: ALL`, 0440). Revoke after smoke |
 | Touch | `FTSC1000` on `/dev/input/event3`, `INPUT_PROP_DIRECT`. lisgd already bound to it |
 | Panel | DRM `DSI-1`. Installed piercing-shell `phoc.ini` already has `scale = 1.5` |
 | Backlight | `intel_backlight` present. **No IIO illuminance node** — Auto-brightness tile must stay hidden |
@@ -106,20 +106,20 @@ SSH: `dr3k@192.168.1.129`. Graphical session is still piercing-shell until 2.5. 
 
 ### Privileges (blocks 2.3+)
 
-- [ ] **2.1 Smoke sudoers.** `dr3k` has `(ALL) ALL` but not NOPASSWD. From this laptop, run `sh scripts/grant-tablet-sudo.sh` (or `sudo sh scripts/grant-tablet-sudo.sh` — it re-execs as `$SUDO_USER` so SSH keys still work). Type the tablet sudo password once. That installs `/etc/sudoers.d/xx-wm-smoke` (`NOPASSWD: ALL`). Revoke later with `sh scripts/grant-tablet-sudo.sh --revoke`. Do not store the sudo password in this repo.
+- [x] **2.1 Smoke sudoers.** `dr3k` has `(ALL) ALL` but not NOPASSWD. From this laptop, run `sh scripts/grant-tablet-sudo.sh` (or `sudo sh scripts/grant-tablet-sudo.sh` — it re-execs as `$SUDO_USER` so SSH keys still work). Type the tablet sudo password once. That installs `/etc/sudoers.d/xx-wm-smoke` (`NOPASSWD: ALL`). Revoke later with `sh scripts/grant-tablet-sudo.sh --revoke`. Do not store the sudo password in this repo.
 
-- [ ] **2.2 Put this tree on the tablet.** Clone or rsync to `dr3k@192.168.1.129:~/xx-wm` (unprivileged). This is the source for install and for later `deploy.sh`.
+- [x] **2.2 Put this tree on the tablet.** Clone or rsync to `dr3k@192.168.1.129:~/xx-wm` (unprivileged). This is the source for install and for later `deploy.sh`.
 
-- [ ] **2.3 Install XX-WM.** Deps + meson `--prefix=/usr` + **tablet** phoc fragment + squeekboard layout symlink + logind drop-in `10-xx-wm-power.conf` (alongside or replacing the piercing one; both ignore power keys — fine). **Do not** enable the systemd user unit (1.3). `input` group already applied. Confirm:
+- [x] **2.3 Install XX-WM.** Deps + meson `--prefix=/usr` + **tablet** phoc fragment + squeekboard layout symlink + logind drop-in `10-xx-wm-power.conf` (alongside or replacing the piercing one; both ignore power keys — fine). **Do not** enable the systemd user unit (1.3). `input` group already applied. Confirm:
   - `/usr/bin/xx-wm`, `/usr/bin/xx-wm-ipc`, `/usr/libexec/xx-wm-session`
   - `/usr/share/wayland-sessions/xx-wm.desktop` with `Name=XX-WM`
   - `/usr/share/xx-wm/{main,hud,lock_lines,toplevel_manager}.py` all present
   - `/usr/share/xx-wm/phoc.ini` is the **tablet** fragment (`DSI-1` scale 1.5)
   - `LD_PRELOAD` resolution in `xx-wm` finds `/usr/lib/libgtk4-layer-shell.so.0`
 
-- [ ] **2.4 GDM Colemak OSK.** GDM is enabled. Run the installer GDM step (backs up stock `us.json`). **GLASS**: at the greeter, OSK types Colemak.
+- [ ] **2.4 GDM Colemak OSK.** GDM is enabled. gnome-shell 50 packs layouts in `gnome-shell-osk-layouts.gresource` — there is no `/usr/share/gnome-shell/osk-layouts/us.json` to overwrite. A filesystem copy plus a gresource extract backup are in place (`us.json` and `us.json.xx-wm-backup`); the greeter may still be QWERTY. **GLASS**: at the greeter, OSK types Colemak. If it does not, this is a GNOME 50 gresource follow-up, not a missed `cp`.
 
-- [ ] **2.5 Switch the session. GLASS.** GDM currently starts PiercingXX. Pick **XX-WM** at the greeter (not PiercingXX, not GNOME, not Plasma, not Hyprland). Re-login. Agent can `sudo reboot` after AccountsService/`~/.dmrc` is pointed at `xx-wm` if the user would rather not tap the greeter — still confirm on the panel that the session is ours.
+- [ ] **2.5 Switch the session. GLASS.** AccountsService and `~/.dmrc` already say `Session=xx-wm` (Icon/SystemAccount preserved). Reboot has been issued. Tablet pings at `192.168.1.129`; SSH is `Permission denied (publickey)` until a session unlocks the home keys. At the greeter pick **XX-WM** (not PiercingXX, not GNOME, not Plasma, not Hyprland) and log in. Rollback: `Session=` / `XSession=` / `~/.dmrc` → `piercingxx`.
 
 - [ ] **2.6 Config migration.** First XX-WM start must rename `~/.config/piercing-shell` → `~/.config/xx-wm` (only if xx-wm dir is absent). Preserve home slots, custom swipe-left/right `launch:` bindings, theme `amoled`. No PIN was set — lock is swipe-to-unlock. `default_layout_applied` is true — **do not re-seed**. First-boot wizard will skip; replay the tour with `xx-wm --welcome` during smoke, and once with a throwaway config (or a moved `config.json`) to exercise the wizard itself.
 
