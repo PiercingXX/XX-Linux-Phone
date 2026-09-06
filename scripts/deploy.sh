@@ -49,8 +49,13 @@ if command -v systemctl >/dev/null 2>&1 \
    && systemctl --user is-active --quiet xx-wm; then
     systemctl --user restart xx-wm
 else
-    # [p]ython3 so this pgrep cmdline cannot match itself (the controller).
-    pid=$(pgrep -u "$(id -un)" -f "[p]ython3 /usr/share/xx-wm/main.py" || true)
+    # Match on comm=python3 so the SSH controller (bash) cannot match.
+    pid=$(ps -u "$(id -un)" -o pid=,comm=,args= | while read -r p c rest; do
+        [ "$c" = python3 ] || continue
+        case $rest in
+            */usr/share/xx-wm/main.py*) printf '%s\n' "$p" ;;
+        esac
+    done)
     if [ -n "$pid" ] && [ "$(echo "$pid" | wc -l)" -eq 1 ]; then
         kill -USR1 "$pid"
     else
@@ -62,7 +67,7 @@ fi'
 if [ "$DRY_RUN" = 1 ]; then
     echo "[dry-run] rsync $RSYNC_FLAGS $REPO_DIR/launcher/src/ ${TARGET}:${STAGE}/"
     echo "[dry-run] ssh $TARGET sudo rsync -a --chown=root:root ${STAGE}/ ${DEST}/"
-    echo "[dry-run] restart: systemctl --user restart xx-wm if active, else SIGUSR1 unique '[p]ython3 /usr/share/xx-wm/main.py' (wrapper respawns)"
+    echo "[dry-run] restart: systemctl --user restart xx-wm if active, else SIGUSR1 unique python3 /usr/share/xx-wm/main.py (wrapper respawns)"
     exit 0
 fi
 

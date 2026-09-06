@@ -2,9 +2,9 @@
 
 You are Skippy, working on **XX-WM**: a minimalist, text-first Wayland shell for Linux phones. Read `README.md` (identity), `design.md` (the UI spec — treat it as the contract), and `launcher/README.md` (code layout) before touching anything.
 
-This file is the live work order. It is not a changelog. Git history holds the closed workstreams. Skippy implements from `docs/build-spec.md` (how); tick boxes here (what). **Start at Workstream 2.** Workstream 1 and 1b are closed — do not reopen 1.1–1.14.
+This file is the live work order. It is not a changelog. Git history holds the closed workstreams. Skippy implements from `docs/build-spec.md` (how); tick boxes here (what). **Start at Workstream 3.** Workstream 1, 1b, and 2 (except 2.4 GLASS Colemak) are closed.
 
-**Sequence:** tablet cutover, then FLX1, then Librem 5. Fairphone 5 is parked. The tablet is up and SSH-able; drive as much as possible over SSH. Operator-at-glass steps are marked **GLASS**.
+**Sequence:** tablet smoke, then FLX1, then Librem 5. Fairphone 5 is parked. The tablet is up and SSH-able; drive as much as possible over SSH. Operator-at-glass steps are marked **GLASS**.
 
 ## Ground rules
 
@@ -21,7 +21,7 @@ This file is the live work order. It is not a changelog. Git history holds the c
 
 Workstream 1 is on `main` (`6a0b2c3`); 1b closed the review follow-up. A meson install of **this** tree is bootable: `hud.py`, `lock_lines.py`, and `toplevel_manager.py` ship; `install.sh` speaks pacman (lisgd skipped, fonts non-fatal); the systemd user unit stays disabled when the wayland-session file exists; lisgd action names map through `ACTION_TO_VERB`; `deploy.sh` writes `/usr/share/xx-wm` and SIGUSR1s the python child; `xx-wm.in` supervises (wait 0 / 138 / 137) and migrates `piercing-shell` before lisgd; theme hot-reload fans out to HUD / lock / switcher / back overlay / QA / both PowerMenus. check.sh: 669 passed, 3 skipped.
 
-XX-WM is meson-installed on the tablet (`/usr/bin/xx-wm` supervisor loop, tablet `phoc.ini` DSI-1 scale 1.5, user unit disabled). AccountsService/`~/.dmrc` Session=`xx-wm`. Reboot issued 2026-09-06. Tablet pings; SSH key auth fails until a graphical login (likely sitting at the GDM greeter). **GLASS:** pick **XX-WM** (not PiercingXX). Rollback session id: `piercingxx`.
+XX-WM is the live session (grim: DE XX-WM, phoc, DSI-1 1200×1920 @ 1.5). Config migrated (`piercing-shell` gone, theme `amoled`, `default_layout_applied` true, no PIN, custom `launch:` home-swipes intact). One phoc, one python child, one lisgd, squeekboard, `$XDG_RUNTIME_DIR/xx-wm.sock`. Search OSK fix (layer-shell `ON_DEMAND`) deployed 2026-09-06. Rollback session id: `piercingxx`.
 
 ### Tablet (`dr3k@192.168.1.129`) — live snapshot
 
@@ -40,8 +40,8 @@ XX-WM is meson-installed on the tablet (`/usr/bin/xx-wm` supervisor loop, tablet
 | Config | `~/.config/piercing-shell/{config.json,gestures.json}` live. **No PIN.** `default_layout_applied: true`. Theme `amoled`, font `jetbrains-mono-nerd` (family **not** installed — `fc-list` has neither JetBrains nor Space Mono) |
 | Gestures (json) | design.md defaults, plus custom `swipe_left_home=launch:htop.desktop`, `swipe_right_home=launch:org.gnome.Nautilus.desktop`. Those `launch:` slots are **in-shell** (not lisgd). Live piercing-shell lisgd still uses the old verbs; after 2.5, XX-WM 1.4 mapping applies. Do **not** rewrite the custom home-swipes |
 | Stack present | phoc 0.56, gtk4 4.22, libadwaita 1.9, gtk4-layer-shell 1.3, python-gobject, python-pywayland 0.4.18, squeekboard, lisgd (source-built at `/usr/bin/lisgd`, not a pacman package), geoclue, NM, PipeWire, gnome-calculator, neovim, whiptail |
-| Stack absent | `xx-wm` binaries, firefox, waydroid, tailscale, fprintd, wlopm, wlr-randr |
-| Repo | no clone of this tree on the tablet. `~/piercing-dots` exists; its `install.sh` has **no** `--profile phone` |
+| Stack absent | firefox, waydroid, tailscale, fprintd, wlopm, wlr-randr |
+| Repo | `~/xx-wm` rsynced (2.2). `~/piercing-dots` intact; its `install.sh` has **no** `--profile phone` |
 | logind | `/etc/systemd/logind.conf.d/10-piercing-power.conf` already ignores power keys |
 
 SSH from this machine works with key auth. Import the graphical session with:
@@ -119,11 +119,11 @@ SSH: `dr3k@192.168.1.129`. Graphical session is still piercing-shell until 2.5. 
 
 - [ ] **2.4 GDM Colemak OSK.** GDM is enabled. gnome-shell 50 packs layouts in `gnome-shell-osk-layouts.gresource` — there is no `/usr/share/gnome-shell/osk-layouts/us.json` to overwrite. A filesystem copy plus a gresource extract backup are in place (`us.json` and `us.json.xx-wm-backup`); the greeter may still be QWERTY. **GLASS**: at the greeter, OSK types Colemak. If it does not, this is a GNOME 50 gresource follow-up, not a missed `cp`.
 
-- [ ] **2.5 Switch the session. GLASS.** AccountsService and `~/.dmrc` already say `Session=xx-wm` (Icon/SystemAccount preserved). Reboot has been issued. Tablet pings at `192.168.1.129`; SSH is `Permission denied (publickey)` until a session unlocks the home keys. At the greeter pick **XX-WM** (not PiercingXX, not GNOME, not Plasma, not Hyprland) and log in. Rollback: `Session=` / `XSession=` / `~/.dmrc` → `piercingxx`.
+- [x] **2.5 Switch the session. GLASS.** AccountsService/`~/.dmrc` Session=`xx-wm`. User logged in. Grim shows DE XX-WM / phoc / DSI-1 @ 1.5. Rollback: `piercingxx`.
 
-- [ ] **2.6 Config migration.** First XX-WM start must rename `~/.config/piercing-shell` → `~/.config/xx-wm` (only if xx-wm dir is absent). Preserve home slots, custom swipe-left/right `launch:` bindings, theme `amoled`. No PIN was set — lock is swipe-to-unlock. `default_layout_applied` is true — **do not re-seed**. First-boot wizard will skip; replay the tour with `xx-wm --welcome` during smoke, and once with a throwaway config (or a moved `config.json`) to exercise the wizard itself.
+- [x] **2.6 Config migration.** First XX-WM start must rename `~/.config/piercing-shell` → `~/.config/xx-wm` (only if xx-wm dir is absent). Preserve home slots, custom swipe-left/right `launch:` bindings, theme `amoled`. No PIN was set — lock is swipe-to-unlock. `default_layout_applied` is true — **do not re-seed**. First-boot wizard will skip; replay the tour with `xx-wm --welcome` during smoke, and once with a throwaway config (or a moved `config.json`) to exercise the wizard itself.
 
-- [ ] **2.7 Single shell.** After re-login: one `phoc`, one `python3 /usr/share/xx-wm/main.py`, one `lisgd` talking to `xx-wm-ipc`, squeekboard running, IPC socket `$XDG_RUNTIME_DIR/xx-wm.sock`. **No** second `piercing-shell` / `piercing-ipc`. `gsettings get sm.puri.phoc auto-maximize` is `true`.
+- [x] **2.7 Single shell.** After re-login: one `phoc`, one `python3 /usr/share/xx-wm/main.py`, one `lisgd` talking to `xx-wm-ipc`, squeekboard running, IPC socket `$XDG_RUNTIME_DIR/xx-wm.sock`. **No** second `piercing-shell` / `piercing-ipc`. `gsettings get sm.puri.phoc auto-maximize` is `true`.
 
 Done when: SSH `pgrep -af xx-wm` shows the new shell, `WAYLAND_DISPLAY=wayland-0 grim` captures the XX-WM home surface, and piercing-shell is not in the process list.
 
@@ -140,7 +140,7 @@ Run in one sitting once 2.7 is green. File fixes as found; do not stockpile. Age
 - [ ] Custom `launch:htop.desktop` / Nautilus home-swipes still work. **GLASS**
 - [ ] Shade opens full-width. Apps auto-maximize (phoc GSetting).
 - [ ] Power key: short press blanks/wakes, long-press → power menu, menu is full-screen. logind is ignoring the key. **GLASS**
-- [ ] Keyboard: appears on entry tap only, hides on tap-outside, Colemak layout, terminal/email/url purpose variants switch. **GLASS**
+- [ ] Keyboard: appears on entry tap only, hides on tap-outside, Colemak layout, terminal/email/url purpose variants switch. **GLASS** — drawer Search was dead (layer-shell default NONE); `ON_DEMAND` deployed 2026-09-06. Re-tap Search to confirm.
 - [ ] Switcher lists / activates / closes **real** phoc toplevels (not the fake-protocol tests). **GLASS**
 - [ ] HUD on volume/brightness keys, auto-hides ~1 s. First real OVERLAY test for `hud.py`. **GLASS**
 - [ ] phoc.ini is the tablet fragment: `DSI-1` scale **1.5**, not 2.5.
@@ -267,8 +267,8 @@ Done when: Phosh is gone, XX-WM is the session, and the canary smoke is written 
 
 ## Blocked — needs the user
 
-- Tablet sudoers drop-in **or** running `install.sh` at the glass (2.1).
-- GDM session pick / first XX-WM login (2.5), unless AccountsService is pointed at `xx-wm` first.
+- **GLASS 2.4:** greeter OSK Colemak. gnome-shell 50 may ignore the filesystem `us.json`.
+- **GLASS 3 keyboard:** tap Search in the drawer — OSK should appear after the ON_DEMAND deploy.
 - FLX1 USB recovery (5.1).
 - piercing-dots `--profile phone` in the **piercing-dots** repo (4.3 / 6 / 7). This repo stays the consumer.
 - Tailscale login + Skippy host if not `skippy` (4.2).
@@ -276,15 +276,15 @@ Done when: Phosh is gone, XX-WM is the session, and the canary smoke is written 
 
 ## Device facts (quick reference)
 
-- **Tablet:** `dr3k@192.168.1.129`, Arch, GDM, `DSI-1` 1200×1920 scale **1.5**, touch `FTSC1000` `event3`, no wlopm, lisgd from source, 1.8 GiB RAM. Currently piercing-shell. `wlopm` not installed — DisplayManager tracks blank state internally. `gtk4-layer-shell` must be `LD_PRELOAD`ed before libgtk-4.
+- **Tablet:** `dr3k@192.168.1.129`, Arch, GDM, `DSI-1` 1200×1920 scale **1.5**, touch `FTSC1000` (lisgd bound `event6` this boot), no wlopm, lisgd from source, 1.8 GiB RAM. Session is XX-WM. `wlopm` not installed — DisplayManager tracks blank state internally. `gtk4-layer-shell` must be `LD_PRELOAD`ed before libgtk-4. SSH keys also in `/etc/ssh/authorized_keys/dr3k`.
 - **phoc 0.56 / wlroots 0.20:** `wlr-foreign-toplevel-management` supported. Auto-maximize is GSetting `sm.puri.phoc auto-maximize`, not a phoc.ini key.
 - **FLX1:** FuriOS, `HWCOMPOSER-1` scale **3**, VoLTE, fingerprint, Halium, vd container. BROM recovery first. Hold apt upgrades.
 - **Librem 5:** PureOS, `DSI-1` scale **2**, Phosh-replace, performance canary.
 
 ## Suggested order
 
-1. Workstream 1b is closed. Do not reopen 1.1–1.14.
-2. 2.1 privileges, then 2.2–2.7 cutover. 2.3 still needs 1.1–1.5, which already landed.
+1. Workstream 1–2 closed except 2.4 GLASS Colemak. Do not reopen 1.1–1.14 or 2.1–2.3/2.5–2.7.
+2. Workstream 3 tablet smoke. First GLASS: tap Search — OSK must appear.
 3. If 2.1 is waiting on the user, land 4.1/4.2 **laptop** half (`scripts/apps.sh`: pacman Waterfox-if-repo-else-Firefox — not `firefox-esr` — Tailscale, `MemTotal < 3145728` Waydroid skip, `tests/test_apps_sh.py`). Do not run `apps.sh` on the tablet until 2.7.
 4. Workstream 3 tablet smoke in one sitting; remaining 4.1–4.2 at the glass; 4.3 whenever piercing-dots lands.
 5. Workstream 5 FLX1 recovery (user + cable), then 6.

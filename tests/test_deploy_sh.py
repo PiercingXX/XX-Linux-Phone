@@ -32,7 +32,9 @@ def test_datadir_rsync_does_not_delete():
 
 def test_restart_sigusr1s_unique_python_child():
     text = SCRIPT.read_text(encoding='utf-8')
-    assert "[p]ython3 /usr/share/xx-wm/main.py" in text
+    assert '/usr/share/xx-wm/main.py' in text
+    assert 'comm=' in text
+    assert '[ "$c" = python3 ]' in text
     assert 'kill -USR1' in text
     assert 'kill -TERM' not in text
     assert 'kill -15' not in text
@@ -57,7 +59,7 @@ def test_dry_run_prints_real_paths():
     assert '/tmp/xx-wm-deploy/' in out
     assert 'xx-wm/src/' not in out
     assert 'SIGUSR1' in out
-    assert "[p]ython3 /usr/share/xx-wm/main.py" in out
+    assert '/usr/share/xx-wm/main.py' in out
 
 
 def test_script_syntax_parses():

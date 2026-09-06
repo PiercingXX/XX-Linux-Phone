@@ -154,6 +154,9 @@ class ShellWindow(Adw.ApplicationWindow):
             # exclusive zones — critically the OSK, so the drawer search
             # field rides up above the keyboard instead of hiding under it
             LayerShell.set_exclusive_zone(self, 0)
+            # Default interactivity is NONE: the compositor never sends
+            # text-input, so tapping Search never raises squeekboard.
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.ON_DEMAND)
         else:
             self.set_default_size(420, 860)
             self.fullscreen()
@@ -225,6 +228,7 @@ class ShellWindow(Adw.ApplicationWindow):
         self.apps_search.add_css_class('drawer-search')
         self.apps_search.connect('search-changed', self._on_apps_search_changed)
         self.apps_search.connect('activate', self._on_apps_search_activate)
+        self.apps_search.connect('notify::has-focus', self._on_search_focus)
 
         self.status_label = Gtk.Label(xalign=0)
         self.status_label.add_css_class('dim-label')
@@ -824,8 +828,11 @@ class ShellWindow(Adw.ApplicationWindow):
             get_logger('window').warning(
                 'tap-outside pick(%s, %s) failed: %s', x, y, error)
             return
-        if not isinstance(widget, Gtk.Editable):
-            self._hide_keyboard()
+        while widget is not None:
+            if isinstance(widget, Gtk.Editable):
+                return
+            widget = widget.get_parent() if hasattr(widget, 'get_parent') else None
+        self._hide_keyboard()
 
     def _show_switcher(self) -> None:
         if self._switcher is None:
@@ -959,11 +966,16 @@ class ShellWindow(Adw.ApplicationWindow):
         adj = self.apps_scroller.get_vadjustment()
         adj.set_value(max(0.0, alloc.y))
 
+    def _on_search_focus(self, entry: Gtk.SearchEntry, _pspec=None) -> None:
+        if entry.has_focus():
+            self._show_keyboard()
+
     def _on_stack_page_changed(self, stack: Gtk.Stack, _param: object) -> None:
         # Leaving the drawer disarms both pick modes so a later tap launches
         if stack.get_visible_child_name() != 'apps':
             self._pick_slot_mode = False
             self._pick_gesture_key = None
+            self._hide_keyboard()
 
     def _gesture_binding_text(self, key: str) -> str:
         action = self.gesture_config.get(key) or 'none'

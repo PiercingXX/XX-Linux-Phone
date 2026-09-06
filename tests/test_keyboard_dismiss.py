@@ -140,6 +140,32 @@ def test_tap_on_editable_keeps_keyboard(window):
     assert calls == []
 
 
+def test_tap_on_child_of_editable_keeps_keyboard(window):
+    """A tap on SearchEntry chrome (icon, padding) still counts as the entry."""
+    editable = window._TEST_GTK.Editable
+    parent = editable()
+    child = types.SimpleNamespace(get_parent=lambda: parent)
+    calls = _install_dbus(window)
+
+    class FakeStack:
+        def pick(self, x, y, flags):
+            return child
+
+    shell = types.SimpleNamespace(
+        stack=FakeStack(),
+        _hide_keyboard=lambda: window._set_osk_visible(False),
+    )
+    window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
+    assert calls == []
+
+
+def test_shell_window_requests_keyboard_on_demand():
+    src = Path(__file__).parent.parent.joinpath(
+        'launcher', 'src', 'window.py').read_text(encoding='utf-8')
+    assert 'KeyboardMode.ON_DEMAND' in src
+    assert "notify::has-focus" in src
+
+
 def test_tap_outside_editable_hides_keyboard(window):
     """A tap that lands on a non-editable widget hides the OSK (20.1)."""
     calls = _install_dbus(window)
