@@ -7,7 +7,7 @@ description="XX-WM shell session"
 
 : "${XX_WM_USER:=user}"
 
-command="/usr/libexec/xx-wm-session"
+command="@libexecdir@/xx-wm-session"
 command_user="${XX_WM_USER}"
 command_background=false
 supervisor=supervise-daemon

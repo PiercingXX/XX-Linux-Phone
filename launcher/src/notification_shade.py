@@ -227,6 +227,9 @@ class NotificationShade(Gtk.Window):
         back to the injected config's own preset."""
         data = theme_css(preset if preset is not None else self._config.theme)
         self._theme_provider.load_from_data(data.encode('utf-8'))
+        qa = getattr(self, 'quick_actions', None)
+        if qa is not None:
+            qa.apply_theme(preset)
 
     def _build_content(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)

@@ -216,6 +216,9 @@ class LockScreen(Gtk.Window):
         from window import resolve_theme
         return resolve_theme(self._config)
 
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        _apply_lock_theme(preset if preset is not None else self._display_preset())
+
     # ------------------------------------------------------------------
     # Build UI
     # ------------------------------------------------------------------

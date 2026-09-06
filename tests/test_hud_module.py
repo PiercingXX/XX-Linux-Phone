@@ -42,6 +42,7 @@ class TestHudApi:
         hud.show_volume(42)
         hud.show_brightness(17)
         hud.set_application(app=None)
+        hud.apply_theme()
 
     def test_silent_absence_when_no_gtk(self):
         """Headless: no window, every call a no-op. GTK-capable: overlay exists.
@@ -59,6 +60,7 @@ class TestHudApi:
             hud.show_volume(100)
             hud.show_brightness(17)
             hud.set_application(app=None)
+            hud.apply_theme()
             assert hud._window is None
         else:
             # On a GTK-capable host the overlay must be created, not dropped.
@@ -92,6 +94,7 @@ class TestHudApi:
             assert hud.show_volume(100) is None
             assert hud.show_brightness(17) is None
             assert hud.set_application(app=None) is None
+            assert hud.apply_theme() is None
             assert hud._window is None
         else:
             assert hud._window is not None

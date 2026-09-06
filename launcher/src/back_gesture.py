@@ -72,10 +72,12 @@ class _ArrowOverlay(Gtk.Window):
 
         self.set_default_size(76, 64)
 
-        css = Gtk.CssProvider()
-        css.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
+        self._theme_provider = Gtk.CssProvider()
+        self._theme_provider.load_from_data(
+            theme_css(self._display_preset()).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
-            self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            self.get_display(), self._theme_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
         win_css = Gtk.CssProvider()
@@ -104,6 +106,10 @@ class _ArrowOverlay(Gtk.Window):
         """
         from window import resolve_theme
         return resolve_theme(self._config)
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        data = theme_css(preset if preset is not None else self._display_preset())
+        self._theme_provider.load_from_data(data.encode('utf-8'))
 
     def flash(self) -> None:
         if self._anim_src is not None:
@@ -146,6 +152,10 @@ class BackGestureLayer:
     def set_application(self, app: Gtk.Application) -> None:
         self._left_arrow.set_application(app)
         self._right_arrow.set_application(app)
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        self._left_arrow.apply_theme(preset)
+        self._right_arrow.apply_theme(preset)
 
     def flash_back(self, from_left: bool = True) -> None:
         arrow = self._left_arrow if from_left else self._right_arrow

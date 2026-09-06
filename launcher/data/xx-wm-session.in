@@ -1,5 +1,5 @@
 #!/bin/sh
-# Session launcher: starts the phoc compositor with PiercingOS shell as the client.
+# Session launcher: starts the phoc compositor with the XX-WM shell as the client.
 # Reads ~/.config/xx-wm/config.json to propagate theme preference to GTK.
 
 _prefer_dark=$(python3 -c "

@@ -596,11 +596,12 @@ class QuickActionsPanel(Gtk.Box):
             'vol': _set_volume_pct,
         }
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
+        self._theme_provider = Gtk.CssProvider()
+        self._theme_provider.load_from_data(
+            theme_css(self._display_preset()).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
-            provider,
+            self._theme_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
         )
 
@@ -617,6 +618,10 @@ class QuickActionsPanel(Gtk.Box):
         """
         from window import resolve_theme
         return resolve_theme(self._config)
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        data = theme_css(preset if preset is not None else self._display_preset())
+        self._theme_provider.load_from_data(data.encode('utf-8'))
 
     def _tiles(self) -> list[_TileDef]:
         tiles = []

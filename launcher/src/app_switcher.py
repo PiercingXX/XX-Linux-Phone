@@ -148,10 +148,12 @@ class AppSwitcher(_AppSwitcherBase):
             self._wire_change(self._manager, self.refresh)
         self.refresh()
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
+        self._theme_provider = Gtk.CssProvider()
+        self._theme_provider.load_from_data(
+            theme_css(self._display_preset()).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+            Gdk.Display.get_default(), self._theme_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
         )
 
         self.card_box = Gtk.Box(
@@ -186,6 +188,10 @@ class AppSwitcher(_AppSwitcherBase):
         """
         from window import resolve_theme
         return resolve_theme(self._config)
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        data = theme_css(preset if preset is not None else self._display_preset())
+        self._theme_provider.load_from_data(data.encode('utf-8'))
 
     def _build_content(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

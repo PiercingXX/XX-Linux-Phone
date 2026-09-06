@@ -1913,10 +1913,27 @@ class ShellWindow(Adw.ApplicationWindow):
         providers, so a hot-reloaded theme edit must reach each one; fonts
         already propagate display-wide via font_theme's global provider."""
         preset = resolve_theme(self.config)
-        for surface in (self._shade, self._dialer, self._call_ui,
-                        self._call_bar, self._power_menu):
+        for attr in ('_shade', '_dialer', '_call_ui', '_call_bar',
+                     '_power_menu', '_switcher'):
+            surface = getattr(self, attr, None)
             if surface is not None:
                 surface.apply_theme(preset)
+        lock = getattr(self, '_lock_screen', None)
+        if lock is not None:
+            lock.apply_theme(preset)
+        back = getattr(self, '_back_layer', None)
+        if back is not None:
+            back.apply_theme(preset)
+        app = self.get_application() if callable(
+            getattr(self, 'get_application', None)) else None
+        if app is not None:
+            hud = getattr(app, '_hud', None)
+            if hud is not None:
+                hud.apply_theme(preset)
+            app_menu = getattr(app, '_power_menu', None)
+            if app_menu is not None and app_menu is not getattr(
+                    self, '_power_menu', None):
+                app_menu.apply_theme(preset)
 
     def _setup_idle_timer(self) -> None:
         if self._idle_timer_id is not None:

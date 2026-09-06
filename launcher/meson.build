@@ -220,9 +220,18 @@ configure_file(
   install_dir: join_paths(get_option('datadir'), 'systemd', 'user'),
 )
 
-# OpenRC init script (postmarketOS default images)
+# OpenRC init script (postmarketOS default images). configure_file so
+# command= uses the meson libexecdir (Arch often ships /usr/lib, not
+# /usr/libexec). Build output cannot be `xx-wm` — that name is the
+# launcher wrapper — so rename on install.
+xx_wm_openrc = configure_file(
+  input: 'data/openrc/xx-wm',
+  output: 'xx-wm-openrc',
+  configuration: session_conf,
+)
 install_data(
-  'data/openrc/xx-wm',
+  xx_wm_openrc,
+  rename: 'xx-wm',
   install_dir: join_paths(get_option('sysconfdir'), 'init.d'),
   install_mode: 'rwxr-xr-x',
 )

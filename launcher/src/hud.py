@@ -97,10 +97,10 @@ if _HAS_GTK:
                 LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
                 LayerShell.set_margin(self, LayerShell.Edge.TOP, 96)
 
-            css = Gtk.CssProvider()
-            css.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
+            self._css = Gtk.CssProvider()
+            self._css.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
             Gtk.StyleContext.add_provider_for_display(
-                self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+                self.get_display(), self._css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )
 
             win_css = Gtk.CssProvider()
@@ -137,6 +137,10 @@ if _HAS_GTK:
             """
             from window import resolve_theme
             return resolve_theme(self._config)
+
+        def apply_theme(self, preset: ThemePreset | None = None) -> None:
+            data = theme_css(preset if preset is not None else self._display_preset())
+            self._css.load_from_data(data.encode('utf-8'))
 
         def show_level(self, pct: int) -> None:
             """Display a clamped 0-100 level and schedule the auto-hide fade."""
@@ -195,3 +199,7 @@ class Hud:
     def show_brightness(self, pct: int) -> None:
         if self._window is not None:
             self._window.show_level(pct)
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        if self._window is not None:
+            self._window.apply_theme(preset)

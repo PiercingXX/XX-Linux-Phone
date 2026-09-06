@@ -1,6 +1,6 @@
 #!/bin/sh
 # XX-WM installer — whiptail TUI, cached sudo, network check up front.
-# POSIX sh; runs on postmarketOS/Alpine (apk) and Debian/Mobian (apt).
+# POSIX sh; runs on postmarketOS/Alpine (apk), Debian/Mobian (apt), and Arch (pacman).
 # GitHub.com/PiercingXX
 
 set -u
@@ -34,8 +34,10 @@ if command -v apk >/dev/null 2>&1; then
     PKG=apk
 elif command -v apt >/dev/null 2>&1; then
     PKG=apt
+elif command -v pacman >/dev/null 2>&1; then
+    PKG=pacman
 else
-    echo "Unsupported distro: need apk or apt." >&2
+    echo "Unsupported distro: need apk, apt, or pacman." >&2
     exit 1
 fi
 
@@ -43,6 +45,8 @@ pkg_install() {
     # Never hard-fail the menu on one missing package
     if [ "$PKG" = apk ]; then
         $SUDO apk add "$@" || echo "warn: some packages failed: $*" >&2
+    elif [ "$PKG" = pacman ]; then
+        $SUDO pacman -S --needed --noconfirm "$@" || echo "warn: some packages failed: $*" >&2
     else
         $SUDO apt install -y "$@" || echo "warn: some packages failed: $*" >&2
     fi
@@ -51,7 +55,13 @@ pkg_install() {
 # --- whiptail ---------------------------------------------------------------
 if ! command -v whiptail >/dev/null 2>&1; then
     echo "Installing whiptail..."
-    if [ "$PKG" = apk ]; then pkg_install newt; else pkg_install whiptail; fi
+    if [ "$PKG" = apk ]; then
+        pkg_install newt
+    elif [ "$PKG" = pacman ]; then
+        pkg_install libnewt
+    else
+        pkg_install whiptail
+    fi
 fi
 
 # --- cached sudo (doas has no timestamp cache; skip there) ------------------
@@ -70,11 +80,48 @@ install_deps() {
     if [ "$PKG" = apk ]; then
         pkg_install py3-gobject3 gtk4.0 libadwaita gtk4-layer-shell \
             meson ninja rsync git squeekboard phoc lisgd wl-clipboard
+        pkg_install py3-pywayland
+        pkg_install geoclue
+        pkg_install networkmanager
+        pkg_install brightnessctl
+    elif [ "$PKG" = pacman ]; then
+        pkg_install python-gobject gtk4 libadwaita gtk4-layer-shell meson ninja \
+            rsync git squeekboard phoc python-pywayland wl-clipboard geoclue \
+            networkmanager brightnessctl
+        if command -v lisgd >/dev/null 2>&1; then
+            echo "lisgd already present: $(command -v lisgd)"
+        else
+            echo "SKIP: lisgd is not in Arch repos. Build from https://git.sr.ht/~mil/lisgd (libevdev + libinput). This tablet already has /usr/bin/lisgd."
+        fi
     else
         pkg_install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
             libgtk4-layer-shell0 meson ninja-build rsync git squeekboard \
             phoc lisgd wl-clipboard
+        pkg_install python3-pywayland
+        pkg_install geoclue-2.0
+        pkg_install network-manager
+        pkg_install brightnessctl
     fi
+}
+
+install_fonts() {
+    # One package per invocation: pacman aborts the whole transaction if any
+    # name is unknown. Missing fonts are a warn, never a failed install.
+    echo "Installing fonts (optional)..."
+    if [ "$PKG" = pacman ]; then
+        pkg_install ttf-jetbrains-mono-nerd
+        pkg_install ttf-jetbrains-mono
+        pkg_install ttf-space-mono-nerd
+        pkg_install ttf-space-mono
+    elif [ "$PKG" = apk ]; then
+        pkg_install nerd-fonts-jetbrains-mono
+        pkg_install font-jetbrains-mono
+        pkg_install font-space-mono
+    else
+        pkg_install fonts-jetbrains-mono
+        echo "warn: no Space Mono package on apt — continuing" >&2
+    fi
+    $SUDO fc-cache -f >/dev/null 2>&1 || true
 }
 
 build_install() {
@@ -93,7 +140,8 @@ build_install() {
     sh "$REPO_DIR/scripts/bootstrap-dots.sh" || \
         echo "warn: piercing-dots phone profile not applied yet" >&2
 
-    select_phoc_scale
+    install_fonts
+    select_phoc_scale || return 1
     enable_service
     add_input_group
 }
@@ -102,22 +150,86 @@ build_install() {
 # The tablet's panel reports as DSI-1 (wanting scale 1.5) and collides with
 # the FP5's DSI-1 (scale 2.5), so a single phoc.ini cannot serve both. Prompt
 # for the device and copy its fragment over the meson-installed default.
-# Cancelling the prompt keeps the default (FP5+FLX1) file.
-select_phoc_scale() {
-    dev=$(whiptail --backtitle "GitHub.com/PiercingXX" --title "Device" \
-        --menu "Which device is this? (sets phoc.ini scale)" 0 0 0 \
-        "fairphone-5"    "FP5 — DSI-1, scale 2.5" \
-        "furiphone-flx1" "FLX1 — HWCOMPOSER-1, scale 3" \
-        "librem-5"       "Librem 5 — DSI-1, scale 2" \
-        "tablet"         "x86 tablet — DSI-1, scale 1.5" \
-        3>&1 1>&2 2>&3) || return 0
-    frag="$REPO_DIR/launcher/data/phoc/$dev.ini"
-    if [ ! -f "$frag" ]; then
-        echo "warn: no phoc.ini fragment for '$dev' — keeping default" >&2
+# Cancelling without a detection must not keep the Fairphone 5 default.
+detect_phoc_device() {
+    for modes in /sys/class/drm/card*-DSI-1/modes; do
+        [ -r "$modes" ] || continue
+        if grep -q '1200x1920' "$modes" 2>/dev/null || \
+           grep -q '1920x1200' "$modes" 2>/dev/null; then
+            echo tablet
+            return 0
+        fi
+        if grep -q '2340x1080' "$modes" 2>/dev/null || \
+           grep -q '1080x2340' "$modes" 2>/dev/null; then
+            echo fairphone-5
+            return 0
+        fi
+        if grep -q '720x1440' "$modes" 2>/dev/null || \
+           grep -q '1440x720' "$modes" 2>/dev/null; then
+            echo librem-5
+            return 0
+        fi
+    done
+    for modes in /sys/class/drm/card*-HWCOMPOSER-1/modes; do
+        [ -r "$modes" ] || continue
+        echo furiphone-flx1
         return 0
+    done
+    return 1
+}
+
+_install_phoc_fragment() {
+    _dev=$1
+    _frag="$REPO_DIR/launcher/data/phoc/${_dev}.ini"
+    if [ ! -f "$_frag" ]; then
+        _frag="/usr/share/xx-wm/phoc/${_dev}.ini"
     fi
-    $SUDO cp "$frag" /usr/share/xx-wm/phoc.ini || \
-        echo "warn: could not install phoc.ini fragment for '$dev'" >&2
+    if [ ! -f "$_frag" ]; then
+        echo "warn: no phoc.ini fragment for '$_dev' — keeping default" >&2
+        return 1
+    fi
+    $SUDO cp "$_frag" /usr/share/xx-wm/phoc.ini || {
+        echo "warn: could not install phoc.ini fragment for '$_dev'" >&2
+        return 1
+    }
+}
+
+select_phoc_scale() {
+    detected=$(detect_phoc_device) || true
+
+    if [ ! -t 0 ]; then
+        if [ -n "$detected" ]; then
+            echo "using detected device: $detected"
+            _install_phoc_fragment "$detected"
+            return
+        fi
+        echo "A device is required so phoc.ini scale is not the Fairphone 5 default (need a TTY or DRM sysfs)." >&2
+        return 1
+    fi
+
+    warned=0
+    while :; do
+        dev=$(whiptail --backtitle "GitHub.com/PiercingXX" --title "Device" \
+            --menu "Which device is this? (sets phoc.ini scale)" 0 0 0 \
+            "fairphone-5"    "FP5 — DSI-1, scale 2.5" \
+            "furiphone-flx1" "FLX1 — HWCOMPOSER-1, scale 3" \
+            "librem-5"       "Librem 5 — DSI-1, scale 2" \
+            "tablet"         "x86 tablet — DSI-1, scale 1.5" \
+            3>&1 1>&2 2>&3) || dev=
+        if [ -n "$dev" ]; then
+            _install_phoc_fragment "$dev"
+            return
+        fi
+        if [ -n "$detected" ]; then
+            echo "using detected device: $detected"
+            _install_phoc_fragment "$detected"
+            return
+        fi
+        if [ "$warned" -eq 0 ]; then
+            msg_box "A device is required so phoc.ini scale is not the Fairphone 5 default."
+            warned=1
+        fi
+    done
 }
 
 # --- input group (20.3) -----------------------------------------------------
@@ -141,8 +253,18 @@ enable_service() {
     init_comm=$(ps -p 1 -o comm= 2>/dev/null || echo unknown)
     if [ "$init_comm" = systemd ]; then
         systemctl --user daemon-reload 2>/dev/null || true
-        systemctl --user enable xx-wm 2>/dev/null || \
-            echo "warn: enable the service after first login: systemctl --user enable xx-wm" >&2
+        if [ -f /usr/share/wayland-sessions/xx-wm.desktop ]; then
+            # Idempotent: a previous install.sh always-enabled the unit.
+            # --now stops a running duplicate if we are somehow inside a session.
+            systemctl --user disable --now xx-wm 2>/dev/null || true
+            echo "wayland-session installed; systemd --user xx-wm disabled (would double-start under GDM)."
+            echo "Opt-in only from a session that is NOT already xx-wm-session:"
+            echo "  systemctl --user start xx-wm"
+            echo "Do not 'enable --now' under GDM: WantedBy=graphical-session.target would start a second Python shell."
+        else
+            systemctl --user enable xx-wm 2>/dev/null || \
+                echo "warn: enable the service after first login: systemctl --user enable xx-wm" >&2
+        fi
     else
         # postmarketOS default images are OpenRC
         $SUDO rc-update add xx-wm default 2>/dev/null || \
@@ -207,7 +329,7 @@ install_gdm_osk() {
 do_install() {
     install_deps
     if build_install; then
-        msg_box "XX-WM installed. Select the PiercingOS session at next login, or reboot."
+        msg_box "XX-WM installed. Select the XX-WM session at next login (not PiercingXX), or reboot."
     else
         msg_box "Install hit an error — check the terminal output."
     fi

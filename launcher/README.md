@@ -64,13 +64,12 @@ gate, and ruff resolves via the venv python first so it needn't be on PATH.
 ## Deploy to device
 
 ```bash
-# WiFi SSH (USB data drops while charging on the FP5)
 export PIERCING_DEVICE=<device-ip>
-export XX_WM_USER=user   # pmos default; check per device
+export XX_WM_USER=dr3k   # tablet default; override per device (FP5: user)
 ./scripts/deploy.sh
 ```
 
-`deploy.sh` rsyncs `src/` to the device and restarts the shell service (systemd user unit or OpenRC). `--dry-run` prints the commands without touching anything. Full installs go through `scripts/install.sh` (whiptail menu: Install / Update / Install phone apps).
+`deploy.sh` rsyncs `launcher/src/` (Python, `style.css`, `wayland_proto/`) to `/usr/share/xx-wm/` (root-owned; no `--delete` on the datadir so `phoc.ini`/sounds stay) and restarts the running shell: `systemctl --user restart xx-wm` only if that unit is active, otherwise SIGUSR1 the unique `python3 /usr/share/xx-wm/main.py` child so the wrapper respawns it. `--dry-run` prints the real paths without touching anything. Full installs go through `scripts/install.sh` (whiptail menu: Install / Update / Install phone apps). The wrapper `/usr/bin/xx-wm` is meson-installed; deploy does not update it.
 
 ## Device checks to run first
 

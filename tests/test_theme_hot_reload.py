@@ -262,15 +262,21 @@ class TestReloadFanOut:
     def test_retheme_reaches_every_constructed_surface(self):
         shade, dialer_s, call_ui_s, call_bar, menu = (
             RecordingSurface() for _ in range(5))
+        switcher, lock, back = (RecordingSurface() for _ in range(3))
+        hud, app_menu = RecordingSurface(), RecordingSurface()
+        app = types.SimpleNamespace(_hud=hud, _power_menu=app_menu)
         shell = types.SimpleNamespace(
             config=_config_with(theme='custom', custom_background='#2A1018'),
             _shade=shade, _dialer=dialer_s, _call_ui=call_ui_s,
             _call_bar=call_bar, _power_menu=menu,
+            _switcher=switcher, _lock_screen=lock, _back_layer=back,
+            get_application=lambda: app,
         )
         window.ShellWindow._retheme_surfaces(shell)
         expected = window.resolve_theme(shell.config)
         assert expected.background == '#2A1018'
-        for surf in (shade, dialer_s, call_ui_s, call_bar, menu):
+        for surf in (shade, dialer_s, call_ui_s, call_bar, menu,
+                     switcher, lock, back, hud, app_menu):
             assert surf.applied == [expected]
 
     def test_retheme_skips_surfaces_never_constructed(self):
@@ -278,9 +284,36 @@ class TestReloadFanOut:
             config=_config_with(theme='ocean'),
             _shade=None, _dialer=None, _call_ui=None,
             _call_bar=None, _power_menu=None,
+            _switcher=None, _lock_screen=None, _back_layer=None,
+            get_application=lambda: None,
         )
         # Must be a silent no-op, never an AttributeError.
         window.ShellWindow._retheme_surfaces(shell)
+
+    def test_retheme_reaches_hud_and_app_power_menu(self):
+        hud, app_menu, win_menu = (RecordingSurface() for _ in range(3))
+        app = types.SimpleNamespace(_hud=hud, _power_menu=app_menu)
+        shell = types.SimpleNamespace(
+            config=_config_with(theme='paper'),
+            _shade=None, _dialer=None, _call_ui=None,
+            _call_bar=None, _power_menu=win_menu,
+            get_application=lambda: app,
+        )
+        window.ShellWindow._retheme_surfaces(shell)
+        expected = window.resolve_theme(shell.config)
+        assert hud.applied == [expected]
+        assert app_menu.applied == [expected]
+        assert win_menu.applied == [expected]
+
+    def test_shade_apply_theme_fans_to_quick_actions(self):
+        qa = RecordingSurface()
+        surf = notification_shade.NotificationShade.__new__(
+            notification_shade.NotificationShade)
+        surf._config = _config_with(theme='mist')
+        surf._theme_provider = FakeProvider()
+        surf.quick_actions = qa
+        surf.apply_theme(THEME_PRESETS['mist'])
+        assert qa.applied == [THEME_PRESETS['mist']]
 
     def test_apply_config_change_ends_with_surface_fan_out(self):
         events = []

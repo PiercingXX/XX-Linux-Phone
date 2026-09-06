@@ -7,6 +7,14 @@ if command -v squeekboard >/dev/null 2>&1; then
     squeekboard &
 fi
 
+# First-login rename so lisgd sees migrated gestures.json (ShellConfig also
+# does this; doing it here means the binding generator reads the new path).
+_xxcfg="$HOME/.config/xx-wm"
+_legacy="$HOME/.config/piercing-shell"
+if [ -d "$_legacy" ] && [ ! -e "$_xxcfg" ]; then
+    mv "$_legacy" "$_xxcfg"
+fi
+
 # System-level gestures: lisgd reads the touchscreen evdev directly, so edge
 # swipes work while any app is focused — each binding feeds the shell IPC.
 # Override autodetection with PIERCING_TOUCH_DEV=/dev/input/eventN.
@@ -27,8 +35,8 @@ if command -v lisgd >/dev/null 2>&1; then
     if [ -n "$_touch_dev" ] && [ -r "$_touch_dev" ]; then
         # Bindings are generated from ~/.config/xx-wm/gestures.json by
         # gesture_bindings.py (docs/config.md "gestures.json"): one -g
-        # value per line. With defaults the invocation is byte-identical
-        # to the previously hardcoded set — pinned by
+        # value per line. Action names map through ACTION_TO_VERB;
+        # invalid values keep DEFAULT_VERBS. Pinned by
         # tests/test_gesture_bindings.py. The subshell keeps the wrapper's
         # own positional parameters (forwarded to main.py below) intact.
         # Rebinding applies at the next session start.
@@ -64,4 +72,36 @@ if [ -n "$_ls_lib" ]; then
     export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$_ls_lib"
 fi
 
-exec @python@ @shell_dir@/main.py "$@"
+# Do not exec python: phoc -E must keep this wrapper as its client.
+# Deploy SIGUSR1s the python child only; we respawn it with fresh FDs.
+# Gio.Application maps TERM/INT/HUP to g_application_quit(); app.run()
+# then returns 0. Do not use those signals for iterate — 0 is session end.
+_child=
+_xx_wm_cleanup() {
+    trap - TERM INT
+    if [ -n "$_child" ]; then
+        kill "$_child" 2>/dev/null || true
+        wait "$_child" 2>/dev/null || true
+    fi
+    exit 0
+}
+trap '_xx_wm_cleanup' TERM INT
+
+while :; do
+    @python@ @shell_dir@/main.py "$@" &
+    _child=$!
+    wait "$_child"
+    _st=$?
+    _child=
+    # 0 = Gio.Application quit (power-off / in-shell session end / TERM-to-python)
+    [ "$_st" -eq 0 ] && exit 0
+    # 138 = 128+SIGUSR1: deploy asked the child to die — restart immediately.
+    # 137 = 128+SIGKILL: same (last-resort iterate).
+    # Other non-zero: crash. Brief delay, then restart.
+    # If the wrapper itself was SIGTERM'd, the trap already exited.
+    if [ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]; then
+        :
+    else
+        sleep 1
+    fi
+done
