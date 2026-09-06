@@ -5,7 +5,7 @@
 | **Title** | XX-WM smoke-ready build spec |
 | **Author** | Skippy / PiercingXX |
 | **Date** | 2026-09-06 |
-| **Status** | WS1 landed on main (`6a0b2c3`); 1b closed; check.sh 663 passed, 3 skipped; next is Workstream 2 |
+| **Status** | WS1 landed on main (`6a0b2c3`); 1b closed; apps.sh laptop half (4.1/4.2) landed; check.sh 669 passed, 3 skipped; next is Workstream 2 |
 | **Audience** | Skippy (implementation agent) — build from this document; do not guess |
 | **UI contract** | `design.md` wins on every UI disagreement |
 | **Work order** | `todo.md` remains the checkbox list. Do **not** restore WS1–28 history. Tick boxes as items land. WS1 verify line is 660 passed, 3 skipped; 1b records a new count. |

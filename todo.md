@@ -19,7 +19,7 @@ This file is the live work order. It is not a changelog. Git history holds the c
 
 ## Current state — 2026-09-06
 
-Workstream 1 is on `main` (`6a0b2c3`); 1b closed the review follow-up. A meson install of **this** tree is bootable: `hud.py`, `lock_lines.py`, and `toplevel_manager.py` ship; `install.sh` speaks pacman (lisgd skipped, fonts non-fatal); the systemd user unit stays disabled when the wayland-session file exists; lisgd action names map through `ACTION_TO_VERB`; `deploy.sh` writes `/usr/share/xx-wm` and SIGUSR1s the python child; `xx-wm.in` supervises (wait 0 / 138 / 137) and migrates `piercing-shell` before lisgd; theme hot-reload fans out to HUD / lock / switcher / back overlay / QA / both PowerMenus. check.sh: 663 passed, 3 skipped.
+Workstream 1 is on `main` (`6a0b2c3`); 1b closed the review follow-up. A meson install of **this** tree is bootable: `hud.py`, `lock_lines.py`, and `toplevel_manager.py` ship; `install.sh` speaks pacman (lisgd skipped, fonts non-fatal); the systemd user unit stays disabled when the wayland-session file exists; lisgd action names map through `ACTION_TO_VERB`; `deploy.sh` writes `/usr/share/xx-wm` and SIGUSR1s the python child; `xx-wm.in` supervises (wait 0 / 138 / 137) and migrates `piercing-shell` before lisgd; theme hot-reload fans out to HUD / lock / switcher / back overlay / QA / both PowerMenus. check.sh: 669 passed, 3 skipped.
 
 The tablet is still the **pre-rename** stack (GDM → PiercingXX / piercing-shell), not XX-WM. Next: 2.1 privileges, then cutover.
 
@@ -180,8 +180,8 @@ Done when: the session checklist is ticked or each failure has a filed fix in th
 
 Still the tablet. Keep it light.
 
-- [ ] **4.1 Browser.** Tablet is x86_64, so a Waterfox Linux build is allowed if it still exists; otherwise Firefox + mobile-config (Arch packages). Default browser via `xdg-settings`. Confirm it appears in the drawer and in the Tools folder if seeded.
-- [ ] **4.2 Tailscale.** Install (pacman or static tgz). `tailscale up` is **GLASS** / user auth. Then Skippy PWA: `apps.sh` 17.4 — host defaults to `skippy`; confirm the `.desktop` Exec escaping and that the entry launches. Needs the user’s tailnet.
+- [ ] **4.1 Browser.** `apps.sh` laptop half landed (pacman: Waterfox if a repo package exists, else `firefox`, never `firefox-esr` / yay; apk/apt stay ESR). This box is the on-device install after 2.7: default browser via `xdg-settings`, confirm it appears in the drawer and in the Tools folder if seeded.
+- [ ] **4.2 Tailscale.** `apps.sh` laptop half landed (pacman `tailscale` then tgz fallback; Waydroid skipped when `MemTotal < 3145728`). This box is on-device: `tailscale up` is **GLASS** / user auth. Then Skippy PWA: host defaults to `skippy`; confirm the `.desktop` Exec escaping and that the entry launches. Needs the user’s tailnet.
 - [ ] **4.3 piercing-dots phone profile.** `scripts/bootstrap-dots.sh` is a loud stub until `./install.sh --profile phone` exists **in the piercing-dots repo**. Tablet already has `~/piercing-dots` without that flag. This repo only consumes the profile: kitty, nvim + `piercing-note`, yazi, bash+starship, maintenance script — POSIX, apk **and** apt **and** pacman, no x86/GNOME/systemd assumptions. Land the profile in piercing-dots, then unstub `bootstrap-dots.sh`. Notes default slot should resolve to `piercing-note` once that entry exists (today it is `org.gnome.TextEditor.desktop`).
 - [ ] **4.4 Calculator** is already installed. Camera / Photos / Calendar `.desktop` ids in the migrated layout must resolve or the slots must compact (no empty gaps, no empty folders).
 

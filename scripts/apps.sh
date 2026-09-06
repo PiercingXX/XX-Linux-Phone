@@ -81,16 +81,28 @@ EOF
 }
 
 # --- 17.1 Browser -----------------------------------------------------------
-# Waterfox has no arm64 Linux build (checked 2026-07; x86-centric) → Firefox
-# ESR + mobile-config-firefox for phone ergonomics.
+# Phones (apk/apt): Firefox ESR + mobile-config. Tablet (pacman/x86_64):
+# Waterfox if a configured repo package exists, else extra's firefox.
+# Never pull AUR via yay.
 echo "Installing browser..."
-if [ "$PKG" = apk ]; then
-    pkg_install firefox-esr mobile-config-firefox
+BROWSER_DESKTOP=
+if [ "$PKG" = pacman ]; then
+    if pacman -Si waterfox >/dev/null 2>&1; then
+        pkg_install waterfox
+        BROWSER_DESKTOP=waterfox.desktop
+    elif pacman -Si waterfox-bin >/dev/null 2>&1; then
+        pkg_install waterfox-bin
+        BROWSER_DESKTOP=waterfox-bin.desktop
+    else
+        pkg_install firefox
+        BROWSER_DESKTOP=firefox.desktop
+    fi
 else
     pkg_install firefox-esr mobile-config-firefox
+    BROWSER_DESKTOP=firefox-esr.desktop
 fi
-if command -v firefox-esr >/dev/null 2>&1 && command -v xdg-settings >/dev/null 2>&1; then
-    xdg-settings set default-web-browser firefox-esr.desktop 2>/dev/null || true
+if [ -n "$BROWSER_DESKTOP" ] && command -v xdg-settings >/dev/null 2>&1; then
+    xdg-settings set default-web-browser "$BROWSER_DESKTOP" 2>/dev/null || true
 fi
 
 # --- 17.2 Calculator --------------------------------------------------------
@@ -106,7 +118,14 @@ elif [ "$PKG" = apk ] && $SUDO apk add tailscale 2>/dev/null; then
 elif [ "$PKG" = apt ] && $SUDO apt install -y tailscale 2>/dev/null; then
     $SUDO systemctl enable --now tailscaled 2>/dev/null || true
     echo "Tailscale installed — run: $SUDO tailscale up"
-else
+elif [ "$PKG" = pacman ]; then
+    pkg_install tailscale
+    if command -v tailscale >/dev/null 2>&1; then
+        $SUDO systemctl enable --now tailscaled 2>/dev/null || true
+        echo "Tailscale installed — run: $SUDO tailscale up"
+    fi
+fi
+if ! command -v tailscale >/dev/null 2>&1; then
     # Static tgz fallback, exactly like the reference apps.sh (service-path sed)
     echo "Installing Tailscale from static tgz..."
     TS_VER=1.90.9
@@ -145,7 +164,17 @@ if [ -n "$ABS_URL" ]; then
 fi
 
 # --- 17.6 Waydroid (install only — init/microG is device work) --------------
-if command -v waydroid >/dev/null 2>&1; then
+# 3 GiB = 3145728 kB. The smoke tablet is 1.8 GiB; do not install there.
+_mem_kb=0
+if [ -r /proc/meminfo ]; then
+    _mem_kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || true)
+fi
+case $_mem_kb in
+    ''|*[!0-9]*) _mem_kb=0 ;;
+esac
+if [ "$_mem_kb" -gt 0 ] && [ "$_mem_kb" -lt 3145728 ]; then
+    echo "SKIP: Waydroid needs ≥3 GiB RAM (MemTotal=${_mem_kb} kB)"
+elif command -v waydroid >/dev/null 2>&1; then
     echo "Waydroid already installed."
 elif [ "$PKG" = apk ] && $SUDO apk add waydroid 2>/dev/null; then
     echo "Waydroid installed via apk."
