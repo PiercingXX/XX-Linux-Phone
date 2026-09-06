@@ -98,18 +98,20 @@ Flat `{gesture: action}`. Valid actions: `home`, `app_switcher`,
 `none`).
 
 Four slots are system-level: lisgd fires them even while an app is
-focused. Their bindings are generated at session start from this file,
-and their value may be an IPC verb — `gesture.home`, `gesture.shade`,
-`gesture.back`, `gesture.keyboard`, or `gesture.switcher` (exactly the
-gesture commands the shell dispatches). Any other value keeps that slot's
+focused. Their bindings are generated at session start from this file.
+Values may be an IPC verb (`gesture.home`, `gesture.shade`,
+`gesture.back`, `gesture.keyboard`, `gesture.switcher`) **or** the
+settings-UI action names `home`, `app_switcher`, `notification_shade`,
+`back`, `search` (mapped to those verbs). `launch:<app>` stays in-shell
+and does not replace the lisgd verb. Any other value keeps that slot's
 default verb; rebinding applies at the next session start.
 
 | Gesture | Default | Notes |
 |---|---|---|
-| `swipe_down_top` | `notification_shade` | In-shell honors any action (`search` is the design's swipe-down choice); the lisgd binding defaults to `gesture.shade`. Verb-rebindable. |
-| `swipe_up_short` | `home` | System-level via lisgd → `gesture.keyboard` by default. Verb-rebindable. |
-| `swipe_up_long` | `app_switcher` | System-level via lisgd → `gesture.home` by default. Verb-rebindable. |
-| `swipe_left_edge` | `back` | System-level via lisgd → `gesture.back` by default, on both edges. Verb-rebindable. |
+| `swipe_down_top` | `notification_shade` | lisgd → `gesture.shade`. |
+| `swipe_up_short` | `home` | lisgd → `gesture.home`. Missing/invalid JSON still uses `gesture.keyboard`. |
+| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Missing/invalid JSON still uses `gesture.home`. |
+| `swipe_left_edge` | `back` | lisgd → `gesture.back` on both edges. |
 | `long_press_bottom` | `search` | |
 | `double_tap_home` | `lock_screen` | Kept on Linux deliberately. |
 | `long_press_home` | `settings` | The shell opens slot edit mode on this. |

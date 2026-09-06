@@ -47,11 +47,26 @@ DEFAULT_VERBS: dict[str, str] = {
 }
 
 
+# gestures.json stores shell action names (home, app_switcher, …). lisgd
+# only speaks IPC verbs. Map the names the settings UI writes; leave
+# explicit IPC verbs and launch:<app> (in-shell, not lisgd) alone.
+ACTION_TO_VERB: dict[str, str] = {
+    'home': 'gesture.home',
+    'app_switcher': 'gesture.switcher',
+    'notification_shade': 'gesture.shade',
+    'back': 'gesture.back',
+    'search': 'gesture.keyboard',
+}
+
+
 def resolve_verb(gc: GestureConfig, slot: str) -> str:
     """Configured IPC verb for a system-level slot, or its default."""
     value = gc.get(slot)
     if value in IPC_VERBS:
         return value
+    mapped = ACTION_TO_VERB.get(value)
+    if mapped is not None:
+        return mapped
     return DEFAULT_VERBS[slot]
 
 

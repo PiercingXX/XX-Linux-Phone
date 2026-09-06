@@ -16,14 +16,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
 import gesture_config
-from gesture_bindings import DEFAULT_VERBS, generate_bindings
+from gesture_bindings import ACTION_TO_VERB, DEFAULT_VERBS, generate_bindings
 from gesture_config import GestureConfig
 
-# Literal bindings formerly hardcoded in data/xx-wm.in, with @bindir@
-# resolved to /usr/bin. Order matters: it is lisgd's argument order.
-LEGACY_BINDINGS = [
-    '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.keyboard',
-    '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.home',
+# Schema defaults are action names (home, app_switcher, …). Those now
+# map onto IPC verbs so lisgd matches the settings UI. Order is lisgd's
+# argument order. DEFAULT_VERBS still apply when a slot's value is an
+# unmapped action (camera, none, launch:…).
+DEFAULT_BINDINGS = [
+    '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.home',
+    '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.switcher',
     '1,UD,T,*,R,/usr/bin/xx-wm-ipc gesture.shade',
     '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.back',
     '1,RL,R,*,R,/usr/bin/xx-wm-ipc gesture.back',
@@ -38,12 +40,12 @@ def _isolate_config(tmp_path, monkeypatch):
 
 class TestDefaultByteEquivalence:
     def test_defaults_match_former_hardcoded_bindings(self):
-        assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
     def test_bindir_is_substituted(self):
         out = generate_bindings('/usr/local/bin')
-        assert out[0] == '1,DU,B,S,R,/usr/local/bin/xx-wm-ipc gesture.keyboard'
-        assert len(out) == len(LEGACY_BINDINGS)
+        assert out[0] == '1,DU,B,S,R,/usr/local/bin/xx-wm-ipc gesture.home'
+        assert len(out) == len(DEFAULT_BINDINGS)
 
     def test_default_verbs_cover_every_slot(self):
         from gesture_bindings import _LISGD_GEOMETRY
@@ -56,13 +58,40 @@ class TestRebinding:
             'swipe_up_short': 'gesture.switcher',
             'swipe_left_edge': 'gesture.home',
         }), encoding='utf-8')
+        got = generate_bindings('/usr/bin')
+        assert got[0].endswith('gesture.switcher')
+        assert got[3].endswith('gesture.home')
+        assert got[4].endswith('gesture.home')
+
+    def test_action_names_map_to_ipc_verbs(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'home',
+            'swipe_up_long': 'app_switcher',
+            'swipe_down_top': 'notification_shade',
+            'swipe_left_edge': 'back',
+        }), encoding='utf-8')
         assert generate_bindings('/usr/bin') == [
-            '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.switcher',
-            '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.home',
+            '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.home',
+            '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.switcher',
             '1,UD,T,*,R,/usr/bin/xx-wm-ipc gesture.shade',
-            '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.home',
-            '1,RL,R,*,R,/usr/bin/xx-wm-ipc gesture.home',
+            '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.back',
+            '1,RL,R,*,R,/usr/bin/xx-wm-ipc gesture.back',
         ]
+
+    def test_search_action_maps_to_keyboard(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(
+            json.dumps({'swipe_up_short': 'search'}), encoding='utf-8')
+        assert generate_bindings('/usr/bin')[0].endswith('gesture.keyboard')
+
+    def test_launch_bindings_do_not_replace_lisgd_verb(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'launch:htop.desktop',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin')[0].endswith('gesture.keyboard')
+
+    def test_action_to_verb_covers_settings_names(self):
+        assert ACTION_TO_VERB['home'] == 'gesture.home'
+        assert ACTION_TO_VERB['app_switcher'] == 'gesture.switcher'
 
     def test_invalid_values_fall_back_silently(self, tmp_path):
         (tmp_path / 'gestures.json').write_text(json.dumps({
@@ -71,18 +100,31 @@ class TestRebinding:
             'swipe_down_top': 'camera',
             'swipe_left_edge': 'none',
         }), encoding='utf-8')
-        assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
+        got = generate_bindings('/usr/bin')
+        # explode is dropped → schema default home → gesture.home
+        assert got[0].endswith('gesture.home')
+        # launch: is in-shell; lisgd keeps DEFAULT_VERBS for the slot
+        assert got[1].endswith('gesture.home')
+        # camera is a valid unmapped action → DEFAULT_VERBS shade
+        assert got[2].endswith('gesture.shade')
+        assert got[3].endswith('gesture.back')
+
+    def test_unmapped_action_uses_default_verb(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'camera',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin')[0].endswith('gesture.keyboard')
 
     def test_non_system_slots_are_ignored(self, tmp_path):
         (tmp_path / 'gestures.json').write_text(
             '{"squeeze": "gesture.home", "double_tap_home": "gesture.shade"}',
             encoding='utf-8',
         )
-        assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
     def test_corrupt_config_file_falls_back(self, tmp_path):
         (tmp_path / 'gestures.json').write_text('{not json', encoding='utf-8')
-        assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
 
 class TestGestureConfigVerbValues:
@@ -112,7 +154,7 @@ class TestCli:
         proc = subprocess.run(
             [sys.executable, str(script), '--bindir', '/usr/bin'],
             capture_output=True, text=True, env=env, timeout=30, check=True)
-        assert proc.stdout.splitlines() == LEGACY_BINDINGS
+        assert proc.stdout.splitlines() == DEFAULT_BINDINGS
 
 
 if __name__ == '__main__':
