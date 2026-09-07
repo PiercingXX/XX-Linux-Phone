@@ -81,6 +81,15 @@ def test_vendored_modules_import_and_expose_protocol_classes() -> None:
     assert callable(handle_proxy.close)
 
 
+def test_proto_init_patches_nongeneric_global() -> None:
+    src = (
+        Path(__file__).parent.parent / 'launcher' / 'src' / 'wayland_proto'
+        / '__init__.py'
+    ).read_text(encoding='utf-8')
+    assert '__class_getitem__' in src
+    assert '_patch_global_subscriptable' in src
+
+
 def test_generated_files_carry_provenance_header() -> None:
     proto_dir = Path(__file__).parent.parent / 'launcher' / 'src' / 'wayland_proto'
     for name in ('wayland.py', 'wlr_foreign_toplevel_management_unstable_v1.py'):

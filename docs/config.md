@@ -4,7 +4,9 @@ Every shell preference lives in `~/.config/xx-wm/`. The config file
 **is the public API**: edit it in a terminal and the running shell hot-reloads
 it (debounced; an invalid file is ignored and the last good config stays
 live). The in-shell Settings page covers system things only (network, sound
-devices, battery, updates, backup) — never these keys.
+devices, battery, updates, backup) — never these keys, except a dedicated
+Appearance surface that writes the `theme` (and `prefer_dark`) keys so a
+tablet without a keyboard can still pick a preset.
 
 Files:
 

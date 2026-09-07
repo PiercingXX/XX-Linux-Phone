@@ -30,9 +30,12 @@ try:
             ZwlrForeignToplevelHandleV1,
             ZwlrForeignToplevelManagerV1,
         )
-    except ImportError:
+    except (ImportError, TypeError):
         # Fall back to an environment where the generated wlr module was
         # installed into pywayland.protocol itself (e.g. hand-run scanner).
+        # TypeError: pywayland 0.4.18 Global is not subscriptable; the
+        # wayland_proto package patches that on import, but if the patch
+        # did not run this must not take the shell down.
         from pywayland.protocol.wayland import WlSeat
         from pywayland.protocol.wlr_foreign_toplevel_management_unstable_v1 import (
             ZwlrForeignToplevelHandleV1,
@@ -40,10 +43,11 @@ try:
         )
 
     _PYWAYLAND_AVAILABLE = True
-except (ImportError, OSError):
+except (ImportError, OSError, TypeError):
     # OSError covers a pywayland install whose native libwayland is missing;
     # ImportError covers missing pywayland entirely and installs without the
-    # generated wlr protocol module in either location.
+    # generated wlr protocol module in either location. TypeError is the
+    # Python 3.14 Global[Iface] failure if both import sources reject it.
     _PYWAYLAND_AVAILABLE = False
     Display = None  # type: ignore[assignment,misc]
     WlSeat = None  # type: ignore[assignment,misc]
@@ -93,11 +97,14 @@ class WaylandToplevelBackend:
         registry = self._display.get_registry()
         registry.dispatcher['global'] = self._on_registry_global
         registry.dispatcher['global_remove'] = self._on_registry_global_remove
-        self._display.dispatch(block=True)
-        self._display.flush()
-        if self._manager is None:
-            raise RuntimeError('compositor does not offer wlr-foreign-toplevel-management')
+        # Never block the GTK thread on compositor round-trips: that froze
+        # power-button idle_add, lock, and Settings until a hard reboot.
         self._arm_fd_watch()
+        try:
+            self._display.dispatch(block=False)
+            self._display.flush()
+        except Exception:
+            pass
 
     # -- GLib fd-watch -----------------------------------------------------
 
@@ -107,29 +114,66 @@ class WaylandToplevelBackend:
         from gi.repository import GLib
 
         fd = self._display.get_fd()
-        self._fd_source = GLib.unix_fd_add(
-            fd, GLib.IOCondition.IN | GLib.IOCondition.HUP, self._on_fd_ready,
-        )
+        condition = GLib.IOCondition.IN | GLib.IOCondition.HUP
+        # Tablet GLib GI has unix_fd_add_full / io_add_watch, not unix_fd_add.
+        if hasattr(GLib, 'unix_fd_add_full'):
+            self._fd_source = GLib.unix_fd_add_full(
+                getattr(GLib, 'PRIORITY_DEFAULT', 0), fd, condition,
+                self._on_fd_ready, None)
+        elif hasattr(GLib, 'io_add_watch'):
+            self._fd_source = GLib.io_add_watch(fd, condition, self._on_fd_ready)
+        elif hasattr(GLib, 'unix_fd_add'):
+            self._fd_source = GLib.unix_fd_add(fd, condition, self._on_fd_ready)
+        else:
+            raise RuntimeError('no GLib fd-watch API')
+        def _kick() -> bool:
+            try:
+                self._display.dispatch(block=False)
+                self._display.flush()
+            except Exception as exc:  # noqa: BLE001
+                # EAGAIN (11) means the fd had nothing; the watch will fire.
+                if '11' not in str(exc) and 'EAGAIN' not in str(exc).upper():
+                    log.error('wayland kick dispatch failed: %s', exc)
+            return False
+        GLib.idle_add(_kick)
 
-    def _on_fd_ready(self, _fd: int, _cond: int) -> bool:
+    def _on_fd_ready(self, *args) -> bool:
         from gi.repository import GLib
 
-        if _cond & GLib.IOCondition.HUP:
-            # Compositor closed the socket; stop watching instead of spinning
-            # on a dead fd forever.
+        # unix_fd_add_full may pass (fd, condition, user_data); io_add_watch
+        # passes (fd, condition). Treat as HUP only when HUP is set without IN.
+        cond = 0
+        for arg in args:
+            try:
+                cond = int(arg)
+            except (TypeError, ValueError):
+                continue
+        if cond & GLib.IOCondition.HUP and not (cond & GLib.IOCondition.IN):
             log.error('wayland compositor connection closed (HUP)')
             return False
         try:
             self._display.dispatch(block=False)
             self._display.flush()
         except Exception as exc:  # noqa: BLE001 - compositor went away
+            if '11' in str(exc) or 'EAGAIN' in str(exc).upper():
+                return True
             log.error('wayland dispatch failed: %s', exc)
-            return False  # dispatch is unrecoverable; stop the fd-watch
-        return True  # keep watching
+            return False
+        return True
 
     # -- protocol glue -----------------------------------------------------
 
-    def _on_registry_global(self, registry, _serial: int, name: int, interface: str, version: int) -> None:
+    def _on_registry_global(self, registry, *args) -> None:
+        # pywayland 0.4.18 dispatcher: (name, interface, version).
+        # The contract-test fake (and some older bindings) also pass a
+        # leading serial. Accept both; a TypeError here used to make
+        # dispatch(block=True) miss every global, including wlr-foreign-toplevel.
+        if len(args) == 4:
+            _serial, name, interface, version = args
+        elif len(args) == 3:
+            name, interface, version = args
+        else:
+            return
         if interface == 'wl_seat':
             self._seat = registry.bind(name, WlSeat, 1)
         elif interface == 'zwlr_foreign_toplevel_manager_v1':
@@ -241,7 +285,9 @@ class ToplevelManager:
         self._backend = backend
         self._registry: dict[object, Toplevel] = {}
         self._callbacks: list[object] = []
-        if backend is not None and backend.available():
+        if backend is not None:
+            # Bind before the first globals arrive: the backend is now
+            # non-blocking, so available() may still be False at construct.
             backend.connect(self._on_backend_event)
 
     @property

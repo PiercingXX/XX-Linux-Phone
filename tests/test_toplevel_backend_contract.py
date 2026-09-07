@@ -137,7 +137,25 @@ class FakeIOCondition:
 
 class FakeGLib:
     IOCondition = FakeIOCondition
+    PRIORITY_DEFAULT = 0
     fd_adds: list[tuple[int, int, object]] = []
+    idle_adds: list[object] = []
+
+    @classmethod
+    def idle_add(cls, callback: object, *data) -> int:
+        cls.idle_adds.append((callback, data))
+        return len(cls.idle_adds)
+
+    @classmethod
+    def unix_fd_add_full(cls, _priority: int, fd: int, condition: int,
+                         callback: object, _data=None) -> int:
+        cls.fd_adds.append((fd, condition, callback))
+        return len(cls.fd_adds)
+
+    @classmethod
+    def io_add_watch(cls, fd: int, condition: int, callback: object, *data) -> int:
+        cls.fd_adds.append((fd, condition, callback))
+        return len(cls.fd_adds)
 
     @classmethod
     def unix_fd_add(cls, fd: int, condition: int, callback: object) -> int:
@@ -228,6 +246,16 @@ def _all_registrations(harness: Harness) -> dict[str, object]:
     manager = registry.bound[TOPLVL_IFACE]
     flat.update(manager.dispatcher.registrations)  # type: ignore[attr-defined]
     return flat
+
+
+def test_registry_global_accepts_three_arg_pywayland_event(harness: Harness) -> None:
+    """pywayland 0.4.18 dispatches wl_registry.global as (name, iface, version)."""
+    backend = harness.module.WaylandToplevelBackend()
+    registry = harness.display.registry
+    assert registry is not None
+    backend._seat = None
+    backend._on_registry_global(registry, 2, SEAT_IFACE, 7)
+    assert backend._seat is registry.bound[SEAT_IFACE]
 
 
 def test_backend_connects_and_binds_globals(harness: Harness) -> None:

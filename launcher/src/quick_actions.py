@@ -562,7 +562,8 @@ _TILES: list[_TileDef] = [
 class QuickActionsPanel(Gtk.Box):
     """
     Quick-actions tile grid + brightness/volume sliders.
-    Embed in NotificationShade. Call expand(True/False) to show tier-2 + sliders.
+    Embed in NotificationShade. Call expand(True/False) to show tier-2 tiles.
+    Brightness and volume sliders stay visible (not gated on expand).
     """
 
     def __init__(self, dnd_state: object | None = None,
@@ -683,7 +684,8 @@ class QuickActionsPanel(Gtk.Box):
 
         self.tier2_grid.set_visible(False)
         self.sep.set_visible(False)
-        self.sliders_box.set_visible(False)
+        self.sliders_box.set_visible(True)
+        self._sync_sliders_to_live_state()
 
     def _make_tile(self, tile: _TileDef) -> Gtk.ToggleButton:
         label_w = Gtk.Label(label=tile.label)
@@ -878,9 +880,11 @@ class QuickActionsPanel(Gtk.Box):
     def expand(self, expanded: bool) -> None:
         self.tier2_grid.set_visible(expanded)
         self.sep.set_visible(expanded)
-        self.sliders_box.set_visible(expanded)
         if expanded:
             self._sync_sliders_to_live_state()
+
+    def sync_sliders(self) -> None:
+        self._sync_sliders_to_live_state()
 
     def _sync_sliders_to_live_state(self) -> None:
         # One getter batch per expand feeds every slider; the sync guard keeps

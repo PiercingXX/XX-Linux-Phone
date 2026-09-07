@@ -119,6 +119,22 @@ def test_show_keyboard_sends_setvisible_true(window):
     assert params.value == (True,)
 
 
+def _shell_for_tap(window, stack, hide_calls_via_dbus=True):
+    """Bare ShellWindow stand-in with the tap-outside helpers bound."""
+    shell = types.SimpleNamespace(
+        stack=stack,
+        apps_search=None,
+        _hide_keyboard=(
+            (lambda: window._set_osk_visible(False)) if hide_calls_via_dbus
+            else lambda: None),
+        _set_layer_keyboard_exclusive=lambda exclusive: None,
+    )
+    shell._widget_is_search_or_editable = (
+        lambda widget: window.ShellWindow._widget_is_search_or_editable(
+            shell, widget))
+    return shell
+
+
 def test_tap_on_editable_keeps_keyboard(window):
     """A tap that lands on an editable widget (the drawer search entry) must
     not dismiss the OSK."""
@@ -130,12 +146,7 @@ def test_tap_on_editable_keeps_keyboard(window):
             # The search entry is an editable widget.
             return editable()
 
-    shell = types.SimpleNamespace(
-        stack=FakeStack(),
-        # Route the dismissal through the real seam so the test proves the
-        # tap logic drives the actual D-Bus call, not a stubbed lambda.
-        _hide_keyboard=lambda: window._set_osk_visible(False),
-    )
+    shell = _shell_for_tap(window, FakeStack())
     window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
     assert calls == []
 
@@ -151,10 +162,23 @@ def test_tap_on_child_of_editable_keeps_keyboard(window):
         def pick(self, x, y, flags):
             return child
 
-    shell = types.SimpleNamespace(
-        stack=FakeStack(),
-        _hide_keyboard=lambda: window._set_osk_visible(False),
-    )
+    shell = _shell_for_tap(window, FakeStack())
+    window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
+    assert calls == []
+
+
+def test_tap_on_search_entry_identity_keeps_keyboard(window):
+    """A tap on SearchEntry chrome that is not Gtk.Editable still counts."""
+    search = object()
+    icon = types.SimpleNamespace(get_parent=lambda: search)
+    calls = _install_dbus(window)
+
+    class FakeStack:
+        def pick(self, x, y, flags):
+            return icon
+
+    shell = _shell_for_tap(window, FakeStack())
+    shell.apps_search = search
     window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
     assert calls == []
 
@@ -162,8 +186,40 @@ def test_tap_on_child_of_editable_keeps_keyboard(window):
 def test_shell_window_requests_keyboard_on_demand():
     src = Path(__file__).parent.parent.joinpath(
         'launcher', 'src', 'window.py').read_text(encoding='utf-8')
-    assert 'KeyboardMode.ON_DEMAND' in src
+    assert 'KeyboardMode.EXCLUSIVE' in src
+    assert 'KeyboardMode.NONE' in src
     assert "notify::has-focus" in src
+    assert 'EventControllerFocus' in src
+    assert 'contains_focus' in src
+
+
+def test_search_focus_shows_when_inner_text_has_focus(window):
+    """GTK4 SearchEntry.has_focus() is often False; contains_focus() is not."""
+    calls = _install_dbus(window)
+    entry = types.SimpleNamespace(
+        has_focus=lambda: False, contains_focus=lambda: True)
+    armed = []
+    shell = types.SimpleNamespace(
+        _arm_search_keyboard=lambda: (
+            armed.append(True), window._set_osk_visible(True)),
+        _disarm_search_keyboard=lambda: armed.append(False),
+    )
+    window.ShellWindow._on_search_focus(shell, entry)
+    assert armed == [True]
+    assert calls[0][4].value == (True,)
+
+
+def test_search_focus_false_does_not_hide(window):
+    """A False has-focus notify must not drop the OSK; tap-outside does that."""
+    calls = _install_dbus(window)
+    entry = types.SimpleNamespace(
+        has_focus=lambda: False, contains_focus=lambda: False)
+    shell = types.SimpleNamespace(
+        _arm_search_keyboard=lambda: window._set_osk_visible(True),
+        _disarm_search_keyboard=lambda: window._set_osk_visible(False),
+    )
+    window.ShellWindow._on_search_focus(shell, entry)
+    assert calls == []
 
 
 def test_tap_outside_editable_hides_keyboard(window):
@@ -175,10 +231,7 @@ def test_tap_outside_editable_hides_keyboard(window):
             # Home launcher / app list / settings are not editable.
             return object()
 
-    shell = types.SimpleNamespace(
-        stack=FakeStack(),
-        _hide_keyboard=lambda: window._set_osk_visible(False),
-    )
+    shell = _shell_for_tap(window, FakeStack())
     window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
     assert len(calls) == 1
     name, path, iface, method, params = calls[0][:5]

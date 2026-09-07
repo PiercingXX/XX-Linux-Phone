@@ -163,6 +163,7 @@ def _panel_for_expand(bright, vol, hud=None):
     panel.tier2_grid = _FakeVisibility()
     panel.sep = _FakeVisibility()
     panel.sliders_box = _FakeVisibility()
+    panel.sliders_box.visible = True
     panel._bright_slider = bright
     panel._vol_slider = vol
     return panel
@@ -335,9 +336,9 @@ class TestExpandGetterBatch:
 
         assert probes == []
         assert panel.tier2_grid.visible is False
-        assert panel.sliders_box.visible is False
+        assert panel.sliders_box.visible is True
 
-    def test_expand_shows_tier2_and_sliders(self, timer_glib, monkeypatch):
+    def test_expand_shows_tier2_and_keeps_sliders(self, timer_glib, monkeypatch):
         monkeypatch.setattr(quick_actions, '_get_brightness_pct', lambda: 50)
         monkeypatch.setattr(quick_actions, '_get_volume_pct', lambda: 50)
         panel = _panel_for_expand(_FakeSlider(), _FakeSlider())
@@ -347,6 +348,20 @@ class TestExpandGetterBatch:
         assert panel.tier2_grid.visible is True
         assert panel.sep.visible is True
         assert panel.sliders_box.visible is True
+
+    def test_sliders_stay_visible_when_collapsed(self, timer_glib, monkeypatch):
+        monkeypatch.setattr(quick_actions, '_get_brightness_pct', lambda: 50)
+        monkeypatch.setattr(quick_actions, '_get_volume_pct', lambda: 50)
+        panel = _panel_for_expand(_FakeSlider(), _FakeSlider())
+        panel.expand(True)
+        panel.expand(False)
+        assert panel.sliders_box.visible is True
+        assert panel.tier2_grid.visible is False
+
+    def test_expand_does_not_gate_sliders(self):
+        import inspect
+        src = inspect.getsource(quick_actions.QuickActionsPanel.expand)
+        assert 'sliders_box.set_visible' not in src
 
     def test_expand_batch_routes_through_read_slider_values(self):
         import inspect

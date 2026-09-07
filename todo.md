@@ -156,9 +156,9 @@ Run in one sitting once 2.7 is green. File fixes as found; do not stockpile. Age
 ### Shade, settings, folders
 
 - [ ] Tiles: WiFi, BT, Data, Airplane always visible. Torch / Auto-brightness **hidden** on this hardware (no illuminance, likely no torch). Location (geoclue is installed) and Hotspot (NM + WiFi) appear in the expanded tier or honestly hide. Enabling Location, then `MaxAccuracyLevel=0` on disable, revokes live clients.
-- [ ] Brightness and volume sliders in the expanded tier; HUD flashes; one nmcli/pactl apply per drag (debounce), not per tick.
+- [ ] Brightness and volume sliders always visible on the shade (not gated on expand); HUD flashes; one nmcli/pactl apply per drag (debounce), not per tick.
 - [ ] DnD and Focus tiles toggle; schedules round-trip through config.
-- [ ] Settings page: WiFi scan/connect (PSK via passwd-file, not argv), BT scan/pair, sound output, battery, APN fields, backup export/restore, About. Shell prefs are **not** on this page.
+- [ ] Settings page: WiFi scan/connect (PSK via passwd-file, not argv), BT scan/pair, sound output, battery, APN fields, backup export/restore, About. Shade Settings hops the launcher to TOP so it appears over apps. Theme presets are a dedicated Appearance surface on this page; other shell prefs stay in the config file.
 - [ ] Drawer folders expand inline, members indent, empty/uninstalled members skip, expand centers the folder. **GLASS** — centering is the remaining panel polish.
 - [ ] Home edit mode: 8-slot cap, add/remove/rename/folder. **GLASS**
 

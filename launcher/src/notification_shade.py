@@ -363,7 +363,13 @@ class NotificationShade(Gtk.Window):
         return True
 
     def _on_settings_clicked(self, _btn: Gtk.Button) -> None:
-        self.hide_shade()
+        # Hide immediately so the BOTTOM launcher (hopped to TOP) is not
+        # covered by this TOP shade for the revealer timeout.
+        if self._clock_timer_id is not None:
+            GLib.source_remove(self._clock_timer_id)
+            self._clock_timer_id = None
+        self._revealer.set_reveal_child(False)
+        self.hide()
         if callable(self._on_open_settings):
             self._on_open_settings()
 
@@ -584,6 +590,9 @@ class NotificationShade(Gtk.Window):
         self._refresh_datetime()
         if self._clock_timer_id is None:
             self._clock_timer_id = GLib.timeout_add_seconds(10, self._refresh_datetime)
+        qa = getattr(self, 'quick_actions', None)
+        if qa is not None and hasattr(qa, 'sync_sliders'):
+            qa.sync_sliders()
         self.present()
         self._revealer.set_reveal_child(True)
 

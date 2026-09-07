@@ -13,7 +13,7 @@ try:
     import gi
 
     gi.require_version('Gtk', '4.0')
-    from gi.repository import Gdk, GLib, Gtk
+    from gi.repository import Gdk, Gtk
 
     try:
         gi.require_version('Gtk4LayerShell', '1.0')
@@ -33,7 +33,6 @@ except (ImportError, ValueError) as exc:
     # NameError. The static headless seams below never reference these names;
     # the window itself is never constructed while _GTK_AVAILABLE is False.
     Gdk = None  # type: ignore[assignment,misc]
-    GLib = None  # type: ignore[assignment,misc]
     Gtk = None  # type: ignore[assignment,misc]
     LayerShell = None  # type: ignore[assignment,misc]
 
@@ -63,15 +62,28 @@ _AppSwitcherBase = Gtk.Window if _GTK_AVAILABLE else _WindowBase
 
 def theme_css(preset: ThemePreset) -> str:
     return f"""
+window.switcher-window {{
+    background: transparent;
+}}
 .switcher-root {{
-    background: alpha({preset.background}, 0.92);
+    background: alpha({preset.background}, 0.96);
     color: {preset.foreground};
+}}
+.switcher-dismiss {{
+    background: alpha({preset.background}, 0.45);
+    border: none;
+    box-shadow: none;
+    min-height: 0;
 }}
 .switcher-header {{
     font-size: 11pt;
     font-weight: 700;
     letter-spacing: 0.18em;
     color: {preset.muted};
+}}
+.switcher-empty {{
+    font-size: 13pt;
+    color: {preset.foreground};
 }}
 .app-card {{
     background: {preset.surface};
@@ -124,6 +136,7 @@ class AppSwitcher(_AppSwitcherBase):
     def __init__(self, manager: ToplevelManager | None = None,
                  config: ShellConfig | None = None) -> None:
         super().__init__(title='PiercingXX Switcher')
+        self.add_css_class('switcher-window')
 
         # The shell window threads its LIVE config so theme == 'custom'
         # renders the derived palette; the fallback keeps direct no-arg
@@ -132,11 +145,14 @@ class AppSwitcher(_AppSwitcherBase):
 
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)
-            LayerShell.set_layer(self, LayerShell.Layer.TOP)
+            # OVERLAY sits above xdg apps (and above the launcher's TOP hop
+            # for Settings). Bottom-anchored opaque panel, not a 4-edge
+            # transparent surface — those never composited on this phoc.
+            LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
+            LayerShell.set_anchor(self, LayerShell.Edge.TOP, False)
             LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
             LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
             LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
-            LayerShell.set_anchor(self, LayerShell.Edge.TOP, False)
             LayerShell.set_exclusive_zone(self, 0)
             LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
         else:
@@ -144,9 +160,6 @@ class AppSwitcher(_AppSwitcherBase):
 
         self._manager = manager if manager is not None else ToplevelManager()
         self._apps: list[AppInfo] = []
-        if self._manager.available:
-            self._wire_change(self._manager, self.refresh)
-        self.refresh()
 
         self._theme_provider = Gtk.CssProvider()
         self._theme_provider.load_from_data(
@@ -160,23 +173,29 @@ class AppSwitcher(_AppSwitcherBase):
             orientation=Gtk.Orientation.HORIZONTAL, spacing=12, homogeneous=False,
         )
 
-        self._revealer = Gtk.Revealer(
-            transition_type=Gtk.RevealerTransitionType.SLIDE_UP,
-            transition_duration=250,
-            reveal_child=False,
-        )
-        self._revealer.set_child(self._build_content())
-        self.set_child(self._revealer)
+        self.set_child(self._build_content())
 
-        # Swipe down anywhere to dismiss
+        self._manager_wired = False
+        if self._manager.available:
+            self._wire_change(self._manager, self.refresh)
+            self._manager_wired = True
+        self.refresh()
+
         swipe = Gtk.GestureSwipe.new()
         swipe.connect('swipe', self._on_swipe)
         self.add_controller(swipe)
 
-        # Escape key to dismiss
         key = Gtk.EventControllerKey.new()
         key.connect('key-pressed', self._on_key)
         self.add_controller(key)
+
+    def attach_manager(self, manager: ToplevelManager) -> None:
+        """Swap in the live toplevel client after the window is already shown."""
+        self._manager = manager
+        if manager.available and not self._manager_wired:
+            self._wire_change(manager, self.refresh)
+            self._manager_wired = True
+        self.refresh()
 
     def _display_preset(self) -> ThemePreset:
         """Preset this surface renders with: window.resolve_theme over the
@@ -200,6 +219,7 @@ class AppSwitcher(_AppSwitcherBase):
         root.set_margin_start(16)
         root.set_margin_end(16)
         root.set_margin_bottom(20)
+        root.set_size_request(-1, 280)
 
         header = Gtk.Label(label='OPEN APPS', xalign=0)
         header.add_css_class('switcher-header')
@@ -209,7 +229,7 @@ class AppSwitcher(_AppSwitcherBase):
         scroller = Gtk.ScrolledWindow(hexpand=True)
         scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         scroller.set_child(self.card_box)
-        scroller.set_min_content_height(200)
+        scroller.set_min_content_height(220)
 
         root.append(header)
         root.append(scroller)
@@ -262,6 +282,8 @@ class AppSwitcher(_AppSwitcherBase):
             manager.close(app.handle)
 
     def _rebuild_cards(self) -> None:
+        if not hasattr(self, 'card_box'):
+            return
         child = self.card_box.get_first_child()
         while child is not None:
             nxt = child.get_next_sibling()
@@ -270,7 +292,7 @@ class AppSwitcher(_AppSwitcherBase):
 
         if not self._apps:
             empty = Gtk.Label(label=_EMPTY_STATE_TEXT, xalign=0)
-            empty.add_css_class('switcher-header')
+            empty.add_css_class('switcher-empty')
             empty.set_margin_start(4)
             self.card_box.append(empty)
             return
@@ -343,9 +365,10 @@ class AppSwitcher(_AppSwitcherBase):
         return False
 
     def show_switcher(self) -> None:
+        self.refresh()
+        self.set_visible(True)
         self.present()
-        self._revealer.set_reveal_child(True)
 
     def hide_switcher(self) -> None:
-        self._revealer.set_reveal_child(False)
-        GLib.timeout_add(260, self.hide)
+        self.set_visible(False)
+        self.hide()

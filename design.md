@@ -112,7 +112,7 @@ lock screen (6-digit PIN, fingerprint when hardware supports), notification shad
 
 - **Header**: date + time on the left; tapping it expands an inline text-first month calendar (no events — just the month). A **Settings** entry on the right opens the Settings page and collapses the shade.
 - **Tiles**: WiFi, Bluetooth, Data, Airplane always visible; Torch, DnD, Focus, Auto-brightness, Location, Hotspot in the expanded tier. Hardware-gated tiles stay hidden until the device supports them.
-- **Brightness and volume sliders** in the expanded tier.
+- **Brightness and volume sliders** always visible under the tiles (not gated on expand).
 - Notification list below: swipe to dismiss, clear all.
 
 ### Do Not Disturb
@@ -126,6 +126,8 @@ Modeled on the Pixel's Focus Mode. The user picks a list of distracting apps; wh
 ### Settings scope
 
 The in-shell Settings page is **system-only**: the things a config file can't own — WiFi networks, Bluetooth pairing, cellular/APN, sound devices, battery/power, system updates, backup/restore actions, about. It replaces both GNOME Settings and phosh-mobile-settings for everything that applies to this shell. Every *shell* preference — theme, fonts, text size, alignment, home slots, widgets, gestures, sounds, DnD/Focus rules — lives in `~/.config/xx-wm/` and is edited there (or through dedicated surfaces like home edit mode). The shell hot-reloads the config file, so editing it in a terminal is a first-class workflow.
+
+Theme presets are also offered as a dedicated Appearance surface on the Settings page so they can be changed without a keyboard. Other shell prefs stay in the config file.
 
 ## Non-goals
 
