@@ -113,7 +113,27 @@ def test_toplevel_activate_is_queued_to_wayland_thread():
     assert 'def _apply_request' in backend
     assert 'select.select' in backend
     thread = src.split('def _thread_loop')[1].split('def _arm_pump')[0]
-    assert 'dispatch(block=True)' not in thread
+    assert 'select.select' in thread
+    assert '_read_and_dispatch' in thread
+
+
+def test_toplevel_thread_reads_display_fd():
+    """dispatch(block=False) is dispatch_pending and does not read the socket.
+
+    Recents showed "No open apps" after the wakeup loop called only that.
+    """
+    src = (ROOT / 'launcher' / 'src' / 'toplevel_manager.py').read_text(
+        encoding='utf-8')
+    reader = src.split('def _read_and_dispatch')[1].split('def _thread_loop')[0]
+    assert 'reader()' in reader
+    assert 'dispatch(block=True)' in reader
+    connect = src.split('def _connect')[1].split('def _is_real_display')[0]
+    assert 'Thread(' not in connect
+    assert 'dispatch(block=True)' not in connect
+    bind = src.split('def connect(self, callback)')[1].split(
+        'def _replay_handles')[0]
+    assert 'Thread(' in bind
+    assert '_replay_handles()' in bind
 
 
 def test_open_settings_hops_over_apps():
@@ -137,8 +157,9 @@ def test_toplevel_manager_never_blocks_gtk_thread():
     assert 'def _thread_loop' in src
     connect = src.split('def _connect')[1].split('def _is_real_display')[0]
     assert 'dispatch(block=True)' not in connect
+    assert 'roundtrip' not in connect
     thread = src.split('def _thread_loop')[1].split('def _arm_pump')[0]
-    assert 'dispatch(block=True)' not in thread
+    assert '_read_and_dispatch' in thread
 
 
 def test_shade_settings_hides_immediately():

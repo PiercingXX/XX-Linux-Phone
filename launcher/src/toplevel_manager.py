@@ -81,10 +81,9 @@ class Toplevel:
 class WaylandToplevelBackend:
     """pywayland client driving wlr-foreign-toplevel-management-unstable-v1.
 
-    Runs on a GLib fd-watch so the GTK main loop is never blocked: the
-    compositor's events are dispatched from the idle callback the watch
-    schedules. The backend only mutates the manager's registry via the
-    ``_upsert``/``_remove`` hooks; it never reads state back.
+    A dedicated thread owns this Display so GTK's libwayland connection is
+    not starved. The wakeup pipe lets activate/close run without waiting
+    for a compositor event. FakeDisplay tests stay on the GLib pump.
     """
 
     def __init__(self) -> None:
@@ -97,6 +96,7 @@ class WaylandToplevelBackend:
         self._info: dict[object, list[str]] = {}
         self._manager_cb = None
         self._fd_source = None
+        self._thread: threading.Thread | None = None
         self._requests: queue.Queue = queue.Queue()
         self._wakeup_r: int | None = None
         self._wakeup_w: int | None = None
@@ -110,17 +110,13 @@ class WaylandToplevelBackend:
         registry = self._display.get_registry()
         registry.dispatcher['global'] = self._on_registry_global
         registry.dispatcher['global_remove'] = self._on_registry_global_remove
-        # A second Display on the GTK thread never saw registry events
-        # (GTK already owns a libwayland connection on that thread). A
-        # dedicated thread with blocking dispatch is the same pattern
-        # that lists Calculator from a standalone python process.
-        # FakeDisplay tests stay on the GLib pump (dispatch does not block).
+        # Do not start the wayland thread here: the initial registry burst
+        # would upsert into a still-None manager callback and recents stays
+        # empty. connect() starts it after the callback is bound.
         if self._is_real_display():
             self._wakeup_r, self._wakeup_w = os.pipe()
             os.set_blocking(self._wakeup_r, False)
-            self._thread = threading.Thread(
-                target=self._thread_loop, daemon=True, name='xx-wm-toplevel')
-            self._thread.start()
+            self._flush_display()
         else:
             self._arm_pump()
             self._pump()
@@ -129,28 +125,74 @@ class WaylandToplevelBackend:
         cls = type(self._display)
         return cls.__name__ == 'Display' and 'pywayland' in (cls.__module__ or '')
 
-    def _thread_loop(self) -> None:
-        # Do not block on the wayland fd: activate/close are queued from
-        # the GTK thread and must run on this Display. A blocking wait
-        # would sit on the fd and ignore those requests until some
-        # unrelated compositor event arrived — card tap looked like a no-op.
+    def _wayland_fd(self) -> int | None:
+        get_fd = getattr(self._display, 'get_fd', None)
+        if not callable(get_fd):
+            return None
+        try:
+            fd = get_fd()
+        except Exception:
+            return None
+        return fd if isinstance(fd, int) and fd >= 0 else None
+
+    def _flush_display(self) -> None:
         try:
             self._display.flush()
         except Exception:
             pass
-        get_fd = getattr(self._display, 'get_fd', None)
-        wl_fd = get_fd() if callable(get_fd) else None
+
+    def _dispatch_error_is_fatal(self, exc: BaseException) -> bool:
+        msg = str(exc)
+        if '11' in msg or 'EAGAIN' in msg.upper():
+            return False
+        if 'has no event' in msg:
+            log.warning('wayland event skipped: %s', exc)
+            return False
+        log.error('wayland thread dispatch failed: %s', exc)
+        return True
+
+    def _dispatch_pending(self) -> bool:
+        try:
+            self._display.dispatch(block=False)
+        except Exception as exc:  # noqa: BLE001
+            return not self._dispatch_error_is_fatal(exc)
+        return True
+
+    def _read_and_dispatch(self) -> bool:
+        # pywayland dispatch(block=False) is wl_display_dispatch_pending and
+        # does not read the display fd. Calling only that after select left
+        # recents at "No open apps" (available=False). Display.read() is
+        # prepare_read + read_events; then pending dispatch delivers the
+        # registry/toplevel events. No Display.read → blocking dispatch.
+        reader = getattr(self._display, 'read', None)
+        try:
+            if callable(reader):
+                reader()
+            else:
+                self._display.dispatch(block=True)
+        except Exception as exc:  # noqa: BLE001
+            if self._dispatch_error_is_fatal(exc):
+                return False
+            return True
+        return self._dispatch_pending()
+
+    def _thread_loop(self) -> None:
+        self._flush_display()
+        wl_fd = self._wayland_fd()
         while True:
             self._drain_requests()
-            try:
-                self._display.flush()
-            except Exception:
-                pass
+            self._flush_display()
+            if not self._dispatch_pending():
+                return
             fds = []
             if wl_fd is not None:
                 fds.append(wl_fd)
             if self._wakeup_r is not None:
                 fds.append(self._wakeup_r)
+            if not fds:
+                if not self._read_and_dispatch():
+                    return
+                continue
             try:
                 ready, _, _ = select.select(fds, [], [], 0.25)
             except Exception as exc:  # noqa: BLE001
@@ -162,26 +204,11 @@ class WaylandToplevelBackend:
                 except BlockingIOError:
                     pass
                 self._drain_requests()
-                try:
-                    self._display.flush()
-                except Exception:
-                    pass
+                self._flush_display()
             if wl_fd is not None and wl_fd in ready:
-                try:
-                    self._display.dispatch(block=False)
-                except Exception as exc:  # noqa: BLE001
-                    msg = str(exc)
-                    if '11' in msg or 'EAGAIN' in msg.upper():
-                        pass
-                    elif 'has no event' in msg:
-                        log.warning('wayland event skipped: %s', exc)
-                    else:
-                        log.error('wayland thread dispatch failed: %s', exc)
-                        return
-                try:
-                    self._display.flush()
-                except Exception:
-                    pass
+                if not self._read_and_dispatch():
+                    return
+                self._flush_display()
 
     def _arm_pump(self) -> None:
         import gi
@@ -309,6 +336,18 @@ class WaylandToplevelBackend:
 
     def connect(self, callback) -> None:
         self._manager_cb = callback
+        self._replay_handles()
+        # Start the wayland thread only after the callback is bound so the
+        # initial registry/toplevel burst is not upserted into None.
+        if self._is_real_display() and self._thread is None:
+            self._thread = threading.Thread(
+                target=self._thread_loop, daemon=True, name='xx-wm-toplevel')
+            self._thread.start()
+
+    def _replay_handles(self) -> None:
+        for handle in list(self._handles):
+            info = self._info.get(handle, ['', ''])
+            self._call_manager_cb(handle, info[0], info[1])
 
     def _drain_requests(self) -> None:
         while True:

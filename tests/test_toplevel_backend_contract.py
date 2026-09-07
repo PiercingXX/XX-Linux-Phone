@@ -327,6 +327,26 @@ def test_arm_fd_watch_called_on_successful_connect(harness: Harness) -> None:
     assert callable(callback)
 
 
+def test_connect_replays_handles_seen_before_callback(harness: Harness) -> None:
+    """Toplevels that arrived before connect() must still reach the manager.
+
+    The wayland thread used to start in _connect, so the initial burst
+    upserted into a None callback and recents stayed empty.
+    """
+    backend = harness.module.WaylandToplevelBackend()
+    registry = harness.display.registry
+    assert registry is not None
+    manager = registry.bound[TOPLVL_IFACE]
+    handle = FakeHandle()
+    manager.dispatcher.registrations['toplevel'](manager, handle)  # type: ignore[index]
+    handle.dispatcher.registrations['app_id'](handle, 'org.gnome.Calculator')  # type: ignore[index]
+    handle.dispatcher.registrations['title'](handle, 'Calculator')  # type: ignore[index]
+
+    events: list[tuple[object, object, object]] = []
+    backend.connect(lambda *args: events.append(args))
+    assert (id(handle), 'org.gnome.Calculator', 'Calculator') in events
+
+
 def test_events_flow_after_connect_via_upserts(harness: Harness) -> None:
     backend = harness.module.WaylandToplevelBackend()
     events: list[tuple[object, object, object]] = []
