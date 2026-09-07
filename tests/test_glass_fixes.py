@@ -82,11 +82,13 @@ def test_switcher_show_presents_visible_window():
 
 
 def test_show_switcher_uses_live_manager():
-    body = WINDOW_SRC.split('def _show_switcher')[1].split('def _build_apps_page')[0]
+    body = WINDOW_SRC.split('def _show_switcher')[1].split('def _refresh_switcher_if_visible')[0]
     assert 'AppSwitcher(manager=manager' in body
     assert '_ensure_toplevel_manager()' in body
     assert 'hide_switcher()' in body
     assert 'get_visible()' in body
+    assert 'resync()' in body
+    assert '_refresh_switcher_if_visible' in body
 
 
 def test_switcher_has_close_button_and_tappable_cards():

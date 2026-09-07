@@ -973,6 +973,11 @@ class ShellWindow(Adw.ApplicationWindow):
             self._switcher.hide_switcher()
             return
         manager = self._ensure_toplevel_manager()
+        # Re-bind each open: a live foreign-toplevel client can stop seeing
+        # new windows after the first snapshot, so recents goes empty while
+        # Calculator is still on screen. A fresh bind matches a standalone
+        # client and lists what is actually open.
+        manager.resync()
         if self._switcher is None:
             from app_switcher import AppSwitcher
             self._switcher = AppSwitcher(manager=manager, config=self.config)
@@ -985,6 +990,21 @@ class ShellWindow(Adw.ApplicationWindow):
             'showing switcher (%d toplevels, available=%s)',
             len(manager.list()), manager.available)
         self._switcher.show_switcher()
+        GLib.timeout_add(50, self._refresh_switcher_if_visible)
+        GLib.timeout_add(200, self._refresh_switcher_if_visible)
+
+    def _refresh_switcher_if_visible(self) -> bool:
+        switcher = self._switcher
+        if switcher is None or not switcher.get_visible():
+            return False
+        manager = self._toplevel_manager
+        from shell_log import get_logger
+        n = len(manager.list()) if manager is not None else -1
+        avail = manager.available if manager is not None else False
+        get_logger('window').info(
+            'switcher refresh (%d toplevels, available=%s)', n, avail)
+        switcher.refresh()
+        return False
 
     def _build_apps_page(self) -> Gtk.Widget:
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)

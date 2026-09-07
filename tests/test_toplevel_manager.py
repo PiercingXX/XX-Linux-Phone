@@ -160,6 +160,22 @@ def test_bad_callback_does_not_break_registry(backend: FakeBackend, manager: Top
     assert [t.handle for t in manager.list()] == ['h1']
 
 
+def test_resync_clears_registry_and_accepts_new_backend() -> None:
+    first = FakeBackend()
+    manager = ToplevelManager(backend=first)
+    first.add('h1', 'org.a.App', 'A')
+    assert [t.handle for t in manager.list()] == ['h1']
+    second = FakeBackend()
+    seen: list[list] = []
+    manager.on_change(lambda: seen.append(manager.list()))
+    manager.resync(backend=second)
+    assert manager.list() == []
+    assert seen[-1] == []
+    second.add('h2', 'org.gnome.Calculator', 'Calculator')
+    assert [t.handle for t in manager.list()] == ['h2']
+    assert [t.title for t in seen[-1]] == ['Calculator']
+
+
 def test_toplevel_dataclass_fields() -> None:
     t = Toplevel(app_id='org.a.App', title='A', handle='h1')
     assert t.app_id == 'org.a.App'

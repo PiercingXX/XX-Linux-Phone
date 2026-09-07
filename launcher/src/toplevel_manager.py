@@ -97,6 +97,8 @@ class WaylandToplevelBackend:
         self._manager_cb = None
         self._fd_source = None
         self._thread: threading.Thread | None = None
+        self._wl_registry: object | None = None
+        self._closing = False
         self._requests: queue.Queue = queue.Queue()
         self._wakeup_r: int | None = None
         self._wakeup_w: int | None = None
@@ -108,6 +110,9 @@ class WaylandToplevelBackend:
         except Exception as exc:
             raise RuntimeError(f'cannot connect to Wayland display: {exc}') from exc
         registry = self._display.get_registry()
+        # Keep the proxy: if it is GC'd the dispatcher dies and globals
+        # (and later the bound manager) stop being delivered.
+        self._wl_registry = registry
         registry.dispatcher['global'] = self._on_registry_global
         registry.dispatcher['global_remove'] = self._on_registry_global_remove
         # Do not start the wayland thread here: the initial registry burst
@@ -179,7 +184,7 @@ class WaylandToplevelBackend:
     def _thread_loop(self) -> None:
         self._flush_display()
         wl_fd = self._wayland_fd()
-        while True:
+        while not self._closing:
             self._drain_requests()
             self._flush_display()
             if not self._dispatch_pending():
@@ -267,6 +272,7 @@ class WaylandToplevelBackend:
         pass
 
     def _on_toplevel(self, manager, toplevel) -> None:
+        log.info('foreign toplevel created %s', id(toplevel))
         self._handles[id(toplevel)] = toplevel
         toplevel.dispatcher['title'] = self._on_title
         toplevel.dispatcher['app_id'] = self._on_app_id
@@ -300,12 +306,15 @@ class WaylandToplevelBackend:
         pass
 
     def _on_closed(self, toplevel) -> None:
+        log.info('foreign toplevel closed %s', id(toplevel))
         self._remove(id(toplevel))
         self._handles.pop(id(toplevel), None)
         self._info.pop(id(toplevel), None)
 
     def _on_finished(self, _manager) -> None:
         # Compositor dropped the protocol; clear everything.
+        log.info('foreign-toplevel manager finished')
+        self._manager = None
         for handle in list(self._handles):
             self._remove(handle)
         self._handles.clear()
@@ -317,11 +326,10 @@ class WaylandToplevelBackend:
         cb = self._manager_cb
         if cb is None:
             return
-        if threading.current_thread() is threading.main_thread():
-            cb(handle, app_id, title)
-            return
-        from gi.repository import GLib
-        GLib.idle_add(lambda: (cb(handle, app_id, title), False)[1])
+        # Invoke directly: ToplevelManager is thread-safe and marshals
+        # GTK refresh itself. idle_add here dropped the initial burst
+        # when the GTK source did not run before the first show.
+        cb(handle, app_id, title)
 
     def _upsert(self, handle: object, app_id: str, title: str) -> None:
         self._call_manager_cb(handle, app_id, title)
@@ -391,6 +399,24 @@ class WaylandToplevelBackend:
         self._requests.put(('close', handle))
         self._wakeup()
 
+    def shutdown(self) -> None:
+        self._closing = True
+        self._wakeup()
+        try:
+            disconnect = getattr(self._display, 'disconnect', None)
+            if callable(disconnect):
+                disconnect()
+        except Exception:
+            pass
+        for attr in ('_wakeup_r', '_wakeup_w'):
+            fd = getattr(self, attr)
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                setattr(self, attr, None)
+
 
 class ToplevelManager:
     """Tracks foreign toplevels and dispatches activate/close.
@@ -413,6 +439,7 @@ class ToplevelManager:
         self._backend = backend
         self._registry: dict[object, Toplevel] = {}
         self._callbacks: list[object] = []
+        self._lock = threading.Lock()
         if backend is not None:
             # Bind before the first globals arrive: the backend is now
             # non-blocking, so available() may still be False at construct.
@@ -425,7 +452,8 @@ class ToplevelManager:
 
     def list(self) -> list[Toplevel]:
         """Current toplevels, own surfaces filtered out, insertion-ordered."""
-        return [t for t in self._registry.values() if t.app_id != _OWN_APP_ID]
+        with self._lock:
+            return [t for t in self._registry.values() if t.app_id != _OWN_APP_ID]
 
     def activate(self, handle: object) -> None:
         if self._backend is not None and self._backend.available():
@@ -435,11 +463,43 @@ class ToplevelManager:
         if self._backend is not None and self._backend.available():
             self._backend.close(handle)
 
+    def resync(self, backend: object | None = None) -> None:
+        """Drop the current protocol client and bind again.
+
+        A live connection can stay available() True after it stops receiving
+        new toplevels (phoc sends the initial snapshot, then silence). Recents
+        then shows "No open apps" while windows are on screen. Re-binding
+        pulls the current list, the same way a fresh standalone client does.
+        """
+        old = self._backend
+        with self._lock:
+            self._registry.clear()
+        if backend is None:
+            backend = _make_default_backend()
+        self._backend = backend
+        if backend is not None:
+            backend.connect(self._on_backend_event)
+        closer = getattr(old, 'shutdown', None)
+        if callable(closer) and old is not backend:
+            closer()
+        self._notify()
+
     def on_change(self, callback: object) -> None:
         """Register a zero-arg callable invoked whenever the registry changes."""
         self._callbacks.append(callback)
 
     def _notify(self) -> None:
+        if threading.current_thread() is threading.main_thread():
+            self._emit_change()
+            return
+        from gi.repository import GLib
+        GLib.idle_add(self._emit_change_idle)
+
+    def _emit_change_idle(self) -> bool:
+        self._emit_change()
+        return False
+
+    def _emit_change(self) -> None:
         for cb in self._callbacks:
             try:
                 cb()
@@ -447,13 +507,13 @@ class ToplevelManager:
                 log.error('toplevel change callback failed: %s', exc)
 
     def _on_backend_event(self, handle: object, app_id: object, title: object) -> None:
-        if app_id is None:
-            self._registry.pop(handle, None)
-            self._notify()
-            return
-        self._registry[handle] = Toplevel(
-            app_id=app_id, title=title or '', handle=handle,
-        )
+        with self._lock:
+            if app_id is None:
+                self._registry.pop(handle, None)
+            else:
+                self._registry[handle] = Toplevel(
+                    app_id=app_id, title=title or '', handle=handle,
+                )
         self._notify()
 
 
