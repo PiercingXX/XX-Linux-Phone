@@ -113,6 +113,13 @@ def test_card_labels_preserve_order() -> None:
     assert AppSwitcher._card_labels(apps) == ['First', 'Second', 'Third']
 
 
+def test_card_pixel_size_is_pixel_fraction() -> None:
+    from app_switcher import AppSwitcher
+
+    assert AppSwitcher._card_pixel_size(800, 1280) == (656, 870)
+    assert AppSwitcher._card_pixel_size(0, 0) == (280, 420)
+
+
 def test_single_app_still_renders_a_card() -> None:
     """One open app produces exactly one card label, not the empty state."""
     from app_switcher import AppSwitcher

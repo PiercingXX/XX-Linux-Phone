@@ -109,16 +109,18 @@ and does not replace the lisgd verb. Two fallbacks: missing or corrupt
 JSON loads schema defaults then `ACTION_TO_VERB` (short → `gesture.home`,
 long → `gesture.switcher`); a **valid unmapped** value (`camera`, `none`,
 `launch:…`) keeps that slot's `DEFAULT_VERBS` (legacy: short →
-`gesture.keyboard`, long → `gesture.home`). Garbage keys are dropped at
-load, so they take the schema-default path, not `DEFAULT_VERBS`.
+`gesture.keyboard`, long → `gesture.home`). A file that still has both
+bottom-up slots as `app_switcher` (the previous default pair) is rewritten
+once so short becomes `home`. Garbage keys are dropped at load, so they
+take the schema-default path, not `DEFAULT_VERBS`.
 Rebinding restarts lisgd immediately from Settings. If that restart
 fails, it applies at the next session start.
 
 | Gesture | Default | Notes |
 |---|---|---|
 | `swipe_down_top` | `notification_shade` | lisgd → `gesture.shade`. Verb-rebindable. |
-| `swipe_up_short` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. A normal slide up from the bottom opens recents (activate / close). Missing/corrupt JSON uses this mapped default, not `gesture.keyboard`. |
-| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Same recents sheet as short — long vs short was too easy to miss on a phone. Verb-rebindable. |
+| `swipe_up_short` | `home` | lisgd → `gesture.home`. Verb-rebindable. A short flick up from the bottom goes home from any screen (including recents). Missing/corrupt JSON uses this mapped default, not `gesture.keyboard`. |
+| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. A long swipe up opens full-screen recents. Swipe down, tap the dim, or back resumes the current app. |
 | `swipe_left_edge` | `back` | lisgd → `gesture.back` on both edges. Verb-rebindable. |
 | `long_press_bottom` | `search` | |
 | `double_tap_home` | `lock_screen` | Kept on Linux deliberately. |

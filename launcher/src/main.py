@@ -192,12 +192,7 @@ class XXWMApplication(Adw.Application):
             if back:
                 GLib.idle_add(back.flash_back, True)
         elif command == 'gesture.home':
-            def _go_home() -> None:
-                if self._shell:
-                    self._shell.stack.set_visible_child_name('home')
-                    # Hop above the focused app; drops back on next launch
-                    self._shell.present_over_apps()
-            GLib.idle_add(_go_home)
+            GLib.idle_add(lambda: self._shell.go_home() if self._shell else None)
         elif command == 'gesture.shade':
             GLib.idle_add(lambda: self._shell._show_shade() if self._shell else None)
         elif command == 'gesture.keyboard':

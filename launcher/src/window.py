@@ -65,13 +65,8 @@ _VERB_LABELS = {
     'gesture.switcher': 'Switcher (system)',
 }
 
-# Swipe-up velocity split: a gentle/short flick raises the keyboard, a
-# stronger/longer swipe opens the app drawer. Velocity-based since the
-# in-window GestureSwipe reports velocity, not distance (lisgd does distance).
-_LONG_SWIPE_UP_VEL = 900
-
 # lisgd owns the bezel. In-window home swipes that start this close to an
-# edge would otherwise double-fire with gesture.back / the bottom switcher.
+# edge would otherwise double-fire with gesture.back / short-home / long-recents.
 _EDGE_GUARD_PX = 72
 
 
@@ -308,6 +303,8 @@ class ShellWindow(Adw.ApplicationWindow):
         )
         GLib.idle_add(self._warm_toplevel_manager)
         GLib.timeout_add(2500, self._tick_thumb_capture)
+        # SIGUSR1 respawns Python only; pick up migrated lisgd verbs now.
+        GLib.idle_add(self._sync_system_gestures)
 
     def _warm_toplevel_manager(self) -> bool:
         self._ensure_toplevel_manager()
@@ -417,15 +414,12 @@ class ShellWindow(Adw.ApplicationWindow):
                 self._dispatch_gesture_action(
                     self.gesture_config.get('swipe_down_top') or 'notification_shade')
             elif vel_y < -300:
-                # Bottom-bezel (lisgd + in-window) and short mid-display
-                # flicks open recents. Long mid-display swipe still opens
-                # the installed-apps drawer.
+                # Bottom bezel is lisgd (short = home, long = recents).
+                # Mid-display swipe-up on home still opens the app drawer.
                 height = self.get_height() if hasattr(self, 'get_height') else 0
-                if origin_is_bottom_edge(self._swipe_origin, height) or (
-                        vel_y >= -_LONG_SWIPE_UP_VEL):
-                    self._show_switcher()
-                else:
-                    self.stack.set_visible_child_name('apps')
+                if origin_is_bottom_edge(self._swipe_origin, height):
+                    return
+                self.stack.set_visible_child_name('apps')
             return
         if abs(vel_y) > abs(vel_x):
             return
@@ -476,7 +470,7 @@ class ShellWindow(Adw.ApplicationWindow):
             self.stack.set_visible_child_name('apps')
             self.apps_search.grab_focus()
         elif action == 'home':
-            self.stack.set_visible_child_name('home')
+            self.go_home()
         elif action == 'app_switcher':
             self._show_switcher()
         elif action == 'lock_screen':
@@ -542,6 +536,21 @@ class ShellWindow(Adw.ApplicationWindow):
         self.stack.set_visible_child_name('home')
         self.present_over_apps()
         return GLib.SOURCE_REMOVE
+
+    def go_home(self) -> None:
+        """Home is a third destination: hide recents/shade, raise the launcher.
+
+        Recents swipe-down / tap-dim / back resume the current app; this
+        path is the Pixel short swipe-up (and the in-shell `home` action).
+        """
+        switcher = getattr(self, '_switcher', None)
+        if switcher is not None and switcher.get_visible():
+            switcher.hide_switcher()
+        shade = getattr(self, '_shade', None)
+        if shade is not None and shade.get_visible():
+            shade.hide_shade()
+        self.stack.set_visible_child_name('home')
+        self.present_over_apps()
 
     def present_over_apps(self) -> None:
         """Raise the shell above regular app windows (the go-home gesture).
@@ -1315,19 +1324,22 @@ class ShellWindow(Adw.ApplicationWindow):
         self._restart_system_gestures()
 
     def _restart_system_gestures(self) -> None:
+        self._sync_system_gestures(notify=True)
+
+    def _sync_system_gestures(self, notify: bool = False) -> bool:
         from gesture_config import GestureConfig
         if not isinstance(self.gesture_config, GestureConfig):
-            return
+            return False
         import shutil
         from gesture_bindings import restart_lisgd
         ipc = shutil.which('xx-wm-ipc') or '/usr/bin/xx-wm-ipc'
         bindir = str(Path(ipc).parent)
         ok = restart_lisgd(bindir, self.gesture_config)
-        if getattr(self, 'status_label', None) is None:
-            return
-        self._show_status(
-            'System gestures updated.' if ok
-            else 'System gestures apply at the next session.')
+        if notify and getattr(self, 'status_label', None) is not None:
+            self._show_status(
+                'System gestures updated.' if ok
+                else 'System gestures apply at the next session.')
+        return False
 
     def _pick_gesture_app(self, key: str, title: str) -> None:
         self._pick_gesture_key = key

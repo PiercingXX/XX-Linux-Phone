@@ -151,3 +151,7 @@ def test_rebind_restarts_lisgd(window):
     assert '_restart_system_gestures' in src
     reset = inspect.getsource(window.ShellWindow._reset_system_gesture)
     assert '_restart_system_gestures' in reset
+    init = inspect.getsource(window.ShellWindow.__init__)
+    assert '_sync_system_gestures' in init
+    sync = inspect.getsource(window.ShellWindow._restart_system_gestures)
+    assert '_sync_system_gestures' in sync

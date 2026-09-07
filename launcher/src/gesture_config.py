@@ -7,10 +7,12 @@ def _config_path() -> Path:
     # Resolved per-instance so a redirected HOME (tests) is honored
     return Path.home() / '.config' / 'xx-wm' / 'gestures.json'
 
-# Gesture slot → default action
+# Gesture slot → default action. Pixel split: short swipe-up is home,
+# long swipe-up is recents. Devices that still have the previous pair
+# (both slots = app_switcher) are migrated once in _load.
 _DEFAULTS: dict[str, str] = {
     'swipe_down_top':        'notification_shade',
-    'swipe_up_short':        'app_switcher',
+    'swipe_up_short':        'home',
     'swipe_up_long':         'app_switcher',
     'swipe_left_edge':       'back',
     'long_press_bottom':     'search',
@@ -103,9 +105,19 @@ class GestureConfig:
             return
         if not isinstance(raw, dict):
             return
+        disk: dict[str, str] = {}
         for key, action in raw.items():
             if key in _DEFAULTS and isinstance(action, str) and _is_valid_value(key, action):
                 self._map[key] = action
+                disk[key] = action
+        # Previous schema defaulted both bottom-up slots to recents so the
+        # short/long split was unused. Rewrite only that exact on-disk pair;
+        # a file that set only one of them (or already has home/recents)
+        # is left alone.
+        if (disk.get('swipe_up_short') == 'app_switcher'
+                and disk.get('swipe_up_long') == 'app_switcher'):
+            self._map['swipe_up_short'] = 'home'
+            self.save()
 
     def save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

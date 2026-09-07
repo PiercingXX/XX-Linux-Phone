@@ -64,7 +64,9 @@ Every dialog and action menu the shell draws (long-press menus, rename entries, 
 | Swipe right on home | Launch configured app (default: Camera) |
 | Swipe down | Notifications **or** search (user choice) |
 | Double-tap | Lock screen (kept on Linux — Android dropped it only because it needed the accessibility service) |
-| Swipe up | App switcher / recents (system-level, via lisgd — short or long from the bottom). Swipe down on the sheet dismisses to home. |
+| Short swipe up from bottom | Home (system-level, via lisgd). Works over any screen, including recents. |
+| Long swipe up from bottom | App switcher / recents, full-screen (system-level, via lisgd). Swipe down, tap the dim, or back resumes the current app — home is the short swipe. |
+| Swipe up on home (mid-display) | App drawer (in-shell). The bottom bezel belongs to lisgd. |
 | Edge swipe left/right | Back (system-level, via lisgd) |
 
 Swipe left/right accept any app via `launch:<app_id>` bindings, alongside the fixed actions.

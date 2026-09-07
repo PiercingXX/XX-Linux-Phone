@@ -27,7 +27,7 @@ Eight built-in theme presets — AMOLED, Graphite, Forest, Ocean, Paper, Mist, A
 ## Design principles
 
 - **Minimal by default.** A clock, a handful of widgets (date, battery, weather), and your most-used apps as plain text. No icon grids anywhere.
-- **Gestures, not chrome.** Swipe up for the app drawer, down for the notification shade and quick settings, sideways for the app switcher. The screen belongs to content, not controls.
+- **Gestures, not chrome.** Short swipe-up goes home, long swipe-up opens full-screen recents, swipe down opens the notification shade. The screen belongs to content, not controls.
 - **A real phone.** Calls, dialer, SMS, notifications, lock screen, and quick settings are all first-class surfaces — this is a daily driver, not a demo.
 - **Fast search.** Search sits at the bottom of the drawer where your thumb is; type a few letters and go — results land right above your hand.
 - **Local-only customization.** Themes, fonts, layout, and gestures live in plain text files under `~/.config/xx-wm/` (see `docs/config.md`) and hot-reload while you edit. Nothing phones home.

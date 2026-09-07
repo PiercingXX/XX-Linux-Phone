@@ -26,7 +26,7 @@ from gesture_config import GestureConfig
 # argument order. DEFAULT_VERBS still apply when a slot's value is an
 # unmapped action (camera, none, launch:…).
 DEFAULT_BINDINGS = [
-    '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.switcher',
+    '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.home',
     '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.switcher',
     '1,UD,T,*,R,/usr/bin/xx-wm-ipc gesture.shade',
     '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.back',
@@ -46,7 +46,7 @@ class TestDefaultActionNameMapping:
 
     def test_bindir_is_substituted(self):
         out = generate_bindings('/usr/local/bin')
-        assert out[0] == '1,DU,B,S,R,/usr/local/bin/xx-wm-ipc gesture.switcher'
+        assert out[0] == '1,DU,B,S,R,/usr/local/bin/xx-wm-ipc gesture.home'
         assert len(out) == len(DEFAULT_BINDINGS)
 
     def test_default_verbs_cover_every_slot(self):
@@ -98,6 +98,15 @@ class TestRebinding:
         }), encoding='utf-8')
         assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
+    def test_legacy_both_recents_migrates_lisgd_to_pixel_split(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'app_switcher',
+            'swipe_up_long': 'app_switcher',
+            'swipe_left_home': 'launch:htop.desktop',
+            'swipe_right_home': 'launch:org.gnome.Nautilus.desktop',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
+
     def test_action_to_verb_covers_settings_names(self):
         assert ACTION_TO_VERB == {
             'home': 'gesture.home',
@@ -115,8 +124,8 @@ class TestRebinding:
             'swipe_left_edge': 'none',
         }), encoding='utf-8')
         got = generate_bindings('/usr/bin')
-        # explode is dropped → schema default app_switcher → gesture.switcher
-        assert got[0].endswith('gesture.switcher')
+        # explode is dropped → schema default home → gesture.home
+        assert got[0].endswith('gesture.home')
         # launch: is in-shell; lisgd keeps DEFAULT_VERBS for the slot
         assert got[1].endswith('gesture.home')
         # camera is a valid unmapped action → DEFAULT_VERBS shade
@@ -192,7 +201,7 @@ class TestLisgdRestart:
         )
         assert killed == [True]
         assert spawned[0][:4] == ['/usr/bin/lisgd', '-d', '/dev/input/event6', '-g']
-        assert spawned[0][4].endswith('gesture.switcher')
+        assert spawned[0][4].endswith('gesture.home')
 
     def test_restart_fails_without_touch(self):
         assert restart_lisgd(

@@ -13,7 +13,7 @@ try:
     import gi
 
     gi.require_version('Gtk', '4.0')
-    from gi.repository import Gdk, Gtk
+    from gi.repository import Gdk, GLib, Gtk
 
     try:
         gi.require_version('Gtk4LayerShell', '1.0')
@@ -33,6 +33,7 @@ except (ImportError, ValueError) as exc:
     # NameError. The static headless seams below never reference these names;
     # the window itself is never constructed while _GTK_AVAILABLE is False.
     Gdk = None  # type: ignore[assignment,misc]
+    GLib = None  # type: ignore[assignment,misc]
     Gtk = None  # type: ignore[assignment,misc]
     LayerShell = None  # type: ignore[assignment,misc]
 
@@ -66,7 +67,7 @@ window.switcher-window {{
     background: alpha({preset.background}, 0.55);
 }}
 .switcher-root {{
-    background: alpha({preset.background}, 0.96);
+    background: transparent;
     color: {preset.foreground};
 }}
 .switcher-dismiss {{
@@ -87,18 +88,12 @@ window.switcher-window {{
 }}
 .app-card {{
     background: {preset.surface};
-    border-radius: 20px;
-    padding: 16px 12px 12px 12px;
-    min-width: 148px;
-    max-width: 168px;
-    min-height: 220px;
+    border-radius: 24px;
+    padding: 16px;
 }}
 .app-card:hover, .app-card:focus {{ background: {preset.surface_alt}; }}
 .app-card-thumb {{
-    min-width: 124px;
-    min-height: 168px;
-    max-height: 200px;
-    border-radius: 12px;
+    border-radius: 16px;
 }}
 .card-name {{
     font-size: 13pt;
@@ -122,8 +117,12 @@ window.switcher-window {{
 """
 
 _SWIPE_DISMISS_THRESHOLD = 120  # px upward drag to dismiss a card
-_SHEET_CLOSE_DY = 100  # px downward drag to close the recents sheet
+_SHEET_CLOSE_DY = 100  # px downward drag to close recents (resume the app)
 _EMPTY_STATE_TEXT = 'No open apps'
+# Pixel-style overview: one large centered card, not a 280px bottom sheet.
+_CARD_WIDTH_FRAC = 0.82
+_CARD_HEIGHT_FRAC = 0.68
+_CARD_FALLBACK = (280, 420)
 
 
 class AppInfo:
@@ -136,9 +135,10 @@ class AppInfo:
 
 
 class AppSwitcher(_AppSwitcherBase):
-    """
-    Slides up from the bottom edge on long swipe-up gesture.
-    Card swipe-up dismisses that app. Reveal/hide uses Gtk.Revealer (SLIDE_UP).
+    """Full-screen recents (Pixel overview). Long swipe-up.
+
+    Tap dim / swipe down / back resume the current app. Card swipe-up or ×
+    closes that app. Short swipe-up is lisgd home, not this surface.
     """
 
     def __init__(self, manager: ToplevelManager | None = None,
@@ -172,6 +172,8 @@ class AppSwitcher(_AppSwitcherBase):
         self._thumbs = thumbnails
         self._apps: list[AppInfo] = []
         self._card_swiping = False
+        self._laid_out: tuple[int, int] | None = None
+        self._scroller: object | None = None
 
         self._theme_provider = Gtk.CssProvider()
         self._theme_provider.load_from_data(
@@ -235,40 +237,77 @@ class AppSwitcher(_AppSwitcherBase):
 
     def _build_content(self) -> Gtk.Widget:
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.add_css_class('switcher-root')
         outer.set_hexpand(True)
         outer.set_vexpand(True)
 
-        dismiss = Gtk.Box()
-        dismiss.add_css_class('switcher-dismiss')
-        dismiss.set_hexpand(True)
-        dismiss.set_vexpand(True)
-        tap = Gtk.GestureClick.new()
-        tap.connect('released', lambda *_: self.hide_switcher())
-        dismiss.add_controller(tap)
-
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        root.add_css_class('switcher-root')
-        root.set_margin_top(12)
-        root.set_margin_start(16)
-        root.set_margin_end(16)
-        root.set_margin_bottom(20)
-        root.set_size_request(-1, 280)
-
-        header = Gtk.Label(label='OPEN APPS', xalign=0)
+        header = Gtk.Label(label='OPEN APPS', xalign=0.5)
         header.add_css_class('switcher-header')
-        header.set_margin_bottom(12)
-        header.set_margin_start(4)
+        header.set_margin_top(24)
+        header.set_margin_bottom(8)
 
-        scroller = Gtk.ScrolledWindow(hexpand=True)
+        self.card_box.set_halign(Gtk.Align.CENTER)
+        self.card_box.set_valign(Gtk.Align.CENTER)
+
+        scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         scroller.set_child(self.card_box)
-        scroller.set_min_content_height(220)
+        scroller.set_halign(Gtk.Align.CENTER)
+        scroller.set_valign(Gtk.Align.CENTER)
+        cw, ch = self._card_pixel_size(0, 0)
+        scroller.set_size_request(cw, ch)
+        self._scroller = scroller
 
-        root.append(header)
-        root.append(scroller)
-        outer.append(dismiss)
-        outer.append(root)
+        def _dismiss_pad() -> Gtk.Widget:
+            pad = Gtk.Box()
+            pad.add_css_class('switcher-dismiss')
+            pad.set_hexpand(True)
+            pad.set_vexpand(True)
+            tap = Gtk.GestureClick.new()
+            tap.connect('released', lambda *_: self.hide_switcher())
+            pad.add_controller(tap)
+            return pad
+
+        body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        body.set_hexpand(True)
+        body.set_vexpand(True)
+        body.append(_dismiss_pad())
+        mid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        mid.set_vexpand(True)
+        mid.append(_dismiss_pad())
+        mid.append(scroller)
+        mid.append(_dismiss_pad())
+        body.append(mid)
+        body.append(_dismiss_pad())
+
+        outer.append(header)
+        outer.append(body)
         return outer
+
+    @staticmethod
+    def _card_pixel_size(width: int, height: int) -> tuple[int, int]:
+        """Headless seam: recents card size as a fraction of the overlay."""
+        if width <= 0 or height <= 0:
+            return _CARD_FALLBACK
+        return (
+            max(200, int(width * _CARD_WIDTH_FRAC)),
+            max(280, int(height * _CARD_HEIGHT_FRAC)),
+        )
+
+    def _relayout_cards(self) -> bool:
+        if not self.get_visible():
+            return False
+        width = self.get_width() if hasattr(self, 'get_width') else 0
+        height = self.get_height() if hasattr(self, 'get_height') else 0
+        size = self._card_pixel_size(width, height)
+        if self._laid_out == size:
+            return False
+        self._laid_out = size
+        scroller = getattr(self, '_scroller', None)
+        if scroller is not None:
+            scroller.set_size_request(*size)
+        self._rebuild_cards()
+        return False
 
     def refresh(self, apps: list[AppInfo] | None = None) -> None:
         if apps is None:
@@ -326,9 +365,12 @@ class AppSwitcher(_AppSwitcherBase):
             child = nxt
 
         if not self._apps:
-            empty = Gtk.Label(label=_EMPTY_STATE_TEXT, xalign=0)
+            empty = Gtk.Label(label=_EMPTY_STATE_TEXT, xalign=0.5)
             empty.add_css_class('switcher-empty')
-            empty.set_margin_start(4)
+            empty.set_hexpand(True)
+            empty.set_vexpand(True)
+            empty.set_valign(Gtk.Align.CENTER)
+            empty.set_halign(Gtk.Align.CENTER)
             self.card_box.append(empty)
             return
 
@@ -345,9 +387,8 @@ class AppSwitcher(_AppSwitcherBase):
 
     @staticmethod
     def _texture_for_thumb(thumb: object) -> object | None:
-        if thumb is None or Gdk is None:
+        if thumb is None or Gdk is None or GLib is None:
             return None
-        from gi.repository import GLib
         width = int(getattr(thumb, 'width', 0))
         height = int(getattr(thumb, 'height', 0))
         rgba = getattr(thumb, 'rgba', b'')
@@ -385,17 +426,18 @@ class AppSwitcher(_AppSwitcherBase):
         inner.add_css_class('app-card')
         inner.set_hexpand(False)
         inner.set_vexpand(False)
-        inner.set_valign(Gtk.Align.END)
-        inner.set_size_request(148, 252)
+        inner.set_valign(Gtk.Align.CENTER)
+        width = self.get_width() if hasattr(self, 'get_width') else 0
+        height = self.get_height() if hasattr(self, 'get_height') else 0
+        inner.set_size_request(*self._card_pixel_size(width, height))
         inner.append(kill_btn)
         texture = self._texture_for_thumb(self._thumb_for_app(self._thumbs, app))
         if texture is not None:
             pic = Gtk.Picture.new_for_paintable(texture)
             pic.add_css_class('app-card-thumb')
             pic.set_hexpand(True)
-            pic.set_vexpand(False)
+            pic.set_vexpand(True)
             pic.set_can_shrink(True)
-            pic.set_size_request(124, 196)
             fit = getattr(Gtk, 'ContentFit', None)
             if fit is not None:
                 pic.set_content_fit(fit.COVER)
@@ -481,6 +523,7 @@ class AppSwitcher(_AppSwitcherBase):
             LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.EXCLUSIVE)
         self.set_visible(True)
         self.present()
+        GLib.idle_add(self._relayout_cards)
 
     def hide_switcher(self) -> None:
         if _LAYER_SHELL and LayerShell.is_supported():

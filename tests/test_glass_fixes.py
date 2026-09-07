@@ -75,6 +75,9 @@ def test_switcher_is_fullscreen_overlay_with_scrim():
     assert 'switcher-dismiss' in SWITCHER_SRC
     assert '_SHEET_CLOSE_DY' in SWITCHER_SRC
     assert "label='▲ Close'" not in SWITCHER_SRC
+    assert 'set_size_request(-1, 280)' not in SWITCHER_SRC
+    assert '_CARD_WIDTH_FRAC = 0.82' in SWITCHER_SRC
+    assert '_CARD_HEIGHT_FRAC = 0.68' in SWITCHER_SRC
 
 
 def test_switcher_show_presents_visible_window():
@@ -280,7 +283,7 @@ def test_home_mid_swipe_still_launches_files(window):
     assert actions == ['launch:org.gnome.Nautilus.desktop']
 
 
-def test_bottom_origin_up_swipe_opens_switcher_not_drawer(window):
+def test_bottom_origin_up_swipe_is_left_to_lisgd(window):
     shown: list[str] = []
     stack = types.SimpleNamespace(
         child='home',
@@ -297,9 +300,32 @@ def test_bottom_origin_up_swipe_opens_switcher_not_drawer(window):
         get_height=lambda: 1280,
         _dispatch_gesture_action=lambda _a: None,
         _show_switcher=lambda: shown.append('switcher'),
+        go_home=lambda: shown.append('home'),
     )
     window.ShellWindow._on_stack_swipe(shell, None, 0.0, -1200.0)
-    assert shown == ['switcher']
+    assert shown == []
+
+
+def test_mid_display_short_up_opens_drawer(window):
+    shown: list[str] = []
+    stack = types.SimpleNamespace(
+        child='home',
+        get_visible_child_name=lambda: 'home',
+        set_visible_child_name=lambda name: shown.append(name),
+        set_transition_type=lambda _t: None,
+    )
+    shell = types.SimpleNamespace(
+        stack=stack,
+        _home_launcher=types.SimpleNamespace(edit_mode=False),
+        gesture_config=types.SimpleNamespace(get=lambda _k: 'notification_shade'),
+        _swipe_origin=(400.0, 400.0),
+        get_width=lambda: 800,
+        get_height=lambda: 1280,
+        _dispatch_gesture_action=lambda _a: None,
+        _show_switcher=lambda: shown.append('switcher'),
+    )
+    window.ShellWindow._on_stack_swipe(shell, None, 0.0, -400.0)
+    assert shown == ['apps']
 
 
 def test_mid_display_long_up_still_opens_drawer(window):
@@ -322,6 +348,35 @@ def test_mid_display_long_up_still_opens_drawer(window):
     )
     window.ShellWindow._on_stack_swipe(shell, None, 0.0, -1200.0)
     assert shown == ['apps']
+
+
+def test_ipc_home_calls_go_home():
+    main = (ROOT / 'launcher' / 'src' / 'main.py').read_text(encoding='utf-8')
+    arm = main.split("command == 'gesture.home'")[1].split('elif command')[0]
+    assert 'go_home()' in arm
+    home = WINDOW_SRC.split('def go_home')[1].split('def present_over_apps')[0]
+    assert 'hide_switcher()' in home
+    assert 'hide_shade()' in home
+    dispatch = WINDOW_SRC.split('def _dispatch_gesture_action')[1].split(
+        'def _show_focus_notice')[0]
+    assert 'go_home()' in dispatch
+
+
+def test_go_home_hides_overlays_and_raises(window):
+    events: list[object] = []
+    shell = types.SimpleNamespace(
+        _switcher=types.SimpleNamespace(
+            get_visible=lambda: True,
+            hide_switcher=lambda: events.append('switcher')),
+        _shade=types.SimpleNamespace(
+            get_visible=lambda: True,
+            hide_shade=lambda: events.append('shade')),
+        stack=types.SimpleNamespace(
+            set_visible_child_name=lambda name: events.append(('page', name))),
+        present_over_apps=lambda: events.append('top'),
+    )
+    window.ShellWindow.go_home(shell)
+    assert events == ['switcher', 'shade', ('page', 'home'), 'top']
 
 
 def test_open_settings_presents_over_apps(window):
