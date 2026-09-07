@@ -113,7 +113,7 @@ class XXWMApplication(Adw.Application):
         self, notif_id: int, app_name: str, summary: str, body: str,
         desktop_entry: str, hints: dict,
     ) -> None:
-        _log.debug('notification %d from %s: %s', notif_id, app_name, summary)
+        _log.info('notification %d from %s: %s', notif_id, app_name, summary)
         if self._shell is None:
             return
         # "Disable for…" mute: notifications from a muted app are discarded

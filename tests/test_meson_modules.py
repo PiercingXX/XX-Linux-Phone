@@ -38,5 +38,6 @@ def test_wayland_proto_package_is_installed():
 
 def test_critical_shell_modules_are_listed():
     shipped = _meson_top_level_py()
-    for name in ('hud.py', 'lock_lines.py', 'toplevel_manager.py', 'main.py'):
+    for name in ('hud.py', 'lock_lines.py', 'toplevel_manager.py', 'main.py',
+                 'osk.py'):
         assert name in shipped, f'{name} must be in meson install_data'

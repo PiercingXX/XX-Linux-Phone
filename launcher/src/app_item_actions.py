@@ -108,6 +108,9 @@ class AppItemActions:
         entry.connect('activate', _commit)
         commit_btn.connect('clicked', _commit)
         popover.connect('closed', _closed)
+        if callable(self._on_keyboard):
+            from osk import attach
+            attach(entry, on_show=lambda: self._on_keyboard(True))
         entry.grab_focus()
         if callable(self._on_keyboard):
             self._on_keyboard(True)

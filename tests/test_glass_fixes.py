@@ -129,6 +129,19 @@ def test_wifi_password_dialog_is_wired_to_osk():
     assert '_attach_osk(self.apn_pass_entry)' in WINDOW_SRC
 
 
+def test_home_compacts_unresolved_slots_at_start():
+    assert 'compact_unresolved_home' in WINDOW_SRC
+
+
+def test_search_hops_over_apps_while_typing():
+    arm = WINDOW_SRC.split('def _arm_search_keyboard')[1].split(
+        'def _disarm_search_keyboard')[0]
+    disarm = WINDOW_SRC.split('def _disarm_search_keyboard')[1].split(
+        'def _on_entry_keyboard')[0]
+    assert 'present_over_apps()' in arm
+    assert 'drop_to_background()' in disarm
+
+
 def test_appearance_card_is_on_settings_page():
     assert 'def _build_appearance_card' in WINDOW_SRC
     assert 'def _on_theme_picked' in WINDOW_SRC

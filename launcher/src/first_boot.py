@@ -163,9 +163,10 @@ class FirstBootWizard(Gtk.Window):
             for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM,
                          LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
                 LayerShell.set_anchor(self, edge, True)
-            # Zone 0 so the OSK pushes the wizard up (keyboard tour page)
+            # Zone 0 so the OSK pushes the wizard up (keyboard tour page).
+            # NONE until an Entry is focused — PIN is buttons, not OSK.
             LayerShell.set_exclusive_zone(self, 0)
-            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.EXCLUSIVE)
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
         else:
             self.set_default_size(420, 860)
             self.fullscreen()
@@ -556,6 +557,17 @@ class FirstBootWizard(Gtk.Window):
             'appears whenever you need to type.')
         entry = Gtk.Entry()
         entry.set_placeholder_text('Type something…')
+        from osk import attach, set_layer_keyboard, set_visible
+
+        def _show(*_a: object) -> None:
+            set_layer_keyboard(self, True)
+            set_visible(True)
+
+        def _hide(*_a: object) -> None:
+            set_layer_keyboard(self, False)
+            set_visible(False)
+
+        attach(entry, on_show=_show, on_hide=_hide)
         # The centered content zone sits between the title block and footer
         page.get_first_child().get_next_sibling().append(entry)
         next_btn = Gtk.Button(label='Next')

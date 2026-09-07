@@ -173,6 +173,9 @@ class SMSConversation(Gtk.Window):
         self._input.set_placeholder_text('Message')
         self._input.set_hexpand(True)
         self._input.connect('activate', self._on_send)
+        from osk import attach, set_visible
+        attach(self._input, on_show=lambda: set_visible(True),
+               on_hide=lambda: set_visible(False))
 
         send_btn = Gtk.Button(label='Send')
         send_btn.add_css_class('sms-send')

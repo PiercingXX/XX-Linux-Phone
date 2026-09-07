@@ -17,9 +17,9 @@ This file is the live work order. It is not a changelog. Git history holds the c
 - **Decisions already made** (don't relitigate): product is **XX-WM** (app id `io.piercingxx.XXWM`, binaries `xx-wm` / `xx-wm-ipc` / `xx-wm-session`); phoc is the compositor; lisgd owns system-level gestures via IPC; keyboard is **squeekboard** with the PiercingXX Colemak layouts; the lock screen stays ours (no phrog/phosh code); DnD and Focus Mode copy the Pixel's behavior; in-shell Settings is **system-only**; backgrounds are solid colors only; `aura` stays as a Linux-only bonus theme; volume/brightness HUD is in-shell; design.md is current.
 - **Minimalism**: the tablet has **1.8 GiB RAM** and a 29 G eMMC. Prefer text over textures. Leave `preload_gesture_apps` off. Do **not** install Waydroid on the tablet.
 
-## Current state — 2026-09-06 (evening)
+## Current state — 2026-09-06 (night)
 
-XX-WM is the live GDM session on the tablet. Latest completeness commit: `d3fe7ef` (recents overlay, Settings Back/drop, power-button unfreeze) plus a follow-up deploy (WiFi password OSK, not yet committed). check.sh: **700 passed, 3 skipped**. Rollback session id: `piercingxx`.
+XX-WM is the live GDM session on the tablet. 3b **Build** is in-tree: `osk.py` helper + Entry inventory, unresolved-slot compact, lisgd live-rebind from Settings. Recents list real windows. Shade owns notifications — grim of `notify-send` in the shade. JetBrains Mono Nerd is installed (`fc-list`). check.sh: **721 passed, 3 skipped**. Rollback session id: `piercingxx`.
 
 ### Glass (operator at the panel)
 
@@ -31,7 +31,8 @@ XX-WM is the live GDM session on the tablet. Latest completeness commit: `d3fe7e
 | Drawer Search → Colemak OSK | **works** |
 | Power lock + swipe-to-unlock | worked, then froze (main-loop block), then unfrozen — **retest** |
 | Volume hardware key | **works** |
-| Recents sheet over an app | panel can map; **cards empty** (`No open apps` with Calculator running) |
+| Recents sheet over an app | **lists Calculator** (grim). Tap / ✕ still GLASS |
+| `notify-send` in shade | **works** (grim: Hello from Grok). Swipe-dismiss / lock list still GLASS |
 | Brightness slider on shade | deployed always-visible — **retest** |
 | Appearance theme presets | on Settings — **retest** |
 | Bezel swipe-right vs Files | edge guard deployed — **retest** |
@@ -39,11 +40,7 @@ XX-WM is the live GDM session on the tablet. Latest completeness commit: `d3fe7e
 
 ### Code holes that make design.md untrue today
 
-1. **Switcher does not list real toplevels.** `available=True` but `list()` stays `[]`. Second pywayland `Display` + non-blocking fd-watch never sees `toplevel` events. Recents cannot activate or close apps.
-2. **Notifications are not ours.** `org.freedesktop.Notifications` is owned by an external daemon; the shade shows a hint and never collects banners. design.md: the shell owns the daemon.
-3. **OSK is not universal.** Search and (deployed) WiFi/APN/dialog entries are wired. Any new `Gtk.Entry` still needs `_attach_osk` / `on_keyboard`. phoc layer-shell v3 has **no** `ON_DEMAND`; only `EXCLUSIVE` while an editable is focused, `NONE` otherwise.
-4. **lisgd rebind** still needs a session restart (`gesture_bindings` at wrapper start).
-5. **Fonts:** JetBrains Mono Nerd was installed as a package; confirm `fc-list` actually has the family the clock uses.
+Closed in 3b Build: recents bind v1 + dedicated thread; shade owns Notifications (unique-name compare); `osk.py` helper + Entry inventory test; lisgd live-rebind from Settings; JetBrainsMono Nerd Font is on the tablet (`fc-list`). Remaining holes are GLASS (finger on panel) plus 2.4 greeter Colemak.
 
 ---
 
@@ -196,57 +193,57 @@ Make every `design.md` surface **true** on this tablet. Skippy builds over SSH; 
 
 ### 3b.2 On-screen keyboard on every text field
 
-- [ ] **Build.** One helper owns this: layer-shell `EXCLUSIVE` + squeekboard `SetVisible` (async, never `call_sync` on the UI thread) while an editable is focused; `NONE` + hide on dismiss. Wire Search (done), WiFi/APN/dialog entries (deployed), and any other `Gtk.Entry` the shell draws (rename, new folder, first-boot if it uses a text field). PIN keypad is buttons — not OSK. A new Entry without the helper is a bug; add a test that lists the Entry construction sites and asserts each is attached or explicitly exempt.
+- [x] **Build.** `osk.py` owns EXCLUSIVE + async SetVisible. Wired: Search, APN, rename/new-folder dialogs, wizard keyboard page, SMS composer. PIN keypad is buttons. `tests/test_osk.py` fails if a new `Gtk.Entry` is constructed without the helper.
 - [ ] **GLASS.** Search, WiFi PSK, APN, Rename all raise Colemak. Tap-outside hides it. Terminal/email/url purpose variants in real apps (browser URL bar is an app, not us).
 
 ### 3b.3 The shade owns notifications
 
-- [x] **Build.** The shade treated *our* unique name as an external daemon (`GetNameOwner` truthy). Compare to `bus.get_unique_name()`. Own the name with `REPLACE|ALLOW_REPLACEMENT`. Daemon starts synchronously so the name is taken before the shade probes. **GLASS** `notify-send` still.
-- [ ] **GLASS.** `notify-send Hello` appears in the shade, swipe-dismiss works, lock shows the summary when a PIN is not set.
+- [x] **Build.** Unique-name compare; `REPLACE|ALLOW_REPLACEMENT`; daemon starts synchronously. SSH grim: `notify-send` rows in the shade (`Hello from Grok`).
+- [ ] **GLASS.** Swipe-dismiss a banner; lock shows the summary when a PIN is not set.
 
 ### 3b.4 Drawer vs keyboard
 
-- [ ] **Build.** design.md: the drawer sheet rises above the OSK, results sit above the search field. Exclusive zone 0 on the launcher is the intent; verify Search + OSK does not cover the field. If it does, hop the drawer with the keyboard (margin / exclusive zone / `present_over_apps` while searching).
+- [x] **Build.** Exclusive zone 0 already. Search hops TOP while the OSK is armed and drops BACK unless Settings owns the layer.
 - [ ] **GLASS.** Type in Search; the field stays visible above Colemak; results stay thumb-reachable.
 
 ### 3b.5 Quick settings tiles — honest hardware
 
-- [ ] **Build.** Tier-1 always: WiFi, BT, Data, Airplane. Hide Torch if no LED. Hide Auto-brightness if `ALSBrightness.available()` is false (this tablet: no IIO). Location / Hotspot: expanded tier or hide. Location off sets `MaxAccuracyLevel=0`. Brightness + volume sliders always visible (already); confirm `_sync_sliders` on shade show.
-- [ ] **GLASS.** Expand/collapse; no empty Torch/Auto tiles; sliders move backlight and sink volume; HUD flashes.
+- [x] **Build.** Tier-1 WiFi/BT/Data/Airplane always. Torch hidden without LED; Auto hidden without ALS (this tablet: no IIO). Location/Hotspot gated. Sliders always visible; `sync_sliders` on shade show. Tests pin the hide rules. Grim of the shade shows no Torch/Auto.
+- [ ] **GLASS.** Expand/collapse; sliders move backlight and sink volume; HUD flashes.
 
 ### 3b.6 DnD and Focus are real, not just tiles
 
-- [ ] **Build.** Tiles toggle config-backed state. Schedules round-trip. Starred numbers + repeat-caller logic stays in code (full proof is FLX1). Focus: paused apps dim + "paused", launch blocked, notifications held then released. Take a break 5/10/15.
-- [ ] **GLASS.** Toggle DnD: `notify-send` is silent but in the shade (once 3b.3 works). Focus-pause Calculator from the drawer; launching it is blocked until break/off.
+- [x] **Build.** Tiles toggle config-backed state. `set_schedules` round-trips. Starred + repeat-caller stay in code (FLX1 proof). Focus pause/dim/block/hold + take a break 5/10/15 already wired.
+- [ ] **GLASS.** Toggle DnD: `notify-send` is silent but in the shade. Focus-pause Calculator from the drawer; launching it is blocked until break/off.
 
 ### 3b.7 Lock, power, HUD
 
-- [ ] **Build.** Power short-press: blank + lock (DisplayManager evdev → idle_add; must never depend on a blocked GTK loop). Long-press: full-screen power menu. HUD overlay on vol/bright keys, auto-hide ~1 s. Swipe-up unlock; PIN keypad only after swipe when a PIN exists.
-- [ ] **GLASS.** Those three, plus lock notification list after 3b.3.
+- [x] **Build.** Power short-press blanks + lock via DisplayManager `idle_add`. Long-press power menu. HUD on vol/bright keys. Swipe-up unlock; PIN keypad after swipe when a PIN exists. Lock notification list is fed by the shade daemon.
+- [ ] **GLASS.** Those three, plus lock notification list after a `notify-send`.
 
 ### 3b.8 Home, folders, edit mode
 
-- [ ] **Build.** 8-slot cap; inline folder drop-downs on home and in the drawer; members indent; empty/uninstalled skipped; expand centers the folder block. Edit mode: add/remove/rename/reorder/new folder, widgets stay visible. Seeded layout already applied — do not re-seed. Compact any unresolved Camera/Photos/Calendar slots (4.4).
+- [x] **Build.** 8-slot cap; inline folders; edit mode. `compact_unresolved_home` on start (no re-seed). This tablet's Calendar/Camera/Photos `.desktop` ids all resolve — compact is a no-op here.
 - [ ] **GLASS.** Long-press home, add/remove a slot, open a folder, launch a member, confirm collapse.
 
 ### 3b.9 Settings + Appearance + backup
 
-- [ ] **Build.** System-only page (WiFi, BT, sound, battery, APN, updates, backup, about) plus the dedicated Appearance preset list. Back / edge-swipe / horizontal swipe leaves Settings and `drop_to_background`. Backup export/restore validate-before-write; restore does not write PIN hash.
+- [x] **Build.** System-only page + Appearance presets. Back / edge-swipe drops to BOTTOM. Backup validate-before-write; restore does not write PIN hash.
 - [ ] **GLASS.** Change theme on-device; export a backup; WiFi PSK OSK; Back returns to the app.
 
 ### 3b.10 Gestures stay as bound
 
-- [ ] **Build.** lisgd slots: bottom-up → recents, top-down → shade, edges → back. Do **not** rewrite `swipe_left_home=launch:htop.desktop` / `swipe_right_home=launch:org.gnome.Nautilus.desktop`. Bezel starts (~72 px) skip in-window launch so Files and back do not double-fire. Rebind in Settings Gestures card still requires next session for lisgd — say so in the UI or hot-restart lisgd (wrapper already can).
+- [x] **Build.** lisgd slots unchanged; home `launch:htop` / `launch:Nautilus` not rewritten. Bezel 72 px skip. Settings rebind hot-restarts lisgd; UI says they apply immediately, with a next-session fallback status.
 - [ ] **GLASS.** Mid-home swipe-right opens Files; from the right bezel only the back arrow. Bottom swipe over Calculator opens recents (3b.1).
 
 ### 3b.11 Fonts and light themes
 
-- [ ] **Build.** `fc-list` must contain the configured family, or install it (1.2 was non-fatal). Clock/slots stay readable on Monospace fallback. Paper and mist sheets must remain contrast-safe (existing theme tests).
+- [x] **Build.** Tablet `fc-list` has `JetBrainsMono Nerd Font` (matches `FONT_FAMILIES`). CSS already falls back to Monospace. Paper/mist contrast tests already exist.
 - [ ] **GLASS.** Pick Paper in Appearance; every overlay still readable; return to AMOLED.
 
 ### 3b.12 First-boot and welcome
 
-- [ ] **Build.** Wizard still skipped when `default_layout_applied` (correct). `xx-wm --welcome` replays the tour only. Throwaway-config wizard is an SSH+GLASS drill, then restore the migrated config.
+- [x] **Build.** Wizard skipped when `default_layout_applied`. `--welcome` is tour-only. Keyboard page Entry uses `osk.attach`; wizard layer-shell starts NONE (PIN is buttons).
 - [ ] **GLASS.** `--welcome` overlay; optional full wizard on a moved `config.json`.
 
 Done when: 3b.1–3b.3 are green on glass (recents, OSK, notifications), the rest of 3b is ticked or has a filed follow-up in this file, and a grim of home + shade + recents-with-a-card is off-device.

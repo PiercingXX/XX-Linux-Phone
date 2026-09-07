@@ -40,6 +40,7 @@ install_data(
     'src/ipc.py',
     'src/shell_log.py',
     'src/notif_daemon.py',
+    'src/osk.py',
     'src/modem_monitor.py',
     'src/app_index.py',
     'src/config.py',

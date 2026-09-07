@@ -111,7 +111,8 @@ long → `gesture.switcher`); a **valid unmapped** value (`camera`, `none`,
 `launch:…`) keeps that slot's `DEFAULT_VERBS` (legacy: short →
 `gesture.keyboard`, long → `gesture.home`). Garbage keys are dropped at
 load, so they take the schema-default path, not `DEFAULT_VERBS`.
-Rebinding applies at the next session start.
+Rebinding restarts lisgd immediately from Settings. If that restart
+fails, it applies at the next session start.
 
 | Gesture | Default | Notes |
 |---|---|---|

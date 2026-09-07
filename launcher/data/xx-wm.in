@@ -39,7 +39,8 @@ if command -v lisgd >/dev/null 2>&1; then
         # invalid values keep DEFAULT_VERBS. Pinned by
         # tests/test_gesture_bindings.py. The subshell keeps the wrapper's
         # own positional parameters (forwarded to main.py below) intact.
-        # Rebinding applies at the next session start.
+        # Rebinding from Settings restarts lisgd in-process; this
+        # session-start path is the fallback.
         (
             set --
             while IFS= read -r _binding; do

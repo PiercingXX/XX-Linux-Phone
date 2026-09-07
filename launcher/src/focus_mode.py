@@ -59,6 +59,24 @@ class FocusState:
         val = self._config.data.get('focus_schedules', [])
         return val if isinstance(val, list) else []
 
+    def set_schedules(self, schedules: list[dict]) -> None:
+        cleaned: list[dict] = []
+        for sched in schedules:
+            if not isinstance(sched, dict):
+                continue
+            days = sched.get('days')
+            start = sched.get('start')
+            end = sched.get('end')
+            if not isinstance(days, list) or not isinstance(start, str) or not isinstance(end, str):
+                continue
+            cleaned.append({
+                'days': [int(d) for d in days if isinstance(d, int)],
+                'start': start,
+                'end': end,
+            })
+        self._config.data['focus_schedules'] = cleaned
+        self._config.save()
+
     @property
     def break_until(self) -> float:
         try:

@@ -139,35 +139,9 @@ def _back_env() -> dict[str, str]:
 
 
 def _set_osk_visible(visible: bool) -> None:
-    """Toggle squeekboard's visibility over D-Bus (headless seam for 20.1).
-
-    Both _show_keyboard() and _hide_keyboard() route through here. It is the
-    headless seam the tap-outside test drives: monkeypatching Gio's
-    bus_get_sync lets a test assert the SetVisible payload without a display.
-    """
-    from gi.repository import Gio
-    try:
-        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        payload = (
-            'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible',
-            GLib.Variant('(b)', (visible,)), None,
-            Gio.DBusCallFlags.NONE,
-        )
-        # Async on the real bus so a slow squeekboard cannot freeze power /
-        # lock / Settings (call_sync with 500ms did). Tests stub only
-        # call_sync, so fall back.
-        async_call = getattr(bus, 'call', None)
-        if callable(async_call):
-            async_call(*payload, 2000, None, None, None)
-        else:
-            bus.call_sync(*payload, 500, None)
-    except Exception as error:
-        # A D-Bus failure (squeekboard absent, bus down) must not crash the
-        # shell, but it is a real fault on a data path — log it rather than
-        # silently dropping the show/hide request.
-        from shell_log import get_logger
-        get_logger('window').warning(
-            'set-OSK-visible(%s) over D-Bus failed: %s', visible, error)
+    """Toggle squeekboard's visibility over D-Bus (headless seam for 20.1)."""
+    from osk import set_visible
+    set_visible(visible)
 
 
 class ShellWindow(Adw.ApplicationWindow):
@@ -202,8 +176,9 @@ class ShellWindow(Adw.ApplicationWindow):
         self.app_index.refresh()
 
         try:
-            from default_layout import apply_default_layout
+            from default_layout import apply_default_layout, compact_unresolved_home
             apply_default_layout(self.config, self.gesture_config)
+            compact_unresolved_home(self.config, self.app_index)
         except Exception:
             pass  # first-boot seeding must never block the shell
 
@@ -230,6 +205,8 @@ class ShellWindow(Adw.ApplicationWindow):
         # ShellWindow.__init__ raced the GTK connection on this compositor.
         self._toplevel_manager = None
         self._raised_for_settings = False
+        self._layer_is_top = False
+        self._search_restore_bottom = False
 
         from modem_monitor import ModemMonitor
         self._modem_monitor = ModemMonitor(
@@ -514,11 +491,13 @@ class ShellWindow(Adw.ApplicationWindow):
         what makes 'swipe up → home' work while an app is open."""
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.set_layer(self, LayerShell.Layer.TOP)
+            self._layer_is_top = True
 
     def drop_to_background(self) -> None:
         """Return the shell to the BOTTOM layer so launched apps show above."""
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.set_layer(self, LayerShell.Layer.BOTTOM)
+            self._layer_is_top = False
 
     def _launch_app_id(self, app_id: str) -> None:
         from gi.repository import Gio
@@ -898,10 +877,21 @@ class ShellWindow(Adw.ApplicationWindow):
     def _arm_search_keyboard(self) -> None:
         self._set_layer_keyboard_exclusive(True)
         self._show_keyboard()
+        # Hop TOP while typing so the drawer search field stays above Colemak
+        # (exclusive-zone 0 on BOTTOM is the intent; the hop is the fallback
+        # when phoc still covers the field). Restore BOTTOM on dismiss unless
+        # Settings already owns the TOP layer.
+        if not getattr(self, '_layer_is_top', False):
+            self._search_restore_bottom = True
+            self.present_over_apps()
 
     def _disarm_search_keyboard(self) -> None:
         self._set_layer_keyboard_exclusive(False)
         self._hide_keyboard()
+        if (getattr(self, '_search_restore_bottom', False)
+                and not getattr(self, '_raised_for_settings', False)):
+            self.drop_to_background()
+        self._search_restore_bottom = False
 
     def _on_entry_keyboard(self, show: bool) -> None:
         if show:
@@ -911,20 +901,8 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _attach_osk(self, widget: Gtk.Widget) -> None:
         """Raise squeekboard when an Entry on this layer-shell window is tapped."""
-        focus = Gtk.EventControllerFocus.new()
-        focus.connect('enter', lambda *_: self._arm_search_keyboard())
-        widget.add_controller(focus)
-        tap = Gtk.GestureClick.new()
-        tap.set_touch_only(False)
-        tap.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-
-        def _pressed(gesture: Gtk.GestureClick, *_args: object) -> None:
-            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-            widget.grab_focus()
-            self._arm_search_keyboard()
-
-        tap.connect('pressed', _pressed)
-        widget.add_controller(tap)
+        from osk import attach
+        attach(widget, on_show=self._arm_search_keyboard)
 
     def _on_search_pressed(self, gesture: Gtk.GestureClick, _n_press: int,
                            _x: float, _y: float) -> None:
@@ -1227,6 +1205,11 @@ class ShellWindow(Adw.ApplicationWindow):
             row.append(change)
             row.append(clear)
             card.append(row)
+        note = Gtk.Label(
+            label='System-level gestures apply immediately. Home swipes stay in-shell.',
+            xalign=0, wrap=True)
+        note.add_css_class('dim-label')
+        card.append(note)
         return card
 
     def _pick_system_gesture(self, anchor: Gtk.Widget, key: str, title: str) -> None:
@@ -1239,10 +1222,27 @@ class ShellWindow(Adw.ApplicationWindow):
     def _set_system_gesture(self, key: str, value: str) -> None:
         self.gesture_config.set(key, value)
         self._refresh_gesture_labels()
+        self._restart_system_gestures()
 
     def _reset_system_gesture(self, key: str) -> None:
         self.gesture_config.reset(key)
         self._refresh_gesture_labels()
+        self._restart_system_gestures()
+
+    def _restart_system_gestures(self) -> None:
+        from gesture_config import GestureConfig
+        if not isinstance(self.gesture_config, GestureConfig):
+            return
+        import shutil
+        from gesture_bindings import restart_lisgd
+        ipc = shutil.which('xx-wm-ipc') or '/usr/bin/xx-wm-ipc'
+        bindir = str(Path(ipc).parent)
+        ok = restart_lisgd(bindir, self.gesture_config)
+        if getattr(self, 'status_label', None) is None:
+            return
+        self._show_status(
+            'System gestures updated.' if ok
+            else 'System gestures apply at the next session.')
 
     def _pick_gesture_app(self, key: str, title: str) -> None:
         self._pick_gesture_key = key

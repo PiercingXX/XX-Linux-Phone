@@ -143,3 +143,11 @@ def test_card_wiring_pins_both_row_sets(window):
     assert '_SYSTEM_GESTURE_TITLES' in src
     assert '_pick_system_gesture' in src
     assert '_reset_system_gesture' in src
+    assert 'System-level gestures apply immediately' in src
+
+
+def test_rebind_restarts_lisgd(window):
+    src = inspect.getsource(window.ShellWindow._set_system_gesture)
+    assert '_restart_system_gestures' in src
+    reset = inspect.getsource(window.ShellWindow._reset_system_gesture)
+    assert '_restart_system_gestures' in reset

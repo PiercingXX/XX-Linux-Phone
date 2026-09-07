@@ -15,13 +15,16 @@ dispatches (_on_ipc_command; the ipc.py protocol line):
 Any other value — shell actions like `camera`, `launch:<app_id>`, `none`,
 or garbage — silently keeps that slot's default verb (config-compat
 invariant: an invalid gestures.json never changes device behavior).
-Rebinding takes effect at the next session start: lisgd reads the
-touchscreen evdev directly and is started once by the session wrapper;
-there is deliberately no live-reload path.
+Rebinding restarts lisgd immediately from Settings. If that restart
+fails, the wrapper's session-start bindings still apply at next login.
 """
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
+import subprocess
+from pathlib import Path
 
 from gesture_config import IPC_VERBS, GestureConfig
 
@@ -68,6 +71,69 @@ def resolve_verb(gc: GestureConfig, slot: str) -> str:
     if mapped is not None:
         return mapped
     return DEFAULT_VERBS[slot]
+
+
+def detect_touch_device(sys_input: Path | None = None) -> str | None:
+    """First evdev node with INPUT_PROP_DIRECT, matching the session wrapper."""
+    override = os.environ.get('PIERCING_TOUCH_DEV')
+    if override:
+        return override
+    root = sys_input or Path('/sys/class/input')
+    try:
+        nodes = sorted(root.glob('event*'))
+    except OSError:
+        return None
+    for syspath in nodes:
+        try:
+            raw = (syspath / 'device' / 'properties').read_text().strip()
+        except OSError:
+            continue
+        if not raw:
+            continue
+        try:
+            value = int(raw, 16)
+        except ValueError:
+            continue
+        if value & 2:
+            return f'/dev/input/{syspath.name}'
+    return None
+
+
+def _kill_lisgd() -> None:
+    subprocess.run(
+        ['pkill', '-x', 'lisgd'], check=False,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def restart_lisgd(
+        bindir: str,
+        gc: GestureConfig | None = None,
+        *,
+        touch_dev: str | None = None,
+        spawn=None,
+        kill_fn=None,
+        which=None) -> bool:
+    """Replace the session lisgd with bindings from the current gestures.json."""
+    touch = detect_touch_device() if touch_dev is None else touch_dev
+    if not touch:
+        return False
+    lisgd = (which or shutil.which)('lisgd')
+    if not lisgd:
+        return False
+    bindings = generate_bindings(bindir, gc)
+    if not bindings:
+        return False
+    argv = [lisgd, '-d', touch]
+    for binding in bindings:
+        argv.extend(['-g', binding])
+    try:
+        (kill_fn or _kill_lisgd)()
+        (spawn or subprocess.Popen)(
+            argv, close_fds=True, start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
 
 
 def generate_bindings(bindir: str, gc: GestureConfig | None = None) -> list[str]:

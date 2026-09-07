@@ -328,6 +328,40 @@ class TestHotspotStateQuery:
 
 # --- Location gating --------------------------------------------------------
 
+class TestHardwareGatedTiles:
+    def test_torch_hidden_without_led(self, monkeypatch):
+        class _Empty:
+            def glob(self, pattern):
+                return iter([])
+
+        monkeypatch.setattr(quick_actions, 'Path', lambda p: _Empty())
+        assert 'torch' not in _panel_keys(_bare_panel())
+
+    def test_auto_brightness_hidden_without_als(self):
+        panel = _bare_panel()
+        panel._als = _FakeALS(available=False)
+        assert 'auto_br' not in _panel_keys(panel)
+
+    def test_auto_brightness_shown_with_als(self):
+        panel = _bare_panel()
+        panel._als = _FakeALS(available=True)
+        assert 'auto_br' in _panel_keys(panel)
+
+    def test_tier1_always_includes_wifi_bt_data_airplane(self, monkeypatch):
+        class _Empty:
+            def glob(self, pattern):
+                return iter([])
+
+        monkeypatch.setattr(quick_actions, 'Path', lambda p: _Empty())
+        monkeypatch.setattr(quick_actions, '_nm_has_wifi_device', lambda: False)
+        keys = _panel_keys(_bare_panel())
+        for key in ('wifi', 'bt', 'data', 'airplane'):
+            assert key in keys
+        assert 'torch' not in keys
+        assert 'auto_br' not in keys
+        assert 'hotspot' not in keys
+
+
 class TestLocationGating:
     def test_tile_appears_when_geoclue_available(self):
         assert 'location' in _panel_keys(_bare_panel())

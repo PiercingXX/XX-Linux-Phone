@@ -33,6 +33,14 @@ class TestActive:
         assert not focus.is_active(MON_NOON, now_ts=1000.0)
 
 
+class TestSetSchedules:
+    def test_round_trips(self, focus):
+        focus.set_schedules([{'days': [0], 'start': '22:00', 'end': '06:30'}])
+        assert focus.schedules == [{'days': [0], 'start': '22:00', 'end': '06:30'}]
+        assert focus.is_active(MON_2300, now_ts=1000.0)
+        assert not focus.is_active(MON_NOON, now_ts=1000.0)
+
+
 class TestBreak:
     def test_break_suspends_focus(self, focus):
         focus.set_enabled(True)

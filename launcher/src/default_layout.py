@@ -278,3 +278,78 @@ def apply_default_layout(config, gestures=None, resolver: DefaultLayoutResolver 
             gestures.set('swipe_left_home', f'launch:{skippy}')
 
     config.set_default_layout_applied(True)
+
+
+def _member_resolves(
+        item: dict,
+        is_installed: Callable[[str], bool],
+        cmd_exists: Callable[[list], bool]) -> bool:
+    app_id = item.get('app_id')
+    cmd = item.get('cmd')
+    if app_id:
+        return bool(is_installed(str(app_id)))
+    if cmd:
+        return bool(cmd_exists(list(cmd)))
+    return True
+
+
+def compact_unresolved_slots(
+        slots: list[dict],
+        is_installed: Callable[[str], bool],
+        cmd_exists: Callable[[list], bool] | None = None) -> list[dict]:
+    """Drop uninstalled app slots/members and empty folders. No re-seed."""
+    cmd_exists = cmd_exists or (lambda cmd: bool(cmd) and shutil.which(cmd[0]) is not None)
+    out: list[dict] = []
+    for slot in slots:
+        stype = slot.get('type')
+        if stype == 'folder':
+            members = [
+                m for m in (slot.get('folder') or [])
+                if _member_resolves(m, is_installed, cmd_exists)
+            ]
+            if members:
+                compacted = dict(slot)
+                compacted['folder'] = members
+                out.append(compacted)
+        elif stype == 'app':
+            if slot.get('app_id') or slot.get('cmd'):
+                if _member_resolves(slot, is_installed, cmd_exists):
+                    out.append(slot)
+        else:
+            out.append(slot)
+    return out
+
+
+def compact_unresolved_home(
+        config, app_index, *,
+        cmd_exists: Callable[[list], bool] | None = None) -> bool:
+    """Rewrite config.home_slots when unresolved ids/cmds are present.
+
+    Built-in members (no app_id, no cmd — the dialer) stay. Returns True
+    when a write happened. Never re-seeds and never sets default_layout_applied.
+    """
+    ids: set[str] = set()
+    for entry in getattr(app_index, 'entries', None) or []:
+        app_id = getattr(entry, 'app_id', '') or ''
+        if not app_id:
+            continue
+        ids.add(app_id)
+        if app_id.endswith('.desktop'):
+            ids.add(app_id[:-8])
+        else:
+            ids.add(f'{app_id}.desktop')
+
+    def is_installed(app_id: str) -> bool:
+        if not app_id:
+            return False
+        if app_id in ids:
+            return True
+        alt = app_id[:-8] if app_id.endswith('.desktop') else f'{app_id}.desktop'
+        return alt in ids
+
+    current = list(config.home_slots)
+    compacted = compact_unresolved_slots(current, is_installed, cmd_exists)
+    if compacted != current:
+        config.set_home_slots(compacted)
+        return True
+    return False

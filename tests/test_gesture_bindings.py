@@ -15,7 +15,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
 import gesture_config
-from gesture_bindings import ACTION_TO_VERB, DEFAULT_VERBS, generate_bindings
+from gesture_bindings import (
+    ACTION_TO_VERB, DEFAULT_VERBS, detect_touch_device, generate_bindings,
+    restart_lisgd,
+)
 from gesture_config import GestureConfig
 
 # Schema defaults are action names (home, app_switcher, …). Those now
@@ -156,6 +159,49 @@ class TestGestureConfigVerbValues:
         (tmp_path / 'gestures.json').write_text('{"squeeze": "gesture.home"}',
                                                 encoding='utf-8')
         assert GestureConfig().get('squeeze') == 'assistant'
+
+
+class TestLisgdRestart:
+    def test_detects_direct_touch(self, tmp_path, monkeypatch):
+        monkeypatch.delenv('PIERCING_TOUCH_DEV', raising=False)
+        node = tmp_path / 'event6'
+        (node / 'device').mkdir(parents=True)
+        (node / 'device' / 'properties').write_text('2\n')
+        assert detect_touch_device(tmp_path) == '/dev/input/event6'
+
+    def test_skips_non_direct(self, tmp_path, monkeypatch):
+        monkeypatch.delenv('PIERCING_TOUCH_DEV', raising=False)
+        node = tmp_path / 'event1'
+        (node / 'device').mkdir(parents=True)
+        (node / 'device' / 'properties').write_text('0\n')
+        assert detect_touch_device(tmp_path) is None
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv('PIERCING_TOUCH_DEV', '/dev/input/event9')
+        assert detect_touch_device() == '/dev/input/event9'
+
+    def test_restart_spawns_lisgd_with_bindings(self):
+        spawned: list[list[str]] = []
+        killed: list[bool] = []
+        assert restart_lisgd(
+            '/usr/bin',
+            touch_dev='/dev/input/event6',
+            spawn=lambda argv, **_k: spawned.append(argv),
+            kill_fn=lambda: killed.append(True),
+            which=lambda name: '/usr/bin/lisgd' if name == 'lisgd' else None,
+        )
+        assert killed == [True]
+        assert spawned[0][:4] == ['/usr/bin/lisgd', '-d', '/dev/input/event6', '-g']
+        assert spawned[0][4].endswith('gesture.switcher')
+
+    def test_restart_fails_without_touch(self):
+        assert restart_lisgd(
+            '/usr/bin',
+            touch_dev='',
+            spawn=lambda *_a, **_k: None,
+            kill_fn=lambda: None,
+            which=lambda _n: '/usr/bin/lisgd',
+        ) is False
 
 
 class TestCli:
