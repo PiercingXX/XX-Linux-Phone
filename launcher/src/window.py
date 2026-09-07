@@ -969,6 +969,9 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _show_switcher(self) -> None:
         self._disarm_search_keyboard()
+        if self._switcher is not None and self._switcher.get_visible():
+            self._switcher.hide_switcher()
+            return
         manager = self._ensure_toplevel_manager()
         if self._switcher is None:
             from app_switcher import AppSwitcher

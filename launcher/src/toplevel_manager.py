@@ -12,6 +12,9 @@ still show "No open apps".
 from __future__ import annotations
 
 import logging
+import os
+import queue
+import select
 import threading
 from dataclasses import dataclass
 
@@ -94,6 +97,9 @@ class WaylandToplevelBackend:
         self._info: dict[object, list[str]] = {}
         self._manager_cb = None
         self._fd_source = None
+        self._requests: queue.Queue = queue.Queue()
+        self._wakeup_r: int | None = None
+        self._wakeup_w: int | None = None
         self._connect()
 
     def _connect(self) -> None:
@@ -110,6 +116,8 @@ class WaylandToplevelBackend:
         # that lists Calculator from a standalone python process.
         # FakeDisplay tests stay on the GLib pump (dispatch does not block).
         if self._is_real_display():
+            self._wakeup_r, self._wakeup_w = os.pipe()
+            os.set_blocking(self._wakeup_r, False)
             self._thread = threading.Thread(
                 target=self._thread_loop, daemon=True, name='xx-wm-toplevel')
             self._thread.start()
@@ -122,23 +130,58 @@ class WaylandToplevelBackend:
         return cls.__name__ == 'Display' and 'pywayland' in (cls.__module__ or '')
 
     def _thread_loop(self) -> None:
+        # Do not block on the wayland fd: activate/close are queued from
+        # the GTK thread and must run on this Display. A blocking wait
+        # would sit on the fd and ignore those requests until some
+        # unrelated compositor event arrived — card tap looked like a no-op.
         try:
             self._display.flush()
         except Exception:
             pass
+        get_fd = getattr(self._display, 'get_fd', None)
+        wl_fd = get_fd() if callable(get_fd) else None
         while True:
+            self._drain_requests()
             try:
-                self._display.dispatch(block=True)
                 self._display.flush()
+            except Exception:
+                pass
+            fds = []
+            if wl_fd is not None:
+                fds.append(wl_fd)
+            if self._wakeup_r is not None:
+                fds.append(self._wakeup_r)
+            try:
+                ready, _, _ = select.select(fds, [], [], 0.25)
             except Exception as exc:  # noqa: BLE001
-                msg = str(exc)
-                if '11' in msg or 'EAGAIN' in msg.upper():
-                    continue
-                if 'has no event' in msg:
-                    log.warning('wayland event skipped: %s', exc)
-                    continue
-                log.error('wayland thread dispatch failed: %s', exc)
+                log.error('wayland thread select failed: %s', exc)
                 return
+            if self._wakeup_r is not None and self._wakeup_r in ready:
+                try:
+                    os.read(self._wakeup_r, 64)
+                except BlockingIOError:
+                    pass
+                self._drain_requests()
+                try:
+                    self._display.flush()
+                except Exception:
+                    pass
+            if wl_fd is not None and wl_fd in ready:
+                try:
+                    self._display.dispatch(block=False)
+                except Exception as exc:  # noqa: BLE001
+                    msg = str(exc)
+                    if '11' in msg or 'EAGAIN' in msg.upper():
+                        pass
+                    elif 'has no event' in msg:
+                        log.warning('wayland event skipped: %s', exc)
+                    else:
+                        log.error('wayland thread dispatch failed: %s', exc)
+                        return
+                try:
+                    self._display.flush()
+                except Exception:
+                    pass
 
     def _arm_pump(self) -> None:
         import gi
@@ -267,21 +310,47 @@ class WaylandToplevelBackend:
     def connect(self, callback) -> None:
         self._manager_cb = callback
 
-    def activate(self, handle: object) -> None:
+    def _drain_requests(self) -> None:
+        while True:
+            try:
+                op, handle = self._requests.get_nowait()
+            except queue.Empty:
+                return
+            self._apply_request(op, handle)
+
+    def _apply_request(self, op: str, handle: object) -> None:
         toplevel = self._handles.get(handle)
         if toplevel is None:
+            log.warning('toplevel %s %r: handle gone', op, handle)
             return
-        if self._seat is None:
-            log.warning('cannot activate %r: no wl_seat bound', handle)
+        try:
+            if op == 'activate':
+                if self._seat is None:
+                    log.warning('cannot activate %r: no wl_seat bound', handle)
+                    return
+                toplevel.activate(self._seat)
+            elif op == 'close':
+                toplevel.close()
+            self._display.flush()
+        except Exception as exc:  # noqa: BLE001
+            log.warning('toplevel %s %r failed: %s', op, handle, exc)
+
+    def _wakeup(self) -> None:
+        if self._wakeup_w is None:
+            self._drain_requests()
             return
-        toplevel.activate(self._seat)
-        self._display.flush()
+        try:
+            os.write(self._wakeup_w, b'\0')
+        except OSError:
+            pass
+
+    def activate(self, handle: object) -> None:
+        self._requests.put(('activate', handle))
+        self._wakeup()
 
     def close(self, handle: object) -> None:
-        toplevel = self._handles.get(handle)
-        if toplevel is not None:
-            toplevel.close()
-            self._display.flush()
+        self._requests.put(('close', handle))
+        self._wakeup()
 
 
 class ToplevelManager:

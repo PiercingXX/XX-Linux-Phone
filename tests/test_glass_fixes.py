@@ -85,6 +85,35 @@ def test_show_switcher_uses_live_manager():
     body = WINDOW_SRC.split('def _show_switcher')[1].split('def _build_apps_page')[0]
     assert 'AppSwitcher(manager=manager' in body
     assert '_ensure_toplevel_manager()' in body
+    assert 'hide_switcher()' in body
+    assert 'get_visible()' in body
+
+
+def test_switcher_has_close_button_and_tappable_cards():
+    assert "label='▲ Close'" in SWITCHER_SRC
+    assert 'def _on_card_tap' in SWITCHER_SRC
+    make = SWITCHER_SRC.split('def _make_card')[1].split('def _on_card_drag')[0]
+    assert 'Gtk.Button()' not in make
+    assert 'GestureClick' in make
+    show = SWITCHER_SRC.split('def show_switcher')[1].split('def hide_switcher')[0]
+    assert 'KeyboardMode.EXCLUSIVE' in show
+    hide = SWITCHER_SRC.split('def hide_switcher')[1]
+    assert 'KeyboardMode.NONE' in hide
+
+
+def test_toplevel_activate_is_queued_to_wayland_thread():
+    src = (ROOT / 'launcher' / 'src' / 'toplevel_manager.py').read_text(
+        encoding='utf-8')
+    backend = src.split('class WaylandToplevelBackend')[1].split(
+        'class ToplevelManager')[0]
+    public = backend.split('def activate(self, handle')[1].split(
+        'def close(self, handle')[0]
+    assert "_requests.put(('activate'" in public
+    assert 'toplevel.activate' not in public
+    assert 'def _apply_request' in backend
+    assert 'select.select' in backend
+    thread = src.split('def _thread_loop')[1].split('def _arm_pump')[0]
+    assert 'dispatch(block=True)' not in thread
 
 
 def test_open_settings_hops_over_apps():
@@ -106,9 +135,10 @@ def test_toplevel_manager_never_blocks_gtk_thread():
     assert 'self._display.roundtrip()' not in src
     assert '_FOREIGN_TOPLEVEL_BIND_VERSION = 1' in src
     assert 'def _thread_loop' in src
-    # Blocking dispatch is confined to the dedicated wayland thread.
     connect = src.split('def _connect')[1].split('def _is_real_display')[0]
     assert 'dispatch(block=True)' not in connect
+    thread = src.split('def _thread_loop')[1].split('def _arm_pump')[0]
+    assert 'dispatch(block=True)' not in thread
 
 
 def test_shade_settings_hides_immediately():

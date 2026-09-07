@@ -154,12 +154,15 @@ class AppSwitcher(_AppSwitcherBase):
             LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
             LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
             LayerShell.set_exclusive_zone(self, 0)
+            # NONE while hidden; show_switcher flips EXCLUSIVE so Escape
+            # and taps reach this overlay (phoc v3 has no ON_DEMAND).
             LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
         else:
             self.set_default_size(420, 320)
 
         self._manager = manager if manager is not None else ToplevelManager()
         self._apps: list[AppInfo] = []
+        self._card_swiping = False
 
         self._theme_provider = Gtk.CssProvider()
         self._theme_provider.load_from_data(
@@ -231,8 +234,16 @@ class AppSwitcher(_AppSwitcherBase):
         scroller.set_child(self.card_box)
         scroller.set_min_content_height(220)
 
+        close_btn = Gtk.Button(label='▲ Close')
+        close_btn.add_css_class('flat')
+        close_btn.add_css_class('switcher-header')
+        close_btn.set_halign(Gtk.Align.CENTER)
+        close_btn.set_margin_top(8)
+        close_btn.connect('clicked', lambda _b: self.hide_switcher())
+
         root.append(header)
         root.append(scroller)
+        root.append(close_btn)
         return root
 
     def refresh(self, apps: list[AppInfo] | None = None) -> None:
@@ -308,19 +319,33 @@ class AppSwitcher(_AppSwitcherBase):
 
         kill_btn = Gtk.Button(label='×')
         kill_btn.add_css_class('card-kill')
-        kill_btn.connect('clicked', lambda _b, a=app: self._kill_app(a))
         kill_btn.set_halign(Gtk.Align.END)
+        kill_claim = Gtk.GestureClick.new()
+        kill_claim.connect(
+            'pressed',
+            lambda g, *_: g.set_state(Gtk.EventSequenceState.CLAIMED),
+        )
+        kill_btn.add_controller(kill_claim)
+        kill_btn.connect('clicked', lambda _b, a=app: self._kill_app(a))
 
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         inner.add_css_class('app-card')
         inner.append(kill_btn)
         inner.append(name_label)
 
-        # Swipe up to dismiss card
+        # A wrapping Gtk.Button never saw clicked: the inner GestureDrag
+        # stole the sequence. Tap is a click on the card; swipe-up kills.
+        click = Gtk.GestureClick.new()
+        click.connect(
+            'released',
+            lambda _g, _n, _x, _y, a=app: self._on_card_tap(a),
+        )
+        inner.add_controller(click)
+
         drag = Gtk.GestureDrag()
         drag.connect(
             'drag-update',
-            lambda _g, _dx, dy, card=inner: self._on_card_drag(card, dy),
+            lambda g, _dx, dy, card=inner: self._on_card_drag(g, card, dy),
         )
         drag.connect(
             'drag-end',
@@ -328,22 +353,27 @@ class AppSwitcher(_AppSwitcherBase):
         )
         inner.add_controller(drag)
 
-        focus_btn = Gtk.Button()
-        focus_btn.add_css_class('flat')
-        focus_btn.set_child(inner)
-        focus_btn.connect('clicked', lambda _b, a=app: self._focus_app(a))
+        return inner
 
-        return focus_btn
-
-    def _on_card_drag(self, card: Gtk.Box, dy: float) -> None:
+    def _on_card_drag(self, gesture: Gtk.GestureDrag, card: Gtk.Box, dy: float) -> None:
+        if dy < -20:
+            self._card_swiping = True
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         if dy < 0:
             card.set_margin_bottom(max(0, int(abs(dy))))
 
     def _on_card_drag_end(self, dy: float, app: AppInfo) -> None:
+        swiping = self._card_swiping
+        self._card_swiping = False
         if dy < -_SWIPE_DISMISS_THRESHOLD:
             self._kill_app(app)
-        else:
+        elif swiping:
             self._rebuild_cards()
+
+    def _on_card_tap(self, app: AppInfo) -> None:
+        if self._card_swiping:
+            return
+        self._focus_app(app)
 
     def _focus_app(self, app: AppInfo) -> None:
         self._focus_app_with_manager(self._manager, app)
@@ -366,9 +396,13 @@ class AppSwitcher(_AppSwitcherBase):
 
     def show_switcher(self) -> None:
         self.refresh()
+        if _LAYER_SHELL and LayerShell.is_supported():
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.EXCLUSIVE)
         self.set_visible(True)
         self.present()
 
     def hide_switcher(self) -> None:
+        if _LAYER_SHELL and LayerShell.is_supported():
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
         self.set_visible(False)
         self.hide()
