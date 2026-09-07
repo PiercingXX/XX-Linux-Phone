@@ -27,11 +27,13 @@ class AppItemActions:
     def __init__(self, config: ShellConfig,
                  on_changed: Callable[[], None],
                  on_status: Callable[[str], None],
-                 focus_state: object | None = None) -> None:
+                 focus_state: object | None = None,
+                 on_keyboard: Callable[[bool], None] | None = None) -> None:
         self._config = config
         self._on_changed = on_changed
         self._on_status = on_status
         self._focus = focus_state
+        self._on_keyboard = on_keyboard
 
     # -- popover plumbing --------------------------------------------------
 
@@ -81,6 +83,9 @@ class AppItemActions:
         entry = Gtk.Entry()
         entry.set_text(initial)
         entry.select_region(0, -1)
+        if self._title_is_password(title):
+            entry.set_visibility(False)
+            entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
         commit_btn = Gtk.Button(label=commit_label)
         commit_btn.add_css_class('flat')
         commit_btn.add_css_class('menu-action')
@@ -96,9 +101,20 @@ class AppItemActions:
             if text:
                 on_commit(text)
 
+        def _closed(_p: Gtk.Popover) -> None:
+            if callable(self._on_keyboard):
+                self._on_keyboard(False)
+
         entry.connect('activate', _commit)
         commit_btn.connect('clicked', _commit)
+        popover.connect('closed', _closed)
         entry.grab_focus()
+        if callable(self._on_keyboard):
+            self._on_keyboard(True)
+
+    @staticmethod
+    def _title_is_password(title: str) -> bool:
+        return 'password' in title.casefold()
 
     # -- drawer app rows ---------------------------------------------------
 

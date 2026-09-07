@@ -257,6 +257,7 @@ class ShellWindow(Adw.ApplicationWindow):
             on_changed=self._refresh_after_item_action,
             on_status=self._show_status,
             focus_state=self.focus_state,
+            on_keyboard=self._on_entry_keyboard,
         )
 
         # Right-aligned flat search, as in the PiercingXX Android launcher
@@ -897,6 +898,29 @@ class ShellWindow(Adw.ApplicationWindow):
         self._set_layer_keyboard_exclusive(False)
         self._hide_keyboard()
 
+    def _on_entry_keyboard(self, show: bool) -> None:
+        if show:
+            self._arm_search_keyboard()
+        else:
+            self._disarm_search_keyboard()
+
+    def _attach_osk(self, widget: Gtk.Widget) -> None:
+        """Raise squeekboard when an Entry on this layer-shell window is tapped."""
+        focus = Gtk.EventControllerFocus.new()
+        focus.connect('enter', lambda *_: self._arm_search_keyboard())
+        widget.add_controller(focus)
+        tap = Gtk.GestureClick.new()
+        tap.set_touch_only(False)
+        tap.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+
+        def _pressed(gesture: Gtk.GestureClick, *_args: object) -> None:
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            widget.grab_focus()
+            self._arm_search_keyboard()
+
+        tap.connect('pressed', _pressed)
+        widget.add_controller(tap)
+
     def _on_search_pressed(self, gesture: Gtk.GestureClick, _n_press: int,
                            _x: float, _y: float) -> None:
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
@@ -1382,6 +1406,9 @@ class ShellWindow(Adw.ApplicationWindow):
         self.apn_pass_entry.set_visibility(False)
         self.apn_pass_entry.set_placeholder_text('Password (leave blank if none)')
         self.apn_pass_entry.set_text(self.config.data.get('apn_pass', ''))
+        self._attach_osk(self.apn_entry)
+        self._attach_osk(self.apn_user_entry)
+        self._attach_osk(self.apn_pass_entry)
 
         apn_save_btn = Gtk.Button(label='Save APN')
         apn_save_btn.add_css_class('flat')

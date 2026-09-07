@@ -43,6 +43,21 @@ def actions(config):
     return act
 
 
+class TestPasswordDialog:
+    def test_wifi_title_is_a_password_field(self):
+        assert AppItemActions._title_is_password('Password for HomeNet') is True
+
+    def test_rename_title_is_not_a_password_field(self):
+        assert AppItemActions._title_is_password('Rename') is False
+
+    def test_entry_dialog_source_raises_osk(self):
+        src = Path(__file__).parent.parent.joinpath(
+            'launcher', 'src', 'app_item_actions.py').read_text(encoding='utf-8')
+        assert 'on_keyboard' in src
+        assert 'InputPurpose.PASSWORD' in src
+        assert 'self._on_keyboard(True)' in src
+
+
 class TestRenameInSlots:
     def test_updates_app_slot_and_folder_member(self, actions, config):
         actions._rename_in_slots('calc.desktop', 'Sums')

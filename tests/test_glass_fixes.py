@@ -120,6 +120,12 @@ def test_sliders_are_not_hidden_at_build():
     assert 'sliders_box.set_visible' not in expand
 
 
+def test_wifi_password_dialog_is_wired_to_osk():
+    assert 'on_keyboard=self._on_entry_keyboard' in WINDOW_SRC
+    assert 'def _attach_osk' in WINDOW_SRC
+    assert '_attach_osk(self.apn_pass_entry)' in WINDOW_SRC
+
+
 def test_appearance_card_is_on_settings_page():
     assert 'def _build_appearance_card' in WINDOW_SRC
     assert 'def _on_theme_picked' in WINDOW_SRC
