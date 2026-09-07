@@ -50,6 +50,8 @@ install_data(
     'src/hud.py',
     'src/lock_lines.py',
     'src/toplevel_manager.py',
+    'src/thumbnail_store.py',
+    'src/output_capture.py',
     'src/default_layout.py',
     'src/backup.py',
     'src/update_checker.py',
@@ -94,6 +96,7 @@ install_data(
 install_data(
   'data/wayland.xml',
   'data/wlr-foreign-toplevel-management-unstable-v1.xml',
+  'data/wlr-screencopy-unstable-v1.xml',
   install_dir: shell_datadir,
 )
 
@@ -105,6 +108,7 @@ install_data(
   'src/wayland_proto/__init__.py',
   'src/wayland_proto/wayland.py',
   'src/wayland_proto/wlr_foreign_toplevel_management_unstable_v1.py',
+  'src/wayland_proto/wlr_screencopy_unstable_v1.py',
   install_dir: join_paths(shell_datadir, 'wayland_proto'),
 )
 

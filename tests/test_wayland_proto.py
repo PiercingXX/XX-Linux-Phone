@@ -69,6 +69,9 @@ def test_vendored_modules_import_and_expose_protocol_classes() -> None:
     assert wayland.WlSeat.name == 'wl_seat'
     assert wlr.ZwlrForeignToplevelManagerV1.name == 'zwlr_foreign_toplevel_manager_v1'
     assert wlr.ZwlrForeignToplevelHandleV1.name == 'zwlr_foreign_toplevel_handle_v1'
+    copy = importlib.import_module('wayland_proto.wlr_screencopy_unstable_v1')
+    assert copy.ZwlrScreencopyManagerV1.name == 'zwlr_screencopy_manager_v1'
+    assert callable(copy.ZwlrScreencopyManagerV1Proxy.capture_output)
     for cls in (
         wayland.WlSeat,
         wlr.ZwlrForeignToplevelManagerV1,
@@ -92,7 +95,11 @@ def test_proto_init_patches_nongeneric_global() -> None:
 
 def test_generated_files_carry_provenance_header() -> None:
     proto_dir = Path(__file__).parent.parent / 'launcher' / 'src' / 'wayland_proto'
-    for name in ('wayland.py', 'wlr_foreign_toplevel_management_unstable_v1.py'):
+    for name in (
+        'wayland.py',
+        'wlr_foreign_toplevel_management_unstable_v1.py',
+        'wlr_screencopy_unstable_v1.py',
+    ):
         text = (proto_dir / name).read_text()
         assert 'do not edit' in text.lower(), f'{name} missing do-not-edit header'
         assert 'pywayland' in text and 'scanner' in text, f'{name} missing generator version'

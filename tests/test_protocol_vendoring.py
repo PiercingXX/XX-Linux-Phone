@@ -13,6 +13,7 @@ import pytest
 LAUNCHER_DATA = Path(__file__).parent.parent / 'launcher' / 'data'
 
 WLR_XML = LAUNCHER_DATA / 'wlr-foreign-toplevel-management-unstable-v1.xml'
+WLR_SCREENCOPY_XML = LAUNCHER_DATA / 'wlr-screencopy-unstable-v1.xml'
 WAYLAND_XML = LAUNCHER_DATA / 'wayland.xml'
 
 # All core Wayland interfaces the vendored wayland.xml must declare.
@@ -47,12 +48,12 @@ def _interface_names(path: Path) -> set[str]:
     return {iface.get('name') for iface in root.findall('interface')}
 
 
-@pytest.mark.parametrize('path', [WLR_XML, WAYLAND_XML])
+@pytest.mark.parametrize('path', [WLR_XML, WLR_SCREENCOPY_XML, WAYLAND_XML])
 def test_xml_file_exists(path: Path) -> None:
     assert path.is_file(), f'vendored protocol XML missing: {path}'
 
 
-@pytest.mark.parametrize('path', [WLR_XML, WAYLAND_XML])
+@pytest.mark.parametrize('path', [WLR_XML, WLR_SCREENCOPY_XML, WAYLAND_XML])
 def test_xml_is_well_formed(path: Path) -> None:
     # Raises ET.ParseError if the file is not well-formed XML.
     ET.parse(path)
@@ -62,6 +63,12 @@ def test_wlr_xml_declares_both_toplevel_interfaces() -> None:
     names = _interface_names(WLR_XML)
     assert 'zwlr_foreign_toplevel_manager_v1' in names
     assert 'zwlr_foreign_toplevel_handle_v1' in names
+
+
+def test_screencopy_xml_declares_manager_and_frame() -> None:
+    names = _interface_names(WLR_SCREENCOPY_XML)
+    assert 'zwlr_screencopy_manager_v1' in names
+    assert 'zwlr_screencopy_frame_v1' in names
 
 
 def test_wayland_xml_declares_all_core_interfaces() -> None:

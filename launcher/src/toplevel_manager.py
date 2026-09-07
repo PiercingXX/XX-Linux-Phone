@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 # The shell's own surfaces must never appear in the switcher.
 _OWN_APP_ID = 'io.piercingxx.XXWM'
+_STATE_ACTIVATED = 2
 
 # Bind v1 only. phoc 0.56 still sends handle event 7 (`parent`, protocol v2+);
 # the vendored scanner output only knows events 0–6, and pywayland then
@@ -95,6 +96,7 @@ class WaylandToplevelBackend:
         self._handles: dict[object, object] = {}
         self._info: dict[object, list[str]] = {}
         self._manager_cb = None
+        self._focus_cb = None
         self._fd_source = None
         self._thread: threading.Thread | None = None
         self._wl_registry: object | None = None
@@ -297,8 +299,11 @@ class WaylandToplevelBackend:
         info[0] = app_id
         self._upsert(id(toplevel), info[0], info[1])
 
-    def _on_state(self, toplevel, _state) -> None:
-        pass
+    def _on_state(self, toplevel, state) -> None:
+        activated = _STATE_ACTIVATED in _parse_states(state)
+        cb = getattr(self, '_focus_cb', None)
+        if cb is not None:
+            cb(id(toplevel), activated)
 
     def _on_output_enter(self, toplevel, _output) -> None:
         pass
@@ -355,6 +360,9 @@ class WaylandToplevelBackend:
             self._thread = threading.Thread(
                 target=self._thread_loop, daemon=True, name='xx-wm-toplevel')
             self._thread.start()
+
+    def connect_focus(self, callback) -> None:
+        self._focus_cb = callback
 
     def _replay_handles(self) -> None:
         for handle in list(self._handles):
@@ -444,10 +452,14 @@ class ToplevelManager:
         self._registry: dict[object, Toplevel] = {}
         self._callbacks: list[object] = []
         self._lock = threading.Lock()
+        self._activated: object | None = None
         if backend is not None:
             # Bind before the first globals arrive: the backend is now
             # non-blocking, so available() may still be False at construct.
             backend.connect(self._on_backend_event)
+            connect_focus = getattr(backend, 'connect_focus', None)
+            if callable(connect_focus):
+                connect_focus(self._on_focus)
 
     @property
     def available(self) -> bool:
@@ -458,6 +470,14 @@ class ToplevelManager:
         """Current toplevels, own surfaces filtered out, insertion-ordered."""
         with self._lock:
             return [t for t in self._registry.values() if t.app_id != _OWN_APP_ID]
+
+    def activated_app_id(self) -> str | None:
+        """app_id of the focused foreign toplevel, or None."""
+        with self._lock:
+            t = self._registry.get(self._activated)
+        if t is None or t.app_id == _OWN_APP_ID or not t.app_id:
+            return None
+        return t.app_id
 
     def activate(self, handle: object) -> None:
         if self._backend is not None and self._backend.available():
@@ -478,11 +498,15 @@ class ToplevelManager:
         old = self._backend
         with self._lock:
             self._registry.clear()
+            self._activated = None
         if backend is None:
             backend = _make_default_backend()
         self._backend = backend
         if backend is not None:
             backend.connect(self._on_backend_event)
+            connect_focus = getattr(backend, 'connect_focus', None)
+            if callable(connect_focus):
+                connect_focus(self._on_focus)
         closer = getattr(old, 'shutdown', None)
         if callable(closer) and old is not backend:
             closer()
@@ -510,15 +534,44 @@ class ToplevelManager:
             except Exception as exc:  # noqa: BLE001 - one bad callback must not break the registry
                 log.error('toplevel change callback failed: %s', exc)
 
+    def _on_focus(self, handle: object, activated: bool) -> None:
+        with self._lock:
+            if activated:
+                self._activated = handle
+            elif self._activated == handle:
+                self._activated = None
+
     def _on_backend_event(self, handle: object, app_id: object, title: object) -> None:
         with self._lock:
             if app_id is None:
                 self._registry.pop(handle, None)
+                if self._activated == handle:
+                    self._activated = None
             else:
                 self._registry[handle] = Toplevel(
                     app_id=app_id, title=title or '', handle=handle,
                 )
         self._notify()
+
+
+def _parse_states(state: object) -> set[int]:
+    if state is None:
+        return set()
+    if isinstance(state, (bytes, bytearray, memoryview)):
+        raw = bytes(state)
+        return {
+            int.from_bytes(raw[i:i + 4], 'little')
+            for i in range(0, len(raw) - 3, 4)
+        }
+    if isinstance(state, (list, tuple, set)):
+        out: set[int] = set()
+        for item in state:
+            try:
+                out.add(int(item))
+            except (TypeError, ValueError):
+                continue
+        return out
+    return set()
 
 
 def _make_default_backend() -> object | None:

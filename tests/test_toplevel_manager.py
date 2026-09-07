@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
-from toplevel_manager import Toplevel, ToplevelManager
+from toplevel_manager import Toplevel, ToplevelManager, _parse_states
 
 
 class FakeBackend:
@@ -20,6 +20,7 @@ class FakeBackend:
     def __init__(self, available: bool = True) -> None:
         self._available = available
         self._callback = None
+        self._focus_cb = None
         self.activated: list[object] = []
         self.closed: list[object] = []
 
@@ -34,6 +35,13 @@ class FakeBackend:
 
     def close(self, handle: object) -> None:
         self.closed.append(handle)
+
+    def connect_focus(self, callback) -> None:
+        self._focus_cb = callback
+
+    def focus(self, handle: object, activated: bool = True) -> None:
+        if self._focus_cb is not None:
+            self._focus_cb(handle, activated)
 
     # -- test drivers ------------------------------------------------------
 
@@ -158,6 +166,25 @@ def test_bad_callback_does_not_break_registry(backend: FakeBackend, manager: Top
     manager.on_change(boom)
     backend.add('h1', 'org.a.App', 'A')  # must not raise
     assert [t.handle for t in manager.list()] == ['h1']
+
+
+def test_parse_states_bytes_and_list() -> None:
+    assert _parse_states(None) == set()
+    assert 2 in _parse_states((2).to_bytes(4, 'little'))
+    assert _parse_states([0, 2]) == {0, 2}
+
+
+def test_activated_app_id_tracks_focus(backend: FakeBackend, manager: ToplevelManager) -> None:
+    backend.add('h1', 'org.gnome.Calculator', 'Calculator')
+    backend.add('h2', 'io.piercingxx.XXWM', 'Shell')
+    assert manager.activated_app_id() is None
+    backend.focus('h1', True)
+    assert manager.activated_app_id() == 'org.gnome.Calculator'
+    backend.focus('h2', True)
+    assert manager.activated_app_id() is None
+    backend.focus('h1', True)
+    backend.remove('h1')
+    assert manager.activated_app_id() is None
 
 
 def test_resync_clears_registry_and_accepts_new_backend() -> None:

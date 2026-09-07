@@ -88,11 +88,18 @@ window.switcher-window {{
 .app-card {{
     background: {preset.surface};
     border-radius: 20px;
-    padding: 20px 16px;
-    min-width: 140px;
-    min-height: 180px;
+    padding: 16px 12px 12px 12px;
+    min-width: 148px;
+    max-width: 168px;
+    min-height: 220px;
 }}
 .app-card:hover, .app-card:focus {{ background: {preset.surface_alt}; }}
+.app-card-thumb {{
+    min-width: 124px;
+    min-height: 168px;
+    max-height: 200px;
+    border-radius: 12px;
+}}
 .card-name {{
     font-size: 13pt;
     font-weight: 400;
@@ -135,7 +142,8 @@ class AppSwitcher(_AppSwitcherBase):
     """
 
     def __init__(self, manager: ToplevelManager | None = None,
-                 config: ShellConfig | None = None) -> None:
+                 config: ShellConfig | None = None,
+                 thumbnails: object | None = None) -> None:
         super().__init__(title='PiercingXX Switcher')
         self.add_css_class('switcher-window')
 
@@ -161,6 +169,7 @@ class AppSwitcher(_AppSwitcherBase):
             self.set_default_size(420, 320)
 
         self._manager = manager if manager is not None else ToplevelManager()
+        self._thumbs = thumbnails
         self._apps: list[AppInfo] = []
         self._card_swiping = False
 
@@ -180,6 +189,8 @@ class AppSwitcher(_AppSwitcherBase):
 
         self._wire_change(self._manager, self.refresh)
         self._manager_wired = True
+        if thumbnails is not None and hasattr(thumbnails, 'on_change'):
+            thumbnails.on_change(self.refresh)
         self.refresh()
 
         swipe = Gtk.GestureSwipe.new()
@@ -324,11 +335,40 @@ class AppSwitcher(_AppSwitcherBase):
         for app in self._apps:
             self.card_box.append(self._make_card(app))
 
+    @staticmethod
+    def _thumb_for_app(store: object | None, app: AppInfo) -> object | None:
+        """Headless seam: last-seen still for this app, if the store has one."""
+        getter = getattr(store, 'get', None)
+        if getter is None:
+            return None
+        return getter(app.app_id)
+
+    @staticmethod
+    def _texture_for_thumb(thumb: object) -> object | None:
+        if thumb is None or Gdk is None:
+            return None
+        from gi.repository import GLib
+        width = int(getattr(thumb, 'width', 0))
+        height = int(getattr(thumb, 'height', 0))
+        rgba = getattr(thumb, 'rgba', b'')
+        if width <= 0 or height <= 0 or not rgba:
+            return None
+        fmt = getattr(Gdk, 'MemoryFormat', None)
+        if fmt is None:
+            return None
+        mem = getattr(fmt, 'R8G8B8A8', None) or getattr(fmt, 'R8G8B8A8_PREMULTIPLIED', None)
+        if mem is None:
+            return None
+        try:
+            return Gdk.MemoryTexture.new(
+                width, height, mem, GLib.Bytes.new(rgba), width * 4)
+        except Exception:
+            return None
+
     def _make_card(self, app: AppInfo) -> Gtk.Widget:
         name_label = Gtk.Label(label=self._card_title(app), wrap=True, max_width_chars=12)
         name_label.add_css_class('card-name')
         name_label.set_valign(Gtk.Align.END)
-        name_label.set_vexpand(True)
 
         kill_btn = Gtk.Button(label='×')
         kill_btn.add_css_class('card-kill')
@@ -343,7 +383,26 @@ class AppSwitcher(_AppSwitcherBase):
 
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         inner.add_css_class('app-card')
+        inner.set_hexpand(False)
+        inner.set_vexpand(False)
+        inner.set_valign(Gtk.Align.END)
+        inner.set_size_request(148, 252)
         inner.append(kill_btn)
+        texture = self._texture_for_thumb(self._thumb_for_app(self._thumbs, app))
+        if texture is not None:
+            pic = Gtk.Picture.new_for_paintable(texture)
+            pic.add_css_class('app-card-thumb')
+            pic.set_hexpand(True)
+            pic.set_vexpand(False)
+            pic.set_can_shrink(True)
+            pic.set_size_request(124, 196)
+            fit = getattr(Gtk, 'ContentFit', None)
+            if fit is not None:
+                pic.set_content_fit(fit.COVER)
+            inner.append(pic)
+            name_label.set_vexpand(False)
+        else:
+            name_label.set_vexpand(True)
         inner.append(name_label)
 
         # A wrapping Gtk.Button never saw clicked: the inner GestureDrag

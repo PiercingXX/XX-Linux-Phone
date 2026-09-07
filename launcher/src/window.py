@@ -204,6 +204,8 @@ class ShellWindow(Adw.ApplicationWindow):
         # Built on first switcher open: a second pywayland Display in
         # ShellWindow.__init__ raced the GTK connection on this compositor.
         self._toplevel_manager = None
+        self._thumbs = None
+        self._output_capture = None
         self._raised_for_settings = False
         self._layer_is_top = False
         self._search_restore_bottom = False
@@ -305,10 +307,68 @@ class ShellWindow(Adw.ApplicationWindow):
             self.config, on_updates_available=self._on_updates_available,
         )
         GLib.idle_add(self._warm_toplevel_manager)
+        GLib.timeout_add(2500, self._tick_thumb_capture)
 
     def _warm_toplevel_manager(self) -> bool:
         self._ensure_toplevel_manager()
+        self._ensure_thumbs()
+        self._ensure_capture()
         return False
+
+    def _ensure_thumbs(self):
+        if self._thumbs is None:
+            from thumbnail_store import ThumbnailStore
+            self._thumbs = ThumbnailStore()
+        return self._thumbs
+
+    def _ensure_capture(self):
+        if self._output_capture is None:
+            from output_capture import OutputCapture
+            self._output_capture = OutputCapture()
+        return self._output_capture
+
+    def _overlays_block_capture(self) -> bool:
+        if getattr(self, '_layer_is_top', False):
+            return True
+        if self._switcher is not None and self._switcher.get_visible():
+            return True
+        if self._shade is not None and self._shade.get_visible():
+            return True
+        lock = getattr(self, '_lock_screen', None)
+        if lock is not None and lock.get_visible():
+            return True
+        power = getattr(self, '_power_menu', None)
+        if power is not None and power.get_visible():
+            return True
+        return False
+
+    def _tick_thumb_capture(self) -> bool:
+        self._maybe_capture_thumb()
+        return True
+
+    def _capture_thumb_once(self) -> bool:
+        self._maybe_capture_thumb()
+        return False
+
+    def _maybe_capture_thumb(self) -> None:
+        if self._overlays_block_capture():
+            return
+        mgr = self._toplevel_manager
+        if mgr is None:
+            return
+        app_id = mgr.activated_app_id()
+        if not app_id:
+            return
+        thumbs = self._ensure_thumbs()
+        from shell_log import get_logger
+        started = self._ensure_capture().capture(
+            lambda thumb, aid=app_id: (
+                get_logger('window').info(
+                    'thumb stored %s %sx%s', aid, thumb.width, thumb.height),
+                thumbs.put(aid, thumb),
+            ))
+        if started:
+            get_logger('window').info('capturing thumb for %s', app_id)
 
     def _load_css(self) -> None:
         style_path = Path(__file__).with_name('style.css')
@@ -498,6 +558,7 @@ class ShellWindow(Adw.ApplicationWindow):
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.set_layer(self, LayerShell.Layer.BOTTOM)
             self._layer_is_top = False
+        GLib.timeout_add(400, self._capture_thumb_once)
 
     def _launch_app_id(self, app_id: str) -> None:
         from gi.repository import Gio
@@ -979,7 +1040,9 @@ class ShellWindow(Adw.ApplicationWindow):
         manager.resync()
         if self._switcher is None:
             from app_switcher import AppSwitcher
-            self._switcher = AppSwitcher(manager=manager, config=self.config)
+            self._switcher = AppSwitcher(
+                manager=manager, config=self.config,
+                thumbnails=self._ensure_thumbs())
             self._switcher.set_application(self.get_application())
             self._switcher.apply_theme(resolve_theme(self.config))
         else:
