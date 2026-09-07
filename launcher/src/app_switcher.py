@@ -63,14 +63,14 @@ _AppSwitcherBase = Gtk.Window if _GTK_AVAILABLE else _WindowBase
 def theme_css(preset: ThemePreset) -> str:
     return f"""
 window.switcher-window {{
-    background: transparent;
+    background: alpha({preset.background}, 0.55);
 }}
 .switcher-root {{
     background: alpha({preset.background}, 0.96);
     color: {preset.foreground};
 }}
 .switcher-dismiss {{
-    background: alpha({preset.background}, 0.45);
+    background: transparent;
     border: none;
     box-shadow: none;
     min-height: 0;
@@ -115,6 +115,7 @@ window.switcher-window {{
 """
 
 _SWIPE_DISMISS_THRESHOLD = 120  # px upward drag to dismiss a card
+_SHEET_CLOSE_DY = 100  # px downward drag to close the recents sheet
 _EMPTY_STATE_TEXT = 'No open apps'
 
 
@@ -145,15 +146,14 @@ class AppSwitcher(_AppSwitcherBase):
 
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)
-            # OVERLAY sits above xdg apps (and above the launcher's TOP hop
-            # for Settings). Bottom-anchored opaque panel, not a 4-edge
-            # transparent surface — those never composited on this phoc.
+            # Full-screen OVERLAY. The window itself is the dim fill —
+            # a transparent 4-edge surface never composited on this phoc.
             LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
-            LayerShell.set_anchor(self, LayerShell.Edge.TOP, False)
+            LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
             LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
             LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
             LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
-            LayerShell.set_exclusive_zone(self, 0)
+            LayerShell.set_exclusive_zone(self, -1)
             # NONE while hidden; show_switcher flips EXCLUSIVE so Escape
             # and taps reach this overlay (phoc v3 has no ON_DEMAND).
             LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
@@ -183,8 +183,15 @@ class AppSwitcher(_AppSwitcherBase):
         self.refresh()
 
         swipe = Gtk.GestureSwipe.new()
+        swipe.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         swipe.connect('swipe', self._on_swipe)
         self.add_controller(swipe)
+
+        sheet_drag = Gtk.GestureDrag.new()
+        sheet_drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        sheet_drag.connect('drag-update', self._on_sheet_drag_update)
+        sheet_drag.connect('drag-end', self._on_sheet_drag_end)
+        self.add_controller(sheet_drag)
 
         key = Gtk.EventControllerKey.new()
         key.connect('key-pressed', self._on_key)
@@ -216,6 +223,18 @@ class AppSwitcher(_AppSwitcherBase):
         self._theme_provider.load_from_data(data.encode('utf-8'))
 
     def _build_content(self) -> Gtk.Widget:
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.set_hexpand(True)
+        outer.set_vexpand(True)
+
+        dismiss = Gtk.Box()
+        dismiss.add_css_class('switcher-dismiss')
+        dismiss.set_hexpand(True)
+        dismiss.set_vexpand(True)
+        tap = Gtk.GestureClick.new()
+        tap.connect('released', lambda *_: self.hide_switcher())
+        dismiss.add_controller(tap)
+
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root.add_css_class('switcher-root')
         root.set_margin_top(12)
@@ -234,17 +253,11 @@ class AppSwitcher(_AppSwitcherBase):
         scroller.set_child(self.card_box)
         scroller.set_min_content_height(220)
 
-        close_btn = Gtk.Button(label='▲ Close')
-        close_btn.add_css_class('flat')
-        close_btn.add_css_class('switcher-header')
-        close_btn.set_halign(Gtk.Align.CENTER)
-        close_btn.set_margin_top(8)
-        close_btn.connect('clicked', lambda _b: self.hide_switcher())
-
         root.append(header)
         root.append(scroller)
-        root.append(close_btn)
-        return root
+        outer.append(dismiss)
+        outer.append(root)
+        return outer
 
     def refresh(self, apps: list[AppInfo] | None = None) -> None:
         if apps is None:
@@ -384,8 +397,17 @@ class AppSwitcher(_AppSwitcherBase):
         self._apps = [a for a in self._apps if a.handle != app.handle]
         self._rebuild_cards()
 
+    def _on_sheet_drag_update(self, gesture: Gtk.GestureDrag, dx: float, dy: float) -> None:
+        # Claim only a downward pull so card swipe-up can still kill an app.
+        if dy > 40 and abs(dy) > abs(dx):
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+    def _on_sheet_drag_end(self, _g: Gtk.GestureDrag, dx: float, dy: float) -> None:
+        if dy > _SHEET_CLOSE_DY and abs(dy) > abs(dx):
+            self.hide_switcher()
+
     def _on_swipe(self, _g: Gtk.GestureSwipe, vel_x: float, vel_y: float) -> None:
-        if vel_y > 200:
+        if vel_y > 200 and abs(vel_y) > abs(vel_x):
             self.hide_switcher()
 
     def _on_key(self, _g: Gtk.EventControllerKey, keyval: int, *_) -> bool:

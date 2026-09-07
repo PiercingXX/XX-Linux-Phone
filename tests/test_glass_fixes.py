@@ -68,10 +68,13 @@ def window():
             sys.modules['window'] = saved_window
 
 
-def test_switcher_anchors_bottom_like_shade():
-    assert 'LayerShell.Edge.TOP, False' in SWITCHER_SRC
+def test_switcher_is_fullscreen_overlay_with_scrim():
+    assert 'LayerShell.Edge.TOP, True' in SWITCHER_SRC
     assert 'LayerShell.Edge.BOTTOM, True' in SWITCHER_SRC
     assert "add_css_class('switcher-window')" in SWITCHER_SRC
+    assert 'switcher-dismiss' in SWITCHER_SRC
+    assert '_SHEET_CLOSE_DY' in SWITCHER_SRC
+    assert "label='▲ Close'" not in SWITCHER_SRC
 
 
 def test_switcher_show_presents_visible_window():
@@ -92,7 +95,6 @@ def test_show_switcher_uses_live_manager():
 
 
 def test_switcher_has_close_button_and_tappable_cards():
-    assert "label='▲ Close'" in SWITCHER_SRC
     assert 'def _on_card_tap' in SWITCHER_SRC
     make = SWITCHER_SRC.split('def _make_card')[1].split('def _on_card_drag')[0]
     assert 'Gtk.Button()' not in make
@@ -101,6 +103,25 @@ def test_switcher_has_close_button_and_tappable_cards():
     assert 'KeyboardMode.EXCLUSIVE' in show
     hide = SWITCHER_SRC.split('def hide_switcher')[1]
     assert 'KeyboardMode.NONE' in hide
+    assert 'def _on_sheet_drag_end' in SWITCHER_SRC
+
+
+def test_shade_dismisses_without_close_button():
+    assert "label='▲ Close'" not in SHADE_SRC
+    assert 'shade-dismiss' in SHADE_SRC
+    assert 'LayerShell.Edge.BOTTOM, True' in SHADE_SRC
+    assert '_SHEET_CLOSE_DY' in SHADE_SRC
+    show = SHADE_SRC.split('def show_shade')[1].split('def hide_shade')[0]
+    assert 'KeyboardMode.EXCLUSIVE' in show
+    hide = SHADE_SRC.split('def hide_shade')[1].split('def clear_all')[0]
+    assert 'KeyboardMode.NONE' in hide
+
+
+def test_handle_back_closes_frontmost_sheet():
+    body = WINDOW_SRC.split('def _handle_back')[1].split('def _build_widget_block')[0]
+    assert 'hide_switcher()' in body
+    assert 'hide_shade()' in body
+    assert body.find('hide_switcher') < body.find('hide_shade')
 
 
 def test_toplevel_activate_is_queued_to_wayland_thread():

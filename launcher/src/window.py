@@ -660,13 +660,12 @@ class ShellWindow(Adw.ApplicationWindow):
     def _handle_back(self) -> None:
         """Called by BackGestureLayer on edge swipe from either side."""
         import subprocess
-        # 1. Dismiss notification shade if open
-        if self._shade and self._shade.get_visible():
-            self._shade.hide_shade()
-            return
-        # 2. Dismiss app switcher if open
+        # Overlay first (switcher sits above the shade), then the shade.
         if self._switcher and self._switcher.get_visible():
             self._switcher.hide_switcher()
+            return
+        if self._shade and self._shade.get_visible():
+            self._shade.hide_shade()
             return
         # 3. Close dialer if open
         if self._dialer and self._dialer.get_visible():

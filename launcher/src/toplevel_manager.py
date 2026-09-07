@@ -147,7 +147,11 @@ class WaylandToplevelBackend:
             pass
 
     def _dispatch_error_is_fatal(self, exc: BaseException) -> bool:
+        if self._closing:
+            return True
         msg = str(exc)
+        if 'destroyed' in msg.lower():
+            return True
         if '11' in msg or 'EAGAIN' in msg.upper():
             return False
         if 'has no event' in msg:
