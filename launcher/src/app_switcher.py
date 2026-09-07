@@ -175,10 +175,8 @@ class AppSwitcher(_AppSwitcherBase):
 
         self.set_child(self._build_content())
 
-        self._manager_wired = False
-        if self._manager.available:
-            self._wire_change(self._manager, self.refresh)
-            self._manager_wired = True
+        self._wire_change(self._manager, self.refresh)
+        self._manager_wired = True
         self.refresh()
 
         swipe = Gtk.GestureSwipe.new()
@@ -191,10 +189,12 @@ class AppSwitcher(_AppSwitcherBase):
 
     def attach_manager(self, manager: ToplevelManager) -> None:
         """Swap in the live toplevel client after the window is already shown."""
+        if manager is self._manager:
+            self.refresh()
+            return
         self._manager = manager
-        if manager.available and not self._manager_wired:
-            self._wire_change(manager, self.refresh)
-            self._manager_wired = True
+        self._wire_change(manager, self.refresh)
+        self._manager_wired = True
         self.refresh()
 
     def _display_preset(self) -> ThemePreset:

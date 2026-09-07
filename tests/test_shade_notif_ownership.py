@@ -86,10 +86,14 @@ class _Reply:
 
 
 class _Bus:
-    def __init__(self, replies=None):
+    def __init__(self, replies=None, unique_name=':1.1'):
         self.replies = list(replies or [])
         self.calls = []
         self.subscriptions = []
+        self._unique_name = unique_name
+
+    def get_unique_name(self):
+        return self._unique_name
 
     def call_sync(self, *args):
         self.calls.append(args)
@@ -135,6 +139,11 @@ class TestExternalDaemonProbe:
                             'org.freedesktop.DBus', 'GetNameOwner')
         assert call[4] == _RecordingVariant(
             '(s)', ('org.freedesktop.Notifications',))
+
+    def test_our_own_name_is_not_external(self, monkeypatch):
+        bus = _Bus(replies=[_Reply(':1.1')], unique_name=':1.1')
+        monkeypatch.setattr(notification_shade, '_session_bus', lambda: bus)
+        assert notification_shade._external_daemon_owns_notifications() is False
 
     def test_unowned_name_reports_no_external_daemon(self, monkeypatch):
         bus = _Bus(replies=[Exception('org.freedesktop.DBus.Error.NameHasNoOwner')])

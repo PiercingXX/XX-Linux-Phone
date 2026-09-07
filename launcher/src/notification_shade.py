@@ -38,7 +38,7 @@ def _external_daemon_owns_notifications() -> bool:
 
     Notify is a method call, never a broadcast: with mako/dunst owning the
     name our in-process capture can never fire, so the shade must say so
-    instead of silently showing nothing.
+    instead of silently showing nothing. Our own unique name is not external.
     """
     bus = _session_bus()
     if bus is None:
@@ -53,7 +53,10 @@ def _external_daemon_owns_notifications() -> bool:
         ).unpack()[0]
     except GLib.Error:
         return False
-    return bool(owner)
+    if not owner:
+        return False
+    ours = bus.get_unique_name() if hasattr(bus, 'get_unique_name') else None
+    return bool(owner) and owner != ours
 
 
 def theme_css(preset: ThemePreset) -> str:

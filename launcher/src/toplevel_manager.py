@@ -12,12 +12,19 @@ still show "No open apps".
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
 # The shell's own surfaces must never appear in the switcher.
 _OWN_APP_ID = 'io.piercingxx.XXWM'
+
+# Bind v1 only. phoc 0.56 still sends handle event 7 (`parent`, protocol v2+);
+# the vendored scanner output only knows events 0–6, and pywayland then
+# raises "has no event 7" and drops the rest of the burst — empty recents.
+_FOREIGN_TOPLEVEL_BIND_VERSION = 1
+_PUMP_INTERVAL_MS = 50
 
 try:
     from pywayland.client import Display
@@ -97,68 +104,72 @@ class WaylandToplevelBackend:
         registry = self._display.get_registry()
         registry.dispatcher['global'] = self._on_registry_global
         registry.dispatcher['global_remove'] = self._on_registry_global_remove
-        # Never block the GTK thread on compositor round-trips: that froze
-        # power-button idle_add, lock, and Settings until a hard reboot.
-        self._arm_fd_watch()
+        # A second Display on the GTK thread never saw registry events
+        # (GTK already owns a libwayland connection on that thread). A
+        # dedicated thread with blocking dispatch is the same pattern
+        # that lists Calculator from a standalone python process.
+        # FakeDisplay tests stay on the GLib pump (dispatch does not block).
+        if self._is_real_display():
+            self._thread = threading.Thread(
+                target=self._thread_loop, daemon=True, name='xx-wm-toplevel')
+            self._thread.start()
+        else:
+            self._arm_pump()
+            self._pump()
+
+    def _is_real_display(self) -> bool:
+        cls = type(self._display)
+        return cls.__name__ == 'Display' and 'pywayland' in (cls.__module__ or '')
+
+    def _thread_loop(self) -> None:
         try:
-            self._display.dispatch(block=False)
             self._display.flush()
         except Exception:
             pass
+        while True:
+            try:
+                self._display.dispatch(block=True)
+                self._display.flush()
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc)
+                if '11' in msg or 'EAGAIN' in msg.upper():
+                    continue
+                if 'has no event' in msg:
+                    log.warning('wayland event skipped: %s', exc)
+                    continue
+                log.error('wayland thread dispatch failed: %s', exc)
+                return
 
-    # -- GLib fd-watch -----------------------------------------------------
-
-    def _arm_fd_watch(self) -> None:
+    def _arm_pump(self) -> None:
         import gi
         gi.require_version('Gtk', '4.0')
         from gi.repository import GLib
 
-        fd = self._display.get_fd()
-        condition = GLib.IOCondition.IN | GLib.IOCondition.HUP
-        # Tablet GLib GI has unix_fd_add_full / io_add_watch, not unix_fd_add.
-        if hasattr(GLib, 'unix_fd_add_full'):
-            self._fd_source = GLib.unix_fd_add_full(
-                getattr(GLib, 'PRIORITY_DEFAULT', 0), fd, condition,
-                self._on_fd_ready, None)
-        elif hasattr(GLib, 'io_add_watch'):
-            self._fd_source = GLib.io_add_watch(fd, condition, self._on_fd_ready)
-        elif hasattr(GLib, 'unix_fd_add'):
-            self._fd_source = GLib.unix_fd_add(fd, condition, self._on_fd_ready)
-        else:
-            raise RuntimeError('no GLib fd-watch API')
-        def _kick() -> bool:
-            try:
-                self._display.dispatch(block=False)
-                self._display.flush()
-            except Exception as exc:  # noqa: BLE001
-                # EAGAIN (11) means the fd had nothing; the watch will fire.
-                if '11' not in str(exc) and 'EAGAIN' not in str(exc).upper():
-                    log.error('wayland kick dispatch failed: %s', exc)
-            return False
-        GLib.idle_add(_kick)
+        self._fd_source = GLib.timeout_add(_PUMP_INTERVAL_MS, self._pump)
 
-    def _on_fd_ready(self, *args) -> bool:
-        from gi.repository import GLib
-
-        # unix_fd_add_full may pass (fd, condition, user_data); io_add_watch
-        # passes (fd, condition). Treat as HUP only when HUP is set without IN.
-        cond = 0
-        for arg in args:
-            try:
-                cond = int(arg)
-            except (TypeError, ValueError):
-                continue
-        if cond & GLib.IOCondition.HUP and not (cond & GLib.IOCondition.IN):
-            log.error('wayland compositor connection closed (HUP)')
-            return False
+    def _pump(self) -> bool:
+        # Flush first: dispatch(block=False) raises EAGAIN on an empty
+        # queue, and a combined try would skip flush — the get_registry
+        # / bind requests never leave the client (empty recents).
+        try:
+            self._display.flush()
+        except Exception:
+            pass
         try:
             self._display.dispatch(block=False)
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            if '11' in msg or 'EAGAIN' in msg.upper():
+                pass
+            elif 'has no event' in msg:
+                log.warning('wayland event skipped: %s', exc)
+            else:
+                log.error('wayland dispatch failed: %s', exc)
+                return False
+        try:
             self._display.flush()
-        except Exception as exc:  # noqa: BLE001 - compositor went away
-            if '11' in str(exc) or 'EAGAIN' in str(exc).upper():
-                return True
-            log.error('wayland dispatch failed: %s', exc)
-            return False
+        except Exception:
+            pass
         return True
 
     # -- protocol glue -----------------------------------------------------
@@ -177,7 +188,8 @@ class WaylandToplevelBackend:
         if interface == 'wl_seat':
             self._seat = registry.bind(name, WlSeat, 1)
         elif interface == 'zwlr_foreign_toplevel_manager_v1':
-            self._manager = registry.bind(name, ZwlrForeignToplevelManagerV1, min(3, version))
+            self._manager = registry.bind(
+                name, ZwlrForeignToplevelManagerV1, _FOREIGN_TOPLEVEL_BIND_VERSION)
             self._manager.dispatcher['toplevel'] = self._on_toplevel
             self._manager.dispatcher['finished'] = self._on_finished
 
@@ -231,13 +243,21 @@ class WaylandToplevelBackend:
 
     # -- manager hooks -----------------------------------------------------
 
+    def _call_manager_cb(self, handle: object, app_id: object, title: object) -> None:
+        cb = self._manager_cb
+        if cb is None:
+            return
+        if threading.current_thread() is threading.main_thread():
+            cb(handle, app_id, title)
+            return
+        from gi.repository import GLib
+        GLib.idle_add(lambda: (cb(handle, app_id, title), False)[1])
+
     def _upsert(self, handle: object, app_id: str, title: str) -> None:
-        if self._manager_cb is not None:
-            self._manager_cb(handle, app_id, title)
+        self._call_manager_cb(handle, app_id, title)
 
     def _remove(self, handle: object) -> None:
-        if self._manager_cb is not None:
-            self._manager_cb(handle, None, None)
+        self._call_manager_cb(handle, None, None)
 
     # -- public API (backend contract) -------------------------------------
 

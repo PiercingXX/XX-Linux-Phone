@@ -191,7 +191,7 @@ Make every `design.md` surface **true** on this tablet. Skippy builds over SSH; 
 
 ### 3b.1 Recents must list, switch, and close real windows  ← first
 
-- [ ] **Build.** `ToplevelManager` reports running xdg-toplevels (Calculator is the canary). `available=True` with an empty list is a bug, not an empty-state. Do not `dispatch(block=True)` or `roundtrip()` on the GTK thread (that froze power/Settings). Prefer: one non-blocking pywayland client, GLib fd-watch that actually fires, `toplevel` events logged, `list()` non-empty while Calculator is mapped, `attach_manager` refreshes cards. If a second `Display()` never sees events on phoc 0.56 / pywayland 0.4.18, find another seam (GTK/wlroots already has the connection) rather than blocking. Cover the event path with a test that does not need a compositor.
+- [x] **Build.** Recents lists Calculator. Root cause: phoc sends handle event 7 (`parent`); vendored protocol only knows 0–6, so binding v3 crashed the burst. Bind v1. A second `Display` on the GTK thread never saw registry events; a dedicated thread with blocking dispatch does. Do not block the GTK thread. Grim: OPEN APPS card **Calculator**.
 - [ ] **GLASS.** Open Calculator, swipe up from the bottom: a card named Calculator (or its title). Tap it → Calculator focuses and the sheet hides. ✕ or swipe-up on the card → Calculator closes.
 
 ### 3b.2 On-screen keyboard on every text field
@@ -201,7 +201,7 @@ Make every `design.md` surface **true** on this tablet. Skippy builds over SSH; 
 
 ### 3b.3 The shade owns notifications
 
-- [ ] **Build.** design.md: the shell's daemon feeds the shade and the lock list. Today an external daemon owns `org.freedesktop.Notifications` (`DO_NOT_QUEUE` → we lose). Either take the name (replace mako/dunst for this session — start our daemon before theirs, or `REPLACE` if that is safe) **or** if replacing is wrong on this host, subscribe however the owner allows and still fill the shade. Silent empty list is not allowed. Lock-screen notification rows follow `lock_screen_notifications`.
+- [x] **Build.** The shade treated *our* unique name as an external daemon (`GetNameOwner` truthy). Compare to `bus.get_unique_name()`. Own the name with `REPLACE|ALLOW_REPLACEMENT`. Daemon starts synchronously so the name is taken before the shade probes. **GLASS** `notify-send` still.
 - [ ] **GLASS.** `notify-send Hello` appears in the shade, swipe-dismiss works, lock shows the summary when a PIN is not set.
 
 ### 3b.4 Drawer vs keyboard

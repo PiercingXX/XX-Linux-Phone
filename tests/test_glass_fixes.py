@@ -81,11 +81,10 @@ def test_switcher_show_presents_visible_window():
     assert 'Layer.OVERLAY' in SWITCHER_SRC
 
 
-def test_show_switcher_presents_before_manager_bind():
-    body = WINDOW_SRC.split('def _show_switcher')[1].split('def _bind_switcher_manager')[0]
-    assert 'show_switcher()' in body
-    assert 'idle_add(self._bind_switcher_manager)' in body
-    assert '_ensure_toplevel_manager()' not in body
+def test_show_switcher_uses_live_manager():
+    body = WINDOW_SRC.split('def _show_switcher')[1].split('def _build_apps_page')[0]
+    assert 'AppSwitcher(manager=manager' in body
+    assert '_ensure_toplevel_manager()' in body
 
 
 def test_open_settings_hops_over_apps():
@@ -104,8 +103,12 @@ def test_leave_settings_drops_layer():
 def test_toplevel_manager_never_blocks_gtk_thread():
     src = (ROOT / 'launcher' / 'src' / 'toplevel_manager.py').read_text(
         encoding='utf-8')
-    assert 'self._display.dispatch(block=True)' not in src
     assert 'self._display.roundtrip()' not in src
+    assert '_FOREIGN_TOPLEVEL_BIND_VERSION = 1' in src
+    assert 'def _thread_loop' in src
+    # Blocking dispatch is confined to the dedicated wayland thread.
+    connect = src.split('def _connect')[1].split('def _is_real_display')[0]
+    assert 'dispatch(block=True)' not in connect
 
 
 def test_shade_settings_hides_immediately():

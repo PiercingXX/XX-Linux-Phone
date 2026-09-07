@@ -327,6 +327,11 @@ class ShellWindow(Adw.ApplicationWindow):
         self._update_checker = UpdateChecker(
             self.config, on_updates_available=self._on_updates_available,
         )
+        GLib.idle_add(self._warm_toplevel_manager)
+
+    def _warm_toplevel_manager(self) -> bool:
+        self._ensure_toplevel_manager()
+        return False
 
     def _load_css(self) -> None:
         style_path = Path(__file__).with_name('style.css')
@@ -985,34 +990,20 @@ class ShellWindow(Adw.ApplicationWindow):
         return self._toplevel_manager
 
     def _show_switcher(self) -> None:
-        """Present recents first; bind the toplevel client on idle.
-
-        Building ToplevelManager used to block this thread on the
-        compositor, which froze power/lock/Settings and made a
-        bottom-swipe over an app look like a no-op.
-        """
         self._disarm_search_keyboard()
+        manager = self._ensure_toplevel_manager()
         if self._switcher is None:
             from app_switcher import AppSwitcher
-            from toplevel_manager import ToplevelManager
-            self._switcher = AppSwitcher(
-                manager=ToplevelManager(backend=None), config=self.config)
+            self._switcher = AppSwitcher(manager=manager, config=self.config)
             self._switcher.set_application(self.get_application())
             self._switcher.apply_theme(resolve_theme(self.config))
+        else:
+            self._switcher.attach_manager(manager)
+        from shell_log import get_logger
+        get_logger('window').info(
+            'showing switcher (%d toplevels, available=%s)',
+            len(manager.list()), manager.available)
         self._switcher.show_switcher()
-        GLib.idle_add(self._bind_switcher_manager)
-
-    def _bind_switcher_manager(self) -> bool:
-        try:
-            manager = self._ensure_toplevel_manager()
-            switcher = getattr(self, '_switcher', None)
-            if switcher is not None:
-                switcher.attach_manager(manager)
-        except Exception as error:
-            from shell_log import get_logger
-            get_logger('window').warning(
-                'switcher manager bind failed: %s', error)
-        return False
 
     def _build_apps_page(self) -> Gtk.Widget:
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
