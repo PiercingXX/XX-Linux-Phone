@@ -265,10 +265,10 @@ def iter_vevent_blocks(text: str):
     stream = io.StringIO(text)
     buf: list[str] | None = None
     for raw_line in stream:
-        line = raw_line.strip()
-        if not line:
+        line = raw_line.rstrip("\r\n")
+        if not line.strip():
             continue
-        upper = line.upper()
+        upper = line.strip().upper()
         if upper == "BEGIN:VEVENT":
             buf = [line]
             continue
@@ -426,14 +426,16 @@ class CalendarService:
                     overrides=override_events):
                 title = summaries.get(instance.recurrence_id or "",
                                       summaries[parent.uid])
+                rid = (instance.recurrence_id
+                       if instance.recurrence_id is not None
+                       else instance.start_utc)
                 out.append({
                     "uid": GLib.Variant("s", parent.uid),
                     "calendar_id": GLib.Variant("s", parent.calendar_id),
                     "start": GLib.Variant("x", int(instance.start_utc)),
                     "end": GLib.Variant("x", int(instance.end_utc)),
                     "all_day": GLib.Variant("b", bool(instance.all_day)),
-                    "recurrence_id": GLib.Variant(
-                        "x", int(instance.recurrence_id or 0)),
+                    "recurrence_id": GLib.Variant("x", int(rid)),
                     "is_override": GLib.Variant("b",
                                                 bool(instance.is_override)),
                     "status": GLib.Variant("s", instance.status or ""),
@@ -488,7 +490,7 @@ class CalendarService:
             if not vevent.uid().strip():
                 _set_uid(vevent, uid)
             status = vevent.status().strip().upper()
-            if status in ("CANCELLED", "CANCELED"):
+            if status in ("CANCELLED", "CANCELED") and vevent.recurrence_id() is None:
                 skipped += 1
                 continue
             if vevent.dtstart() is None:

@@ -342,13 +342,16 @@ def query_instances(store, start_ms: int, end_ms: int,
                 event, start_ms, end_ms, overrides=override_events):
             title = summaries.get(instance.recurrence_id or "",
                                   summaries[parent.uid])
+            rid = (instance.recurrence_id
+                   if instance.recurrence_id is not None
+                   else instance.start_utc)
             out.append({
                 "uid": parent.uid,
                 "calendar_id": parent.calendar_id,
                 "start": int(instance.start_utc),
                 "end": int(instance.end_utc),
                 "all_day": bool(instance.all_day),
-                "recurrence_id": int(instance.recurrence_id or 0),
+                "recurrence_id": int(rid),
                 "is_override": bool(instance.is_override),
                 "status": instance.status or "",
                 "title": title or "",

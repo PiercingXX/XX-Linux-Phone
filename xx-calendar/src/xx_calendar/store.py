@@ -231,6 +231,41 @@ class CalendarStore:
         except (TypeError, ValueError):
             return 0
 
+    def _existing_columns(self, table: str) -> set[str]:
+        try:
+            rows = self._conn.execute(
+                f'PRAGMA table_info("{table}")').fetchall()
+        except sqlite3.Error:
+            return set()
+        return {str(row["name"]) for row in rows} if rows else set()
+
+    @staticmethod
+    def _split_statements(script: str) -> list[str]:
+        return [part.strip() for part in script.split(";") if part.strip()]
+
+    def _apply_migration_script(self, script: str) -> None:
+        for statement in self._split_statements(script):
+            upper = statement.strip().upper()
+            if upper.startswith("ALTER TABLE"):
+                tokens = statement.split()
+                try:
+                    table = tokens[2].strip('"[]')
+                    column = tokens[5].strip('"[]').split("(")[0]
+                except IndexError:
+                    self._conn.execute(statement)
+                    continue
+                if column in self._existing_columns(table):
+                    continue
+                try:
+                    self._conn.execute(statement)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+                    if column not in self._existing_columns(table):
+                        raise
+                continue
+            self._conn.execute(statement)
+
     def migrate(self) -> int:
         """Apply pending migrations in order; return the schema version."""
         with self._lock:
@@ -244,11 +279,20 @@ class CalendarStore:
                     f"supported v{SCHEMA_VERSION}")
             for target, script in sorted(MIGRATIONS, key=lambda m: m[0]):
                 if target > version:
-                    self._conn.executescript(script)
-                    self._conn.execute(
-                        "INSERT INTO meta(key, value) VALUES"
-                        " ('schema_version', ?) ON CONFLICT(key) DO UPDATE"
-                        " SET value = excluded.value", (str(target),))
+                    self._conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        self._apply_migration_script(script)
+                        self._conn.execute(
+                            "INSERT INTO meta(key, value) VALUES"
+                            " ('schema_version', ?) ON CONFLICT(key) DO UPDATE"
+                            " SET value = excluded.value", (str(target),))
+                        self._conn.execute("COMMIT")
+                    except Exception:
+                        try:
+                            self._conn.execute("ROLLBACK")
+                        except sqlite3.Error:
+                            pass
+                        raise
                     version = target
             self._conn.execute(
                 "INSERT INTO meta(key, value) VALUES ('revision', '0')"
@@ -537,8 +581,11 @@ class CalendarStore:
         with self._lock:
             cur = self._conn.cursor()
             query = ("SELECT uid, recurrence_id FROM events"
-                     " WHERE (rrule != '' OR (dtstart < ? AND dtend > ?))")
-            args: list = [int(end_utc), int(start_utc)]
+                     " WHERE (rrule != '' OR (dtstart < ? AND dtend > ?)"
+                     " OR (recurrence_id != 0 AND recurrence_id >= ?"
+                     " AND recurrence_id < ?))")
+            args: list = [int(end_utc), int(start_utc),
+                          int(start_utc), int(end_utc)]
             if calendar_ids is not None:
                 ids = list(calendar_ids)
                 if not ids:

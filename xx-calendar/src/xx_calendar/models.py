@@ -485,6 +485,10 @@ class ScopeResolver:
                      edits: EventFieldEdits):
         if context.rule is None:
             return UpdateParentRow(context.parent_uid, edits)
+        if scope in (RecurrenceScope.THIS_INSTANCE,
+                     RecurrenceScope.THIS_AND_FOLLOWING):
+            if instance.instance_start_millis <= 0:
+                return Refusal("invalid recurrence_id for scoped edit")
         if scope == RecurrenceScope.THIS_INSTANCE:
             return InsertExceptionRow(
                 context.parent_uid, instance.instance_start_millis, edits)
@@ -503,6 +507,10 @@ class ScopeResolver:
                        scope: RecurrenceScope, instance: InstanceRef):
         if context.rule is None:
             return DeleteParentRow(context.parent_uid)
+        if scope in (RecurrenceScope.THIS_INSTANCE,
+                     RecurrenceScope.THIS_AND_FOLLOWING):
+            if instance.instance_start_millis <= 0:
+                return Refusal("invalid recurrence_id for scoped delete")
         if scope == RecurrenceScope.THIS_INSTANCE:
             return DeleteInstanceUri(context.parent_uid,
                                      instance.instance_start_millis)

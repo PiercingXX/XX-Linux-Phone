@@ -80,6 +80,28 @@ def parse_launch_args(argv: list[str]) -> dict:
     return opts
 
 
+def local_zone():
+    """System local zone as an IANA ZoneInfo (per-date DST), else fixed."""
+    from zoneinfo import ZoneInfo
+
+    names = [os.environ.get("TZ", "").lstrip(":").strip()]
+    try:
+        with open("/etc/timezone", encoding="utf-8") as handle:
+            names.append(handle.readline().strip())
+    except OSError:
+        pass
+    try:
+        names.append(os.readlink("/etc/localtime").partition("zoneinfo/")[2])
+    except OSError:
+        pass
+    for name in filter(None, names):
+        try:
+            return ZoneInfo(name)
+        except Exception:
+            continue
+    return _datetime.datetime.now().astimezone().tzinfo or _datetime.timezone.utc
+
+
 def parse_sheet_datetime(text: str, all_day: bool,
                          zone) -> int | None:
     """Parse create-sheet ``YYYY-MM-DD[ HH:MM]`` to UTC millis, else None."""
@@ -88,7 +110,7 @@ def parse_sheet_datetime(text: str, all_day: bool,
         if all_day:
             day = _datetime.date.fromisoformat(cleaned)
             moment = _datetime.datetime(day.year, day.month, day.day,
-                                        tzinfo=zone)
+                                        tzinfo=_datetime.timezone.utc)
         else:
             naive = _datetime.datetime.strptime(cleaned, "%Y-%m-%d %H:%M")
             moment = naive.replace(tzinfo=zone)
@@ -187,9 +209,7 @@ class CalendarWindow(Adw.ApplicationWindow):
         self._store = CalendarStore(db_path)
         self._service = CalendarService(self._store, start_worker=False)
         self._settings = load_settings()
-        self._zone = _datetime.datetime.now().astimezone().tzinfo
-        if self._zone is None:
-            self._zone = _datetime.timezone.utc
+        self._zone = local_zone()
         self._sigils: dict = {}
         self._schedule = views.ScheduleWindow()
         self._month_year = self._schedule.picker_month()
