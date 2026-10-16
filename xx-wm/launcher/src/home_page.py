@@ -7,6 +7,20 @@ if TYPE_CHECKING:
     from app_index import AppEntry
 
 
+def _open_settings(win) -> None:
+    """Show settings with the TOP hop when the window offers it.
+
+    Bare test doubles predate _open_settings and only switch the stack
+    page; real windows always carry the method, so behavior there is the
+    hop that raises settings above a focused app.
+    """
+    opener = getattr(win, '_open_settings', None)
+    if callable(opener):
+        opener()
+    else:
+        win.stack.set_visible_child_name('settings')
+
+
 class HomePage:
     """Home page builder and widget/slot behavior for ShellWindow.
 
@@ -227,7 +241,7 @@ class HomePage:
         elif key == 'date':
             win._launch_first_matching('calendar')
         elif key == 'battery':
-            win.stack.set_visible_child_name('settings')
+            _open_settings(win)
 
     def _launch_first_matching(self, needle: str) -> None:
         win = self._win
@@ -331,7 +345,7 @@ class HomePage:
             win._home_launcher.set_edit_mode(False)
         elif action == 'settings':
             win._home_launcher.set_edit_mode(False)
-            win.stack.set_visible_child_name('settings')
+            _open_settings(win)
         elif action == 'add_app':
             win._pick_slot_mode = True
             win.stack.set_visible_child_name('apps')

@@ -11,6 +11,8 @@ from default_layout import (
     STOCK_HIDDEN_APPS,
     DefaultLayoutResolver,
     apply_default_layout,
+    compact_unresolved_home,
+    compact_unresolved_slots,
     seed_default_layout,
 )
 
@@ -205,6 +207,52 @@ class TestApplyDefaultLayout:
         )
         apply_default_layout(config, gestures, resolver=resolver)
         assert gestures.bindings == {}
+
+
+class TestCompactUnresolved:
+    def test_drops_missing_apps_and_empty_folders(self):
+        slots = [
+            {'type': 'app', 'label': 'Notes', 'app_id': 'notes.desktop'},
+            {'type': 'app', 'label': 'Gone', 'app_id': 'missing.desktop'},
+            {'type': 'folder', 'label': 'Tools', 'folder': [
+                {'label': 'Calc', 'app_id': 'calc.desktop'},
+                {'label': 'Cam', 'app_id': 'cam.desktop'},
+            ]},
+            {'type': 'folder', 'label': 'Empty', 'folder': [
+                {'label': 'X', 'app_id': 'nope.desktop'},
+            ]},
+            {'type': 'folder', 'label': 'Comms', 'folder': [
+                {'label': 'Phone', 'app_id': None, 'cmd': None},
+            ]},
+            {'type': 'app', 'label': 'NoteCmd', 'cmd': ['piercing-note']},
+        ]
+        installed = {'notes.desktop', 'calc.desktop'}
+        out = compact_unresolved_slots(
+            slots,
+            is_installed=lambda a: a in installed,
+            cmd_exists=lambda c: c == ['piercing-note'],
+        )
+        assert [s['label'] for s in out] == ['Notes', 'Tools', 'Comms', 'NoteCmd']
+        assert [m['label'] for m in out[1]['folder']] == ['Calc']
+        assert out[2]['folder'][0]['label'] == 'Phone'
+
+    def test_home_write_only_when_changed(self):
+        class _Idx:
+            entries = [type('E', (), {'app_id': 'notes.desktop'})()]
+
+        config = FakeConfig(slots=[
+            {'type': 'app', 'label': 'Notes', 'app_id': 'notes.desktop'},
+        ], applied=True)
+        assert compact_unresolved_home(config, _Idx()) is False
+        assert config.writes == 0
+
+        config = FakeConfig(slots=[
+            {'type': 'app', 'label': 'Notes', 'app_id': 'notes.desktop'},
+            {'type': 'app', 'label': 'Gone', 'app_id': 'missing.desktop'},
+        ], applied=True)
+        assert compact_unresolved_home(config, _Idx()) is True
+        assert [s['label'] for s in config.home_slots] == ['Notes']
+        assert config.default_layout_applied is True
 
 
 if __name__ == '__main__':

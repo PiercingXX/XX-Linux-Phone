@@ -1,6 +1,6 @@
 #!/bin/sh
 # XX-WM dev-loop deploy: rsync launcher/src/ to the phone's installed
-# datadir and restart the running shell.
+# datadir (/usr/share/xx-wm/) and restart the running shell.
 # Usage:
 #   PIERCING_DEVICE=192.168.1.20 [XX_WM_USER=dr3k] scripts/deploy.sh [--dry-run]
 # GitHub.com/PiercingXX
@@ -33,13 +33,19 @@ if [ -z "$DEVICE" ]; then
 fi
 
 TARGET="${USER_NAME}@${DEVICE}"
-STAGE_DIR="/tmp/xx-wm-deploy"
-DEST_DIR="/usr/share/xx-wm"
+STAGE=/tmp/xx-wm-deploy
+DEST=/usr/share/xx-wm
+RSYNC_FLAGS="-az --delete --exclude __pycache__"
 
 # Restart the running shell: the systemd user unit only when it is the
 # active shell (restarting an inactive unit under GDM would start a
 # second shell). Otherwise SIGUSR1 the unique python child; the
-# /usr/bin/xx-wm supervisor respawns it with fresh FDs.
+# /usr/bin/xx-wm supervisor respawns it with fresh FDs. Gio.Application
+# maps TERM/INT/HUP to quit (wait 0 → wrapper exits → phoc -E dies),
+# so iterate never uses those.
+# The child is matched on comm=python3 so the SSH controller (bash) cannot
+# match. A pgrep '[p]ython3 /usr/share/xx-wm/main.py' pattern would also
+# dodge self-match, but pgrep is not guaranteed on the device.
 # shellcheck disable=SC2016  # expands remotely, not here
 RESTART_CMD='
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
@@ -49,8 +55,13 @@ if command -v systemctl >/dev/null 2>&1 \
    && systemctl --user is-active --quiet xx-wm; then
     systemctl --user restart xx-wm
 else
-    # [p]ython3 so this pgrep cmdline cannot match itself (the controller).
-    pid=$(pgrep -u "$(id -un)" -f '"'"'[p]ython3 /usr/share/xx-wm/main.py'"'"' || true)
+    # Match on comm=python3 so the SSH controller (bash) cannot match.
+    pid=$(ps -u "$(id -un)" -o pid=,comm=,args= | while read -r p c rest; do
+        [ "$c" = python3 ] || continue
+        case $rest in
+            */usr/share/xx-wm/main.py*) echo "$p" ;;
+        esac
+    done)
     if [ -n "$pid" ] && [ "$(echo "$pid" | wc -l)" -eq 1 ]; then
         kill -USR1 "$pid"
     else
@@ -60,32 +71,35 @@ else
 fi'
 
 if [ "$DRY_RUN" = 1 ]; then
-    echo "[dry-run] rsync -az --delete --exclude '__pycache__' $REPO_DIR/launcher/src/ $TARGET:$STAGE_DIR/"
-    echo "[dry-run] rsync -az $REPO_DIR/launcher/data/{wayland,wlr-foreign-toplevel-management-unstable-v1,wlr-output-power-management-unstable-v1,virtual-pointer-unstable-v1}.xml $TARGET:$STAGE_DIR/"
-    echo "[dry-run] ssh $TARGET sudo rsync -a --chown=root:root $STAGE_DIR/ $DEST_DIR/"
-    echo "[dry-run] restart: systemctl --user restart xx-wm if active, else SIGUSR1 unique '[p]ython3 /usr/share/xx-wm/main.py' (wrapper respawns)"
+    echo "[dry-run] rsync $RSYNC_FLAGS $REPO_DIR/launcher/src/ ${TARGET}:${STAGE}/"
+    echo "[dry-run] rsync -az $REPO_DIR/launcher/data/wayland.xml $REPO_DIR/launcher/data/wlr-foreign-toplevel-management-unstable-v1.xml $REPO_DIR/launcher/data/wlr-output-power-management-unstable-v1.xml $REPO_DIR/launcher/data/virtual-pointer-unstable-v1.xml $REPO_DIR/launcher/data/wlr-screencopy-unstable-v1.xml ${TARGET}:${STAGE}/"
+    echo "[dry-run] ssh $TARGET sudo rsync -a --chown=root:root ${STAGE}/ ${DEST}/"
+    echo "[dry-run] restart: systemctl --user restart xx-wm if active, else SIGUSR1 unique python3 /usr/share/xx-wm/main.py (wrapper respawns)"
     exit 0
 fi
 
-if ! ssh "$TARGET" 'sudo -n true' 2>/dev/null; then
-    echo "passwordless sudo is required on $TARGET — run scripts/grant-tablet-sudo.sh" >&2
+echo "Checking passwordless sudo on ${TARGET}..."
+if ! ssh "$TARGET" 'sudo -n true'; then
+    echo "passwordless sudo is required to write ${DEST}. Run scripts/grant-tablet-sudo.sh" >&2
     exit 1
 fi
 
-echo "Deploying launcher/src/ -> $TARGET:$DEST_DIR/ (via $STAGE_DIR)"
-rsync -az --delete --exclude '__pycache__' \
-    "$REPO_DIR/launcher/src/" "${TARGET}:$STAGE_DIR/" || exit 1
-# The protocol XMLs live next to the modules on the device; the switcher
+echo "Deploying launcher/src/ -> ${TARGET}:${STAGE}/ then ${DEST}/"
+# shellcheck disable=SC2086  # RSYNC_FLAGS is intentionally word-split
+rsync $RSYNC_FLAGS "$REPO_DIR/launcher/src/" "${TARGET}:${STAGE}/" || exit 1
+# The protocol XMLs live next to the modules on the device; the shell
 # regenerates its bindings when they change, so ship them with the code.
 rsync -az "$REPO_DIR/launcher/data/wayland.xml" \
     "$REPO_DIR/launcher/data/wlr-foreign-toplevel-management-unstable-v1.xml" \
     "$REPO_DIR/launcher/data/wlr-output-power-management-unstable-v1.xml" \
     "$REPO_DIR/launcher/data/virtual-pointer-unstable-v1.xml" \
-    "${TARGET}:$STAGE_DIR/" || exit 1
+    "$REPO_DIR/launcher/data/wlr-screencopy-unstable-v1.xml" \
+    "${TARGET}:${STAGE}/" || exit 1
 
-echo "Installing into $DEST_DIR on ${DEVICE}..."
-# shellcheck disable=SC2029  # client-side expansion is intended
-ssh "$TARGET" "sudo rsync -a --chown=root:root $STAGE_DIR/ $DEST_DIR/" || exit 1
+# Datadir rsync is without --delete: --delete would wipe phoc.ini, sounds,
+# squeekboard, gnome-osk. --chown keeps the meson-installed tree root-owned.
+# shellcheck disable=SC2029  # client-side expansion of STAGE/DEST is intended
+ssh "$TARGET" "sudo rsync -a --chown=root:root ${STAGE}/ ${DEST}/" || exit 1
 
 echo "Restarting xx-wm on ${DEVICE}..."
 # shellcheck disable=SC2029  # client-side expansion is intended

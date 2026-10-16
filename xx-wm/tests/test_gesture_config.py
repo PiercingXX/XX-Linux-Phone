@@ -38,6 +38,32 @@ class TestGestureConfig:
         assert gc.get('swipe_left_home') == 'none'  # Skippy is seeded at first boot
         assert gc.get('swipe_right_home') == 'camera'
 
+    def test_pixel_nav_defaults(self):
+        gc = GestureConfig()
+        assert gc.get('swipe_up_short') == 'home'
+        assert gc.get('swipe_up_long') == 'app_switcher'
+
+    def test_migrates_legacy_both_recents_pair(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(
+            '{"swipe_up_short": "app_switcher",'
+            ' "swipe_up_long": "app_switcher",'
+            ' "swipe_left_home": "launch:htop.desktop",'
+            ' "swipe_right_home": "launch:org.gnome.Nautilus.desktop"}',
+            encoding='utf-8',
+        )
+        gc = GestureConfig()
+        assert gc.get('swipe_up_short') == 'home'
+        assert gc.get('swipe_up_long') == 'app_switcher'
+        assert gc.get('swipe_left_home') == 'launch:htop.desktop'
+        assert gc.get('swipe_right_home') == 'launch:org.gnome.Nautilus.desktop'
+
+    def test_does_not_migrate_partial_recents_override(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(
+            '{"swipe_up_short": "app_switcher"}', encoding='utf-8')
+        gc = GestureConfig()
+        assert gc.get('swipe_up_short') == 'app_switcher'
+        assert gc.get('swipe_up_long') == 'app_switcher'
+
     def test_set_launch_action_persists(self):
         gc = GestureConfig()
         gc.set('swipe_left_home', 'launch:skippy-pwa.desktop')

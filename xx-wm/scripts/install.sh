@@ -1,6 +1,6 @@
 #!/bin/sh
 # XX-WM installer — whiptail TUI, cached sudo, network check up front.
-# POSIX sh; runs on postmarketOS/Alpine (apk) and Debian/Mobian (apt).
+# POSIX sh; runs on postmarketOS/Alpine (apk), Debian/Mobian (apt), and Arch (pacman).
 # GitHub.com/PiercingXX
 
 set -u
@@ -91,9 +91,12 @@ pkg_install() {
 # --- whiptail (TUI only; unattended never prompts) ---------------------------
 if [ "$UNATTENDED" != 1 ] && ! command -v whiptail >/dev/null 2>&1; then
     echo "Installing whiptail..."
-    if [ "$PKG" = apk ]; then pkg_install newt
-    elif [ "$PKG" = pacman ]; then pkg_install libnewt
-    else pkg_install whiptail
+    if [ "$PKG" = apk ]; then
+        pkg_install newt
+    elif [ "$PKG" = pacman ]; then
+        pkg_install libnewt
+    else
+        pkg_install whiptail
     fi
 fi
 
@@ -122,9 +125,9 @@ install_deps() {
         pkg_install networkmanager
         pkg_install brightnessctl
     elif [ "$PKG" = pacman ]; then
-        pkg_install python-gobject gtk4 libadwaita gtk4-layer-shell \
-            meson ninja rsync git squeekboard phoc python-pywayland \
-            wl-clipboard geoclue networkmanager brightnessctl
+        pkg_install python-gobject gtk4 libadwaita gtk4-layer-shell meson ninja \
+            rsync git squeekboard phoc python-pywayland wl-clipboard geoclue \
+            networkmanager brightnessctl
         if command -v lisgd >/dev/null 2>&1; then
             echo "lisgd already present: $(command -v lisgd)"
         else
@@ -372,19 +375,23 @@ select_phoc_scale() {
             fi
         fi
     fi
-    frag="$REPO_DIR/launcher/data/phoc/$dev.ini"
-    if [ ! -f "$frag" ]; then
-        frag="/usr/share/xx-wm/phoc/$dev.ini"
+    # The fragment ships in the repo tree (launcher/data/phoc/$dev.ini);
+    # post-install the helper falls back to /usr/share/xx-wm/phoc/$dev.ini.
+    _install_phoc_fragment "$dev"
+}
+
+_install_phoc_fragment() {
+    _dev=$1
+    _frag="$REPO_DIR/launcher/data/phoc/${_dev}.ini"
+    if [ ! -f "$_frag" ]; then
+        _frag="/usr/share/xx-wm/phoc/${_dev}.ini"
     fi
-    if [ ! -f "$frag" ]; then
-        echo "warn: no phoc.ini fragment for '$dev' — keeping default" >&2
-        if [ "${UNATTENDED:-0}" = 1 ]; then
-            return 1
-        fi
-        return 0
+    if [ ! -f "$_frag" ]; then
+        echo "warn: no phoc.ini fragment for '$_dev' — keeping default" >&2
+        return 1
     fi
-    $SUDO cp "$frag" "${XX_WM_PHOC_DEST:-/usr/share/xx-wm/phoc.ini}" || {
-        echo "warn: could not install phoc.ini fragment for '$dev'" >&2
+    $SUDO cp "$_frag" "${XX_WM_PHOC_DEST:-/usr/share/xx-wm/phoc.ini}" || {
+        echo "warn: could not install phoc.ini fragment for '$_dev'" >&2
         if [ "${UNATTENDED:-0}" = 1 ]; then
             return 1
         fi
@@ -428,6 +435,8 @@ enable_service() {
     if is_systemd; then
         systemctl --user daemon-reload 2>/dev/null || true
         if [ -f /usr/share/wayland-sessions/xx-wm.desktop ]; then
+            # Idempotent: a previous install.sh always-enabled the unit.
+            # --now stops a running duplicate if we are somehow inside a session.
             systemctl --user disable --now xx-wm 2>/dev/null || true
             echo "wayland-session installed; systemd --user xx-wm disabled (would double-start under GDM)."
             echo "Opt-in only from a session that is NOT already xx-wm-session:"

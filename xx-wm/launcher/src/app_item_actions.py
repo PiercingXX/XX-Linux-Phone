@@ -33,12 +33,14 @@ class AppItemActions:
                  on_changed: Callable[[], None],
                  on_status: Callable[[str], None],
                  focus_state: object | None = None,
-                 on_popover_changed: Callable[[bool], None] | None = None) -> None:
+                 on_popover_changed: Callable[[bool], None] | None = None,
+                 on_keyboard: Callable[[bool], None] | None = None) -> None:
         self._config = config
         self._on_changed = on_changed
         self._on_status = on_status
         self._focus = focus_state
         self._on_popover_changed = on_popover_changed
+        self._on_keyboard = on_keyboard
 
     # -- popover plumbing --------------------------------------------------
 
@@ -104,7 +106,7 @@ class AppItemActions:
 
     def _show_entry_dialog(self, anchor: Gtk.Widget, title: str, initial: str,
                            commit_label: str, on_commit: Callable[[str], None],
-                           password: bool = False) -> None:
+                           password: bool | None = None) -> None:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         heading = Gtk.Label(label=title, xalign=0)
         heading.add_css_class('menu-title')
@@ -112,7 +114,11 @@ class AppItemActions:
         entry = Gtk.Entry()
         entry.set_text(initial)
         entry.set_max_width_chars(_MENU_TEXT_WIDTH)
-        if password:
+        if password is None:
+            is_password = self._title_is_password(title)
+        else:
+            is_password = password
+        if is_password:
             entry.set_visibility(False)
             entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
         else:
@@ -129,14 +135,29 @@ class AppItemActions:
 
         def _commit(*_args: object) -> None:
             raw = entry.get_text()
-            text = raw if password else raw.strip()
+            text = raw if is_password else raw.strip()
             popover.popdown()
             if text:
                 on_commit(text)
 
+        def _closed(_p: Gtk.Popover) -> None:
+            if callable(self._on_keyboard):
+                self._on_keyboard(False)
+
         entry.connect('activate', _commit)
         commit_btn.connect('clicked', _commit)
+        if hasattr(popover, 'connect'):
+            popover.connect('closed', _closed)
+        if callable(self._on_keyboard):
+            from osk import attach
+            attach(entry, on_show=lambda: self._on_keyboard(True))
         entry.grab_focus()
+        if callable(self._on_keyboard):
+            self._on_keyboard(True)
+
+    @staticmethod
+    def _title_is_password(title: str) -> bool:
+        return 'password' in title.casefold()
 
     # -- drawer app rows ---------------------------------------------------
 

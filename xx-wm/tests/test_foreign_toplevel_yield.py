@@ -217,7 +217,10 @@ class TestHomeRecomputesPolicy:
         start = body.find("command == 'gesture.home'")
         assert start != -1
         block = body[start:start + 500]
-        assert 'present_over_apps' in block
+        # The arm funnels through ShellWindow.go_home, which hides the
+        # overlays, shows home, and raises via present_over_apps
+        # (see test_go_home_hides_overlays_and_raises).
+        assert 'go_home()' in block
 
     def test_present_recomputes_policy(self):
         src = (SRC / 'window.py').read_text(encoding='utf-8')

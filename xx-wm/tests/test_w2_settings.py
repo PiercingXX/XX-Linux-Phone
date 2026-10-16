@@ -280,7 +280,11 @@ class TestOpenSettings:
 
     def test_shade_handler_is_open_settings(self, window):
         src = inspect.getsource(window.ShellWindow._ensure_shade)
-        assert 'on_open_settings=self.open_settings' in src
+        # The shade's Settings button must reach the shell's settings
+        # opener: _open_settings hops over apps, and open_settings fans
+        # out to it before refreshing the linked section.
+        assert ('on_open_settings=self._open_settings' in src
+                or 'on_open_settings=self.open_settings' in src)
 
 
 class TestSettingsNarrowRows:

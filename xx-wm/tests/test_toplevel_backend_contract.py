@@ -142,10 +142,27 @@ class FakeGLib:
     IOCondition = FakeIOCondition
     PRIORITY_DEFAULT = 0
     fd_adds: list[tuple[int, int, object]] = []
+    idle_adds: list[object] = []
+    timeouts: list[tuple[int, object, tuple]] = []
+
+    @classmethod
+    def idle_add(cls, callback: object, *data) -> int:
+        cls.idle_adds.append((callback, data))
+        return len(cls.idle_adds)
+
+    @classmethod
+    def timeout_add(cls, ms: int, callback: object, *data) -> int:
+        cls.timeouts.append((ms, callback, data))
+        return len(cls.timeouts)
 
     @classmethod
     def unix_fd_add_full(cls, _priority: int, fd: int, condition: int,
-                         callback: object) -> int:
+                         callback: object, _data=None) -> int:
+        cls.fd_adds.append((fd, condition, callback))
+        return len(cls.fd_adds)
+
+    @classmethod
+    def io_add_watch(cls, fd: int, condition: int, callback: object, *data) -> int:
         cls.fd_adds.append((fd, condition, callback))
         return len(cls.fd_adds)
 
@@ -224,6 +241,8 @@ ADVERTISED = [
 @pytest.fixture
 def harness() -> Harness:
     FakeGLib.fd_adds.clear()
+    FakeGLib.timeouts.clear()
+    FakeGLib.idle_adds.clear()
     with Harness(list(ADVERTISED)) as h:
         yield h
 
@@ -238,6 +257,16 @@ def _all_registrations(harness: Harness) -> dict[str, object]:
     return flat
 
 
+def test_registry_global_accepts_three_arg_pywayland_event(harness: Harness) -> None:
+    """pywayland 0.4.18 dispatches wl_registry.global as (name, iface, version)."""
+    backend = harness.module.WaylandToplevelBackend()
+    registry = harness.display.registry
+    assert registry is not None
+    backend._seat = None
+    backend._on_registry_global(registry, 2, SEAT_IFACE, 7)
+    assert backend._seat is registry.bound[SEAT_IFACE]
+
+
 def test_backend_connects_and_binds_globals(harness: Harness) -> None:
     backend = harness.module.WaylandToplevelBackend()
     registry = harness.display.registry
@@ -245,7 +274,7 @@ def test_backend_connects_and_binds_globals(harness: Harness) -> None:
     assert backend.available() is True
     assert registry is not None
     # Manager global arrives before the seat; binding must not depend on order.
-    assert [(n, v) for n, _c, v in registry.binds] == [(1, 3), (2, 1)]
+    assert [(n, v) for n, _c, v in registry.binds] == [(1, 1), (2, 1)]
     assert registry.bound[SEAT_IFACE] is backend._seat
 
 
@@ -272,13 +301,51 @@ def test_handle_events_registered_on_toplevel_event(harness: Harness) -> None:
     assert id(handle) in backend._handles
 
 
+def test_pump_flushes_even_when_dispatch_raises_eagain(harness: Harness) -> None:
+    backend = harness.module.WaylandToplevelBackend()
+    flushes: list[int] = []
+    orig_flush = backend._display.flush
+
+    def _flush() -> None:
+        flushes.append(1)
+        orig_flush()
+
+    def _boom(*, block: bool = False) -> int:
+        raise RuntimeError('Failed with error: 11')
+
+    backend._display.flush = _flush  # type: ignore[method-assign]
+    backend._display.dispatch = _boom  # type: ignore[method-assign]
+    flushes.clear()
+    assert backend._pump() is True
+    assert flushes
+
+
 def test_arm_fd_watch_called_on_successful_connect(harness: Harness) -> None:
     harness.module.WaylandToplevelBackend()
-    assert len(FakeGLib.fd_adds) == 1
-    fd, condition, callback = FakeGLib.fd_adds[0]
-    assert fd == harness.display.fd
-    assert condition == FakeIOCondition.IN | FakeIOCondition.HUP
+    assert len(FakeGLib.timeouts) == 1
+    ms, callback, _data = FakeGLib.timeouts[0]
+    assert ms == harness.module._PUMP_INTERVAL_MS
     assert callable(callback)
+
+
+def test_connect_replays_handles_seen_before_callback(harness: Harness) -> None:
+    """Toplevels that arrived before connect() must still reach the manager.
+
+    The wayland thread used to start in _connect, so the initial burst
+    upserted into a None callback and recents stayed empty.
+    """
+    backend = harness.module.WaylandToplevelBackend()
+    registry = harness.display.registry
+    assert registry is not None
+    manager = registry.bound[TOPLVL_IFACE]
+    handle = FakeHandle()
+    manager.dispatcher.registrations['toplevel'](manager, handle)  # type: ignore[index]
+    handle.dispatcher.registrations['app_id'](handle, 'org.gnome.Calculator')  # type: ignore[index]
+    handle.dispatcher.registrations['title'](handle, 'Calculator')  # type: ignore[index]
+
+    events: list[tuple[object, object, object]] = []
+    backend.connect(lambda *args: events.append(args))
+    assert (id(handle), 'org.gnome.Calculator', 'Calculator') in events
 
 
 def test_events_flow_after_connect_via_upserts(harness: Harness) -> None:

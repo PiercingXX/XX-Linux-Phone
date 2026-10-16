@@ -413,9 +413,11 @@ def _unattended_harness(tmp_path, autologin=True):
 
 
 _UNATTENDED_FUNCS = ['msg_box', 'pkg_install', 'install_deps',
+                     'install_portals',
                      'download_nerd_font_fallback', 'install_fonts',
                      'install_logind_dropin', 'link_squeekboard_layouts',
                      'check_layer_shell', 'detect_phoc_device', 'select_phoc_scale',
+                     '_install_phoc_fragment',
                      'is_systemd', 'has_openrc', 'enable_service',
                      'greetd_detected', 'greetd_config_path',
                      'setup_greetd_autologin', 'setup_greeter',

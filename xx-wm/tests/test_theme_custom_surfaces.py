@@ -10,9 +10,9 @@ one of those surfaces resolves its display preset through resolve_theme at
 CSS-build time from an injected live config, while no-arg construction
 keeps working (backward-compat invariant).
 
-Live re-theme on hot reload is explicitly NOT covered here — these surfaces
-are not in window.py's _retheme_surfaces fan-out; construction-time correct
-rendering is the deliverable.
+Live re-theme on hot reload is covered in test_theme_hot_reload.py; this
+file still pins construction-time resolve_theme and that apply_theme exists
+on HUD, switcher, lock, back overlay, and the quick-actions panel.
 
 Headless seams: modules are imported once against a shared fake gi stack
 (test_theme_hot_reload idiom, extended for the switcher's toplevel_manager
@@ -309,3 +309,36 @@ class TestShadeThreadsConfigIntoPanel:
         src = inspect.getsource(notification_shade.NotificationShade.__init__)
         panel_call = src.split('QuickActionsPanel(')[1]
         assert 'config=self._config' in panel_call
+
+
+class TestApplyThemeSeam:
+    """Hot-reload fan-out (1.8) needs apply_theme on every overlay that
+    previously only themed at construction."""
+
+    def test_surfaces_expose_apply_theme(self):
+        for cls in (app_switcher.AppSwitcher, lock_screen.LockScreen,
+                    back_gesture.BackGestureLayer, back_gesture._ArrowOverlay,
+                    quick_actions.QuickActionsPanel):
+            assert callable(getattr(cls, 'apply_theme', None)), cls.__name__
+
+    def test_hud_exposes_apply_theme(self, hud_mod):
+        assert callable(getattr(hud_mod.Hud, 'apply_theme', None))
+        assert callable(getattr(hud_mod._HudWindow, 'apply_theme', None))
+
+    def test_back_layer_apply_theme_fans_to_arrows(self):
+        layer = back_gesture.BackGestureLayer.__new__(
+            back_gesture.BackGestureLayer)
+        left, right = _RecordingSurface(), _RecordingSurface()
+        layer._left_arrow = left
+        layer._right_arrow = right
+        layer.apply_theme(THEME_PRESETS['paper'])
+        assert left.applied == [THEME_PRESETS['paper']]
+        assert right.applied == [THEME_PRESETS['paper']]
+
+
+class _RecordingSurface:
+    def __init__(self) -> None:
+        self.applied: list[ThemePreset] = []
+
+    def apply_theme(self, preset) -> None:
+        self.applied.append(preset)

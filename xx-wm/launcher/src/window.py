@@ -31,6 +31,30 @@ from config import (
 )
 from gesture_config import GestureConfig
 
+# lisgd owns the bezel. In-window home swipes that start this close to an
+# edge would otherwise double-fire with gesture.back / short-home / long-recents.
+_EDGE_GUARD_PX = 72
+
+
+def origin_is_screen_edge(
+        origin: tuple[float, float] | None, width: float,
+        margin: float = _EDGE_GUARD_PX) -> bool:
+    """True when a swipe began on the left or right bezel."""
+    if origin is None or width <= 0:
+        return False
+    x = origin[0]
+    return x <= margin or x >= width - margin
+
+
+def origin_is_bottom_edge(
+        origin: tuple[float, float] | None, height: float,
+        margin: float = _EDGE_GUARD_PX) -> bool:
+    """True when a swipe began on the bottom bezel."""
+    if origin is None or height <= 0:
+        return False
+    return origin[1] >= height - margin
+
+
 _PAGE_ORDER = ['home', 'apps', 'settings']
 
 # Pages whose widgets take text input (drawer search, settings entries and
@@ -288,8 +312,9 @@ class ShellWindow(Adw.ApplicationWindow):
         self.app_index.refresh()
 
         try:
-            from default_layout import apply_default_layout
+            from default_layout import apply_default_layout, compact_unresolved_home
             apply_default_layout(self.config, self.gesture_config)
+            compact_unresolved_home(self.config, self.app_index)
         except Exception:
             pass  # first-boot seeding must never block the shell
 
@@ -333,6 +358,16 @@ class ShellWindow(Adw.ApplicationWindow):
         self._dialer: object | None = None
         self._power_menu: object | None = None
         self._back_layer: object | None = None
+        self._swipe_origin: tuple[float, float] | None = None
+        self._theme_buttons: dict[str, Gtk.Button] = {}
+        # Built on first switcher open: a second pywayland Display in
+        # ShellWindow.__init__ raced the GTK connection on this compositor.
+        self._toplevel_manager = None
+        self._thumbs = None
+        self._output_capture = None
+        self._raised_for_settings = False
+        self._layer_is_top = False
+        self._search_restore_bottom = False
 
         from modem_monitor import ModemMonitor
         self._modem_monitor = ModemMonitor(
@@ -373,6 +408,7 @@ class ShellWindow(Adw.ApplicationWindow):
             on_status=self._show_status,
             focus_state=self.focus_state,
             on_popover_changed=self._on_item_popover,
+            on_keyboard=self._on_entry_keyboard,
         )
 
         # Right-aligned flat search, as in the PiercingXX Android launcher
@@ -381,6 +417,20 @@ class ShellWindow(Adw.ApplicationWindow):
         self.apps_search.add_css_class('drawer-search')
         self.apps_search.connect('search-changed', self._on_apps_search_changed)
         self.apps_search.connect('activate', self._on_apps_search_activate)
+        self.apps_search.connect('notify::has-focus', self._on_search_focus)
+        # SearchEntry focus lives on the inner GtkText, so has-focus on the
+        # entry itself is often False. A focus controller + a claimed tap
+        # raise squeekboard; EXCLUSIVE keyboard mode is armed while typing.
+        search_focus = Gtk.EventControllerFocus.new()
+        # Arm on enter only: leave fires when focus moves to the inner
+        # GtkText and would hide the OSK on the same tap that opened it.
+        search_focus.connect('enter', lambda *_: self._arm_search_keyboard())
+        self.apps_search.add_controller(search_focus)
+        search_tap = Gtk.GestureClick.new()
+        search_tap.set_touch_only(False)
+        search_tap.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        search_tap.connect('pressed', self._on_search_pressed)
+        self.apps_search.add_controller(search_tap)
 
         self.status_label = Gtk.Label(xalign=0)
         self.status_label.add_css_class('dim-label')
@@ -439,6 +489,77 @@ class ShellWindow(Adw.ApplicationWindow):
         # manager degrades to unavailable headless, so this never breaks
         # construction.
         self._wire_foreign_toplevels()
+        GLib.idle_add(self._warm_toplevel_manager)
+        GLib.timeout_add(2500, self._tick_thumb_capture)
+        # SIGUSR1 respawns Python only; pick up migrated lisgd verbs now.
+        GLib.idle_add(self._sync_system_gestures)
+        try:
+            self._attach_osk(self.apn_entry)
+            self._attach_osk(self.apn_user_entry)
+            self._attach_osk(self.apn_pass_entry)
+        except Exception:
+            pass
+
+    def _warm_toplevel_manager(self) -> bool:
+        self._ensure_toplevel_manager()
+        self._ensure_thumbs()
+        self._ensure_capture()
+        return False
+
+    def _ensure_thumbs(self):
+        if self._thumbs is None:
+            from thumbnail_store import ThumbnailStore
+            self._thumbs = ThumbnailStore()
+        return self._thumbs
+
+    def _ensure_capture(self):
+        if self._output_capture is None:
+            from output_capture import OutputCapture
+            self._output_capture = OutputCapture()
+        return self._output_capture
+
+    def _overlays_block_capture(self) -> bool:
+        if getattr(self, '_layer_is_top', False):
+            return True
+        if self._switcher is not None and self._switcher.get_visible():
+            return True
+        if self._shade is not None and self._shade.get_visible():
+            return True
+        lock = getattr(self, '_lock_screen', None)
+        if lock is not None and lock.get_visible():
+            return True
+        power = getattr(self, '_power_menu', None)
+        if power is not None and power.get_visible():
+            return True
+        return False
+
+    def _tick_thumb_capture(self) -> bool:
+        self._maybe_capture_thumb()
+        return True
+
+    def _capture_thumb_once(self) -> bool:
+        self._maybe_capture_thumb()
+        return False
+
+    def _maybe_capture_thumb(self) -> None:
+        if self._overlays_block_capture():
+            return
+        mgr = self._toplevel_manager
+        if mgr is None:
+            return
+        app_id = mgr.activated_app_id()
+        if not app_id:
+            return
+        thumbs = self._ensure_thumbs()
+        from shell_log import get_logger
+        started = self._ensure_capture().capture(
+            lambda thumb, aid=app_id: (
+                get_logger('window').info(
+                    'thumb stored %s %sx%s', aid, thumb.width, thumb.height),
+                thumbs.put(aid, thumb),
+            ))
+        if started:
+            get_logger('window').info('capturing thumb for %s', app_id)
 
     def _load_css(self) -> None:
         style_path = Path(__file__).with_name('style.css')
@@ -494,22 +615,32 @@ class ShellWindow(Adw.ApplicationWindow):
     def _on_stack_swipe(self, _gesture: Gtk.GestureSwipe, vel_x: float, vel_y: float) -> None:
         # Vertical swipes match the PiercingXX Android launcher: up opens the
         # app drawer, down runs the configured action (default: shade)
+        current = self.stack.get_visible_child_name()
         if abs(vel_y) > abs(vel_x) * 1.5:
             if vel_y > 300:
                 self._dispatch_gesture_action(
                     self.gesture_config.get('swipe_down_top') or 'notification_shade')
-            elif vel_y < -_LONG_SWIPE_UP_VEL:
-                # Long/fast swipe up → app drawer
-                self.stack.set_visible_child_name('apps')
-            elif vel_y < -_SHORT_SWIPE_UP_VEL:
-                # Short swipe up → on-screen keyboard
-                self._show_keyboard()
+            elif vel_y < 0:
+                if current == 'settings':
+                    self._leave_settings()
+                elif current == 'apps':
+                    try:
+                        self.apps_search.grab_focus()
+                    except Exception:
+                        pass
+                else:
+                    # Bottom bezel is lisgd (short = home, long = recents).
+                    # Mid-display swipe-up on home still opens the app drawer.
+                    height = self.get_height() if hasattr(self, 'get_height') else 0
+                    if origin_is_bottom_edge(self._swipe_origin, height):
+                        return
+                    self.stack.set_visible_child_name('apps')
             return
         if abs(vel_y) > abs(vel_x):
             return
-        current = self.stack.get_visible_child_name()
         # Swipe right in the drawer collapses an open folder drop-down first
-        if current == 'apps' and vel_x > 200 and self._drawer_open_folder is not None:
+        folder = getattr(self, '_drawer_open_folder', None)
+        if current == 'apps' and vel_x > 200 and folder is not None:
             self._drawer_open_folder = None
             self._populate_apps(self.apps_search.get_text())
             return
@@ -518,8 +649,12 @@ class ShellWindow(Adw.ApplicationWindow):
         # drawer stays reachable without lisgd.
         if current == 'home' and not self._home_launcher.edit_mode:
             # Sideways on home is app-launch only (launcher parity) — an
-            # unbound direction does nothing; the drawer is a swipe up away
+            # unbound direction does nothing; the drawer is a swipe up away.
+            # Bezel starts belong to lisgd (back), not launch:Files.
             if abs(vel_x) > 200:
+                width = self.get_width() if hasattr(self, 'get_width') else 0
+                if origin_is_screen_edge(self._swipe_origin, width):
+                    return
                 action = self.gesture_config.get(
                     'swipe_left_home' if vel_x < -200 else 'swipe_right_home')
                 if action != 'none':
@@ -528,8 +663,7 @@ class ShellWindow(Adw.ApplicationWindow):
         # Settings is a leaf page: a horizontal swipe from either edge is an
         # unconditional "back to home", so there is always a way out by gesture
         if current == 'settings' and abs(vel_x) > 200:
-            self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
-            self.stack.set_visible_child_name('home')
+            self._leave_settings()
             return
         idx = _PAGE_ORDER.index(current) if current in _PAGE_ORDER else 0
         if vel_x < -200 and idx < len(_PAGE_ORDER) - 1:
@@ -543,6 +677,7 @@ class ShellWindow(Adw.ApplicationWindow):
                                start_y: float) -> None:
         from gi.repository import GLib
         now_ms = GLib.get_monotonic_time() / 1000.0
+        self._swipe_origin = (start_x, start_y)
         self._swipe_drag_samples = [(now_ms, start_x, start_y)]
         self._swipe_drag_claimed = False
 
@@ -593,14 +728,13 @@ class ShellWindow(Adw.ApplicationWindow):
             self.stack.set_visible_child_name('apps')
             self.apps_search.grab_focus()
         elif action == 'home':
-            self.stack.set_visible_child_name('home')
-            self._apply_layer_policy()
+            self.go_home()
         elif action == 'app_switcher':
             self._show_switcher()
         elif action == 'lock_screen':
             self._show_lock_screen()
         elif action == 'settings':
-            self.stack.set_visible_child_name('settings')
+            self._open_settings()
         elif action == 'dialer':
             self._open_dialer()
         elif action == 'back':
@@ -679,6 +813,21 @@ class ShellWindow(Adw.ApplicationWindow):
         self._popover_count = max(0, self._popover_count + (1 if opened else -1))
         self._apply_layer_policy()
 
+    def go_home(self) -> None:
+        """Home is a third destination: hide recents/shade, raise the launcher.
+
+        Recents swipe-down / tap-dim / back resume the current app; this
+        path is the Pixel short swipe-up (and the in-shell `home` action).
+        """
+        switcher = getattr(self, '_switcher', None)
+        if switcher is not None and switcher.get_visible():
+            switcher.hide_switcher()
+        shade = getattr(self, '_shade', None)
+        if shade is not None and shade.get_visible():
+            shade.hide_shade()
+        self.stack.set_visible_child_name('home')
+        self.present_over_apps()
+
     def present_over_apps(self) -> None:
         """Raise the shell above regular app windows (the go-home gesture).
 
@@ -687,6 +836,7 @@ class ShellWindow(Adw.ApplicationWindow):
         what makes 'swipe up → home' work while an app is open. An editable
         page keeps EXCLUSIVE so typing still works up there."""
         self._over_apps = True
+        self._layer_is_top = True
         self._apply_layer_policy()
 
     def drop_to_background(self) -> None:
@@ -697,9 +847,11 @@ class ShellWindow(Adw.ApplicationWindow):
         raised and keyboard-grabbing over the app. The next page change,
         popover event or present_over_apps re-applies the policy."""
         self._over_apps = False
+        self._layer_is_top = False
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.set_layer(self, LayerShell.Layer.BOTTOM)
             LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
+        GLib.timeout_add(400, self._capture_thumb_once)
 
     def _wire_foreign_toplevels(self, manager=None) -> None:
         """Yield to apps mapped outside the shell (D-Bus activation,
@@ -825,13 +977,12 @@ class ShellWindow(Adw.ApplicationWindow):
     def _handle_back(self) -> None:
         """Called by BackGestureLayer on edge swipe from either side."""
         import subprocess
-        # 1. Dismiss notification shade if open
-        if self._shade and self._shade.get_visible():
-            self._shade.hide_shade()
-            return
-        # 2. Dismiss app switcher if open
+        # Overlay first (switcher sits above the shade), then the shade.
         if self._switcher and self._switcher.get_visible():
             self._switcher.hide_switcher()
+            return
+        if self._shade and self._shade.get_visible():
+            self._shade.hide_shade()
             return
         # 3. Close dialer if open
         if self._dialer and self._dialer.get_visible():
@@ -839,7 +990,10 @@ class ShellWindow(Adw.ApplicationWindow):
             return
         # 4. Navigate back within the shell stack
         current = self.stack.get_visible_child_name()
-        if current in ('apps', 'settings'):
+        if current == 'settings':
+            self._leave_settings()
+            return
+        if current == 'apps':
             self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
             self.stack.set_visible_child_name('home')
             return
@@ -896,6 +1050,7 @@ class ShellWindow(Adw.ApplicationWindow):
         return lock is not None and bool(lock.get_visible())
 
     def _show_lock_screen(self) -> None:
+        self._disarm_search_keyboard()
         lock = getattr(self, '_lock_screen', None)
         if lock is not None:
             if not lock.get_visible():
@@ -955,7 +1110,7 @@ class ShellWindow(Adw.ApplicationWindow):
             self._shade = NotificationShade(
                 dnd_state=self.dnd_state,
                 focus_state=self.focus_state,
-                on_open_settings=self.open_settings,
+                on_open_settings=self._open_settings,
                 on_power=self._show_power_menu,
                 hud=hud,
                 config=self.config,
@@ -977,8 +1132,13 @@ class ShellWindow(Adw.ApplicationWindow):
 
         `section` is one of 'wifi' | 'bluetooth' | 'mobile' (or None for the
         top); unknown values open the top. The linked section also refreshes:
-        a WiFi scan for 'wifi', a device list for 'bluetooth'."""
-        return _settings(self).open_settings(section)
+        a WiFi scan for 'wifi', a device list for 'bluetooth'. Raises over
+        apps via _open_settings, then refreshes the linked section."""
+        self._open_settings(section)
+        try:
+            _settings(self).open_settings(section)
+        except Exception:
+            pass
 
     def _scroll_settings_to(self, section: str | None) -> bool:
         return _settings(self)._scroll_settings_to(section)
@@ -1006,6 +1166,62 @@ class ShellWindow(Adw.ApplicationWindow):
         """Hide squeekboard when focus leaves an editable widget (20.1)."""
         _set_osk_visible(False)
 
+    def _set_layer_keyboard_exclusive(self, exclusive: bool) -> None:
+        if not (_LAYER_SHELL and LayerShell.is_supported()):
+            return
+        # phoc layer-shell v3 ignores ON_DEMAND. EXCLUSIVE while Search is
+        # focused; NONE otherwise so the compositor does not keep the
+        # launcher grabbing the keyboard (that also stalls power/lock).
+        mode = (LayerShell.KeyboardMode.EXCLUSIVE if exclusive
+                else LayerShell.KeyboardMode.NONE)
+        LayerShell.set_keyboard_mode(self, mode)
+
+    def _arm_search_keyboard(self) -> None:
+        self._set_layer_keyboard_exclusive(True)
+        self._show_keyboard()
+        # Hop TOP while typing so the drawer search field stays above Colemak
+        # (exclusive-zone 0 on BOTTOM is the intent; the hop is the fallback
+        # when phoc still covers the field). Restore BOTTOM on dismiss unless
+        # Settings already owns the TOP layer.
+        if not getattr(self, '_layer_is_top', False):
+            self._search_restore_bottom = True
+            self.present_over_apps()
+
+    def _disarm_search_keyboard(self) -> None:
+        self._set_layer_keyboard_exclusive(False)
+        self._hide_keyboard()
+        if (getattr(self, '_search_restore_bottom', False)
+                and not getattr(self, '_raised_for_settings', False)):
+            self.drop_to_background()
+        self._search_restore_bottom = False
+
+    def _on_entry_keyboard(self, show: bool) -> None:
+        if show:
+            self._arm_search_keyboard()
+        else:
+            self._disarm_search_keyboard()
+
+    def _attach_osk(self, widget: Gtk.Widget) -> None:
+        """Raise squeekboard when an Entry on this layer-shell window is tapped."""
+        from osk import attach
+        attach(widget, on_show=self._arm_search_keyboard)
+
+    def _on_search_pressed(self, gesture: Gtk.GestureClick, _n_press: int,
+                           _x: float, _y: float) -> None:
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self.apps_search.grab_focus()
+        self._arm_search_keyboard()
+
+    def _widget_is_search_or_editable(self, widget) -> bool:
+        search = getattr(self, 'apps_search', None)
+        while widget is not None:
+            if search is not None and widget is search:
+                return True
+            if isinstance(widget, Gtk.Editable):
+                return True
+            widget = widget.get_parent() if hasattr(widget, 'get_parent') else None
+        return False
+
     def _on_tap_outside(self, _gesture: Gtk.GestureClick, _n_press: int,
                         x: float, y: float) -> None:
         """Hide squeekboard when a tap lands outside any editable widget.
@@ -1024,17 +1240,106 @@ class ShellWindow(Adw.ApplicationWindow):
             get_logger('window').warning(
                 'tap-outside pick(%s, %s) failed: %s', x, y, error)
             return
-        if not isinstance(widget, Gtk.Editable):
-            self._hide_keyboard()
+        if self._widget_is_search_or_editable(widget):
+            return
+        self._set_layer_keyboard_exclusive(False)
+        self._hide_keyboard()
+
+    def _open_settings(self, section: str | None = None) -> None:
+        """Show the in-shell Settings page above any focused app.
+
+        Settings is a stack page of the BOTTOM launcher window. present()
+        alone leaves it under the app; hopping to TOP is what makes the
+        shade Settings button (and the drawer row) actually appear.
+        Leaving settings drops back to BOTTOM so the user is not trapped
+        on a TOP overlay that needs a hard reboot to escape.
+        """
+        self._disarm_search_keyboard()
+        self._raised_for_settings = True
+        self.stack.set_visible_child_name('settings')
+        self.present_over_apps()
+        if section is not None:
+            try:
+                self._scroll_settings_to(section)
+            except Exception:
+                pass
+
+    def _leave_settings(self) -> None:
+        self._disarm_search_keyboard()
+        if self.stack.get_visible_child_name() == 'settings':
+            self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
+            self.stack.set_visible_child_name('home')
+        if getattr(self, '_raised_for_settings', False):
+            self._raised_for_settings = False
+            self.drop_to_background()
+
+    def _ensure_toplevel_manager(self):
+        if self._toplevel_manager is None:
+            from toplevel_manager import ToplevelManager
+            self._toplevel_manager = ToplevelManager()
+        return self._toplevel_manager
 
     def _show_switcher(self) -> None:
+        self._disarm_search_keyboard()
+        if self._switcher is not None and self._switcher.get_visible():
+            self._switcher.hide_switcher()
+            return
+        manager = self._ensure_toplevel_manager()
+        # Re-bind each open: a live foreign-toplevel client can stop seeing
+        # new windows after the first snapshot, so recents goes empty while
+        # Calculator is still on screen. A fresh bind matches a standalone
+        # client and lists what is actually open.
+        try:
+            manager.resync()
+        except Exception:
+            pass
         if self._switcher is None:
             from app_switcher import AppSwitcher
             self._switcher = AppSwitcher(
-                config=self.config, on_activated=self.drop_to_background,
+                manager=manager, config=self.config,
+                thumbnails=self._ensure_thumbs(),
+                on_activated=self.drop_to_background,
             )
             self._switcher.set_application(self.get_application())
+            self._switcher.apply_theme(resolve_theme(self.config))
+        else:
+            try:
+                self._switcher.attach_manager(manager)
+            except Exception:
+                pass
+        from shell_log import get_logger
+        try:
+            get_logger('window').info(
+                'showing switcher (%d toplevels, available=%s)',
+                len(manager.list()), manager.available)
+        except Exception:
+            pass
         self._switcher.show_switcher()
+        GLib.timeout_add(50, self._refresh_switcher_if_visible)
+        GLib.timeout_add(200, self._refresh_switcher_if_visible)
+
+    def _refresh_switcher_if_visible(self) -> bool:
+        switcher = self._switcher
+        try:
+            visible = switcher is not None and switcher.get_visible()
+        except Exception:
+            return False
+        if not visible:
+            return False
+        manager = self._toplevel_manager
+        from shell_log import get_logger
+        try:
+            n = len(manager.list()) if manager is not None else -1
+            avail = manager.available if manager is not None else False
+            get_logger('window').info(
+                'switcher refresh (%d toplevels, available=%s)', n, avail)
+        except Exception:
+            pass
+        try:
+            switcher.refresh()
+        except Exception:
+            pass
+        return False
 
     # -- app drawer (drawer_page.py) ------------------------------------------
     def _build_apps_page(self) -> Gtk.Widget:
@@ -1063,13 +1368,36 @@ class ShellWindow(Adw.ApplicationWindow):
     def _on_alpha_jump(self, _btn: Gtk.Button, letter: str) -> None:
         return _drawer(self)._on_alpha_jump(_btn, letter)
 
+    def _on_search_focus(self, entry: Gtk.SearchEntry, _pspec=None) -> None:
+        # GTK4 SearchEntry focus is on the inner GtkText; has-focus() on the
+        # entry is often False even while the user is typing. Only ARM here:
+        # a False notify would hide the OSK on the same tap that opened it.
+        contains = getattr(entry, 'contains_focus', None)
+        focused = bool(contains()) if callable(contains) else bool(entry.has_focus())
+        if focused:
+            self._arm_search_keyboard()
+
     def _on_stack_page_changed(self, stack: Gtk.Stack, _param: object) -> None:
+        name = stack.get_visible_child_name()
         # Leaving the drawer disarms both pick modes so a later tap launches
-        if stack.get_visible_child_name() != 'apps':
+        if name != 'apps':
             self._pick_slot_mode = False
             self._pick_gesture_key = None
             self._pick_exempt_mode = False
-        self._apply_layer_policy()
+            try:
+                self._disarm_search_keyboard()
+            except Exception:
+                pass
+        if name != 'settings' and getattr(self, '_raised_for_settings', False):
+            self._raised_for_settings = False
+            try:
+                self.drop_to_background()
+            except Exception:
+                pass
+        try:
+            self._apply_layer_policy()
+        except Exception:
+            pass
 
     def _gesture_binding_text(self, key: str) -> str:
         return _settings(self)._gesture_binding_text(key)
@@ -1099,10 +1427,38 @@ class ShellWindow(Adw.ApplicationWindow):
         return _settings(self)._pick_system_gesture(anchor, key, title)
 
     def _set_system_gesture(self, key: str, value: str) -> None:
-        return _settings(self)._set_system_gesture(key, value)
+        self.gesture_config.set(key, value)
+        self._refresh_gesture_labels()
+        self._restart_system_gestures()
 
     def _reset_system_gesture(self, key: str) -> None:
-        return _settings(self)._reset_system_gesture(key)
+        self.gesture_config.reset(key)
+        self._refresh_gesture_labels()
+        self._restart_system_gestures()
+
+    def _restart_system_gestures(self) -> None:
+        self._sync_system_gestures(notify=True)
+
+    def _sync_system_gestures(self, notify: bool = False) -> bool:
+        from gesture_config import GestureConfig
+        if not isinstance(self.gesture_config, GestureConfig):
+            return False
+        import shutil
+        from gesture_bindings import restart_lisgd
+        ipc = shutil.which('xx-wm-ipc') or '/usr/bin/xx-wm-ipc'
+        bindir = str(Path(ipc).parent)
+        try:
+            ok = restart_lisgd(bindir, self.gesture_config)
+        except Exception:
+            ok = False
+        if notify and getattr(self, 'status_label', None) is not None:
+            try:
+                self._show_status(
+                    'System gestures updated.' if ok
+                    else 'System gestures apply at the next session.')
+            except Exception:
+                pass
+        return False
 
     def _pick_gesture_app(self, key: str, title: str) -> None:
         return _settings(self)._pick_gesture_app(key, title)
@@ -1111,7 +1467,63 @@ class ShellWindow(Adw.ApplicationWindow):
         return _settings(self)._clear_gesture_app(key)
 
     def _build_settings_page(self) -> Gtk.Widget:
-        return _settings(self)._build_settings_page()
+        page = _settings(self)._build_settings_page()
+        try:
+            box = page.get_child()
+            back_btn = Gtk.Button(label='Back')
+            back_btn.add_css_class('flat')
+            back_btn.add_css_class('action-link')
+            back_btn.set_halign(Gtk.Align.START)
+            back_btn.connect('clicked', lambda _b: self._leave_settings())
+            box.prepend(back_btn)
+            appearance_title = Gtk.Label(label='Appearance', xalign=0)
+            appearance_title.add_css_class('section-title')
+            appearance_card = self._build_appearance_card()
+            appearance_card.set_name('appearance_card')
+            box.append(appearance_title)
+            box.append(appearance_card)
+        except Exception:
+            pass
+        return page
+
+    def _build_appearance_card(self) -> Gtk.Widget:
+        """Dedicated theme-preset surface on Settings (glass: no keyboard to
+        edit config.json). Other shell prefs still live in the config file."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        card.add_css_class('settings-card')
+        self._theme_buttons = {}
+        current = str(self.config.data.get('theme', DEFAULT_CONFIG['theme']))
+        for key, preset in THEME_PRESETS.items():
+            btn = Gtk.Button(label=preset.name)
+            btn.add_css_class('flat')
+            btn.add_css_class('action-link' if key == current else 'dim-label')
+            btn.connect('clicked', lambda _b, k=key: self._on_theme_picked(k))
+            self._theme_buttons[key] = btn
+            card.append(btn)
+        return card
+
+    def _refresh_theme_buttons(self) -> None:
+        current = str(self.config.data.get('theme', DEFAULT_CONFIG['theme']))
+        for key, btn in self._theme_buttons.items():
+            if key == current:
+                btn.add_css_class('action-link')
+                btn.remove_css_class('dim-label')
+            else:
+                btn.add_css_class('dim-label')
+                btn.remove_css_class('action-link')
+
+    def _on_theme_picked(self, key: str) -> None:
+        self.config.set_theme(key)
+        preset = THEME_PRESETS.get(key)
+        if preset is not None:
+            bg = preset.background.lstrip('#')
+            if len(bg) == 6:
+                r, g, b = (int(bg[i:i + 2], 16) for i in (0, 2, 4))
+                luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+                self.config.set_prefer_dark(luminance < 0.5)
+        self._refresh_theme_buttons()
+        self._apply_theme()
+        self._retheme_surfaces()
 
     # -- Developer section: wireless debugging (xxdb) ----------------------
 
@@ -1509,17 +1921,45 @@ class ShellWindow(Adw.ApplicationWindow):
         providers, so a hot-reloaded theme edit must reach each one; fonts
         already propagate display-wide via font_theme's global provider."""
         preset = resolve_theme(self.config)
+        try:
+            surfaces = (self._shade, self._dialer, self._call_ui,
+                        self._call_bar, self._power_menu, self._switcher)
+        except AttributeError:
+            surfaces = tuple(getattr(self, attr, None) for attr in (
+                '_shade', '_dialer', '_call_ui', '_call_bar',
+                '_power_menu', '_switcher'))
+        for surface in surfaces:
+            if surface is not None:
+                surface.apply_theme(preset)
+        lock = getattr(self, '_lock_screen', None)
+        if lock is not None:
+            lock.apply_theme(preset)
+        back = getattr(self, '_back_layer', None)
+        if back is not None:
+            back.apply_theme(preset)
         # The HUD lives on the application (main.py wires it into the shade
         # from there); getattr-guarded so bare test namespaces still fan out.
         get_app = getattr(self, 'get_application', None)
-        hud = getattr(get_app(), '_hud', None) if callable(get_app) else None
-        banner = getattr(get_app(), '_banner', None) if callable(get_app) else None
-        back = getattr(self, '_back_layer', None)
-        for surface in (self._shade, self._dialer, self._call_ui,
-                        self._call_bar, self._power_menu, self._switcher,
-                        back, hud, banner):
-            if surface is not None:
-                surface.apply_theme(preset)
+        app = get_app() if callable(get_app) else None
+        if app is not None:
+            hud = getattr(app, '_hud', None)
+            if hud is not None:
+                hud.apply_theme(preset)
+            banner = getattr(app, '_banner', None)
+            if banner is not None:
+                banner.apply_theme(preset)
+            # The application owns the single power menu instance; the
+            # window reuses it instead of building a second one. Fan out
+            # here only when it is not the window's own menu (which the
+            # loop above already themed): same instance, themed once.
+            for menu in (getattr(app, '_power_menu', None),):
+                if (menu is not None
+                        and menu is not getattr(self, '_power_menu', None)):
+                    menu.apply_theme(preset)
+        try:
+            self._refresh_theme_buttons()
+        except Exception:
+            pass
 
     def on_blank_changed(self, blanked: bool) -> None:
         """DisplayManager callback: the screen locks after

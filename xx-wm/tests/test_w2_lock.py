@@ -405,6 +405,11 @@ def _app_with_shell(locked):
             set_visible_child_name=lambda name: calls.append(
                 ('home', name))),
         present_over_apps=lambda: calls.append('over-apps'),
+        _switcher=None,
+        _shade=None,
+        go_home=lambda: (
+            shell.stack.set_visible_child_name('home'),
+            shell.present_over_apps()),
     )
     app._shell = shell
     app._show_welcome_tour = lambda: calls.append('welcome')

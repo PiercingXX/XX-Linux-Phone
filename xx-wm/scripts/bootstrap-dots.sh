@@ -21,6 +21,7 @@ fi
 
 if [ -d "${HOME}/piercing-dots" ]; then
     DEST="${HOME}/piercing-dots"
+    # Keep the user's clone; never delete this path.
 else
     DEST="${HOME}/.cache/piercing-dots"
     rm -rf "$DEST"

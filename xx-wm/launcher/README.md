@@ -10,7 +10,7 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" nam
 - **Notification shade** (`notification_shade.py`) — TOP layer, date/time header with inline month calendar (`calendar_grid.py`), Settings entry, in-process daemon (`notif_daemon.py`), tap-to-launch, swipe-to-dismiss, clear all, quick actions embedded.
 - **DnD & Focus** (`dnd.py`, `focus_mode.py`) — Pixel-model Do Not Disturb (schedules, starred contacts, repeat callers) and Focus Mode (paused apps, held notifications, take-a-break), wired through tiles, calls, and the notification path.
 - **Quick actions** (`quick_actions.py`) — WiFi, BT, mobile data, airplane, torch, DnD, Focus; brightness/volume sliders; hardware-gated tiles hide themselves.
-- **App switcher** (`app_switcher.py`, `toplevel_manager.py`, `wayland_bindings.py`) — live window list over `wlr-foreign-toplevel-management-unstable-v1`: `python-pywayland` on a GLib fd-watch (never blocks the GTK loop), bindings generated at runtime by the installed pywayland's own scanner from the protocol XMLs under `data/` into a version-keyed cache. Rows are app name + window title text only; tap → activate (hands the screen to the app), ✕ or left/right swipe → close; own and keyboard surfaces filtered out; graceful empty state when the compositor doesn't offer the protocol.
+- **App switcher** (`app_switcher.py`, `toplevel_manager.py`, `wayland_bindings.py`, `thumbnail_store.py`, `output_capture.py`) — full-screen recents over `wlr-foreign-toplevel-management-unstable-v1`: `python-pywayland` on a GLib pump plus a dedicated wayland thread (never blocks the GTK loop), bindings generated at runtime by the installed pywayland's own scanner from the protocol XMLs under `data/` into a version-keyed cache. Cards show the resolved app name, window title, and last-seen stills; tap → activate (hands the screen to the app), ✕ or swipe-up on a card → close; tap dim / swipe down / back → resume; own and keyboard surfaces filtered out; graceful empty state when the compositor doesn't offer the protocol.
 - **Volume/brightness HUD** (`hud.py`) — in-shell overlay on the layer-shell OVERLAY layer: flashes the new volume/brightness level on hardware key presses, auto-hides after ~1 s. No external process involved, and it silently no-ops where GTK or the layer shell can't init.
 - **Sounds** (`sound.py`, `data/sounds/`) — ringtone loop + notification sound via paplay/pw-play, gated by config, DnD, mutes.
 - **Weather** (`weather.py`) — Open-Meteo current conditions, 15-min cache, silent offline fallback.
@@ -77,24 +77,24 @@ gate, and ruff resolves via the venv python first so it needn't be on PATH.
 ## Deploy to device
 
 ```bash
-# WiFi SSH (USB data drops while charging on the FP5)
 export PIERCING_DEVICE=<device-ip>
 export XX_WM_USER=dr3k   # tablet default; pmos default is user — check per device
 ./scripts/deploy.sh
 ```
 
-`deploy.sh` stages `launcher/src/` (`*.py`, `style.css`, `wayland_proto/`)
-in `/tmp/xx-wm-deploy/` on the device, then `sudo rsync`s it into the
-installed datadir `/usr/share/xx-wm/` (no `--delete` there, so `phoc.ini`
-and sounds survive) and restarts the running shell: `systemctl --user
-restart xx-wm` only when that unit is active, otherwise `SIGUSR1` to the
-unique `python3 /usr/share/xx-wm/main.py` child (the `/usr/bin/xx-wm`
-supervisor respawns it; never `TERM`/`HUP` — `Gio.Application` maps those
-to quit and the session would end). It never updates `/usr/bin/xx-wm`
-itself — wrapper changes need `meson install`. Needs passwordless sudo
-on the device (`scripts/grant-tablet-sudo.sh`). `--dry-run` prints the
-real paths without touching anything. Full installs go through
-`scripts/install.sh` (whiptail menu: Install / Update / Install phone apps).
+`deploy.sh` stages `launcher/src/` (`*.py`, `style.css`) plus the Wayland
+protocol XMLs in `/tmp/xx-wm-deploy/` on the device, then `sudo rsync`s
+it into the installed datadir `/usr/share/xx-wm/` (root-owned; no
+`--delete` there, so `phoc.ini` and sounds survive) and restarts the
+running shell: `systemctl --user restart xx-wm` only when that unit is
+active, otherwise `SIGUSR1` to the unique `python3
+/usr/share/xx-wm/main.py` child (the `/usr/bin/xx-wm` supervisor respawns
+it; never `TERM`/`HUP` — `Gio.Application` maps those to quit and the
+session would end). It never updates `/usr/bin/xx-wm` itself — wrapper
+changes need `meson install`. Needs passwordless sudo on the device
+(`scripts/grant-tablet-sudo.sh`). `--dry-run` prints the real paths
+without touching anything. Full installs go through `scripts/install.sh`
+(whiptail menu: Install / Update / Install phone apps).
 
 ## Device checks to run first
 

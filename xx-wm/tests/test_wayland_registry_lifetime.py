@@ -52,11 +52,12 @@ def hermetic_modules_and_cache(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_gi(monkeypatch):
-    """Neutralize the GLib fd-watch so backends connect headless."""
+    """Neutralize GLib pumps/watches so backends connect headless."""
     glib = types.SimpleNamespace(
         PRIORITY_DEFAULT=0,
         IOCondition=types.SimpleNamespace(IN=1, HUP=2),
         unix_fd_add_full=lambda *args: 1,
+        timeout_add=lambda *args: 1,
     )
     glib_unix = types.SimpleNamespace(fd_add_full=lambda *args: 1)
     gi_mod = types.ModuleType('gi')

@@ -33,9 +33,17 @@ def install_script():
 
 
 def _function_body(script, name):
-    import re
-    m = re.search(re.escape(name) + r'\(\) \{(.*?)^\}', script, re.M | re.S)
-    return m.group(1) if m else ''
+    start = script.find(name + '() {')
+    assert start != -1, f'{name} not defined'
+    depth = 0
+    for i in range(start, len(script)):
+        if script[i] == '{':
+            depth += 1
+        elif script[i] == '}':
+            depth -= 1
+            if depth == 0 and script[i - 1] == '\n':
+                return script[start:i]
+    return ''
 
 
 def test_per_device_fragments_exist():
@@ -68,11 +76,25 @@ def test_fragment_disables_xwayland():
 def test_install_script_selects_fragment(install_script):
     """install.sh must copy the chosen device's fragment over phoc.ini."""
     body = _function_body(install_script, 'select_phoc_scale')
+    helper = _function_body(install_script, '_install_phoc_fragment')
+    combined = body + helper
     assert 'whiptail' in body or '_ask_device' in body
-    assert 'launcher/data/phoc' in body
-    assert '.ini' in body
-    assert 'cp' in body
-    assert '/usr/share/xx-wm/phoc.ini' in body
+    assert 'launcher/data/phoc' in combined
+    assert '.ini' in combined
+    assert 'cp' in combined
+    assert '/usr/share/xx-wm/phoc.ini' in combined
+
+
+def test_detects_or_requires_device(install_script):
+    """Cancel must not silently keep the Fairphone 5 DSI-1 scale 2.5."""
+    body = _function_body(install_script, 'select_phoc_scale')
+    detect = _function_body(install_script, 'detect_phoc_device')
+    assert '1200x1920' in detect or '1200x1920' in body
+    assert '/sys/class/drm' in detect or '/sys/class/drm' in body
+    assert '-t 0' in body
+    assert 'return 1' in body
+    assert '|| return 0' not in body
+    assert 'detect' in body
 
 
 def test_detect_probes_drm_modes(install_script):

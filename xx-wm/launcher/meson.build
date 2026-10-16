@@ -27,71 +27,74 @@ shell_datadir = join_paths(get_option('datadir'), shell_subdir)
 # both the flat imports and the asset lookups.
 install_data(
   [
-    'src/main.py',
-    'src/window.py',
-    'src/home_page.py',
-    'src/drawer_page.py',
-    'src/settings_page.py',
-    'src/settings_standby.py',
-    'src/settings_permissions.py',
-    'src/settings_smart_lock.py',
-    'src/call_wiring.py',
-    'src/call_screen.py',
-    'src/lock_screen.py',
-    'src/notification_shade.py',
-    'src/app_switcher.py',
-    'src/quick_actions.py',
-    'src/gesture_config.py',
-    'src/gesture_bindings.py',
-    'src/system_status.py',
-    'src/toplevel_manager.py',
-    'src/wayland_bindings.py',
-    'src/first_boot.py',
-    'src/call_ui.py',
-    'src/dialer.py',
-    'src/sms.py',
-    'src/ipc.py',
-    'src/shell_log.py',
-    'src/notif_daemon.py',
-    'src/modem_monitor.py',
-    'src/app_index.py',
-    'src/app_names.py',
-    'src/app_standby.py',
-    'src/config.py',
-    'src/contacts.py',
     'src/als_brightness.py',
-    'src/home_launcher.py',
-    'src/default_layout.py',
-    'src/backup.py',
-    'src/update_checker.py',
-    'src/display_manager.py',
-    'src/power_menu.py',
-    'src/back_gesture.py',
+    'src/app_index.py',
     'src/app_item_actions.py',
-    'src/calendar_grid.py',
-    'src/dnd.py',
-    'src/focus_mode.py',
-    'src/font_theme.py',
-    'src/sound.py',
-    'src/system_settings.py',
-    'src/weather.py',
-    'src/hud.py',
-    'src/lock_lines.py',
-    'src/smart_lock.py',
-    'src/banner.py',
-    'src/output_power.py',
-    'src/usage_stats.py',
-    'src/helper_client.py',
-    'src/media_controls.py',
-    'src/settings_charging.py',
-    'src/settings_battery_use.py',
-    'src/settings_screentime.py',
-    'src/settings_medical.py',
-    'src/privacy_monitor.py',
-    'src/captions.py',
+    'src/app_names.py',
     'src/app_permissions.py',
+    'src/app_standby.py',
+    'src/app_switcher.py',
+    'src/back_gesture.py',
+    'src/backup.py',
+    'src/banner.py',
+    'src/calendar_grid.py',
+    'src/call_screen.py',
+    'src/call_ui.py',
+    'src/call_wiring.py',
+    'src/captions.py',
     'src/capture.py',
     'src/capture_stitch.py',
+    'src/config.py',
+    'src/contacts.py',
+    'src/default_layout.py',
+    'src/dialer.py',
+    'src/display_manager.py',
+    'src/dnd.py',
+    'src/drawer_page.py',
+    'src/first_boot.py',
+    'src/focus_mode.py',
+    'src/font_theme.py',
+    'src/gesture_bindings.py',
+    'src/gesture_config.py',
+    'src/helper_client.py',
+    'src/home_launcher.py',
+    'src/home_page.py',
+    'src/hud.py',
+    'src/ipc.py',
+    'src/lock_lines.py',
+    'src/lock_screen.py',
+    'src/main.py',
+    'src/media_controls.py',
+    'src/modem_monitor.py',
+    'src/notif_daemon.py',
+    'src/notification_shade.py',
+    'src/osk.py',
+    'src/output_capture.py',
+    'src/output_power.py',
+    'src/power_menu.py',
+    'src/privacy_monitor.py',
+    'src/quick_actions.py',
+    'src/settings_battery_use.py',
+    'src/settings_charging.py',
+    'src/settings_medical.py',
+    'src/settings_page.py',
+    'src/settings_permissions.py',
+    'src/settings_screentime.py',
+    'src/settings_smart_lock.py',
+    'src/settings_standby.py',
+    'src/shell_log.py',
+    'src/smart_lock.py',
+    'src/sms.py',
+    'src/sound.py',
+    'src/system_settings.py',
+    'src/system_status.py',
+    'src/thumbnail_store.py',
+    'src/toplevel_manager.py',
+    'src/update_checker.py',
+    'src/usage_stats.py',
+    'src/wayland_bindings.py',
+    'src/weather.py',
+    'src/window.py',
     'src/xxdb.py',
     'src/xxdb_controller.py',
     'src/xxdb_daemon.py',
@@ -122,15 +125,17 @@ install_data(
   install_dir: join_paths(shell_datadir, 'phoc'),
 )
 
-# Wayland protocol XML (core + wlr foreign-toplevel-management). Installed
-# next to the shell modules; the pywayland client generates its bindings from
-# these at runtime with the installed pywayland's own scanner (see
-# src/wayland_bindings.py), cached per pywayland version.
+# Wayland protocol XML (core + wlr extensions). Installed next to the
+# shell modules; the pywayland client generates its bindings from these at
+# runtime with the installed pywayland's own scanner (see
+# src/wayland_bindings.py), cached per pywayland version and XML content.
+# No generated modules are vendored or installed.
 install_data(
   'data/wayland.xml',
   'data/wlr-foreign-toplevel-management-unstable-v1.xml',
   'data/wlr-output-power-management-unstable-v1.xml',
   'data/virtual-pointer-unstable-v1.xml',
+  'data/wlr-screencopy-unstable-v1.xml',
   install_dir: shell_datadir,
 )
 
@@ -149,6 +154,18 @@ install_data(
 install_data(
   'data/squeekboard/us+colemak.yaml',
   'data/squeekboard/us+colemak_wide.yaml',
+  install_dir: join_paths(shell_datadir, 'squeekboard'),
+)
+# squeekboard falls back to us.yaml when gsettings reports layout "us"
+# (mru-sources often stays us even when sources is us+colemak).
+install_data(
+  'data/squeekboard/us+colemak.yaml',
+  rename: 'us.yaml',
+  install_dir: join_paths(shell_datadir, 'squeekboard'),
+)
+install_data(
+  'data/squeekboard/us+colemak_wide.yaml',
+  rename: 'us_wide.yaml',
   install_dir: join_paths(shell_datadir, 'squeekboard'),
 )
 install_data(
@@ -263,7 +280,9 @@ install_data(
   install_dir: join_paths(get_option('datadir'), 'xdg-desktop-portal'),
 )
 
-# OpenRC init script (for OpenRC-based images). The build output must NOT be
+# OpenRC init script (for OpenRC-based images; postmarketOS default images
+# are OpenRC). configure_file so command= uses the meson libexecdir (Arch
+# often ships /usr/lib, not /usr/libexec). The build output must NOT be
 # plain 'xx-wm': the launcher wrapper above already produces build/xx-wm and
 # the later file would win, shipping the init script as /usr/bin/xx-wm.
 # Configure to xx-wm.openrc, then install it renamed to init.d/xx-wm.

@@ -25,6 +25,7 @@ import wayland_bindings
 LAUNCHER_DATA = Path(__file__).parent.parent / 'launcher' / 'data'
 
 WLR_XML = LAUNCHER_DATA / 'wlr-foreign-toplevel-management-unstable-v1.xml'
+WLR_SCREENCOPY_XML = LAUNCHER_DATA / 'wlr-screencopy-unstable-v1.xml'
 WAYLAND_XML = LAUNCHER_DATA / 'wayland.xml'
 
 # All core Wayland interfaces the wayland.xml scanner input must declare.
@@ -130,12 +131,12 @@ def _interface_names(path: Path) -> set[str]:
     return {iface.get('name') for iface in root.findall('interface')}
 
 
-@pytest.mark.parametrize('path', [WLR_XML, WAYLAND_XML])
+@pytest.mark.parametrize('path', [WLR_XML, WLR_SCREENCOPY_XML, WAYLAND_XML])
 def test_xml_file_exists(path: Path) -> None:
     assert path.is_file(), f'protocol XML missing: {path}'
 
 
-@pytest.mark.parametrize('path', [WLR_XML, WAYLAND_XML])
+@pytest.mark.parametrize('path', [WLR_XML, WLR_SCREENCOPY_XML, WAYLAND_XML])
 def test_xml_is_well_formed(path: Path) -> None:
     # Raises ET.ParseError if the file is not well-formed XML.
     ET.parse(path)
@@ -145,6 +146,12 @@ def test_wlr_xml_declares_both_toplevel_interfaces() -> None:
     names = _interface_names(WLR_XML)
     assert 'zwlr_foreign_toplevel_manager_v1' in names
     assert 'zwlr_foreign_toplevel_handle_v1' in names
+
+
+def test_screencopy_xml_declares_manager_and_frame() -> None:
+    names = _interface_names(WLR_SCREENCOPY_XML)
+    assert 'zwlr_screencopy_manager_v1' in names
+    assert 'zwlr_screencopy_frame_v1' in names
 
 
 def test_wayland_xml_declares_all_core_interfaces() -> None:
@@ -251,6 +258,48 @@ def test_load_incomplete_tree_returns_none(tmp_path: Path, isolated_imports) -> 
         "class WlSeat:\n    name = 'wl_seat'\n", encoding='utf-8',
     )
     assert wayland_bindings.load_classes_from(package_dir) is None
+
+
+def test_screencopy_resolves_against_installed_tree() -> None:
+    """The screencopy XML ships in data/ and declares the manager + frame
+    interfaces the generated bindings (and the old vendored module)
+    exposed."""
+    import xml.etree.ElementTree as ET
+
+    path = wayland_bindings.protocol_xml_path(
+        wayland_bindings.SCREENCAST_XML_NAME)
+    assert path is not None
+    names = {i.get('name') for i in ET.parse(str(path)).getroot().iter('interface')}
+    assert 'zwlr_screencopy_manager_v1' in names
+    assert 'zwlr_screencopy_frame_v1' in names
+
+
+def test_ensure_screencopy_loads_from_generated_tree(
+    tmp_path: Path, isolated_imports, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ensure_screencopy_bindings goes through the same cache/generate/load
+    path as the toplevel bindings, keyed on the screencopy XML names."""
+    package_dir = tmp_path / wayland_bindings.PROTO_PACKAGE_NAME
+    package_dir.mkdir(parents=True)
+    for filename, class_names in (
+        ('wayland.py', ('WlOutput', 'WlShm')),
+        ('wlr_screencopy_unstable_v1.py',
+         ('ZwlrScreencopyManagerV1', 'ZwlrScreencopyFrameV1')),
+    ):
+        body = ''.join(f"class {name}:\n    name = '{name}'\n"
+                        for name in class_names)
+        (package_dir / filename).write_text(body, encoding='utf-8')
+    monkeypatch.setattr(wayland_bindings, 'installed_pywayland_version',
+                        lambda: '0.4.18-test')
+    monkeypatch.setattr(wayland_bindings, 'package_dir_for',
+                        lambda *args: package_dir)
+    found = wayland_bindings.ensure_screencopy_bindings()
+    assert found is not None
+    assert [c.__name__ for c in
+            (found['WlOutput'], found['WlShm'],
+             found['ZwlrScreencopyManagerV1'],
+             found['ZwlrScreencopyFrameV1'])] == list(
+                 wayland_bindings.SCREENCAST_CLASS_NAMES)
 
 
 def test_ensure_degrades_without_pywayland(

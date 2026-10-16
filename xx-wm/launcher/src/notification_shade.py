@@ -167,12 +167,21 @@ def theme_css(preset: ThemePreset) -> str:
 window.xx-wm-shade {{
     background: transparent;
 }}
+window.shade-window {{
+    background: alpha({preset.background}, 0.55);
+}}
 .shade-root {{
     background: {preset.background};
     color: {preset.foreground};
 }}
 .shade-scrim {{
     background: alpha({preset.background}, 0.85);
+}}
+.shade-dismiss {{
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    min-height: 0;
 }}
 .shade-time {{
     font-size: 20pt;
@@ -297,6 +306,7 @@ def group_notification_runs(notifs: list) -> list[list]:
 
 
 _SWIPE_DISMISS_THRESHOLD = 140  # pixels to trigger dismiss
+_SHEET_CLOSE_DY = 100  # px upward drag to close the shade
 
 
 class Notification:
@@ -334,6 +344,7 @@ class NotificationShade(Gtk.Window):
                  is_own_daemon: Callable[[], bool] | None = None,
                  media_watcher: object | None = None) -> None:
         super().__init__(title='PiercingXX Shade')
+        self.add_css_class('shade-window')
         self._dnd = dnd_state
         self._focus = focus_state
         self._on_open_settings = on_open_settings
@@ -358,7 +369,9 @@ class NotificationShade(Gtk.Window):
         self.add_css_class('xx-wm-shade')
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)
-            LayerShell.set_layer(self, LayerShell.Layer.TOP)
+            # OVERLAY, not TOP: a 4-edge TOP surface sat under the
+            # maximized xdg app on this phoc, so tap-outside never drew.
+            LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
             LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
             LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
             LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
@@ -407,6 +420,7 @@ class NotificationShade(Gtk.Window):
         outer.append(self._revealer)
         self._scrim = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._scrim.add_css_class('shade-scrim')
+        self._scrim.add_css_class('shade-dismiss')
         self._scrim.set_hexpand(True)
         self._scrim.set_vexpand(True)
         scrim_tap = Gtk.GestureClick.new()
@@ -417,11 +431,20 @@ class NotificationShade(Gtk.Window):
         self._scrim.add_controller(scrim_tap)
         outer.append(self._scrim)
         swipe = Gtk.GestureSwipe.new()
-        swipe.connect(
-            'swipe',
-            lambda _g, _vx, vy: self.hide_shade() if vy < -200 else None,
-        )
+        swipe.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        swipe.connect('swipe', self._on_swipe)
         outer.add_controller(swipe)
+        sheet_drag = Gtk.GestureDrag.new()
+        sheet_drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        sheet_drag.connect('drag-update', self._on_sheet_drag_update)
+        sheet_drag.connect('drag-end', self._on_sheet_drag_end)
+        outer.add_controller(sheet_drag)
+        key = Gtk.EventControllerKey.new()
+        key.connect('key-pressed', self._on_key)
+        # Key events from focused children bubble to the outer box, so the
+        # controller lives here instead of on the window: bare-construction
+        # test doubles exercise _build_outer without a Gtk.Window base.
+        outer.add_controller(key)
         return outer
 
     def apply_theme(self, preset: ThemePreset | None = None) -> None:
@@ -585,6 +608,7 @@ class NotificationShade(Gtk.Window):
         close_btn.set_margin_top(8)
         close_btn.connect('clicked', lambda _b: self.hide_shade())
 
+
         root.append(top_header)
         root.append(self._privacy_revealer)
         root.append(self._calendar_revealer)
@@ -674,6 +698,18 @@ class NotificationShade(Gtk.Window):
         The shell's handler takes an optional section argument; a legacy
         zero-arg handler still works via the TypeError fallback.
         """
+        # Hide immediately so the BOTTOM launcher (hopped to TOP) is not
+        # covered by this TOP shade for the revealer timeout.
+        try:
+            if self._clock_timer_id is not None:
+                GLib.source_remove(self._clock_timer_id)
+                self._clock_timer_id = None
+            self._revealer.set_reveal_child(False)
+            if _LAYER_SHELL and LayerShell.is_supported():
+                LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
+            self.hide()
+        except Exception:
+            pass
         self.hide_shade()
         callback = self._on_open_settings
         if not callable(callback):
@@ -1043,6 +1079,25 @@ class NotificationShade(Gtk.Window):
             row_box.set_margin_start(0)
             row_box.set_margin_end(0)
 
+    def _on_sheet_drag_update(self, gesture: Gtk.GestureDrag, dx: float, dy: float) -> None:
+        # Claim only an upward pull so horizontal notif-row swipes still fire.
+        if dy < -40 and abs(dy) > abs(dx):
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+
+    def _on_sheet_drag_end(self, _g: Gtk.GestureDrag, dx: float, dy: float) -> None:
+        if dy < -_SHEET_CLOSE_DY and abs(dy) > abs(dx):
+            self.hide_shade()
+
+    def _on_swipe(self, _g: Gtk.GestureSwipe, vel_x: float, vel_y: float) -> None:
+        if vel_y < -200 and abs(vel_y) > abs(vel_x):
+            self.hide_shade()
+
+    def _on_key(self, _g: Gtk.EventControllerKey, keyval: int, *_) -> bool:
+        if keyval == Gdk.KEY_Escape:
+            self.hide_shade()
+            return True
+        return False
+
     def show_shade(self) -> None:
         # A show inside the hide grace window wins: drop the pending hide.
         hide_timer = getattr(self, '_hide_timer_id', None)
@@ -1059,6 +1114,15 @@ class NotificationShade(Gtk.Window):
             self.quick_actions.refresh_states()
         except Exception:
             pass
+        qa = getattr(self, 'quick_actions', None)
+        if qa is not None and hasattr(qa, 'sync_sliders'):
+            qa.sync_sliders()
+        if _LAYER_SHELL and LayerShell.is_supported():
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.EXCLUSIVE)
+        try:
+            self.set_visible(True)
+        except AttributeError:
+            pass
         self.present()
         self._revealer.set_reveal_child(True)
 
@@ -1068,6 +1132,8 @@ class NotificationShade(Gtk.Window):
             self._clock_timer_id = None
         self._calendar_revealer.set_reveal_child(False)
         self._revealer.set_reveal_child(False)
+        if _LAYER_SHELL and LayerShell.is_supported():
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
         old = getattr(self, '_hide_timer_id', None)
         if old is not None:
             try:

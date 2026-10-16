@@ -281,5 +281,25 @@ def test_card_labels_preserve_order(monkeypatch: pytest.MonkeyPatch) -> None:
     assert AppSwitcher._card_labels(apps) == ['org.a.App', 'org.b.App', 'org.c.App']
 
 
+def test_card_pixel_size_is_pixel_fraction() -> None:
+    from app_switcher import AppSwitcher
+
+    assert AppSwitcher._card_pixel_size(800, 1280) == (656, 870)
+    assert AppSwitcher._card_pixel_size(0, 0) == (280, 420)
+
+
+def test_single_app_still_renders_a_card(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One open app produces exactly one card label, not the empty state."""
+    from app_switcher import AppSwitcher
+
+    monkeypatch.setattr(app_switcher, 'resolve_app_name', lambda _id: 'Solo')
+    apps = [AppInfo('org.a.App', 'Solo', handle='h1')]
+    assert AppSwitcher._card_labels(apps) == ['Solo']
+    # A non-empty list must not be mistaken for the empty state.
+    assert len(apps) > 0
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

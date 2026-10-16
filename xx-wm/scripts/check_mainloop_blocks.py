@@ -180,6 +180,12 @@ ALLOW = {
         'xx-wm-wayland-bindings worker; cached per pywayland version.',
     ('window.py', '_work'):
         'osk-visible worker thread (moved off tap/swipe paths).',
+    ('osk.py', 'set_visible'):
+        'async D-Bus SetVisible first; call_sync only where bus.call is missing.',
+    ('output_capture.py', '_run'):
+        'grim worker thread spawned by capture(); never runs on the GTK loop.',
+    ('gesture_bindings.py', '_kill_lisgd'):
+        'single bounded local pkill; respawn is fire-and-forget Popen.',
     ('xxdb_daemon.py', '_default_shell_runner'):
         'xxdb service process, no GTK main loop; runner injectable.',
     ('xxdb_daemon.py', '_default_screenshot'):

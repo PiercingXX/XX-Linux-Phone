@@ -14,6 +14,9 @@ instead of crashing, so the switcher can still show "No open apps".
 from __future__ import annotations
 
 import logging
+import os
+import queue
+import select
 import struct
 import threading
 from dataclasses import dataclass
@@ -55,6 +58,13 @@ def decode_state_array(state: object) -> tuple[int, ...]:
 # on-screen keyboard (it is a regular toplevel while typing).
 _OWN_APP_ID = 'io.piercingxx.XXWM'
 _FILTERED_SUBSTRINGS = ('squeekboard',)
+_STATE_ACTIVATED = 2
+
+# Bind v1 only. phoc 0.56 still sends handle event 7 (`parent`, protocol v2+);
+# bindings generated from older output only know events 0–6, and pywayland
+# then raises "has no event 7" and drops the rest of the burst — empty recents.
+_FOREIGN_TOPLEVEL_BIND_VERSION = 1
+_PUMP_INTERVAL_MS = 50
 
 try:
     from pywayland.client import Display
@@ -88,7 +98,11 @@ def _resolve_import_time_classes() -> tuple[object, object, object]:
             ZwlrForeignToplevelHandleV1,
             ZwlrForeignToplevelManagerV1,
         )
-    except (ImportError, OSError):
+    except (ImportError, OSError, TypeError):
+        # Fall back to an environment where the generated wlr module was
+        # installed into pywayland.protocol itself (e.g. hand-run scanner).
+        # TypeError: pywayland 0.4.18 Global is not subscriptable, and
+        # Python 3.14 rejects Global[Iface] from either source.
         return (None, None, None)
     return (WlSeat, ZwlrForeignToplevelManagerV1, ZwlrForeignToplevelHandleV1)
 
@@ -140,10 +154,12 @@ def _is_filtered(app_id: str) -> bool:
 class WaylandToplevelBackend:
     """pywayland client driving wlr-foreign-toplevel-management-unstable-v1.
 
-    Runs on a GLib fd-watch so the GTK main loop is never blocked: the
-    compositor's events are dispatched from the idle callback the watch
-    schedules. The backend only mutates the manager's registry via the
-    ``_upsert``/``_remove`` hooks; it never reads state back.
+    A dedicated thread owns this Display so GTK's libwayland connection is
+    not starved. The wakeup pipe lets activate/close run without waiting
+    for a compositor event. FakeDisplay tests stay on the GLib pump, which
+    also delivers the initial registry burst. The backend only mutates the
+    manager's registry via the ``_upsert``/``_remove`` hooks and reports
+    focus via the state/focus callbacks; it never reads state back.
 
     ``seat_cls``/``manager_cls`` default to the import-time bindings; passing
     them explicitly (runtime-generated bindings, or fakes in tests) selects
@@ -176,7 +192,13 @@ class WaylandToplevelBackend:
         self._info: dict[object, list[str]] = {}
         self._manager_cb = None
         self._state_cb = None
+        self._focus_cb = None
         self._fd_source = None
+        self._thread: threading.Thread | None = None
+        self._closing = False
+        self._requests: queue.Queue = queue.Queue()
+        self._wakeup_r: int | None = None
+        self._wakeup_w: int | None = None
         self._connect()
 
     def _connect(self) -> None:
@@ -189,58 +211,154 @@ class WaylandToplevelBackend:
         self._registry = self._display.get_registry()
         self._registry.dispatcher['global'] = self._on_registry_global
         self._registry.dispatcher['global_remove'] = self._on_registry_global_remove
-        self._display.dispatch(block=True)
-        self._display.flush()
-        if self._manager is None:
-            raise RuntimeError('compositor does not offer wlr-foreign-toplevel-management')
-        self._arm_fd_watch()
+        # Do not start the wayland thread here: the initial registry burst
+        # would upsert into a still-None manager callback and recents stays
+        # empty. connect() starts it after the callback is bound.
+        if self._is_real_display():
+            self._wakeup_r, self._wakeup_w = os.pipe()
+            os.set_blocking(self._wakeup_r, False)
+            self._flush_display()
+        else:
+            self._arm_pump()
+            self._pump()
 
-    # -- GLib fd-watch -----------------------------------------------------
+    def _is_real_display(self) -> bool:
+        cls = type(self._display)
+        return cls.__name__ == 'Display' and 'pywayland' in (cls.__module__ or '')
 
-    def _arm_fd_watch(self) -> None:
+    def _wayland_fd(self) -> int | None:
+        get_fd = getattr(self._display, 'get_fd', None)
+        if not callable(get_fd):
+            return None
+        try:
+            fd = get_fd()
+        except Exception:
+            return None
+        return fd if isinstance(fd, int) and fd >= 0 else None
+
+    def _flush_display(self) -> None:
+        try:
+            self._display.flush()
+        except Exception:
+            pass
+
+    def _dispatch_error_is_fatal(self, exc: BaseException) -> bool:
+        if self._closing:
+            return True
+        msg = str(exc)
+        if 'destroyed' in msg.lower():
+            return True
+        if '11' in msg or 'EAGAIN' in msg.upper():
+            return False
+        if 'has no event' in msg:
+            log.warning('wayland event skipped: %s', exc)
+            return False
+        log.error('wayland thread dispatch failed: %s', exc)
+        return True
+
+    def _dispatch_pending(self) -> bool:
+        try:
+            self._display.dispatch(block=False)
+        except Exception as exc:  # noqa: BLE001
+            return not self._dispatch_error_is_fatal(exc)
+        return True
+
+    def _read_and_dispatch(self) -> bool:
+        # pywayland dispatch(block=False) is wl_display_dispatch_pending and
+        # does not read the display fd. Calling only that after select left
+        # recents at "No open apps" (available=False). Display.read() is
+        # prepare_read + read_events; then pending dispatch delivers the
+        # registry/toplevel events. No Display.read → blocking dispatch.
+        reader = getattr(self._display, 'read', None)
+        try:
+            if callable(reader):
+                reader()
+            else:
+                self._display.dispatch(block=True)
+        except Exception as exc:  # noqa: BLE001
+            if self._dispatch_error_is_fatal(exc):
+                return False
+            return True
+        return self._dispatch_pending()
+
+    def _thread_loop(self) -> None:
+        self._flush_display()
+        wl_fd = self._wayland_fd()
+        while not self._closing:
+            self._drain_requests()
+            self._flush_display()
+            if not self._dispatch_pending():
+                return
+            fds = []
+            if wl_fd is not None:
+                fds.append(wl_fd)
+            if self._wakeup_r is not None:
+                fds.append(self._wakeup_r)
+            if not fds:
+                if not self._read_and_dispatch():
+                    return
+                continue
+            try:
+                ready, _, _ = select.select(fds, [], [], 0.25)
+            except Exception as exc:  # noqa: BLE001
+                log.error('wayland thread select failed: %s', exc)
+                return
+            if self._wakeup_r is not None and self._wakeup_r in ready:
+                try:
+                    os.read(self._wakeup_r, 64)
+                except BlockingIOError:
+                    pass
+                self._drain_requests()
+                self._flush_display()
+            if wl_fd is not None and wl_fd in ready:
+                if not self._read_and_dispatch():
+                    return
+                self._flush_display()
+
+    def _arm_pump(self) -> None:
         import gi
         gi.require_version('Gtk', '4.0')
         from gi.repository import GLib
 
-        fd = self._display.get_fd()
-        # PyGObject has no unix_fd_add; newer releases move fd_add_full to
-        # GLibUnix and deprecate the GLib alias.
-        try:
-            from gi.repository import GLibUnix
-            fd_add_full = GLibUnix.fd_add_full
-        except (ImportError, AttributeError):
-            fd_add_full = GLib.unix_fd_add_full
-        self._fd_source = fd_add_full(
-            GLib.PRIORITY_DEFAULT, fd,
-            GLib.IOCondition.IN | GLib.IOCondition.HUP, self._on_fd_ready,
-        )
+        self._fd_source = GLib.timeout_add(_PUMP_INTERVAL_MS, self._pump)
 
-    def _on_fd_ready(self, _fd: int, _cond: int) -> bool:
-        from gi.repository import GLib
-
-        if _cond & GLib.IOCondition.HUP:
-            # Compositor closed the socket; stop watching instead of spinning
-            # on a dead fd forever.
-            log.error('wayland compositor connection closed (HUP)')
-            return False
+    def _pump(self) -> bool:
+        # Flush first: dispatch(block=False) raises EAGAIN on an empty
+        # queue, and a combined try would skip flush — the get_registry
+        # / bind requests never leave the client (empty recents).
         try:
-            # The fd is readable, so a reading dispatch returns at once;
-            # dispatch(block=False) only drains already-queued events, never
-            # reads the socket, and the still-readable fd spins the loop.
-            self._display.dispatch(block=True)
             self._display.flush()
-        except Exception as exc:  # noqa: BLE001 - compositor went away
-            log.error('wayland dispatch failed: %s', exc)
-            return False  # dispatch is unrecoverable; stop the fd-watch
-        return True  # keep watching
+        except Exception:
+            pass
+        try:
+            self._display.dispatch(block=False)
+        except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            if '11' in msg or 'EAGAIN' in msg.upper():
+                pass
+            elif 'has no event' in msg:
+                log.warning('wayland event skipped: %s', exc)
+            else:
+                log.error('wayland dispatch failed: %s', exc)
+                return False
+        try:
+            self._display.flush()
+        except Exception:
+            pass
+        return True
 
     # -- protocol glue -----------------------------------------------------
 
     def _on_registry_global(self, registry, name: int, interface: str, version: int) -> None:
+        # pywayland dispatches wl_registry.global as (registry, name,
+        # interface, version) with no serial. An extra parameter here used
+        # to make every global raise TypeError and the manager never bound
+        # (seen on a real phoc session).
         if interface == 'wl_seat':
             self._seat = registry.bind(name, self._seat_cls, 1)
         elif interface == 'zwlr_foreign_toplevel_manager_v1':
-            self._manager = registry.bind(name, self._manager_cls, min(3, version))
+            self._manager = registry.bind(
+                name, self._manager_cls, _FOREIGN_TOPLEVEL_BIND_VERSION)
             self._manager.dispatcher['toplevel'] = self._on_toplevel
             self._manager.dispatcher['finished'] = self._on_finished
 
@@ -248,6 +366,7 @@ class WaylandToplevelBackend:
         pass
 
     def _on_toplevel(self, manager, toplevel) -> None:
+        log.info('foreign toplevel created %s', id(toplevel))
         self._handles[id(toplevel)] = toplevel
         toplevel.dispatcher['title'] = self._on_title
         toplevel.dispatcher['app_id'] = self._on_app_id
@@ -271,11 +390,14 @@ class WaylandToplevelBackend:
 
     def _on_state(self, toplevel, state) -> None:
         try:
-            activated = STATE_ACTIVATED in decode_state_array(state)
+            activated = _STATE_ACTIVATED in _parse_states(state)
         except Exception:  # noqa: BLE001 - a bad state array must not break dispatch
             activated = False
         if self._state_cb is not None:
             self._state_cb(id(toplevel), activated)
+        focus_cb = getattr(self, '_focus_cb', None)
+        if focus_cb is not None:
+            focus_cb(id(toplevel), activated)
 
     def _on_parent(self, toplevel, _parent) -> None:
         pass
@@ -290,12 +412,15 @@ class WaylandToplevelBackend:
         pass
 
     def _on_closed(self, toplevel) -> None:
+        log.info('foreign toplevel closed %s', id(toplevel))
         self._remove(id(toplevel))
         self._handles.pop(id(toplevel), None)
         self._info.pop(id(toplevel), None)
 
     def _on_finished(self, _manager) -> None:
         # Compositor dropped the protocol; clear everything.
+        log.info('foreign-toplevel manager finished')
+        self._manager = None
         for handle in list(self._handles):
             self._remove(handle)
         self._handles.clear()
@@ -303,13 +428,20 @@ class WaylandToplevelBackend:
 
     # -- manager hooks -----------------------------------------------------
 
+    def _call_manager_cb(self, handle: object, app_id: object, title: object) -> None:
+        cb = self._manager_cb
+        if cb is None:
+            return
+        # Invoke directly: ToplevelManager is thread-safe and marshals
+        # GTK refresh itself. idle_add here dropped the initial burst
+        # when the GTK source did not run before the first show.
+        cb(handle, app_id, title)
+
     def _upsert(self, handle: object, app_id: str, title: str) -> None:
-        if self._manager_cb is not None:
-            self._manager_cb(handle, app_id, title)
+        self._call_manager_cb(handle, app_id, title)
 
     def _remove(self, handle: object) -> None:
-        if self._manager_cb is not None:
-            self._manager_cb(handle, None, None)
+        self._call_manager_cb(handle, None, None)
 
     # -- public API (backend contract) -------------------------------------
 
@@ -318,26 +450,85 @@ class WaylandToplevelBackend:
 
     def connect(self, callback) -> None:
         self._manager_cb = callback
+        self._replay_handles()
+        # Start the wayland thread only after the callback is bound so the
+        # initial registry/toplevel burst is not upserted into None.
+        if self._is_real_display() and self._thread is None:
+            self._thread = threading.Thread(
+                target=self._thread_loop, daemon=True, name='xx-wm-toplevel')
+            self._thread.start()
+
+    def connect_focus(self, callback) -> None:
+        self._focus_cb = callback
+
+    def _replay_handles(self) -> None:
+        for handle in list(self._handles):
+            info = self._info.get(handle, ['', ''])
+            self._call_manager_cb(handle, info[0], info[1])
 
     def connect_state(self, callback) -> None:
         """Register ``callback(handle, activated)`` for state events."""
         self._state_cb = callback
 
-    def activate(self, handle: object) -> None:
+    def _drain_requests(self) -> None:
+        while True:
+            try:
+                op, handle = self._requests.get_nowait()
+            except queue.Empty:
+                return
+            self._apply_request(op, handle)
+
+    def _apply_request(self, op: str, handle: object) -> None:
         toplevel = self._handles.get(handle)
         if toplevel is None:
+            log.warning('toplevel %s %r: handle gone', op, handle)
             return
-        if self._seat is None:
-            log.warning('cannot activate %r: no wl_seat bound', handle)
+        try:
+            if op == 'activate':
+                if self._seat is None:
+                    log.warning('cannot activate %r: no wl_seat bound', handle)
+                    return
+                toplevel.activate(self._seat)
+            elif op == 'close':
+                toplevel.close()
+            self._display.flush()
+        except Exception as exc:  # noqa: BLE001
+            log.warning('toplevel %s %r failed: %s', op, handle, exc)
+
+    def _wakeup(self) -> None:
+        if self._wakeup_w is None:
+            self._drain_requests()
             return
-        toplevel.activate(self._seat)
-        self._display.flush()
+        try:
+            os.write(self._wakeup_w, b'\0')
+        except OSError:
+            pass
+
+    def activate(self, handle: object) -> None:
+        self._requests.put(('activate', handle))
+        self._wakeup()
 
     def close(self, handle: object) -> None:
-        toplevel = self._handles.get(handle)
-        if toplevel is not None:
-            toplevel.close()
-            self._display.flush()
+        self._requests.put(('close', handle))
+        self._wakeup()
+
+    def shutdown(self) -> None:
+        self._closing = True
+        self._wakeup()
+        try:
+            disconnect = getattr(self._display, 'disconnect', None)
+            if callable(disconnect):
+                disconnect()
+        except Exception:
+            pass
+        for attr in ('_wakeup_r', '_wakeup_w'):
+            fd = getattr(self, attr)
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                setattr(self, attr, None)
 
 
 class DeferredWaylandBackend:
@@ -461,27 +652,29 @@ class ToplevelManager:
         self._backend = backend
         self._registry: dict[object, Toplevel] = {}
         self._callbacks: list[object] = []
-        self._activated: dict[object, bool] = {}
-        self._state_seq: dict[object, int] = {}
-        self._state_tick = 0
+        self._lock = threading.Lock()
+        self._activated: object | None = None
         self._activated_callbacks: list[object] = []
         self._current_active: str | None = None
-        if backend is None:
-            return
-        if backend.available():
+        if backend is not None:
+            # Bind before the first globals arrive: the backend is
+            # non-blocking, so available() may still be False at construct.
             backend.connect(self._on_backend_event)
             self._connect_state(backend)
-        else:
+            self._connect_focus(backend)
             on_ready = getattr(backend, 'on_ready', None)
             if callable(on_ready):
-                backend.connect(self._on_backend_event)
-                self._connect_state(backend)
                 on_ready(self._on_bindings_ready)
 
     def _connect_state(self, backend: object) -> None:
         connect_state = getattr(backend, 'connect_state', None)
         if callable(connect_state):
             connect_state(self._on_backend_state)
+
+    def _connect_focus(self, backend: object) -> None:
+        connect_focus = getattr(backend, 'connect_focus', None)
+        if callable(connect_focus):
+            connect_focus(self._on_focus)
 
     def _on_bindings_ready(self) -> None:
         self._notify()
@@ -493,7 +686,13 @@ class ToplevelManager:
 
     def list(self) -> list[Toplevel]:
         """Current toplevels, shell and keyboard surfaces filtered out."""
-        return [t for t in self._registry.values() if not _is_filtered(t.app_id)]
+        with self._lock:
+            return [t for t in self._registry.values() if not _is_filtered(t.app_id)]
+
+    def activated_app_id(self) -> str | None:
+        """app_id of the focused foreign toplevel, or None."""
+        with self._lock:
+            return self._current_active
 
     def activate(self, handle: object) -> None:
         if self._backend is not None and self._backend.available():
@@ -502,6 +701,31 @@ class ToplevelManager:
     def close(self, handle: object) -> None:
         if self._backend is not None and self._backend.available():
             self._backend.close(handle)
+
+    def resync(self, backend: object | None = None) -> None:
+        """Drop the current protocol client and bind again.
+
+        A live connection can stay available() True after it stops receiving
+        new toplevels (phoc sends the initial snapshot, then silence). Recents
+        then shows "No open apps" while windows are on screen. Re-binding
+        pulls the current list, the same way a fresh standalone client does.
+        """
+        old = self._backend
+        with self._lock:
+            self._registry.clear()
+            self._activated = None
+        if backend is None:
+            backend = _make_default_backend()
+        self._backend = backend
+        if backend is not None:
+            backend.connect(self._on_backend_event)
+            self._connect_state(backend)
+            self._connect_focus(backend)
+        closer = getattr(old, 'shutdown', None)
+        if callable(closer) and old is not backend:
+            closer()
+        self._notify()
+        self._recompute_active()
 
     def on_change(self, callback: object) -> None:
         """Register a zero-arg callable invoked whenever the registry changes."""
@@ -522,6 +746,24 @@ class ToplevelManager:
         return self._current_active
 
     def _notify(self) -> None:
+        if threading.current_thread() is threading.main_thread():
+            self._emit_change()
+            return
+        from gi.repository import GLib
+        main_depth = getattr(GLib, 'main_depth', None)
+        if callable(main_depth) and main_depth() == 0:
+            # No main loop is running (headless tests, early boot before
+            # Gtk.main takes over): an idle source would never fire, so
+            # deliver directly instead of losing the change.
+            self._emit_change()
+            return
+        GLib.idle_add(self._emit_change_idle)
+
+    def _emit_change_idle(self) -> bool:
+        self._emit_change()
+        return False
+
+    def _emit_change(self) -> None:
         for cb in self._callbacks:
             try:
                 cb()
@@ -536,47 +778,70 @@ class ToplevelManager:
                 log.error('toplevel activated callback failed: %s', exc)
 
     def _recompute_active(self) -> None:
-        best: str | None = None
-        best_seq = -1
-        for handle, topo in self._registry.items():
-            if not self._activated.get(handle, False):
-                continue
-            if not topo.app_id or _is_filtered(topo.app_id):
-                continue
-            seq = self._state_seq.get(handle, -1)
-            if best is None or seq >= best_seq:
+        with self._lock:
+            topo = self._registry.get(self._activated)
+            best = None
+            if topo is not None and topo.app_id and not _is_filtered(topo.app_id):
                 best = topo.app_id
-                best_seq = seq
         if best != self._current_active:
             self._current_active = best
             self._notify_activated(best)
 
-    def _on_backend_state(self, handle: object, activated: object) -> None:
-        self._activated[handle] = bool(activated)
-        self._state_tick += 1
-        self._state_seq[handle] = self._state_tick
-        current = self._registry.get(handle)
-        if current is not None:
-            self._registry[handle] = Toplevel(
-                app_id=current.app_id, title=current.title,
-                handle=current.handle, activated=bool(activated),
-            )
+    def _note_focus(self, handle: object, activated: object) -> None:
+        activated = bool(activated)
+        with self._lock:
+            if activated:
+                self._activated = handle
+            elif self._activated == handle:
+                self._activated = None
+            for known, topo in self._registry.items():
+                want = known == self._activated
+                if topo.activated != want:
+                    self._registry[known] = Toplevel(
+                        app_id=topo.app_id, title=topo.title,
+                        handle=topo.handle, activated=want,
+                    )
         self._recompute_active()
 
+    def _on_focus(self, handle: object, activated: bool) -> None:
+        self._note_focus(handle, activated)
+
+    def _on_backend_state(self, handle: object, activated: object) -> None:
+        self._note_focus(handle, activated)
+
     def _on_backend_event(self, handle: object, app_id: object, title: object) -> None:
-        if app_id is None:
-            self._registry.pop(handle, None)
-            self._activated.pop(handle, None)
-            self._state_seq.pop(handle, None)
-            self._notify()
-            self._recompute_active()
-            return
-        self._registry[handle] = Toplevel(
-            app_id=app_id, title=title or '', handle=handle,
-            activated=self._activated.get(handle, False),
-        )
+        with self._lock:
+            if app_id is None:
+                self._registry.pop(handle, None)
+                if self._activated == handle:
+                    self._activated = None
+            else:
+                self._registry[handle] = Toplevel(
+                    app_id=app_id, title=title or '', handle=handle,
+                    activated=handle == self._activated,
+                )
         self._notify()
         self._recompute_active()
+
+
+def _parse_states(state: object) -> set[int]:
+    if state is None:
+        return set()
+    if isinstance(state, (bytes, bytearray, memoryview)):
+        raw = bytes(state)
+        return {
+            int.from_bytes(raw[i:i + 4], 'little')
+            for i in range(0, len(raw) - 3, 4)
+        }
+    if isinstance(state, (list, tuple, set)):
+        out: set[int] = set()
+        for item in state:
+            try:
+                out.add(int(item))
+            except (TypeError, ValueError):
+                continue
+        return out
+    return set()
 
 
 def _make_default_backend() -> object | None:

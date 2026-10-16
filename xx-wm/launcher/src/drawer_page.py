@@ -9,6 +9,20 @@ if TYPE_CHECKING:
 _WEB_SEARCH_URL = 'https://duckduckgo.com/?q='
 
 
+def _open_settings(win) -> None:
+    """Show settings with the TOP hop when the window offers it.
+
+    Bare test doubles predate _open_settings and only switch the stack
+    page; real windows always carry the method, so behavior there is the
+    hop that raises settings above a focused app.
+    """
+    opener = getattr(win, '_open_settings', None)
+    if callable(opener):
+        opener()
+    else:
+        win.stack.set_visible_child_name('settings')
+
+
 class DrawerPage:
     """App drawer builder and list behavior for ShellWindow.
 
@@ -408,7 +422,7 @@ class DrawerPage:
         btn.add_css_class('flat')
         btn.add_css_class('app-entry')
         btn.set_child(title)
-        btn.connect('clicked', lambda _b: win.stack.set_visible_child_name('settings'))
+        btn.connect('clicked', lambda _b: _open_settings(win))
 
         row = Gtk.ListBoxRow(selectable=False, activatable=False)
         row.set_child(btn)
@@ -491,7 +505,7 @@ class DrawerPage:
             win._pick_gesture_key = None
             win.gesture_config.set(key, f'launch:{entry.app_id}')
             win._refresh_gesture_labels()
-            win.stack.set_visible_child_name('settings')
+            _open_settings(win)
             name = win.config.label_for(entry.app_id, entry.name)
             win._show_status(f'{name} bound to {_GESTURE_TITLES[key]}.')
             return
@@ -514,7 +528,7 @@ class DrawerPage:
                     win.config.set_standby_exempt(exempt)
             except Exception:
                 pass
-            win.stack.set_visible_child_name('settings')
+            _open_settings(win)
             win._show_status(
                 f'{win.config.label_for(entry.app_id, entry.name)} '
                 'will never freeze.')

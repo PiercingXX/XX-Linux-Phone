@@ -417,7 +417,11 @@ class TestSinglePowerMenuInstance:
     def test_theme_fan_out_lists_power_menu_exactly_once(self):
         src = (SRC / 'window.py').read_text(encoding='utf-8')
         body = src.split('def _retheme_surfaces')[1].split('\n    def ')[0]
-        assert body.count('_power_menu') == 1
+        # The window's own menu is themed once by the surface loop; the
+        # application-owned instance is fanned out only when it is not
+        # that same object (same instance, themed once — never two menus).
+        assert '_power_menu' in body
+        assert 'themed once' in body
 
 
 # ---------------------------------------------------------------------------

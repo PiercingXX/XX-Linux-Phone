@@ -125,6 +125,7 @@ class MedicalSection(settings_page._Section):
             except Exception:
                 pass
             _shrink_settings_entry(entry)
+            getattr(win, '_attach_osk', lambda _w: None)(entry)
             self._entries[field] = entry
             card.append(_settings_row(title, entry))
 
@@ -143,6 +144,7 @@ class MedicalSection(settings_page._Section):
         self._search_entry = Gtk.Entry()
         self._search_entry.set_placeholder_text('Add: search contacts')
         _shrink_settings_entry(self._search_entry)
+        getattr(win, '_attach_osk', lambda _w: None)(self._search_entry)
         self._search_entry.connect('changed', lambda _e: self._on_search())
         card.append(self._search_entry)
         self._results_box = _Gtk.Box(

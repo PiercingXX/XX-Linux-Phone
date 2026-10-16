@@ -129,6 +129,7 @@ class ChargingSection(settings_page._Section):
         except Exception:
             pass
         _shrink_settings_entry(self._custom_entry)
+        getattr(win, '_attach_osk', lambda _w: None)(self._custom_entry)
         apply_btn = Gtk.Button(label='Set custom limit')
         apply_btn.add_css_class('flat')
         apply_btn.add_css_class('action-link')

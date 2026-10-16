@@ -7,6 +7,9 @@ if command -v squeekboard >/dev/null 2>&1; then
     squeekboard &
 fi
 
+# First-login rename so the binding generator reads the migrated
+# gestures.json (ShellConfig also does this; doing it here covers the
+# session-start path).
 _xxcfg="$HOME/.config/xx-wm"
 _legacy="$HOME/.config/piercing-shell"
 if [ -d "$_legacy" ] && [ ! -e "$_xxcfg" ]; then
@@ -34,9 +37,11 @@ if command -v lisgd >/dev/null 2>&1; then
         # Bindings are generated from ~/.config/xx-wm/gestures.json by
         # gesture_bindings.py (docs/config.md "gestures.json"): one -g
         # value per line. Action names map through ACTION_TO_VERB;
-        # invalid values keep DEFAULT_VERBS. The subshell keeps the
-        # wrapper's own positional parameters (forwarded to main.py
-        # below) intact. Rebinding applies at the next session start.
+        # invalid values keep DEFAULT_VERBS. Pinned by
+        # tests/test_gesture_bindings.py. The subshell keeps the wrapper's
+        # own positional parameters (forwarded to main.py below) intact.
+        # Rebinding from Settings restarts lisgd in-process; this
+        # session-start path is the fallback.
         (
             set --
             while IFS= read -r _binding; do

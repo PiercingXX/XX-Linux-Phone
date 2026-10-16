@@ -285,17 +285,20 @@ class MobileSection(_Section):
         win.apn_entry.set_placeholder_text('APN (e.g. internet)')
         win.apn_entry.set_text(win.config.data.get('apn', ''))
         _shrink_settings_entry(win.apn_entry)
+        getattr(win, '_attach_osk', lambda _w: None)(win.apn_entry)
 
         win.apn_user_entry = Gtk.Entry()
         win.apn_user_entry.set_placeholder_text('Username (leave blank if none)')
         win.apn_user_entry.set_text(win.config.data.get('apn_user', ''))
         _shrink_settings_entry(win.apn_user_entry)
+        getattr(win, '_attach_osk', lambda _w: None)(win.apn_user_entry)
 
         win.apn_pass_entry = Gtk.Entry()
         win.apn_pass_entry.set_visibility(False)
         win.apn_pass_entry.set_placeholder_text('Password (leave blank if none)')
         win.apn_pass_entry.set_text(win.config.data.get('apn_pass', ''))
         _shrink_settings_entry(win.apn_pass_entry)
+        getattr(win, '_attach_osk', lambda _w: None)(win.apn_pass_entry)
 
         apn_save_btn = Gtk.Button(label='Save APN')
         apn_save_btn.add_css_class('flat')
@@ -569,6 +572,7 @@ class SettingsPage:
         return _link_button(label_text, css)
 
     def _build_gestures_card(self):
+        from gi.repository import Gtk
         win = self._win
         card = _section_card()
         for key, title in _GESTURE_TITLES.items():
@@ -593,6 +597,11 @@ class SettingsPage:
             card.append(win._build_gesture_row(
                 title, win._binding_label(key, win._system_gesture_labels),
                 change, clear))
+        note = Gtk.Label(
+            label='System-level gestures apply immediately. Home swipes stay in-shell.',
+            xalign=0, wrap=True)
+        note.add_css_class('dim-label')
+        card.append(note)
         return card
 
     def _pick_system_gesture(self, anchor, key: str, title: str) -> None:

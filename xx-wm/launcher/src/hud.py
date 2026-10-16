@@ -298,6 +298,10 @@ class Hud:
         if self._window is not None:
             self._window.show_brightness(pct)
 
+    def show_level(self, pct: int) -> None:
+        if self._window is not None:
+            self._window.show_level(pct)
+
     def apply_theme(self, preset: ThemePreset | None = None) -> None:
         """Reload the overlay's sheet (hot-reload fan-out); silent no-op
         headlessly, like every other method here."""

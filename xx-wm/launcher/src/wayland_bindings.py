@@ -52,6 +52,14 @@ VIRTUAL_POINTER_CLASS_NAMES = (
     'ZwlrVirtualPointerManagerV1',
     'ZwlrVirtualPointerV1',
 )
+SCREENCAST_XML_NAME = 'wlr-screencopy-unstable-v1.xml'
+SCREENCAST_XML_NAMES = (WAYLAND_XML_NAME, SCREENCAST_XML_NAME)
+SCREENCAST_CLASS_NAMES = (
+    'WlOutput',
+    'WlShm',
+    'ZwlrScreencopyManagerV1',
+    'ZwlrScreencopyFrameV1',
+)
 _WL_OBJECT_ATTR = ' interface="wl_object"'
 _SCANNER_TIMEOUT_SECONDS = 180
 
@@ -309,6 +317,14 @@ def ensure_bindings() -> dict[str, type] | None:
                   'toplevel manager disabled')
         return None
     return loaded
+
+
+def ensure_screencopy_bindings() -> dict[str, type] | None:
+    """Load cached wlr-screencopy bindings, generating them with the
+    installed scanner when absent. Blocking — call only from a worker
+    thread. None on any failure. The XML ships under launcher/data/; no
+    vendored generated module is ever imported."""
+    return ensure_protocol_bindings(SCREENCAST_XML_NAMES, SCREENCAST_CLASS_NAMES)
 
 
 def ensure_protocol_bindings(

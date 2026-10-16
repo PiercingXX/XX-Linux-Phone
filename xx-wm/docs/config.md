@@ -4,7 +4,9 @@ Every shell preference lives in `~/.config/xx-wm/`. The config file
 **is the public API**: edit it in a terminal and the running shell hot-reloads
 it (debounced; an invalid file is ignored and the last good config stays
 live). The in-shell Settings page covers system things only (network, sound
-devices, battery, updates, backup) — never these keys.
+devices, battery, updates, backup) — never these keys, except a dedicated
+Appearance surface that writes the `theme` (and `prefer_dark`) keys so a
+tablet without a keyboard can still pick a preset.
 
 Files:
 
@@ -266,24 +268,32 @@ Flat `{gesture: action}`. Valid actions: `home`, `app_switcher`,
 `launch:<app_id>` for any installed app (an uninstalled target behaves as
 `none`).
 
-Four slots are system-level: lisgd fires them even while an app is
-focused. Their bindings are generated at session start from this file,
-and their value may be an IPC verb — `gesture.home`, `gesture.shade`,
-`gesture.back`, `gesture.keyboard`, or `gesture.switcher` (exactly the
-gesture commands the shell dispatches). Action names map to verbs via
-`ACTION_TO_VERB`: `home`→`gesture.home`,
-`app_switcher`→`gesture.switcher`,
+focused. Their bindings are generated at session start from this file.
+Values may be an IPC verb (`gesture.home`, `gesture.shade`,
+`gesture.back`, `gesture.keyboard`, `gesture.switcher`) **or** the
+settings-UI action names `home`, `app_switcher`, `notification_shade`,
+`back`, `search` (mapped to those verbs via `ACTION_TO_VERB`:
+`home`→`gesture.home`, `app_switcher`→`gesture.switcher`,
 `notification_shade`→`gesture.shade`, `back`→`gesture.back`,
-`search`→`gesture.keyboard`. A valid action with no verb mapping
-(`launch:`, `camera`, `none`, …) keeps that slot's legacy `DEFAULT_VERBS`
-entry; a truly invalid value is ignored at load so the default action
-mapping applies instead. Rebinding applies at the next session start.
+`search`→`gesture.keyboard`). `launch:<app>` stays in-shell
+and does not replace the lisgd verb. Two fallbacks: missing or corrupt
+JSON loads schema defaults then `ACTION_TO_VERB` (short → `gesture.home`,
+long → `gesture.switcher`); a **valid unmapped** value (`camera`, `none`,
+`launch:…`) keeps that slot's legacy `DEFAULT_VERBS` entry (legacy: short →
+`gesture.keyboard`, long → `gesture.home`); a truly invalid value is
+ignored at load so the default action mapping applies instead. A file
+that still has both bottom-up slots as `app_switcher` (the previous
+default pair) is rewritten once so short becomes `home`. Garbage keys
+are dropped at load, so they take the schema-default path, not
+`DEFAULT_VERBS`.
+Rebinding restarts lisgd immediately from Settings. If that restart
+fails, it applies at the next session start.
 
 | Gesture | Default | Notes |
 |---|---|---|
 | `swipe_down_top` | `notification_shade` | lisgd → `gesture.shade`. Verb-rebindable. |
-| `swipe_up_short` | `home` | lisgd → `gesture.home`. Verb-rebindable. |
-| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. |
+| `swipe_up_short` | `home` | lisgd → `gesture.home`. Verb-rebindable. A short flick up from the bottom goes home from any screen (including recents). Missing/corrupt JSON uses this mapped default, not `gesture.keyboard`. |
+| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. A long swipe up opens full-screen recents. Swipe down, tap the dim, or back resumes the current app. |
 | `swipe_left_edge` | `back` | lisgd → `gesture.back` on both edges. Verb-rebindable. |
 | `long_press_bottom` | `search` | |
 | `double_tap_home` | `lock_screen` | Kept on Linux deliberately. |

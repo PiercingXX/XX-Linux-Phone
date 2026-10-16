@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
 MAIN_PY = Path(__file__).parent.parent / 'launcher' / 'src' / 'main.py'
 WRAPPER_IN = Path(__file__).parent.parent / 'launcher' / 'data' / 'xx-wm.in'
+WRAPPER = WRAPPER_IN
 
 
 def test_power_button_menu_gets_live_config():
@@ -56,6 +57,17 @@ def test_wrapper_respawns_on_sigusr1():
 
 def test_main_py_has_no_execv_restart():
     """Restart is the wrapper's job; main.py must not execv/SIGHUP itself."""
+
+def test_wrapper_supervises_python_instead_of_exec():
+    src = WRAPPER.read_text(encoding='utf-8')
+    assert 'while :;' in src
+    assert 'wait "$_child"' in src
+    assert '[ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]' in src
+    assert '[ "$_st" -eq 0 ]' in src and 'exit 0' in src
+    assert 'exec @python@' not in src
+
+
+def test_main_does_not_restart_via_execv_or_sighup():
     src = MAIN_PY.read_text(encoding='utf-8')
     assert 'os.execv' not in src
     assert 'SIGHUP' not in src
@@ -72,6 +84,14 @@ def test_config_migrate_runs_before_lisgd():
     assert migrate_at != -1 and lisgd_at != -1
     assert migrate_at < lisgd_at
     assert migrate_at < bindings_at
+
+def test_wrapper_migrates_piercing_shell_before_lisgd():
+    src = WRAPPER.read_text(encoding='utf-8')
+    mv_at = src.find('mv "$_legacy" "$_xxcfg"')
+    lisgd_at = src.find('gesture_bindings.py --bindir')
+    assert mv_at != -1
+    assert lisgd_at != -1
+    assert mv_at < lisgd_at
 
 
 if __name__ == '__main__':

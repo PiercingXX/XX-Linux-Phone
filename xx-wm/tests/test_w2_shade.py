@@ -230,6 +230,9 @@ class _FakeGesture:
     def set_touch_only(self, value):
         self.touch_only = value
 
+    def set_propagation_phase(self, phase):
+        self.propagation_phase = phase
+
 
 class _FakeRevealer:
     def __init__(self, **kwargs):
@@ -400,7 +403,9 @@ def _pin_shade_gtk(monkeypatch):
         'GestureDrag': _FakeGesture,
         'GestureSwipe': _FakeGesture,
         'GestureLongPress': _FakeGesture,
+        'EventControllerKey': _FakeGesture,
         'Orientation': SimpleNamespace(HORIZONTAL=0, VERTICAL=1),
+        'PropagationPhase': SimpleNamespace(NONE=0, CAPTURE=1, BUBBLE=2, TARGET=3),
         'RevealerTransitionType': SimpleNamespace(SLIDE_DOWN=0),
         'Align': SimpleNamespace(START=0, END=1, CENTER=2, FILL=3),
         'PolicyType': SimpleNamespace(NEVER=0, AUTOMATIC=1),
@@ -714,7 +719,9 @@ class TestShadeSurface:
         src = Path(__file__).parent.parent.joinpath(
             'launcher', 'src', 'notification_shade.py').read_text(
                 encoding='utf-8')
-        assert 'LayerShell.Layer.TOP' in src
+        # The shade sits on OVERLAY so it stays above the launcher when
+        # Settings hops it to TOP (and above full-screen recents).
+        assert 'LayerShell.Layer.OVERLAY' in src
         assert 'LayerShell.Edge.BOTTOM, True' in src
         assert 'set_exclusive_zone(self, 0)' in src
         assert "add_css_class('xx-wm-shade')" in src

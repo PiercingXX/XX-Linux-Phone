@@ -180,7 +180,8 @@ class NotificationDaemon:
             self._name_id = Gio.bus_own_name_on_connection(
                 self._bus,
                 _IFACE_NAME,
-                Gio.BusNameOwnerFlags.DO_NOT_QUEUE,
+                (Gio.BusNameOwnerFlags.REPLACE
+                 | Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT),
                 self._on_name_acquired,
                 self._on_name_lost,
             )

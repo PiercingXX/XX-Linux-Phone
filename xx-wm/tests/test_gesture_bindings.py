@@ -2,8 +2,8 @@
 
 gestures.json stores action names (home, app_switcher, ...); lisgd can only
 exec xx-wm-ipc verbs, so ACTION_TO_VERB maps them at generation time.
-LEGACY_BINDINGS pins the invalid-value fallback (DEFAULT_VERBS);
-DEFAULT_BINDINGS pins the mapped defaults.
+LEGACY_BINDINGS pins the valid-but-unmapped fallback (DEFAULT_VERBS);
+DEFAULT_BINDINGS pins the mapped schema defaults.
 """
 import json
 import os
@@ -17,7 +17,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
 import gesture_config
-from gesture_bindings import ACTION_TO_VERB, DEFAULT_VERBS, generate_bindings
+from gesture_bindings import (
+    ACTION_TO_VERB, DEFAULT_VERBS, detect_touch_device, generate_bindings,
+    restart_lisgd,
+)
 from gesture_config import GestureConfig
 
 # Fallback verbs for valid-but-unmapped values (launch:, camera, none).
@@ -88,22 +91,83 @@ class TestRebinding:
             'swipe_up_short': 'gesture.switcher',
             'swipe_left_edge': 'gesture.home',
         }), encoding='utf-8')
+        got = generate_bindings('/usr/bin')
+        assert got[0].endswith('gesture.switcher')
+        assert got[3].endswith('gesture.home')
+        assert got[4].endswith('gesture.home')
+
+    def test_action_names_map_to_ipc_verbs(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'home',
+            'swipe_up_long': 'app_switcher',
+            'swipe_down_top': 'notification_shade',
+            'swipe_left_edge': 'back',
+        }), encoding='utf-8')
         assert generate_bindings('/usr/bin') == [
-            '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.switcher',
+            '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.home',
             '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.switcher',
             '1,UD,T,*,R,/usr/bin/xx-wm-ipc gesture.shade',
-            '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.home',
-            '1,RL,R,*,R,/usr/bin/xx-wm-ipc gesture.home',
+            '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.back',
+            '1,RL,R,*,R,/usr/bin/xx-wm-ipc gesture.back',
         ]
+
+    def test_search_action_maps_to_keyboard(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(
+            json.dumps({'swipe_up_short': 'search'}), encoding='utf-8')
+        assert generate_bindings('/usr/bin')[0].endswith('gesture.keyboard')
+
+    def test_launch_bindings_do_not_replace_lisgd_verb(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'launch:htop.desktop',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin')[0].endswith('gesture.keyboard')
+
+    def test_launch_home_swipes_do_not_change_lisgd(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_left_home': 'launch:htop.desktop',
+            'swipe_right_home': 'launch:org.gnome.Nautilus.desktop',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
+
+    def test_legacy_both_recents_migrates_lisgd_to_pixel_split(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'app_switcher',
+            'swipe_up_long': 'app_switcher',
+            'swipe_left_home': 'launch:htop.desktop',
+            'swipe_right_home': 'launch:org.gnome.Nautilus.desktop',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
+
+    def test_action_to_verb_covers_settings_names(self):
+        assert ACTION_TO_VERB == {
+            'home': 'gesture.home',
+            'app_switcher': 'gesture.switcher',
+            'notification_shade': 'gesture.shade',
+            'back': 'gesture.back',
+            'search': 'gesture.keyboard',
+        }
 
     def test_invalid_values_fall_back_silently(self, tmp_path):
         (tmp_path / 'gestures.json').write_text(json.dumps({
-            'swipe_up_short': 'camera',
+            'swipe_up_short': 'explode',
             'swipe_up_long': 'launch:org.some.App.desktop',
             'swipe_down_top': 'camera',
             'swipe_left_edge': 'none',
         }), encoding='utf-8')
-        assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
+        got = generate_bindings('/usr/bin')
+        # explode is dropped → schema default home → gesture.home
+        assert got[0].endswith('gesture.home')
+        # launch: is in-shell; lisgd keeps DEFAULT_VERBS for the slot
+        assert got[1].endswith('gesture.home')
+        # camera is a valid unmapped action → DEFAULT_VERBS shade
+        assert got[2].endswith('gesture.shade')
+        assert got[3].endswith('gesture.back')
+
+    def test_unmapped_action_uses_default_verb(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'camera',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin')[0].endswith('gesture.keyboard')
 
     def test_garbage_falls_back_to_mapped_default(self, tmp_path):
         (tmp_path / 'gestures.json').write_text(json.dumps({
@@ -141,6 +205,49 @@ class TestGestureConfigVerbValues:
         (tmp_path / 'gestures.json').write_text('{"squeeze": "gesture.home"}',
                                                 encoding='utf-8')
         assert GestureConfig().get('squeeze') == 'assistant'
+
+
+class TestLisgdRestart:
+    def test_detects_direct_touch(self, tmp_path, monkeypatch):
+        monkeypatch.delenv('PIERCING_TOUCH_DEV', raising=False)
+        node = tmp_path / 'event6'
+        (node / 'device').mkdir(parents=True)
+        (node / 'device' / 'properties').write_text('2\n')
+        assert detect_touch_device(tmp_path) == '/dev/input/event6'
+
+    def test_skips_non_direct(self, tmp_path, monkeypatch):
+        monkeypatch.delenv('PIERCING_TOUCH_DEV', raising=False)
+        node = tmp_path / 'event1'
+        (node / 'device').mkdir(parents=True)
+        (node / 'device' / 'properties').write_text('0\n')
+        assert detect_touch_device(tmp_path) is None
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv('PIERCING_TOUCH_DEV', '/dev/input/event9')
+        assert detect_touch_device() == '/dev/input/event9'
+
+    def test_restart_spawns_lisgd_with_bindings(self):
+        spawned: list[list[str]] = []
+        killed: list[bool] = []
+        assert restart_lisgd(
+            '/usr/bin',
+            touch_dev='/dev/input/event6',
+            spawn=lambda argv, **_k: spawned.append(argv),
+            kill_fn=lambda: killed.append(True),
+            which=lambda name: '/usr/bin/lisgd' if name == 'lisgd' else None,
+        )
+        assert killed == [True]
+        assert spawned[0][:4] == ['/usr/bin/lisgd', '-d', '/dev/input/event6', '-g']
+        assert spawned[0][4].endswith('gesture.home')
+
+    def test_restart_fails_without_touch(self):
+        assert restart_lisgd(
+            '/usr/bin',
+            touch_dev='',
+            spawn=lambda *_a, **_k: None,
+            kill_fn=lambda: None,
+            which=lambda _n: '/usr/bin/lisgd',
+        ) is False
 
 
 class TestCli:

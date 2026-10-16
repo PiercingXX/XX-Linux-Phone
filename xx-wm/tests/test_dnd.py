@@ -64,6 +64,19 @@ class TestActive:
         assert not dnd.is_active(MON_NOON)
 
 
+class TestSetSchedules:
+    def test_round_trips_and_drops_garbage(self, dnd):
+        dnd.set_schedules([
+            {'days': [0, 1], 'start': '22:00', 'end': '06:30'},
+            {'days': 'nope', 'start': '09:00', 'end': '17:00'},
+            'not a dict',
+        ])
+        assert dnd.schedules == [
+            {'days': [0, 1], 'start': '22:00', 'end': '06:30'}]
+        assert dnd.is_active(MON_2300)
+        assert not dnd.is_active(MON_NOON)
+
+
 class TestRepeatCaller:
     def test_second_call_within_window_is_exception(self, dnd):
         t0 = 1_000_000.0
