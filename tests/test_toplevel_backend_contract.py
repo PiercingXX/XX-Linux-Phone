@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 REGISTRY_EVENTS = ('global', 'global_remove')
 MANAGER_EVENTS = ('toplevel', 'finished')
 HANDLE_EVENTS = (
-    'title', 'app_id', 'state', 'output_enter', 'output_leave', 'done', 'closed',
+    'title', 'app_id', 'state', 'output_enter', 'output_leave', 'done', 'closed', 'parent',
 )
 
 TOPLVL_IFACE = 'zwlr_foreign_toplevel_manager_v1'
@@ -119,8 +119,10 @@ class FakeDisplay:
         assert self.registry is not None
         handler = self.registry.dispatcher.registrations.get('global')
         assert callable(handler)
-        for serial, name, iface, version in self._advertised:
-            handler(self.registry, serial, name, iface, version)
+        # pywayland dispatches wl_registry.global as (proxy, name, interface,
+        # version) — the advertised tuples' leading id is not an event arg.
+        for _id, name, iface, version in self._advertised:
+            handler(self.registry, name, iface, version)
         return len(self._advertised)
 
     def flush(self) -> None:
@@ -136,13 +138,18 @@ class FakeIOCondition:
 
 
 class FakeGLib:
+    # Mirrors PyGObject: only unix_fd_add_full exists (no unix_fd_add).
     IOCondition = FakeIOCondition
+    PRIORITY_DEFAULT = 0
     fd_adds: list[tuple[int, int, object]] = []
 
     @classmethod
-    def unix_fd_add(cls, fd: int, condition: int, callback: object) -> int:
+    def unix_fd_add_full(cls, _priority: int, fd: int, condition: int,
+                         callback: object) -> int:
         cls.fd_adds.append((fd, condition, callback))
         return len(cls.fd_adds)
+
+    fd_add_full = unix_fd_add_full  # GLibUnix spelling (newer PyGObject)
 
 
 class Harness:
@@ -188,6 +195,7 @@ class Harness:
         gi.require_version = lambda *args, **kwargs: None  # type: ignore[attr-defined]
         repo = types.ModuleType('gi.repository')
         repo.GLib = FakeGLib  # type: ignore[attr-defined]
+        repo.GLibUnix = FakeGLib  # type: ignore[attr-defined]
         gi.repository = repo  # type: ignore[attr-defined]
         sys.modules['gi'] = gi
         sys.modules['gi.repository'] = repo
@@ -308,36 +316,42 @@ def test_activate_passes_bound_seat(harness: Harness) -> None:
     assert handle.close_calls == [True]
 
 
-def test_graceful_degradation_without_wlr_protocol_module() -> None:
-    # pywayland present but the generated wlr protocol classes missing from
-    # BOTH import sources -- no vendored launcher/src/wayland_proto package
-    # and no hand-installed pywayland.protocol module (upstream pywayland
-    # does not ship one): import must survive and the default backend
-    # factory must degrade to None instead of crashing.
+def test_graceful_degradation_without_wlr_protocol_module(tmp_path) -> None:
+    # pywayland present but the wlr protocol classes missing from BOTH
+    # import sources -- no usable runtime-generated cache and no
+    # hand-installed pywayland.protocol module (upstream pywayland does not
+    # ship one): import must survive and the default backend factory must
+    # degrade to a permanently unavailable backend instead of crashing.
+    import os
+
     FakeGLib.fd_adds.clear()
-    vendored = (
-        'wayland_proto',
-        'wayland_proto.wayland',
-        'wayland_proto.wlr_foreign_toplevel_management_unstable_v1',
-    )
+    generated = ('xx_wm_wayland_proto',)
     _absent = object()
-    saved_vendored = {name: sys.modules.get(name, _absent) for name in vendored}
+    saved_generated = {name: sys.modules.get(name, _absent) for name in generated}
+    saved_xdg = os.environ.get('XDG_CACHE_HOME', _absent)
+    os.environ['XDG_CACHE_HOME'] = str(tmp_path)
     with Harness(list(ADVERTISED)):
         pw = sys.modules['pywayland']
         wlr_name = 'pywayland.protocol.wlr_foreign_toplevel_management_unstable_v1'
         sys.modules.pop(wlr_name, None)
         delattr(pw.protocol, 'wlr_foreign_toplevel_management_unstable_v1')  # type: ignore[attr-defined]
-        for name in vendored:
-            sys.modules[name] = None  # block the vendored package too
+        for name in generated:
+            sys.modules[name] = None  # block any cached generated package too
         sys.modules.pop('toplevel_manager', None)
         mod = importlib.import_module('toplevel_manager')
         assert mod._PYWAYLAND_AVAILABLE is False
-        assert mod._make_default_backend() is None
-    for name, value in saved_vendored.items():
+        backend = mod._make_default_backend()
+        assert backend is not None
+        assert backend.available() is False
+    for name, value in saved_generated.items():
         if value is _absent:
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = value
+    if saved_xdg is _absent:
+        os.environ.pop('XDG_CACHE_HOME', None)
+    else:
+        os.environ['XDG_CACHE_HOME'] = saved_xdg
 
 
 if __name__ == '__main__':

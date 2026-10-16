@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=io.piercingxx.XXWM.Helper1
+Exec=@libexecdir@/xx-wm-helper
+User=root

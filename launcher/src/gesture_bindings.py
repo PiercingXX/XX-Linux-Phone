@@ -12,9 +12,15 @@ dispatches (_on_ipc_command; the ipc.py protocol line):
     gesture.back  gesture.home  gesture.shade
     gesture.keyboard  gesture.switcher
 
-Any other value — shell actions like `camera`, `launch:<app_id>`, `none`,
-or garbage — silently keeps that slot's default verb (config-compat
-invariant: an invalid gestures.json never changes device behavior).
+gestures.json action names map through ACTION_TO_VERB (home→gesture.home,
+app_switcher→gesture.switcher, notification_shade→gesture.shade,
+back→gesture.back, search→gesture.keyboard).
+
+A valid action with no verb mapping (`camera`, `launch:<app_id>`,
+`none`) silently keeps that slot's legacy default verb; a truly invalid
+value is ignored at load (see gesture_config), so the default action
+mapping applies instead (config-compat invariant: a bad gestures.json
+never changes device behavior).
 Rebinding takes effect at the next session start: lisgd reads the
 touchscreen evdev directly and is started once by the session wrapper;
 there is deliberately no live-reload path.
@@ -36,14 +42,24 @@ _LISGD_GEOMETRY: dict[str, tuple[str, ...]] = {
     'swipe_left_edge': ('1,LR,L,*,R', '1,RL,R,*,R'),
 }
 
-# slot -> verb fired when gestures.json says nothing (or nothing valid).
-# These reproduce today's device behavior exactly; pinned by
-# tests/test_gesture_bindings.py against the literal former bindings.
+# slot -> verb fired when gestures.json says nothing valid. Invalid values
+# (launch:, camera, none, garbage) keep these legacy verbs; pinned by
+# tests/test_gesture_bindings.py LEGACY_BINDINGS.
 DEFAULT_VERBS: dict[str, str] = {
     'swipe_up_short': 'gesture.keyboard',
     'swipe_up_long': 'gesture.home',
     'swipe_down_top': 'gesture.shade',
     'swipe_left_edge': 'gesture.back',
+}
+
+# gestures.json action name -> IPC verb lisgd fires. Config stores actions
+# (home, app_switcher, ...); lisgd can only exec xx-wm-ipc <verb>.
+ACTION_TO_VERB: dict[str, str] = {
+    'home': 'gesture.home',
+    'app_switcher': 'gesture.switcher',
+    'notification_shade': 'gesture.shade',
+    'back': 'gesture.back',
+    'search': 'gesture.keyboard',
 }
 
 
@@ -52,6 +68,9 @@ def resolve_verb(gc: GestureConfig, slot: str) -> str:
     value = gc.get(slot)
     if value in IPC_VERBS:
         return value
+    mapped = ACTION_TO_VERB.get(value)
+    if mapped is not None:
+        return mapped
     return DEFAULT_VERBS[slot]
 
 

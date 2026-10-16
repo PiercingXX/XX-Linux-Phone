@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <vendor>XX-WM</vendor>
+  <vendor_url>https://github.com/piercingxx/linux-phone</vendor_url>
+
+  <action id="io.piercingxx.XXWM.Helper1.set-charge-limit">
+    <description>Set the battery charge limit</description>
+    <message>Authentication is required to set the battery charge limit.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.piercingxx.XXWM.Helper1.app-network">
+    <description>Block or unblock network access for an app</description>
+    <message>Authentication is required to change per-app network access.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.piercingxx.XXWM.Helper1.freeze">
+    <description>Freeze or thaw an app cgroup</description>
+    <message>Authentication is required to freeze or thaw an app.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

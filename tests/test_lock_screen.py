@@ -95,6 +95,9 @@ class _FakeVisibility:
 
 
 class _FakeNotifBox:
+    def __init__(self):
+        self.visible = True
+
     def get_first_child(self):
         return None
 
@@ -103,6 +106,21 @@ class _FakeNotifBox:
 
     def append(self, _child):
         pass
+
+    def set_visible(self, value):
+        self.visible = bool(value)
+
+
+class _FakeGridPane:
+    def __init__(self):
+        self.homogeneous = True
+        self.vexpand = True
+
+    def set_row_homogeneous(self, value):
+        self.homogeneous = bool(value)
+
+    def set_vexpand(self, value):
+        self.vexpand = bool(value)
 
 
 class _LockHarness:
@@ -120,11 +138,23 @@ class _LockHarness:
         self._swipe_hint = _FakeVisibility()
         self.dots_label = _FakeLabel()
         self.error_label = _FakeLabel()
+        self.clock_label = _FakeLabel()
+        self.date_label = _FakeVisibility()
         self._notif_box = _FakeNotifBox()
+        self._lock_grid = _FakeGridPane()
+        self._top_pane = _FakeGridPane()
+        self._key_size = 0
+        self._key_widgets: list = []
         self._get_notifications = lambda: []
         self._dnd_active = lambda: False
         self.visible = True
         self.unlocked = 0
+
+    def get_width(self):
+        return 360
+
+    def get_height(self):
+        return 720
 
     def _on_unlock(self):
         self.unlocked += 1
@@ -146,6 +176,18 @@ class _LockHarness:
 
     def _unlock(self):
         _lock_screen_module().LockScreen._unlock(self)
+
+    def _apply_keypad_size(self, size):
+        _lock_screen_module().LockScreen._apply_keypad_size(self, size)
+
+    def _fit_keypad_to_screen(self):
+        _lock_screen_module().LockScreen._fit_keypad_to_screen(self)
+
+    def _set_clock_compact(self, compact):
+        _lock_screen_module().LockScreen._set_clock_compact(self, compact)
+
+    def _persist_lockout_state(self, until):
+        _lock_screen_module().LockScreen._persist_lockout_state(self, until)
 
 
 def _lock_screen_module():

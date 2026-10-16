@@ -260,24 +260,24 @@ class TestSurfaceApplyTheme:
 
 class TestReloadFanOut:
     def test_retheme_reaches_every_constructed_surface(self):
-        shade, dialer_s, call_ui_s, call_bar, menu = (
-            RecordingSurface() for _ in range(5))
+        shade, dialer_s, call_ui_s, call_bar, menu, switcher = (
+            RecordingSurface() for _ in range(6))
         shell = types.SimpleNamespace(
             config=_config_with(theme='custom', custom_background='#2A1018'),
             _shade=shade, _dialer=dialer_s, _call_ui=call_ui_s,
-            _call_bar=call_bar, _power_menu=menu,
+            _call_bar=call_bar, _power_menu=menu, _switcher=switcher,
         )
         window.ShellWindow._retheme_surfaces(shell)
         expected = window.resolve_theme(shell.config)
         assert expected.background == '#2A1018'
-        for surf in (shade, dialer_s, call_ui_s, call_bar, menu):
+        for surf in (shade, dialer_s, call_ui_s, call_bar, menu, switcher):
             assert surf.applied == [expected]
 
     def test_retheme_skips_surfaces_never_constructed(self):
         shell = types.SimpleNamespace(
             config=_config_with(theme='ocean'),
             _shade=None, _dialer=None, _call_ui=None,
-            _call_bar=None, _power_menu=None,
+            _call_bar=None, _power_menu=None, _switcher=None,
         )
         # Must be a silent no-op, never an AttributeError.
         window.ShellWindow._retheme_surfaces(shell)
@@ -293,11 +293,11 @@ class TestReloadFanOut:
         shell._populate_apps = lambda query: events.append('apps')
         shell.apps_search = types.SimpleNamespace(get_text=lambda: '')
         shell._refresh_weather = lambda: events.append('weather')
-        shell._setup_idle_timer = lambda: events.append('idle')
+        shell._resync_blank_lock = lambda: events.append('blank-lock')
         shell._retheme_surfaces = lambda: events.append('surfaces')
         window.ShellWindow._apply_config_change(shell)
         assert events == ['theme', 'widgets', 'home', 'apps', 'weather',
-                          'idle', 'surfaces']
+                          'blank-lock', 'surfaces']
 
 
 class TestWindowUsesResolvedPreset:

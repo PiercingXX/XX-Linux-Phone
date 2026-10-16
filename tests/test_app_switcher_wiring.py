@@ -150,3 +150,103 @@ def test_manager_backend_does_not_require_gtk() -> None:
     """The manager wiring itself needs no GTK: pywayland absence degrades."""
     mgr = ToplevelManager(backend=None)
     assert mgr.list() == []
+
+
+def test_focus_hands_screen_to_app_via_on_activated() -> None:
+    """Activating a row calls on_activated after dispatching to the manager."""
+    fake = FakeManager([Toplevel('org.a.App', 'Alpha', 'h1')])
+    app = AppInfo('org.a.App', 'Alpha', handle='h1')
+    handed: list[bool] = []
+
+    from app_switcher import AppSwitcher
+
+    AppSwitcher._focus_app_with_manager(fake, app, on_activated=lambda: handed.append(True))
+    assert fake.activated == ['h1']
+    assert handed == [True]
+
+
+def test_focus_without_callback_still_activates() -> None:
+    """on_activated is optional: standalone switchers just activate."""
+    fake = FakeManager([Toplevel('org.a.App', 'Alpha', 'h1')])
+    app = AppInfo('org.a.App', 'Alpha', handle='h1')
+
+    from app_switcher import AppSwitcher
+
+    AppSwitcher._focus_app_with_manager(fake, app)
+    assert fake.activated == ['h1']
+
+
+def test_switcher_accepts_on_activated() -> None:
+    """AppSwitcher.__init__ takes the activation-handoff callback."""
+    import inspect
+
+    from app_switcher import AppSwitcher
+
+    assert 'on_activated' in inspect.signature(AppSwitcher.__init__).parameters
+
+
+def test_window_hands_screen_to_app_on_switch() -> None:
+    """ShellWindow builds the switcher with drop_to_background as on_activated,
+    so activating a row returns the shell to the BOTTOM layer."""
+    window_text = (
+        Path(__file__).parent.parent / 'launcher' / 'src' / 'window.py'
+    ).read_text(encoding='utf-8')
+    assert 'on_activated=self.drop_to_background' in window_text
+
+
+def test_window_rethemes_switcher() -> None:
+    """ShellWindow fans hot-reloaded themes out to the switcher surface."""
+    window_text = (
+        Path(__file__).parent.parent / 'launcher' / 'src' / 'window.py'
+    ).read_text(encoding='utf-8')
+    start = window_text.index('def _retheme_surfaces')
+    end = window_text.index('def ', start + len('def _retheme_surfaces'))
+    assert 'self._switcher' in window_text[start:end]
+
+
+class FakeThemeProvider:
+    """Stand-in for Gtk.CssProvider recording loaded sheets."""
+
+    def __init__(self) -> None:
+        self.loads: list[str] = []
+
+    def load_from_data(self, data: bytes) -> None:
+        self.loads.append(data.decode('utf-8'))
+
+
+def _stub_switcher(monkeypatch, preset):
+    """AppSwitcher instance without a window: apply_theme only needs the
+    provider (and the config preset for the standalone path)."""
+    from app_switcher import AppSwitcher
+
+    inst = AppSwitcher.__new__(AppSwitcher)
+    inst._theme_provider = FakeThemeProvider()
+    monkeypatch.setattr(AppSwitcher, '_display_preset', lambda self: preset)
+    return inst
+
+
+def test_apply_theme_reloads_single_provider(monkeypatch) -> None:
+    """apply_theme(preset) reloads the one display-level provider in place."""
+    from app_switcher import AppSwitcher
+    from config import THEME_PRESETS
+
+    preset = THEME_PRESETS['paper']
+    inst = _stub_switcher(monkeypatch, preset)
+    provider = inst._theme_provider
+    AppSwitcher.apply_theme(inst, preset)
+    AppSwitcher.apply_theme(inst, THEME_PRESETS['ocean'])
+    assert len(provider.loads) == 2
+    assert preset.background in provider.loads[0]
+    assert THEME_PRESETS['ocean'].background in provider.loads[1]
+
+
+def test_apply_theme_defaults_to_config_preset(monkeypatch) -> None:
+    """apply_theme() with no preset renders the surface's own preset."""
+    from app_switcher import AppSwitcher
+    from config import THEME_PRESETS
+
+    preset = THEME_PRESETS['forest']
+    inst = _stub_switcher(monkeypatch, preset)
+    AppSwitcher.apply_theme(inst)
+    assert len(inst._theme_provider.loads) == 1
+    assert preset.background in inst._theme_provider.loads[0]

@@ -134,21 +134,47 @@ class ContactBook:
 
 # ------------------------------------------------------------------ mmcli SMS
 
+def _resolve_mmcli_modem() -> str | None:
+    """D-Bus-resolved modem path for the mmcli fallback, if reachable."""
+    try:
+        from modem_monitor import resolve_modem_path
+        return resolve_modem_path(
+            'org.freedesktop.ModemManager1.Modem.Messaging')
+    except Exception:
+        return None
+
+
 def _strip_label(line: str, label: str) -> str | None:
     """Extract value after 'label:' in mmcli tabular output."""
     m = re.search(rf'\|\s+{re.escape(label)}:\s+(.+)', line)
     return m.group(1).strip() if m else None
 
 
-def load_sms_history(modem_idx: int = 0, timeout: int = 8) -> list[dict]:
+def load_sms_history(
+    modem_idx: int = 0, timeout: int = 8, modem: str | None = None,
+) -> list[dict]:
     """
-    Fetch SMS history from ModemManager via mmcli.
+    Fetch SMS history from ModemManager.
     Returns list of dicts: {number, text, outgoing, timestamp_iso}.
-    Returns empty list if mmcli is unavailable or fails.
+    Prefers Messaging.List + GetAll over D-Bus (exact text, including
+    multi-line bodies that mmcli's human-readable tables truncate);
+    falls back to mmcli scraping against the D-Bus-resolved modem path,
+    then the legacy numeric index. Empty list when nothing is reachable.
     """
     try:
+        from modem_monitor import messaging_list, resolve_modem_path
+        resolved = modem or resolve_modem_path(
+            'org.freedesktop.ModemManager1.Modem.Messaging')
+        messages = messaging_list(
+            modem=resolved, timeout_ms=timeout * 1000)
+        if messages is not None:
+            return messages
+    except Exception:
+        pass
+    selector = modem or _resolve_mmcli_modem() or str(modem_idx)
+    try:
         result = subprocess.run(
-            ['mmcli', '-m', str(modem_idx), '--messaging-list-sms'],
+            ['mmcli', '-m', selector, '--messaging-list-sms'],
             capture_output=True, text=True, timeout=timeout,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):

@@ -189,5 +189,52 @@
         typically use a mechanism like XDG_RESPONSE to close the toplevel.
       </description>
     </request>
+
+    <request name="set_rectangle">
+      <description summary="the rectangle which represents the toplevel">
+        The rectangle of the surface specified in this request corresponds to
+        the place where the app using this protocol represents the given toplevel.
+      </description>
+      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <enum name="error">
+      <entry name="invalid_rectangle" value="0"
+        summary="the provided rectangle is invalid"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the zwlr_foreign_toplevel_handle_v1 object">
+        Destroys the zwlr_foreign_toplevel_handle_v1 object.
+      </description>
+    </request>
+
+    <!-- Version 2 additions -->
+
+    <request name="set_fullscreen" since="2">
+      <description summary="request that the toplevel be fullscreened">
+        Requests that the toplevel be fullscreened on the given output.
+      </description>
+      <arg name="output" type="object" interface="wl_output" allow-null="true"/>
+    </request>
+
+    <request name="unset_fullscreen" since="2">
+      <description summary="request that the toplevel be unfullscreened">
+        Requests that the toplevel be unfullscreened.
+      </description>
+    </request>
+
+    <!-- Version 3 additions -->
+
+    <event name="parent" since="3">
+      <description summary="parent change">
+        This event is emitted whenever the parent of the toplevel changes.
+      </description>
+      <arg name="parent" type="object" interface="zwlr_foreign_toplevel_handle_v1" allow-null="true"/>
+    </event>
   </interface>
 </protocol>

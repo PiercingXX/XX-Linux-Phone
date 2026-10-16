@@ -13,12 +13,17 @@ from typing import Callable
 
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, Pango
 
 from app_index import AppEntry
 from config import ShellConfig
 
 _DISABLE_DURATIONS = [('1 hour', 1), ('2 hours', 2), ('4 hours', 4), ('8 hours', 8)]
+
+# Phone-narrow popover cap: the shell runs at 320–360 px, so menu text must
+# never size the popover past the screen. Item labels wrap (WORD_CHAR still
+# breaks dot-chains like long app ids); titles stay one line and ellipsize.
+_MENU_TEXT_WIDTH = 28
 
 
 class AppItemActions:
@@ -27,11 +32,13 @@ class AppItemActions:
     def __init__(self, config: ShellConfig,
                  on_changed: Callable[[], None],
                  on_status: Callable[[str], None],
-                 focus_state: object | None = None) -> None:
+                 focus_state: object | None = None,
+                 on_popover_changed: Callable[[bool], None] | None = None) -> None:
         self._config = config
         self._on_changed = on_changed
         self._on_status = on_status
         self._focus = focus_state
+        self._on_popover_changed = on_popover_changed
 
     # -- popover plumbing --------------------------------------------------
 
@@ -41,9 +48,28 @@ class AppItemActions:
         popover.set_child(content)
         popover.set_parent(anchor)
         popover.set_position(Gtk.PositionType.BOTTOM)
-        popover.connect('closed', lambda p: p.unparent())
+
+        def _on_closed(p: Gtk.Popover) -> None:
+            p.unparent()
+            if self._on_popover_changed is not None:
+                self._on_popover_changed(False)
+
+        popover.connect('closed', _on_closed)
         popover.popup()
+        if self._on_popover_changed is not None:
+            self._on_popover_changed(True)
         return popover
+
+    @staticmethod
+    def _cap_title(label: Gtk.Label) -> None:
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.set_max_width_chars(_MENU_TEXT_WIDTH)
+
+    @staticmethod
+    def _cap_item_label(label: Gtk.Label) -> None:
+        label.set_wrap(True)
+        label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        label.set_max_width_chars(_MENU_TEXT_WIDTH)
 
     def _action_list(self, actions: list[tuple[str, Callable[[], None]]],
                      title: str | None = None) -> Gtk.Widget:
@@ -51,6 +77,7 @@ class AppItemActions:
         if title:
             heading = Gtk.Label(label=title, xalign=0)
             heading.add_css_class('menu-title')
+            self._cap_title(heading)
             box.append(heading)
         self._popover_ref: Gtk.Popover | None = None
 
@@ -63,7 +90,9 @@ class AppItemActions:
             btn = Gtk.Button(label=label)
             btn.add_css_class('flat')
             btn.add_css_class('menu-action')
-            btn.get_child().set_xalign(0)
+            child = btn.get_child()
+            child.set_xalign(0)
+            self._cap_item_label(child)
             btn.connect('clicked', lambda _b, cb=callback: _run(cb))
             box.append(btn)
         return box
@@ -74,16 +103,24 @@ class AppItemActions:
         self._popover_ref = self._show_popover(anchor, content)
 
     def _show_entry_dialog(self, anchor: Gtk.Widget, title: str, initial: str,
-                           commit_label: str, on_commit: Callable[[str], None]) -> None:
+                           commit_label: str, on_commit: Callable[[str], None],
+                           password: bool = False) -> None:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         heading = Gtk.Label(label=title, xalign=0)
         heading.add_css_class('menu-title')
+        self._cap_title(heading)
         entry = Gtk.Entry()
         entry.set_text(initial)
-        entry.select_region(0, -1)
+        entry.set_max_width_chars(_MENU_TEXT_WIDTH)
+        if password:
+            entry.set_visibility(False)
+            entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        else:
+            entry.select_region(0, -1)
         commit_btn = Gtk.Button(label=commit_label)
         commit_btn.add_css_class('flat')
         commit_btn.add_css_class('menu-action')
+        self._cap_item_label(commit_btn.get_child())
         box.append(heading)
         box.append(entry)
         box.append(commit_btn)
@@ -91,7 +128,8 @@ class AppItemActions:
         popover = self._show_popover(anchor, box)
 
         def _commit(*_args: object) -> None:
-            text = entry.get_text().strip()
+            raw = entry.get_text()
+            text = raw if password else raw.strip()
             popover.popdown()
             if text:
                 on_commit(text)
@@ -141,6 +179,11 @@ class AppItemActions:
         for idx, line in enumerate(lines):
             lbl = Gtk.Label(label=line, xalign=0, wrap=True)
             lbl.add_css_class('menu-title' if idx == 0 else 'dim-label')
+            if idx == 0:
+                lbl.set_wrap(False)
+                self._cap_title(lbl)
+            else:
+                self._cap_item_label(lbl)
             box.append(lbl)
         self._show_popover(anchor, box)
 
@@ -286,6 +329,11 @@ class AppItemActions:
         for idx, line in enumerate(lines):
             lbl = Gtk.Label(label=line, xalign=0, wrap=True)
             lbl.add_css_class('menu-title' if idx == 0 else 'dim-label')
+            if idx == 0:
+                lbl.set_wrap(False)
+                self._cap_title(lbl)
+            else:
+                self._cap_item_label(lbl)
             box.append(lbl)
         self._show_popover(anchor, box)
 

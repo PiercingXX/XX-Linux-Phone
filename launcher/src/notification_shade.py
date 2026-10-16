@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import gi
+import html
+import re
 import subprocess
+import threading
+from collections.abc import Callable
 from datetime import datetime
 
 _LAYER_SHELL = False
@@ -20,6 +24,8 @@ if _LAYER_SHELL:
     from gi.repository import Gtk4LayerShell as LayerShell
 
 from quick_actions import QuickActionsPanel
+from media_controls import MediaCard
+from privacy_monitor import detail_text, format_indicator
 from config import DANGER_RED, ShellConfig, ThemePreset
 
 _NOTIF_IFACE = 'org.freedesktop.Notifications'
@@ -33,12 +39,16 @@ def _session_bus() -> Gio.DBusConnection | None:
         return None
 
 
-def _external_daemon_owns_notifications() -> bool:
+def _external_daemon_owns_notifications(
+    own_unique_name: str | None = None,
+) -> bool:
     """True when another process already owns org.freedesktop.Notifications.
 
     Notify is a method call, never a broadcast: with mako/dunst owning the
     name our in-process capture can never fire, so the shade must say so
-    instead of silently showing nothing.
+    instead of silently showing nothing. The owner's unique name is compared
+    against our own connection's unique name, so our own daemon acquiring
+    the name never reads as "external".
     """
     bus = _session_bus()
     if bus is None:
@@ -51,32 +61,158 @@ def _external_daemon_owns_notifications() -> bool:
             GLib.VariantType('(s)'),
             Gio.DBusCallFlags.NONE, 800, None,
         ).unpack()[0]
-    except GLib.Error:
+    except Exception:
         return False
-    return bool(owner)
+    if not owner:
+        return False
+    if own_unique_name is None:
+        try:
+            own_unique_name = bus.get_unique_name()
+        except Exception:
+            own_unique_name = None
+    if own_unique_name and owner == own_unique_name:
+        return False
+    return True
+
+
+def _spawn_shade_thread(target: Callable[[], None]):
+    """Run target off the GTK main thread; never raises."""
+    try:
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        return thread
+    except Exception:
+        try:
+            target()
+        except Exception:
+            pass
+        return None
+
+
+def _post_to_main(callback: Callable, *args):
+    """Deliver callback results to the GTK main thread.
+
+    Falls back to a direct call when GLib.idle_add is unavailable, which
+    only happens under the headless test seams.
+    """
+    idle_add = getattr(GLib, 'idle_add', None)
+    if idle_add is None:
+        return callback(*args)
+    try:
+        idle_add(callback, *args)
+    except Exception:
+        pass
+
+
+# Shell-internal notification ids never came from the daemon (e.g. the
+# update notice, screenshot, screen-recording and wireless-debugging rows),
+# so dismissing them must not echo-close over D-Bus.
+_SHELL_INTERNAL_IDS = frozenset({999901, 999902, 999903, 999904, 999905})
+
+_ALLOWED_BODY_TAGS = ('b', 'i', 'u')
+_ANCHOR_RE = re.compile(r'&lt;a\b.*?&gt;(.*?)&lt;/a&gt;',
+                       re.DOTALL | re.IGNORECASE)
+
+
+def notif_body_to_pango_markup(body: str) -> str:
+    """Render the advertised body-markup subset as safe Pango markup.
+
+    Everything untrusted is escaped first; only <b>/<i>/<u> pairs are
+    re-allowed and links keep their text with the target dropped. An
+    unbalanced tag is left escaped so Pango never sees malformed markup.
+    """
+    escape = getattr(GLib, 'markup_escape_text', None)
+    if callable(escape):
+        try:
+            text = escape(body)
+        except Exception:
+            text = html.escape(body, quote=True)
+    else:
+        text = html.escape(body, quote=True)
+    for tag in _ALLOWED_BODY_TAGS:
+        text = text.replace(f'&lt;{tag}&gt;', f'<{tag}>')
+        text = text.replace(f'&lt;/{tag}&gt;', f'</{tag}>')
+        if text.count(f'<{tag}>') != text.count(f'</{tag}>'):
+            text = text.replace(f'<{tag}>', f'&lt;{tag}&gt;')
+            text = text.replace(f'</{tag}>', f'&lt;/{tag}&gt;')
+    return _ANCHOR_RE.sub(r'\1', text)
+
+
+def _normalize_notif_actions(
+    actions: list | None,
+) -> list[tuple[str, str, object | None]]:
+    """D-Bus (key, label) pairs and legacy (label, callback) pairs both land
+    as (key, label, callback|None); D-Bus rows invoke over the daemon."""
+    normalized: list[tuple[str, str, object | None]] = []
+    for item in actions or []:
+        try:
+            parts = tuple(item)
+        except TypeError:
+            continue
+        if len(parts) == 3:
+            key, label, callback = parts
+            normalized.append(
+                (str(key), str(label), callback if callable(callback) else None))
+        elif len(parts) == 2:
+            first, second = parts
+            if callable(second):
+                normalized.append((str(first), str(first), second))
+            else:
+                normalized.append((str(first), str(second), None))
+    return normalized
 
 
 def theme_css(preset: ThemePreset) -> str:
     return f"""
+window.xx-wm-shade {{
+    background: transparent;
+}}
 .shade-root {{
-    background: alpha({preset.background}, 0.88);
+    background: {preset.background};
     color: {preset.foreground};
 }}
-.shade-header {{
-    font-size: 11pt;
+.shade-scrim {{
+    background: alpha({preset.background}, 0.85);
+}}
+.shade-time {{
+    font-size: 20pt;
     font-weight: 700;
-    letter-spacing: 0.18em;
+    color: {preset.foreground};
+}}
+.shade-date {{
+    font-size: 11pt;
+    color: {preset.muted};
+}}
+.shade-btn {{
+    font-size: 12pt;
+    color: {preset.foreground};
+    padding: 0 8px;
+}}
+.shade-privacy {{
+    font-size: 11pt;
+    color: {preset.accent};
+    padding: 0 8px;
+}}
+.shade-privacy-detail {{
+    font-size: 10pt;
     color: {preset.muted};
 }}
 .shade-power {{
     font-size: 15pt;
     font-weight: 400;
-    letter-spacing: 0;
-    min-width: 40px;
     padding: 0 8px;
 }}
 .shade-power:hover {{
     color: {DANGER_RED};
+}}
+.shade-section {{
+    font-size: 10pt;
+    color: {preset.muted};
+    letter-spacing: 0.05em;
+}}
+.notif-time {{
+    font-size: 9pt;
+    color: {preset.muted};
 }}
 .notif-app {{
     font-size: 10pt;
@@ -109,12 +245,6 @@ def theme_css(preset: ThemePreset) -> str:
     border: none;
 }}
 .dismiss-button:hover {{ background: {preset.surface_alt}; }}
-.shade-datetime {{
-    font-size: 13pt;
-    font-weight: 500;
-    color: {preset.foreground};
-    letter-spacing: 0.02em;
-}}
 .cal-header {{
     font-size: 11pt;
     color: {preset.muted};
@@ -138,11 +268,40 @@ def theme_css(preset: ThemePreset) -> str:
 }}
 """
 
+def format_rel_time(timestamp: datetime, now: datetime | None = None) -> str:
+    """Compact relative age for a notification row ("now", "5m", "2h")."""
+    now = now if now is not None else datetime.now()
+    try:
+        seconds = max(0, int((now - timestamp).total_seconds()))
+    except Exception:
+        return 'now'
+    if seconds < 60:
+        return 'now'
+    if seconds < 3600:
+        return f'{seconds // 60}m'
+    if seconds < 86400:
+        return f'{seconds // 3600}h'
+    return f'{seconds // 86400}d'
+
+
+def group_notification_runs(notifs: list) -> list[list]:
+    """Group consecutive notifications from the same app so the group shares
+    one app label; a repeat after another app starts a new group."""
+    groups: list[list] = []
+    for notif in notifs:
+        if groups and groups[-1][0].app_name == notif.app_name:
+            groups[-1].append(notif)
+        else:
+            groups.append([notif])
+    return groups
+
+
 _SWIPE_DISMISS_THRESHOLD = 140  # pixels to trigger dismiss
 
 
 class Notification:
-    __slots__ = ('id', 'app_name', 'summary', 'body', 'desktop_entry', 'timestamp', 'actions')
+    __slots__ = ('id', 'app_name', 'summary', 'body', 'desktop_entry',
+                 'timestamp', 'actions', 'hints')
 
     def __init__(
         self,
@@ -151,7 +310,8 @@ class Notification:
         summary: str,
         body: str,
         desktop_entry: str = '',
-        actions: list[tuple[str, object]] | None = None,
+        actions: list | None = None,
+        hints: dict | None = None,
     ) -> None:
         self.id = notif_id
         self.app_name = app_name
@@ -159,7 +319,8 @@ class Notification:
         self.body = body
         self.desktop_entry = desktop_entry
         self.timestamp = datetime.now()
-        self.actions = actions or []
+        self.actions = _normalize_notif_actions(actions)
+        self.hints = dict(hints) if isinstance(hints, dict) else {}
 
 
 class NotificationShade(Gtk.Window):
@@ -168,7 +329,10 @@ class NotificationShade(Gtk.Window):
                  on_open_settings: object | None = None,
                  on_power: object | None = None,
                  hud: object | None = None,
-                 config: ShellConfig | None = None) -> None:
+                 config: ShellConfig | None = None,
+                 notif_daemon: object | None = None,
+                 is_own_daemon: Callable[[], bool] | None = None,
+                 media_watcher: object | None = None) -> None:
         super().__init__(title='PiercingXX Shade')
         self._dnd = dnd_state
         self._focus = focus_state
@@ -178,22 +342,34 @@ class NotificationShade(Gtk.Window):
         # The shell window threads its LIVE config so hot reloads reach this
         # surface; the fallback keeps direct no-arg construction working.
         self._config = config if config is not None else ShellConfig()
+        # The app passes its NotificationDaemon (or a predicate) so the
+        # shade can tell our own name ownership apart from an external
+        # daemon's, and report user dismissals back to sending apps.
+        self._notif_daemon = notif_daemon
+        self._is_own_daemon = is_own_daemon
+        # Now-playing card (MPRIS): hides itself while no player exists.
+        self.media_card = MediaCard(
+            watcher=media_watcher, config=self._config)
         self._clock_timer_id: int | None = None
+        self._hide_timer_id: int | None = None
+        self._worker_threads: list = []
         self._cal_year_month: tuple[int, int] | None = None
 
+        self.add_css_class('xx-wm-shade')
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.init_for_window(self)
             LayerShell.set_layer(self, LayerShell.Layer.TOP)
             LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
             LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
             LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
-            LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, False)
+            LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
             LayerShell.set_exclusive_zone(self, 0)
             LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
         else:
             self.set_default_size(420, 500)
 
         self._notifications: list[Notification] = []
+        self._privacy_snapshot: dict[str, set[str]] = {}
 
         self._theme_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
@@ -206,9 +382,11 @@ class NotificationShade(Gtk.Window):
         self.list_box.add_css_class('text-list')
         # The embedded panel shares this shade's LIVE config so its tiles and
         # sliders resolve the same preset (theme == 'custom' included).
+        # Long-presses on its tiles open Settings via the shade callback.
         self.quick_actions = QuickActionsPanel(
             dnd_state=dnd_state, focus_state=focus_state, hud=hud,
-            config=self._config)
+            config=self._config,
+            on_open_settings=self._open_settings_section)
 
         self._revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
@@ -216,17 +394,56 @@ class NotificationShade(Gtk.Window):
             reveal_child=False,
         )
         self._revealer.set_child(self._build_content())
-        self.set_child(self._revealer)
+        self.set_child(self._build_outer())
 
         self._subscribe_dbus()
         self._check_external_notif_daemon()
 
+    def _build_outer(self) -> Gtk.Widget:
+        """Full-screen surface: the panel slides down from the top while the
+        scrim below it dims the rest of the screen. Tapping the scrim or
+        swiping up anywhere closes the shade."""
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.append(self._revealer)
+        self._scrim = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._scrim.add_css_class('shade-scrim')
+        self._scrim.set_hexpand(True)
+        self._scrim.set_vexpand(True)
+        scrim_tap = Gtk.GestureClick.new()
+        scrim_tap.connect(
+            'pressed',
+            lambda _g, _n, _x, _y: self.hide_shade(),
+        )
+        self._scrim.add_controller(scrim_tap)
+        outer.append(self._scrim)
+        swipe = Gtk.GestureSwipe.new()
+        swipe.connect(
+            'swipe',
+            lambda _g, _vx, vy: self.hide_shade() if vy < -200 else None,
+        )
+        outer.add_controller(swipe)
+        return outer
+
     def apply_theme(self, preset: ThemePreset | None = None) -> None:
         """(Re)load this shade's display-level sheet. The shell window passes
         the freshly resolved preset on hot-reload fan-out; standalone falls
-        back to the injected config's own preset."""
-        data = theme_css(preset if preset is not None else self._config.theme)
+        back to the injected config's own preset. Forwards into the
+        embedded quick-actions panel so tiles restyle on the same reload."""
+        resolved = preset if preset is not None else self._config.theme
+        data = theme_css(resolved)
         self._theme_provider.load_from_data(data.encode('utf-8'))
+        panel = getattr(self, 'quick_actions', None)
+        if panel is not None:
+            try:
+                panel.apply_theme(resolved)
+            except Exception:
+                pass
+        card = getattr(self, 'media_card', None)
+        if card is not None:
+            try:
+                card.apply_theme(resolved)
+            except Exception:
+                pass
 
     def _build_content(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -236,24 +453,42 @@ class NotificationShade(Gtk.Window):
         root.set_margin_end(12)
         root.set_margin_bottom(12)
 
-        # Header: date + time on the left (tap → inline month calendar),
-        # Settings on the right (design.md "Notification shade & quick settings")
+        # Header: time + date on the left (tap → inline month calendar),
+        # Settings + power text buttons on the right (design.md "Notification
+        # shade & quick settings"). No letter-spacing anywhere here, so every
+        # row fits a 320 px screen without truncation.
         self._datetime_btn = Gtk.Button()
         self._datetime_btn.add_css_class('flat')
-        self._datetime_label = Gtk.Label(xalign=0)
-        self._datetime_label.add_css_class('shade-datetime')
-        self._datetime_btn.set_child(self._datetime_label)
+        datetime_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        datetime_box.set_valign(Gtk.Align.CENTER)
+        self._time_label = Gtk.Label(xalign=0)
+        self._time_label.add_css_class('shade-time')
+        self._date_label = Gtk.Label(xalign=0)
+        self._date_label.add_css_class('shade-date')
+        # Older harnesses drive _datetime_label directly; it is the time label.
+        self._datetime_label = self._time_label
+        datetime_box.append(self._time_label)
+        datetime_box.append(self._date_label)
+        self._datetime_btn.set_child(datetime_box)
         self._datetime_btn.connect('clicked', lambda _b: self._toggle_calendar())
 
         settings_btn = Gtk.Button(label='Settings')
         settings_btn.add_css_class('flat')
-        settings_btn.add_css_class('shade-header')
+        settings_btn.add_css_class('shade-btn')
         settings_btn.connect('clicked', self._on_settings_clicked)
+
+        self._privacy_btn = Gtk.Button(label='')
+        self._privacy_btn.add_css_class('flat')
+        self._privacy_btn.add_css_class('shade-privacy')
+        self._privacy_btn.set_visible(False)
+        self._privacy_btn.set_tooltip_text('Privacy indicators')
+        self._privacy_btn.connect('clicked', self._toggle_privacy_detail)
 
         # Power button, top-right — suspend / restart / power off via PowerMenu
         power_btn = Gtk.Button(label='⏻')
         power_btn.add_css_class('flat')
-        power_btn.add_css_class('shade-header')
+        power_btn.add_css_class('shade-btn')
         power_btn.add_css_class('shade-power')
         power_btn.set_tooltip_text('Power')
         power_btn.connect('clicked', self._on_power_clicked)
@@ -263,8 +498,20 @@ class NotificationShade(Gtk.Window):
         self._datetime_btn.set_hexpand(True)
         self._datetime_btn.set_halign(Gtk.Align.START)
         top_header.append(self._datetime_btn)
+        top_header.append(self._privacy_btn)
         top_header.append(settings_btn)
         top_header.append(power_btn)
+
+        self._privacy_revealer = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
+            transition_duration=180,
+            reveal_child=False,
+        )
+        self._privacy_detail = Gtk.Label(xalign=0, wrap=True,
+                                         max_width_chars=36)
+        self._privacy_detail.add_css_class('shade-privacy-detail')
+        self._privacy_revealer.set_child(self._privacy_detail)
+        self._refresh_privacy_indicator()
 
         self._calendar_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
@@ -279,14 +526,14 @@ class NotificationShade(Gtk.Window):
         qa_header.set_margin_top(8)
         qa_header.set_margin_bottom(4)
 
-        qa_label = Gtk.Label(label='QUICK SETTINGS', xalign=0)
-        qa_label.add_css_class('shade-header')
+        qa_label = Gtk.Label(label='Quick settings', xalign=0)
+        qa_label.add_css_class('shade-section')
         qa_label.set_hexpand(True)
         qa_label.set_margin_start(6)
 
         self._expand_btn = Gtk.Button(label='↓')
         self._expand_btn.add_css_class('flat')
-        self._expand_btn.add_css_class('shade-header')
+        self._expand_btn.add_css_class('shade-btn')
         self._expand_btn.connect('clicked', self._toggle_expand)
 
         qa_header.append(qa_label)
@@ -296,14 +543,14 @@ class NotificationShade(Gtk.Window):
         sep.set_margin_top(8)
         sep.set_margin_bottom(8)
 
-        notif_label = Gtk.Label(label='NOTIFICATIONS', xalign=0)
-        notif_label.add_css_class('shade-header')
+        notif_label = Gtk.Label(label='Notifications', xalign=0)
+        notif_label.add_css_class('shade-section')
         notif_label.set_hexpand(True)
         notif_label.set_margin_start(6)
 
         clear_btn = Gtk.Button(label='Clear all')
         clear_btn.add_css_class('flat')
-        clear_btn.add_css_class('shade-header')
+        clear_btn.add_css_class('shade-btn')
         clear_btn.connect('clicked', lambda _b: self.clear_all())
 
         notif_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -325,20 +572,29 @@ class NotificationShade(Gtk.Window):
         scroller.set_propagate_natural_height(True)
         scroller.set_child(self.list_box)
 
-        # Swipe UP anywhere in the shade to close it
-        swipe = Gtk.GestureSwipe.new()
-        swipe.connect('swipe', lambda _g, _vx, vy: self.hide_shade() if vy < -200 else None)
-        root.add_controller(swipe)
+        # Placeholder empty state: a single muted line while the list is empty.
+        self._empty_label = Gtk.Label(label='No notifications', xalign=0)
+        self._empty_label.add_css_class('notif-app')
+        self._empty_label.set_margin_start(6)
+        self.list_box.set_placeholder(self._empty_label)
 
         close_btn = Gtk.Button(label='▲ Close')
         close_btn.add_css_class('flat')
-        close_btn.add_css_class('shade-header')
+        close_btn.add_css_class('shade-btn')
         close_btn.set_halign(Gtk.Align.CENTER)
         close_btn.set_margin_top(8)
         close_btn.connect('clicked', lambda _b: self.hide_shade())
 
         root.append(top_header)
+        root.append(self._privacy_revealer)
         root.append(self._calendar_revealer)
+        # Now-playing card: directly under the header, above Quick
+        # settings. Hidden entirely while no MPRIS player exists. The
+        # getattr keeps bare test harnesses (built without __init__)
+        # working; a real shade always carries the card.
+        media_card = getattr(self, 'media_card', None)
+        if media_card is not None:
+            root.append(media_card)
         root.append(qa_header)
         root.append(self.quick_actions)
         root.append(sep)
@@ -355,14 +611,80 @@ class NotificationShade(Gtk.Window):
 
     def _refresh_datetime(self) -> bool:
         now = datetime.now()
-        date_part = now.strftime('%a, %b %d').replace(' 0', ' ')
-        self._datetime_label.set_text(f'{date_part}   {now.strftime("%H:%M")}')
+        time_part = now.strftime('%H:%M')
+        date_part = now.strftime('%a %d %b').replace(' 0', ' ')
+        time_label = getattr(self, '_datetime_label', None)
+        if time_label is not None:
+            time_label.set_text(time_part)
+        date_label = getattr(self, '_date_label', None)
+        if date_label is not None:
+            date_label.set_text(date_part)
         return True
 
+    def set_privacy_snapshot(self, snapshot: dict | None) -> None:
+        """Feed the privacy monitor snapshot; the header dot-line shows
+        only while something is in use."""
+        try:
+            self._privacy_snapshot = {
+                kind: set(apps)
+                for kind, apps in dict(snapshot or {}).items()}
+        except Exception:
+            self._privacy_snapshot = {}
+        self._refresh_privacy_indicator()
+
+    def _refresh_privacy_indicator(self) -> None:
+        btn = getattr(self, '_privacy_btn', None)
+        if btn is None:
+            return
+        try:
+            text = format_indicator(
+                getattr(self, '_privacy_snapshot', None) or {})
+        except Exception:
+            text = ''
+        try:
+            btn.set_label(text)
+            btn.set_visible(bool(text))
+            if not text:
+                self._privacy_revealer.set_reveal_child(False)
+            else:
+                self._privacy_detail.set_text(
+                    detail_text(getattr(self, '_privacy_snapshot', None)
+                                or {}))
+        except Exception:
+            pass
+
+    def _toggle_privacy_detail(self, _btn: Gtk.Button) -> None:
+        """Tap the indicator: reveal which apps hold each kind."""
+        try:
+            snapshot = getattr(self, '_privacy_snapshot', None) or {}
+            if not format_indicator(snapshot):
+                return
+            self._privacy_detail.set_text(detail_text(snapshot))
+            self._privacy_revealer.set_reveal_child(
+                not self._privacy_revealer.get_reveal_child())
+        except Exception:
+            pass
+
     def _on_settings_clicked(self, _btn: Gtk.Button) -> None:
+        self._open_settings_section(None)
+
+    def _open_settings_section(self, section: str | None = None) -> None:
+        """Open the Settings page, ideally at the long-pressed tile's section.
+
+        The shell's handler takes an optional section argument; a legacy
+        zero-arg handler still works via the TypeError fallback.
+        """
         self.hide_shade()
-        if callable(self._on_open_settings):
-            self._on_open_settings()
+        callback = self._on_open_settings
+        if not callable(callback):
+            return
+        try:
+            callback(section)
+        except TypeError:
+            try:
+                callback()
+            except Exception:
+                pass
 
     def _on_power_clicked(self, _btn: Gtk.Button) -> None:
         self.hide_shade()
@@ -438,19 +760,80 @@ class NotificationShade(Gtk.Window):
             pass
 
     def _on_dbus_closed(self, _c, _s, _p, _i, _sig, params, _ud) -> None:
+        # Reason 1 (expired) keeps its history row: the daemon reports back
+        # to the app but the shade retains the notification.
         try:
-            self.dismiss(int(params.unpack()[0]))
+            unpacked = params.unpack()
+            if len(unpacked) > 1 and int(unpacked[1]) == 1:
+                return
+            self.dismiss(int(unpacked[0]), notify_daemon=False)
         except Exception:
             pass
 
+    def _spawn_shade_worker(self, target: Callable[[], None]):
+        thread = _spawn_shade_thread(target)
+        workers = getattr(self, '_worker_threads', None)
+        if workers is None:
+            self._worker_threads = workers = []
+        if thread is not None:
+            workers.append(thread)
+        return thread
+
     def _check_external_notif_daemon(self) -> None:
-        if not _external_daemon_owns_notifications():
-            return
-        self._external_hint.set_visible(True)
-        from shell_log import get_logger
-        get_logger('notification_shade').info(
-            'org.freedesktop.Notifications owned by an external daemon — '
-            'shade cannot capture notifications')
+        # Our own daemon is authoritative and answers instantly; only the
+        # undecided case pays for a bus probe, off the main thread.
+        daemon = getattr(self, '_notif_daemon', None)
+        if daemon is not None:
+            try:
+                if daemon.owns_name():
+                    self._external_hint.set_visible(False)
+                    return
+            except Exception:
+                pass
+        predicate = getattr(self, '_is_own_daemon', None)
+        if predicate is not None:
+            try:
+                if predicate():
+                    self._external_hint.set_visible(False)
+                    return
+            except Exception:
+                pass
+        try:
+            self._spawn_shade_worker(self._probe_external_daemon_in_worker)
+        except Exception:
+            pass
+
+    def _probe_external_daemon_in_worker(self) -> None:
+        try:
+            daemon = getattr(self, '_notif_daemon', None)
+            own: str | None = None
+            if daemon is not None:
+                try:
+                    own = daemon.unique_name()
+                except Exception:
+                    own = None
+            if own is not None:
+                external = _external_daemon_owns_notifications(own)
+            else:
+                external = _external_daemon_owns_notifications()
+        except Exception:
+            external = False
+        _post_to_main(self._finish_external_probe, external)
+
+    def _finish_external_probe(self, external: bool) -> bool:
+        try:
+            self._external_hint.set_visible(bool(external))
+        except Exception:
+            return False
+        if external:
+            try:
+                from shell_log import get_logger
+                get_logger('notification_shade').info(
+                    'org.freedesktop.Notifications owned by an external '
+                    'daemon — shade cannot capture notifications')
+            except Exception:
+                pass
+        return False
 
     def add_notification(
         self,
@@ -459,16 +842,35 @@ class NotificationShade(Gtk.Window):
         summary: str,
         body: str,
         desktop_entry: str = '',
-        actions: list[tuple[str, object]] | None = None,
+        actions: list | None = None,
+        hints: dict | None = None,
     ) -> None:
-        self.dismiss(notif_id)
-        notif = Notification(notif_id, app_name, summary, body, desktop_entry, actions)
-        self._notifications.append(notif)
-        self.list_box.append(self._make_row(notif))
+        self.dismiss(notif_id, notify_daemon=False)
+        notif = Notification(notif_id, app_name, summary, body, desktop_entry,
+                             actions, hints)
+        self._notifications.insert(0, notif)
+        self._rebuild_list()
 
-    def dismiss(self, notif_id: int) -> None:
+    def dismiss(self, notif_id: int, notify_daemon: bool = True) -> None:
         self._notifications = [n for n in self._notifications if n.id != notif_id]
         self._rebuild_list()
+        if notify_daemon:
+            self._notify_daemon_of_dismissal(notif_id)
+
+    def _notify_daemon_of_dismissal(self, notif_id: int) -> None:
+        """Report a user dismissal back to the sending app (reason 2).
+
+        Daemon-driven removals and shell-internal rows never echo here.
+        """
+        if notif_id in _SHELL_INTERNAL_IDS:
+            return
+        daemon = getattr(self, '_notif_daemon', None)
+        if daemon is None:
+            return
+        try:
+            daemon.close_from_shell(notif_id)
+        except Exception:
+            pass
 
     def _rebuild_list(self) -> None:
         child = self.list_box.get_first_child()
@@ -476,66 +878,101 @@ class NotificationShade(Gtk.Window):
             nxt = child.get_next_sibling()
             self.list_box.remove(child)
             child = nxt
-        for notif in self._notifications:
-            self.list_box.append(self._make_row(notif))
+        for group in group_notification_runs(self._notifications):
+            first = True
+            for notif in group:
+                self.list_box.append(
+                    self._make_row(notif, show_app_header=first))
+                first = False
 
-    def _make_row(self, notif: Notification) -> Gtk.ListBoxRow:
-        app_label = Gtk.Label(label=notif.app_name.upper(), xalign=0)
-        app_label.add_css_class('notif-app')
-
+    def _make_row(self, notif: Notification,
+                  show_app_header: bool = True) -> Gtk.ListBoxRow:
         title_label = Gtk.Label(label=notif.summary, xalign=0, wrap=True, max_width_chars=36)
         title_label.add_css_class('notif-title')
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         content.set_hexpand(True)
-        content.append(app_label)
+        # First row of each same-app run carries the shared app label plus
+        # the relative age; the rows grouped under it show summary/body only.
+        if show_app_header:
+            header = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            header.set_hexpand(True)
+            app_label = Gtk.Label(label=notif.app_name.upper(), xalign=0)
+            app_label.add_css_class('notif-app')
+            app_label.set_hexpand(True)
+            time_label = Gtk.Label(
+                label=format_rel_time(notif.timestamp), xalign=1)
+            time_label.add_css_class('notif-time')
+            header.append(app_label)
+            header.append(time_label)
+            content.append(header)
         content.append(title_label)
 
         if notif.body.strip():
-            body_label = Gtk.Label(label=notif.body, xalign=0, wrap=True, max_width_chars=36)
+            body_label = Gtk.Label(xalign=0, wrap=True, max_width_chars=36)
+            body_label.set_markup(notif_body_to_pango_markup(notif.body))
             body_label.add_css_class('notif-body')
             content.append(body_label)
 
-        if notif.actions:
+        # Up to 3 non-default actions as text buttons; the "default" action
+        # (if any) fires on row tap instead of being rendered.
+        tappable = [a for a in notif.actions if a[0] != 'default'][:3]
+        if tappable:
             action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             action_row.set_margin_top(6)
-            for label, callback in notif.actions:
+            for key, label, callback in tappable:
                 btn = Gtk.Button(label=label)
                 btn.add_css_class('flat')
                 btn.add_css_class('action-link')
-                btn.connect(
-                    'clicked',
-                    lambda _b, cb=callback, nid=notif.id: self._run_action(cb, nid),
-                )
+                if callback is not None:
+                    btn.connect(
+                        'clicked',
+                        lambda _b, cb=callback, nid=notif.id:
+                        self._run_action(cb, nid),
+                    )
+                else:
+                    btn.connect(
+                        'clicked',
+                        lambda _b, k=key, n=notif:
+                        self._invoke_notif_action(n, k),
+                    )
                 action_row.append(btn)
             content.append(action_row)
 
-        dismiss_btn = Gtk.Button(label='×')
-        dismiss_btn.add_css_class('dismiss-button')
-        dismiss_btn.connect('clicked', lambda _b, nid=notif.id: self.dismiss(nid))
+        # Resident rows (e.g. the wireless-debugging indicator) are
+        # persistent: no dismiss button and no swipe-to-dismiss, so the
+        # user cannot swipe away state the shell must keep showing.
+        resident = bool((notif.hints or {}).get('resident', False))
 
         row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         row_box.add_css_class('notif-row')
         row_box.append(content)
-        row_box.append(dismiss_btn)
+        if not resident:
+            dismiss_btn = Gtk.Button(label='×')
+            dismiss_btn.add_css_class('dismiss-button')
+            dismiss_btn.connect('clicked', lambda _b, nid=notif.id: self.dismiss(nid))
+            row_box.append(dismiss_btn)
 
-        # Tap to launch app
-        if notif.desktop_entry:
+        # Tap invokes the "default" action when the app offered one, and only
+        # otherwise launches the desktop entry.
+        has_default = any(a[0] == 'default' for a in notif.actions)
+        if notif.desktop_entry or has_default:
             tap = Gtk.GestureClick(n_points=1)
             tap.connect(
                 'released',
-                lambda _g, _n, _x, _y, de=notif.desktop_entry, nid=notif.id:
-                self._launch_notif_app(de, nid),
+                lambda _g, _n, _x, _y, n=notif: self._on_notif_tapped(n),
             )
             content.add_controller(tap)
 
-        # Swipe to dismiss
-        drag = Gtk.GestureDrag()
-        drag.connect('drag-update', lambda _g, dx, _dy, nid=notif.id, rb=row_box:
-                     self._on_notif_drag(rb, dx, nid))
-        drag.connect('drag-end', lambda _g, dx, _dy, nid=notif.id, rb=row_box:
-                     self._on_notif_drag_end(rb, dx, nid))
-        row_box.add_controller(drag)
+        # Swipe to dismiss (resident rows keep showing, so no drag)
+        if not resident:
+            drag = Gtk.GestureDrag()
+            drag.connect('drag-update', lambda _g, dx, _dy, nid=notif.id, rb=row_box:
+                         self._on_notif_drag(rb, dx, nid))
+            drag.connect('drag-end', lambda _g, dx, _dy, nid=notif.id, rb=row_box:
+                         self._on_notif_drag_end(rb, dx, nid))
+            row_box.add_controller(drag)
 
         row = Gtk.ListBoxRow(selectable=False, activatable=False)
         row.set_child(row_box)
@@ -546,6 +983,35 @@ class NotificationShade(Gtk.Window):
         self.hide_shade()
         if callable(callback):
             callback()
+
+    def _on_notif_tapped(self, notif: Notification) -> None:
+        default = next((a for a in notif.actions if a[0] == 'default'), None)
+        if default is not None:
+            self._invoke_notif_action(notif, default[0])
+            return
+        self._launch_notif_app(notif.desktop_entry, notif.id)
+
+    def _invoke_notif_action(self, notif: Notification, action_key: str) -> None:
+        """Fire an app action over the daemon, then close (reason 2).
+
+        Resident rows stay: the spec keeps them after invocation.
+        """
+        daemon = getattr(self, '_notif_daemon', None)
+        if daemon is not None:
+            try:
+                daemon.invoke_action(notif.id, action_key)
+            except Exception:
+                pass
+        if bool((notif.hints or {}).get('resident', False)):
+            self.hide_shade()
+            return
+        self.dismiss(notif.id, notify_daemon=False)
+        if daemon is not None:
+            try:
+                daemon.close_from_shell(notif.id)
+            except Exception:
+                pass
+        self.hide_shade()
 
     def _launch_notif_app(self, desktop_entry: str, notif_id: int) -> None:
         try:
@@ -578,9 +1044,21 @@ class NotificationShade(Gtk.Window):
             row_box.set_margin_end(0)
 
     def show_shade(self) -> None:
+        # A show inside the hide grace window wins: drop the pending hide.
+        hide_timer = getattr(self, '_hide_timer_id', None)
+        if hide_timer is not None:
+            try:
+                GLib.source_remove(hide_timer)
+            except Exception:
+                pass
+            self._hide_timer_id = None
         self._refresh_datetime()
         if self._clock_timer_id is None:
             self._clock_timer_id = GLib.timeout_add_seconds(10, self._refresh_datetime)
+        try:
+            self.quick_actions.refresh_states()
+        except Exception:
+            pass
         self.present()
         self._revealer.set_reveal_child(True)
 
@@ -590,11 +1068,35 @@ class NotificationShade(Gtk.Window):
             self._clock_timer_id = None
         self._calendar_revealer.set_reveal_child(False)
         self._revealer.set_reveal_child(False)
-        GLib.timeout_add(260, self.hide)
+        old = getattr(self, '_hide_timer_id', None)
+        if old is not None:
+            try:
+                GLib.source_remove(old)
+            except Exception:
+                pass
+        try:
+            self._hide_timer_id = GLib.timeout_add(260, self._hide_now)
+        except Exception:
+            self._hide_timer_id = None
+
+    def _hide_now(self) -> bool:
+        self._hide_timer_id = None
+        try:
+            self.hide()
+        except Exception:
+            pass
+        return False
 
     def clear_all(self) -> None:
-        self._notifications.clear()
+        # Resident rows survive Clear all: they describe shell state, not
+        # an app event the user can clear.
+        removed = [n.id for n in self._notifications
+                   if not bool((n.hints or {}).get('resident', False))]
+        self._notifications = [n for n in self._notifications
+                               if n.id not in removed]
         self._rebuild_list()
+        for notif_id in removed:
+            self._notify_daemon_of_dismissal(notif_id)
 
     def notifications_snapshot(self) -> list[tuple[str, str]]:
         """(app_name, summary) pairs for the lock screen's text list."""

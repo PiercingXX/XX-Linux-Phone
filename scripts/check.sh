@@ -9,7 +9,7 @@ PYTHON="${PYTHON:-.venv/bin/python}"
 if [ ! -x "$PYTHON" ]; then
     PYTHON=python3
 fi
-"$PYTHON" -m py_compile launcher/src/*.py || {
+find launcher/src -name '*.py' -print0 | xargs -0 "$PYTHON" -m py_compile || {
     echo "Python syntax check FAILED"
     exit 1
 }
@@ -30,6 +30,12 @@ elif command -v ruff >/dev/null 2>&1; then
 else
     echo "ruff SKIPPED - not found (install with: .venv/bin/pip install ruff)"
 fi
+
+echo "=== Checking for main-loop blocking calls ==="
+"$PYTHON" scripts/check_mainloop_blocks.py || {
+    echo "main-loop block check FAILED"
+    exit 1
+}
 
 echo "=== Running pytest ==="
 if command -v pytest >/dev/null 2>&1 || [ -x .venv/bin/pytest ]; then

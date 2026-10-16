@@ -1,0 +1,669 @@
+#!/usr/bin/env python3
+"""xxdb host CLI: pair with the phone, then shell/logs/screenshot/files.
+
+Pairs over TLS with the 6-digit code shown on the phone (Settings page,
+Developer section). The code is never sent: it keys an HMAC over the
+phone's certificate fingerprint and this host's public certificate, so a
+man-in-the-middle cannot substitute either certificate without the code.
+After pairing, connections use mutual TLS with pinned fingerprints.
+
+Host keys/certs live in ~/.config/xxdb/ (0600). mDNS discovery uses
+`avahi-browse` when available, else the known-hosts file.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import hmac
+import json
+import os
+import queue
+import shutil
+import socket
+import ssl
+import subprocess
+import sys
+import threading
+from pathlib import Path
+
+STATE_DIRNAME = 'xxdb'
+KEY_FILE = 'key.pem'
+CERT_FILE = 'cert.pem'
+PHONES_FILE = 'phones.json'
+MAX_FILE_BYTES = 512 * 1024 * 1024
+
+
+def state_dir() -> Path:
+    return Path.home() / '.config' / STATE_DIRNAME
+
+
+def split_hostport(spec: str, default_port: int | None = None):
+    if ':' in spec and not spec.startswith('['):
+        host, _, port_text = spec.rpartition(':')
+        try:
+            return host or 'localhost', int(port_text)
+        except ValueError:
+            return spec, default_port
+    return spec, default_port
+
+
+def load_phones(home: Path | None = None) -> dict:
+    path = (home if home is not None else Path.home()) / '.config' \
+        / STATE_DIRNAME / PHONES_FILE
+    try:
+        raw = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_phones(phones: dict, home: Path | None = None) -> Path:
+    directory = (home if home is not None else Path.home()) / '.config' \
+        / STATE_DIRNAME
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
+    path = directory / PHONES_FILE
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+        json.dump(phones, handle, indent=2)
+        handle.write('\n')
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def ensure_host_cert(home: Path | None = None):
+    """Create the host key + self-signed cert on first use."""
+    directory = (home if home is not None else Path.home()) / '.config' \
+        / STATE_DIRNAME
+    directory.mkdir(parents=True, exist_ok=True)
+    key_path = directory / KEY_FILE
+    cert_path = directory / CERT_FILE
+    if key_path.exists() and cert_path.exists():
+        pem = cert_path.read_text(encoding='utf-8')
+        der = ssl.PEM_cert_to_DER_cert(pem)
+        return key_path, cert_path, der, hashlib.sha256(der).hexdigest()
+    if shutil.which('openssl') is None:
+        raise SystemExit('openssl is required for the first pairing')
+    user = os.environ.get('USER', 'host')
+    result = subprocess.run(
+        ['openssl', 'req', '-x509', '-newkey', 'rsa:2048',
+         '-keyout', str(key_path), '-out', str(cert_path),
+         '-days', '825', '-nodes', '-subj', f'/CN=xxdb-host-{user}'],
+        capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise SystemExit('openssl could not create the host certificate')
+    for path in (key_path, cert_path):
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    pem = cert_path.read_text(encoding='utf-8')
+    der = ssl.PEM_cert_to_DER_cert(pem)
+    return key_path, cert_path, der, hashlib.sha256(der).hexdigest()
+
+
+def pairing_mac(code: str, phone_fp_hex: str, host_cert_der: bytes) -> str:
+    msg = phone_fp_hex.encode('ascii') + b'|' + bytes(host_cert_der)
+    return hmac.new(code.encode('ascii'), msg, hashlib.sha256).hexdigest()
+
+
+def discover(timeout: int = 5) -> list[tuple[str, int, str]]:
+    """(host, port, name) triples from avahi-browse, best effort."""
+    if shutil.which('avahi-browse') is None:
+        return []
+    try:
+        result = subprocess.run(
+            ['avahi-browse', '-t', '-r', '-p', '_xxdb._tcp'],
+            capture_output=True, text=True, timeout=timeout + 5)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    found = []
+    for line in result.stdout.splitlines():
+        parts = line.split(';')
+        if len(parts) >= 8 and parts[0] == '=':
+            try:
+                found.append((parts[7], int(parts[8]), parts[3]))
+            except ValueError:
+                continue
+    return found
+
+
+class ClientError(RuntimeError):
+    pass
+
+
+class XxdbClient:
+    def __init__(self, host: str, port: int, phone_fp: str | None,
+                 key_path: Path, cert_path: Path) -> None:
+        self.host = host
+        self.port = port
+        self.phone_fp = phone_fp
+        self.key_path = key_path
+        self.cert_path = cert_path
+        self._sock = None
+        self._reader = None
+        self._next_id = 1
+        self._inbox: dict = {}
+        self._lock = threading.Lock()
+        self._server_fp = ''
+
+    def connect(self, with_cert: bool = True) -> str:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        if with_cert:
+            try:
+                context.load_cert_chain(str(self.cert_path),
+                                        str(self.key_path))
+            except (OSError, ssl.SSLError) as error:
+                raise ClientError(f'cannot load host certificate: {error}')
+        try:
+            raw = socket.create_connection((self.host, self.port), timeout=15)
+            self._sock = context.wrap_socket(raw, server_hostname=self.host)
+        except (OSError, ssl.SSLError) as error:
+            raise ClientError(f'cannot connect to {self.host}:{self.port}: '
+                              f'{error}')
+        try:
+            der = self._sock.getpeercert(binary_form=True)
+        except (ValueError, ssl.SSLError) as error:
+            raise ClientError(f'cannot read phone certificate: {error}')
+        self._server_fp = hashlib.sha256(bytes(der)).hexdigest()
+        if self.phone_fp and not hmac.compare_digest(self.phone_fp,
+                                                     self._server_fp):
+            self.close()
+            raise ClientError('phone certificate changed since pairing: '
+                              're-pair before continuing')
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+        return self._server_fp
+
+    def close(self) -> None:
+        sock, self._sock = self._sock, None
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+    def _read_loop(self) -> None:
+        buffer = bytearray()
+        while True:
+            try:
+                chunk = self._sock.recv(65536)
+            except (OSError, ValueError, AttributeError):
+                break
+            if not chunk:
+                break
+            buffer.extend(chunk)
+            while True:
+                newline = buffer.find(b'\n')
+                if newline < 0:
+                    break
+                raw = bytes(buffer[:newline])
+                del buffer[:newline + 1]
+                if not raw.strip():
+                    continue
+                try:
+                    message = json.loads(raw.decode('utf-8'))
+                except ValueError:
+                    continue
+                if not isinstance(message, dict):
+                    continue
+                with self._lock:
+                    box = self._inbox.setdefault(message.get('id'),
+                                                 queue.Queue())
+                box.put(message)
+        with self._lock:
+            for box in self._inbox.values():
+                box.put(None)
+
+    def _send(self, payload: dict) -> None:
+        data = (json.dumps(payload, separators=(',', ':')) + '\n').encode()
+        try:
+            self._sock.sendall(data)
+        except (OSError, AttributeError) as error:
+            raise ClientError(f'send failed: {error}')
+
+    def _wait(self, request_id, timeout: int = 130):
+        with self._lock:
+            box = self._inbox.setdefault(request_id, queue.Queue())
+        try:
+            return box.get(timeout=timeout)
+        except queue.Empty:
+            raise ClientError('phone did not answer in time')
+
+    def call(self, payload: dict, stream=None, timeout: int = 130) -> dict:
+        request_id = payload.get('id') or self._next_id
+        self._next_id = max(self._next_id + 1, int(request_id) + 1
+                            if isinstance(request_id, int) else self._next_id + 1)
+        payload = dict(payload, id=request_id)
+        self._send(payload)
+        while True:
+            message = self._wait(request_id, timeout)
+            if message is None:
+                raise ClientError('connection closed by the phone')
+            if message.get('stream') and message.get('stream') not in (
+                    'log-done', 'pty-done'):
+                if stream is not None:
+                    stream(message)
+                continue
+            return message
+
+
+def _client_for(host: str, port: int | None, need_fp: bool = True):
+    key_path, cert_path, _der, _fp = ensure_host_cert()
+    phones = load_phones()
+    entry = phones.get(host, {})
+    if port is None:
+        port = entry.get('port')
+    if port is None:
+        raise ClientError(f'no known port for {host}: '
+                          'give HOST:PORT or pair first')
+    phone_fp = entry.get('phone_fp')
+    if need_fp and not phone_fp:
+        raise ClientError(f'{host} is not paired yet: run `xxdb pair` first')
+    client = XxdbClient(host, port, phone_fp, key_path, cert_path)
+    return client, entry
+
+
+def cmd_pair(args) -> int:
+    host, port = split_hostport(args.hostport)
+    if port is None:
+        raise ClientError('give HOST:PORT (the port is shown on the phone)')
+    key_path, cert_path, host_der, _host_fp = ensure_host_cert()
+    host_pem = cert_path.read_text(encoding='utf-8')
+    client = XxdbClient(host, port, None, key_path, cert_path)
+    # No client cert on the pairing connection: the phone has nothing to
+    # verify it against yet, and would abort the handshake. The HMAC in
+    # the pair request binds the embedded host certificate instead.
+    server_fp = client.connect(with_cert=False)
+    try:
+        response = client.call({
+            'cmd': 'pair',
+            'code': args.code,
+            'host_cert_pem': host_pem,
+            'host_name': os.environ.get('USER', 'host'),
+            'mac': pairing_mac(args.code, server_fp, host_der),
+        })
+    finally:
+        client.close()
+    if not response.get('ok'):
+        print(f"pairing failed: {response.get('error')}", file=sys.stderr)
+        return 1
+    phones = load_phones()
+    phones[host] = {'port': port, 'phone_fp': response['phone_fp'],
+                    'host_fp': response.get('host_fp')}
+    save_phones(phones)
+    print(f'paired with {host}:{port}')
+    return 0
+
+
+def cmd_devices(_args) -> int:
+    for host, port, name in discover():
+        print(f'{host}:{port}  {name}')
+    known = load_phones()
+    if known:
+        print('known hosts:')
+        for host, entry in sorted(known.items()):
+            print(f"  {host}:{entry.get('port')}  fp={str(entry.get('phone_fp'))[:16]}…")
+    return 0
+
+
+def cmd_connect(args) -> int:
+    host, port = split_hostport(args.hostport)
+    client, _entry = _client_for(host, port)
+    try:
+        client.connect()
+        response = client.call({'cmd': 'hello'})
+    finally:
+        client.close()
+    if not response.get('ok'):
+        print(f"connect failed: {response.get('error')}", file=sys.stderr)
+        return 1
+    print(f"connected to {host} as {response.get('user')}")
+    return 0
+
+
+def cmd_shell(args) -> int:
+    host, port = split_hostport(args.hostport or '')
+    if not host:
+        raise ClientError('give HOST[:PORT] with --to, or pair first')
+    argv = list(args.cmd or [])
+    if argv and argv[0] == '--':
+        argv = argv[1:]
+    client, _entry = _client_for(host, port)
+    client.connect()
+    try:
+        if argv:
+            response = client.call({'cmd': 'shell', 'argv': argv})
+            if not response.get('ok'):
+                print(f"shell failed: {response.get('error')}",
+                      file=sys.stderr)
+                return 1
+            sys.stdout.write(response.get('stdout', ''))
+            sys.stderr.write(response.get('stderr', ''))
+            return int(response.get('returncode', 0))
+        return _interactive_shell(client)
+    finally:
+        client.close()
+
+
+def _interactive_shell(client: XxdbClient) -> int:
+    request_id = 1
+    client._send({'cmd': 'shell', 'interactive': True, 'id': request_id})
+    stop = threading.Event()
+
+    def _pump() -> None:
+        with client._lock:
+            box = client._inbox.setdefault(request_id, queue.Queue())
+        while not stop.is_set():
+            try:
+                message = box.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if message is None:
+                stop.set()
+                return
+            kind = message.get('stream')
+            if kind == 'pty-output':
+                sys.stdout.write(message.get('data', ''))
+                sys.stdout.flush()
+            elif kind == 'pty-done':
+                stop.set()
+                return
+    thread = threading.Thread(target=_pump, daemon=True)
+    thread.start()
+    try:
+        for line in sys.stdin:
+            client._send({'cmd': 'shell', 'id': request_id, 'input': line})
+            if stop.is_set():
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop.set()
+    try:
+        client._send({'cmd': 'shell', 'id': request_id, 'close': True})
+    except ClientError:
+        pass
+    return 0
+
+
+def cmd_logcat(args) -> int:
+    host, port = split_hostport(args.hostport)
+    client, _entry = _client_for(host, port)
+    client.connect()
+    try:
+        request_id = 1
+        client._send({'cmd': 'logcat', 'id': request_id,
+                      'lines': args.lines, 'follow': args.follow})
+        with client._lock:
+            box = client._inbox.setdefault(request_id, queue.Queue())
+        while True:
+            try:
+                message = box.get(timeout=150)
+            except queue.Empty:
+                break
+            if message is None:
+                break
+            kind = message.get('stream')
+            if kind == 'log':
+                print(f"[{message.get('source')}] {message.get('line')}")
+            elif kind in ('log-done', None):
+                if not message.get('ok', True):
+                    print(f"logcat failed: {message.get('error')}",
+                          file=sys.stderr)
+                    return 1
+                if kind is None or not args.follow:
+                    return 0
+    except KeyboardInterrupt:
+        pass
+    finally:
+        client.close()
+    return 0
+
+
+def cmd_screenshot(args) -> int:
+    host, port = split_hostport(args.hostport)
+    client, _entry = _client_for(host, port)
+    try:
+        client.connect()
+        response = client.call({'cmd': 'screenshot'})
+    finally:
+        client.close()
+    if not response.get('ok'):
+        print(f"screenshot failed: {response.get('error')}", file=sys.stderr)
+        return 1
+    Path(args.out).write_bytes(base64.b64decode(response['data']))
+    print(f'saved {args.out}')
+    return 0
+
+
+def _push_pull_path_check(size: int) -> None:
+    if size > MAX_FILE_BYTES:
+        raise ClientError('file exceeds the 512 MB limit')
+
+
+def cmd_push(args) -> int:
+    host, port = split_hostport(args.hostport)
+    data = Path(args.src).read_bytes()
+    _push_pull_path_check(len(data))
+    client, _entry = _client_for(host, port)
+    try:
+        client.connect()
+        payload = {'cmd': 'push', 'path': args.dst,
+                   'data': base64.b64encode(data).decode('ascii')}
+        if args.system:
+            payload['system'] = True
+        response = client.call(payload)
+        if (not response.get('ok')
+                and response.get('error') == 'needs-confirm'):
+            print('The phone asks to confirm this --system path on its '
+                  'screen (Settings, Developer section), then re-run '
+                  'the same command.')
+            return 2
+        if not response.get('ok'):
+            print(f"push failed: {response.get('error')}", file=sys.stderr)
+            return 1
+    finally:
+        client.close()
+    print(f"pushed {response.get('bytes')} bytes to {response.get('path')}")
+    return 0
+
+
+def cmd_pull(args) -> int:
+    host, port = split_hostport(args.hostport)
+    client, _entry = _client_for(host, port)
+    try:
+        client.connect()
+        response = client.call({'cmd': 'pull', 'path': args.src})
+    finally:
+        client.close()
+    if not response.get('ok'):
+        print(f"pull failed: {response.get('error')}", file=sys.stderr)
+        return 1
+    Path(args.dst).write_bytes(base64.b64decode(response['data']))
+    print(f"pulled {response.get('size')} bytes to {args.dst}")
+    return 0
+
+
+def collect_deploy_tree(src_dir: Path) -> dict:
+    """launcher/src (*.py + style.css) plus the protocol XMLs, as
+    {destination-relative-path: base64} ready for the install command."""
+    tree = {}
+    for path in sorted(src_dir.glob('*.py')):
+        tree[path.name] = base64.b64encode(path.read_bytes()).decode('ascii')
+    style = src_dir / 'style.css'
+    if style.is_file():
+        tree['style.css'] = base64.b64encode(style.read_bytes()).decode('ascii')
+    data_dir = src_dir.parent / 'data'
+    for name in ('wayland.xml',
+                 'wlr-foreign-toplevel-management-unstable-v1.xml',
+                 'wlr-output-power-management-unstable-v1.xml'):
+        candidate = data_dir / name
+        if candidate.is_file():
+            tree[name] = base64.b64encode(candidate.read_bytes()).decode('ascii')
+    return tree
+
+
+def cmd_deploy(args) -> int:
+    host, port = split_hostport(args.hostport)
+    src_dir = Path(args.src or 'launcher/src')
+    if not src_dir.is_dir():
+        raise ClientError(f'no such source dir: {src_dir}')
+    tree = collect_deploy_tree(src_dir)
+    if not tree:
+        raise ClientError(f'nothing to deploy in {src_dir}')
+    client, _entry = _client_for(host, port)
+    try:
+        client.connect()
+        response = client.call({'cmd': 'install', 'files': tree})
+        if not response.get('ok'):
+            print(f"deploy failed: {response.get('error')}", file=sys.stderr)
+            return 1
+        print(f"installed {response.get('count')} files")
+        restart = client.call({'cmd': 'restart-shell'})
+        if not restart.get('ok'):
+            print(f"restart failed: {restart.get('error')}", file=sys.stderr)
+            return 1
+        print(f"shell restarted (pid {restart.get('pid')})")
+    finally:
+        client.close()
+    return 0
+
+
+def cmd_ipc(args) -> int:
+    host, port = split_hostport(args.hostport)
+    client, _entry = _client_for(host, port)
+    try:
+        client.connect()
+        response = client.call({'cmd': 'ipc', 'verb': args.verb})
+    finally:
+        client.close()
+    if not response.get('ok'):
+        print(f"ipc failed: {response.get('error')}", file=sys.stderr)
+        return 1
+    print(f'sent {args.verb}')
+    return 0
+
+
+def cmd_input(args) -> int:
+    host, port = split_hostport(args.hostport)
+    params: dict = {}
+    if args.action == 'tap':
+        params = {'x': int(args.rest[0]), 'y': int(args.rest[1])}
+    elif args.action == 'swipe':
+        params = {'x1': int(args.rest[0]), 'y1': int(args.rest[1]),
+                  'x2': int(args.rest[2]), 'y2': int(args.rest[3]),
+                  'ms': int(args.rest[4]) if len(args.rest) > 4 else 300}
+    elif args.action == 'key':
+        params = {'name': args.rest[0]}
+    elif args.action == 'text':
+        params = {'string': ' '.join(args.rest)}
+    else:
+        raise ClientError(f'unknown input action {args.action!r}')
+    client, _entry = _client_for(host, port)
+    try:
+        client.connect()
+        response = client.call({'cmd': 'input', 'action': args.action,
+                                **params})
+    finally:
+        client.close()
+    if not response.get('ok'):
+        print(f"input failed: {response.get('error')}", file=sys.stderr)
+        return 1
+    print(response.get('message', 'ok'))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog='xxdb',
+                                     description='XX-WM wireless debugging')
+    sub = parser.add_subparsers(dest='command', required=True)
+
+    pair = sub.add_parser('pair', help='pair with PHONE:PORT using CODE')
+    pair.add_argument('hostport')
+    pair.add_argument('code')
+    pair.set_defaults(func=cmd_pair)
+
+    devices = sub.add_parser('devices', help='list reachable/known phones')
+    devices.set_defaults(func=cmd_devices)
+
+    connect = sub.add_parser('connect', help='verify a paired phone')
+    connect.add_argument('hostport')
+    connect.set_defaults(func=cmd_connect)
+
+    shell = sub.add_parser('shell', help='run a command or open a shell')
+    shell.add_argument('--to', dest='hostport', default='')
+    shell.add_argument('cmd', nargs=argparse.REMAINDER)
+    shell.set_defaults(func=cmd_shell)
+
+    logcat = sub.add_parser('logcat', help='follow the shell log')
+    logcat.add_argument('hostport')
+    logcat.add_argument('--lines', type=int, default=200)
+    logcat.add_argument('--no-follow', dest='follow', action='store_false',
+                        default=True)
+    logcat.set_defaults(func=cmd_logcat)
+
+    shot = sub.add_parser('screenshot', help='capture the phone screen')
+    shot.add_argument('hostport')
+    shot.add_argument('out')
+    shot.set_defaults(func=cmd_screenshot)
+
+    push = sub.add_parser('push', help='upload a file ($HOME unless --system)')
+    push.add_argument('hostport')
+    push.add_argument('src')
+    push.add_argument('dst')
+    push.add_argument('--system', action='store_true')
+    push.set_defaults(func=cmd_push)
+
+    pull = sub.add_parser('pull', help='download a file')
+    pull.add_argument('hostport')
+    pull.add_argument('src')
+    pull.add_argument('dst')
+    pull.set_defaults(func=cmd_pull)
+
+    deploy = sub.add_parser('deploy', help='push launcher/src + restart')
+    deploy.add_argument('hostport')
+    deploy.add_argument('--src', default='launcher/src')
+    deploy.set_defaults(func=cmd_deploy)
+
+    ipc = sub.add_parser('ipc', help='send an IPC verb to the shell')
+    ipc.add_argument('hostport')
+    ipc.add_argument('verb')
+    ipc.set_defaults(func=cmd_ipc)
+
+    itype = sub.add_parser('input', help='tap/swipe/key/text injection')
+    itype.add_argument('hostport')
+    itype.add_argument('action', choices=('tap', 'swipe', 'key', 'text'))
+    itype.add_argument('rest', nargs='*')
+    itype.set_defaults(func=cmd_input)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args))
+    except ClientError as error:
+        print(f'xxdb: {error}', file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

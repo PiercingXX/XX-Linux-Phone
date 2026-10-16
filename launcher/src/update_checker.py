@@ -18,8 +18,12 @@ CHECK_INTERVAL = 24 * 3600
 SNOOZE_INTERVAL = 7 * 24 * 3600
 
 # First match wins; each entry maps a terminal binary to the argv that runs a
-# shell command string inside it.
+# shell command string inside it. GNOME Console first: FuriOS/PureOS phones
+# ship it (as kgx, with gnome-console as the long name) instead of the
+# desktop terminals below.
 _TERMINALS: list[tuple[str, Callable[[str, str], list[str]]]] = [
+    ('kgx', lambda sh, cmd: ['kgx', '-e', sh, '-c', cmd]),
+    ('gnome-console', lambda sh, cmd: ['gnome-console', '-e', sh, '-c', cmd]),
     ('kitty', lambda sh, cmd: ['kitty', sh, '-c', cmd]),
     ('foot', lambda sh, cmd: ['foot', sh, '-c', cmd]),
     ('alacritty', lambda sh, cmd: ['alacritty', '-e', sh, '-c', cmd]),
@@ -53,8 +57,57 @@ def run_update_script(script_path: str) -> tuple[bool, str]:
     return False, 'No terminal emulator found (kitty, foot, alacritty, ...).'
 
 
-def count_updates() -> int:
-    """Best-effort count of upgradable packages across the distros we target."""
+# Package indexes `apt list --upgradable` / `apk list --upgradable` read go
+# stale: without a recent refresh they under-report, so a 0 from a stale
+# index must never be presented as "up to date". A backend is only trusted
+# while one of its index paths has been written within _INDEX_MAX_AGE. The
+# shell never refreshes indexes itself — that needs root.
+_INDEX_PATHS: dict[str, list[str]] = {
+    'apt': ['/var/lib/apt/lists'],
+    'apk': ['/var/cache/apk', '/lib/apk/db'],
+    'checkupdates': ['/var/lib/pacman/sync'],
+    'pacman': ['/var/lib/pacman/sync'],
+}
+_INDEX_MAX_AGE = 24 * 3600
+
+
+def _newest_mtime(path: str) -> float | None:
+    """Newest mtime of a file or directory tree root (one level), or None
+    when the path cannot be inspected."""
+    import os
+    try:
+        newest = os.path.getmtime(path)
+        if os.path.isdir(path):
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    try:
+                        newest = max(newest, entry.stat().st_mtime)
+                    except OSError:
+                        pass
+        return newest
+    except OSError:
+        return None
+
+
+def _index_fresh(binary: str, max_age_s: float = _INDEX_MAX_AGE,
+                 now: float | None = None) -> bool:
+    """True when `binary` has a package index fresh enough to trust."""
+    candidates = _INDEX_PATHS.get(binary)
+    if not candidates:
+        return True
+    now = time.time() if now is None else now
+    for candidate in candidates:
+        mtime = _newest_mtime(candidate)
+        if mtime is not None and now - mtime <= max_age_s:
+            return True
+    return False
+
+
+def count_updates() -> int | None:
+    """Best-effort count of upgradable packages across the distros we
+    target. None means unknown: no backend installed, every usable
+    backend's index is stale, or the listing failed — callers must report
+    that as unknown, never as "up to date"."""
     checks: list[tuple[str, list[str], Callable[[str], int]]] = [
         ('apk', ['apk', 'list', '--upgradable'],
          lambda out: sum(1 for line in out.splitlines() if line.strip())),
@@ -68,6 +121,10 @@ def count_updates() -> int:
     for binary, argv, parse in checks:
         if not shutil.which(binary):
             continue
+        if not _index_fresh(binary):
+            _log.info('update count via %s skipped: package index is stale',
+                      binary)
+            continue
         try:
             result = subprocess.run(
                 argv, capture_output=True, text=True, timeout=120, check=False,
@@ -75,8 +132,8 @@ def count_updates() -> int:
             return parse(result.stdout)
         except (OSError, subprocess.TimeoutExpired) as e:
             _log.warning('update count via %s failed: %s', binary, e)
-            return 0
-    return 0
+            return None
+    return None
 
 
 class UpdateChecker:
@@ -114,10 +171,10 @@ class UpdateChecker:
             return
         self._start_check(self._report_scheduled)
 
-    def check_now(self, on_result: Callable[[int], None]) -> None:
+    def check_now(self, on_result: Callable[[int | None], None]) -> None:
         self._start_check(on_result)
 
-    def _start_check(self, report: Callable[[int], None]) -> None:
+    def _start_check(self, report: Callable[[int | None], None]) -> None:
         if self._checking:
             return
         self._checking = True
@@ -128,15 +185,19 @@ class UpdateChecker:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _finish_check(self, count: int, report: Callable[[int], None]) -> bool:
+    def _finish_check(self, count: int | None,
+                      report: Callable[[int | None], None]) -> bool:
         self._checking = False
         self._config.set_update_last_check(time.time())
-        _log.info('update check: %d packages upgradable', count)
+        if count is None:
+            _log.info('update check: status unknown (stale index)')
+        else:
+            _log.info('update check: %d packages upgradable', count)
         report(count)
         return False
 
-    def _report_scheduled(self, count: int) -> None:
-        if count > 0:
+    def _report_scheduled(self, count: int | None) -> None:
+        if count is not None and count > 0:
             self._on_updates_available(count)
 
     def snooze(self) -> None:

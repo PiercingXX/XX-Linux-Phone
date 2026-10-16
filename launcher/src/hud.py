@@ -43,6 +43,45 @@ _HUD_HOLD_MS          = 1000
 _HUD_FADE_STEPS       = 10
 _HUD_FADE_INTERVAL_MS = 20
 
+_HUD_TOP_FRACTION = 0.2
+_HUD_FALLBACK_SCREEN_PX = 720
+
+
+def hud_top_margin(screen_height: int) -> int:
+    """TOP margin placing the HUD ~20% down the screen."""
+    try:
+        height = int(screen_height)
+    except (TypeError, ValueError):
+        height = _HUD_FALLBACK_SCREEN_PX
+    return max(0, int(height * _HUD_TOP_FRACTION))
+
+
+def _screen_height() -> int:
+    """Current output height; falls back to the 360x720 target."""
+    try:
+        from gi.repository import Gdk
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() if display is not None else None
+        geometry = monitor.get_geometry() if monitor is not None else None
+        height = geometry.height if geometry is not None else None
+        if height:
+            return int(height)
+    except Exception:
+        pass
+    return _HUD_FALLBACK_SCREEN_PX
+
+
+def volume_label(pct: int) -> str:
+    """HUD caption for a volume level: 'Muted' at 0, else 'Volume N%'."""
+    pct = max(0, min(100, int(pct)))
+    return 'Muted' if pct == 0 else f'Volume {pct}%'
+
+
+def brightness_label(pct: int) -> str:
+    """HUD caption for a brightness level."""
+    pct = max(0, min(100, int(pct)))
+    return f'Brightness {pct}%'
+
 def theme_css(preset: ThemePreset) -> str:
     return f"""
     .piercing-hud-box {{
@@ -90,17 +129,23 @@ if _HAS_GTK:
                 LayerShell.init_for_window(self)
                 LayerShell.set_layer(self, LayerShell.Layer.OVERLAY)
                 LayerShell.set_anchor(self, LayerShell.Edge.TOP, True)
-                LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, True)
+                LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, False)
                 LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
                 LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
                 LayerShell.set_exclusive_zone(self, 0)
                 LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
-                LayerShell.set_margin(self, LayerShell.Edge.TOP, 96)
+                LayerShell.set_margin(
+                    self, LayerShell.Edge.TOP,
+                    hud_top_margin(_screen_height()))
 
-            css = Gtk.CssProvider()
-            css.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
+            # Registered once; apply_theme() reloads this same provider so hot
+            # reloads never stack a new display provider per call.
+            self._theme_provider = Gtk.CssProvider()
+            self._theme_provider.load_from_data(
+                theme_css(self._display_preset()).encode('utf-8'))
             Gtk.StyleContext.add_provider_for_display(
-                self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+                self.get_display(), self._theme_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )
 
             win_css = Gtk.CssProvider()
@@ -120,12 +165,46 @@ if _HAS_GTK:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
             box.add_css_class('piercing-hud-box')
             box.set_halign(Gtk.Align.CENTER)
-            box.set_valign(Gtk.Align.CENTER)
+            box.set_valign(Gtk.Align.START)
             box.append(self._label)
             box.append(self._level)
+            self._box = box
             self.set_child(box)
 
+            # The OVERLAY still receives input while visible (~1.2 s
+            # per volume press); drop the input region so touches pass through.
+            self.connect('realize', self._on_realize)
+
             self.set_opacity(0.0)
+
+        def apply_theme(self, preset: ThemePreset | None = None) -> None:
+            """Reload this overlay's display-level sheet. The shell window
+            passes the freshly resolved preset on hot-reload fan-out;
+            standalone falls back to the injected config's own preset."""
+            data = theme_css(
+                preset if preset is not None else self._display_preset())
+            self._theme_provider.load_from_data(data.encode('utf-8'))
+
+        def _on_realize(self, _widget) -> None:
+            self._drop_input()
+
+        def _drop_input(self) -> None:
+            """Empty input region so the overlay never swallows touches.
+            Without cairo, keep the TOP + LEFT + RIGHT strip (sized to
+            content) so the rest of the screen stays live and the box
+            stays horizontally centered."""
+            try:
+                import cairo
+            except ImportError:
+                cairo = None
+            surface = self.get_surface()
+            if cairo is not None and surface is not None:
+                surface.set_input_region(cairo.Region())
+                return
+            if _HAS_LAYER and LayerShell.is_supported():
+                LayerShell.set_anchor(self, LayerShell.Edge.BOTTOM, False)
+                LayerShell.set_anchor(self, LayerShell.Edge.LEFT, True)
+                LayerShell.set_anchor(self, LayerShell.Edge.RIGHT, True)
 
         def _display_preset(self) -> ThemePreset:
             """Preset this overlay renders with: window.resolve_theme over
@@ -138,10 +217,33 @@ if _HAS_GTK:
             from window import resolve_theme
             return resolve_theme(self._config)
 
+        def show_volume(self, pct: int) -> None:
+            """Display a volume level ('Volume N%', 'Muted' at 0)."""
+            pct = max(0, min(100, int(pct)))
+            self._flash(volume_label(pct), pct)
+
+        def show_brightness(self, pct: int) -> None:
+            """Display a brightness level ('Brightness N%')."""
+            pct = max(0, min(100, int(pct)))
+            self._flash(brightness_label(pct), pct)
+
         def show_level(self, pct: int) -> None:
             """Display a clamped 0-100 level and schedule the auto-hide fade."""
             pct = max(0, min(100, int(pct)))
-            self._label.set_text(f'{pct}%')
+            self._flash(f'{pct}%', pct)
+
+        def _place_at_top_fraction(self) -> None:
+            if _HAS_LAYER and LayerShell.is_supported():
+                try:
+                    LayerShell.set_margin(
+                        self, LayerShell.Edge.TOP,
+                        hud_top_margin(_screen_height()))
+                except Exception:
+                    pass
+
+        def _flash(self, text: str, pct: int) -> None:
+            self._place_at_top_fraction()
+            self._label.set_text(text)
             self._level.set_fraction(pct / 100.0)
 
             if self._anim_src is not None:
@@ -190,8 +292,14 @@ class Hud:
 
     def show_volume(self, pct: int) -> None:
         if self._window is not None:
-            self._window.show_level(pct)
+            self._window.show_volume(pct)
 
     def show_brightness(self, pct: int) -> None:
         if self._window is not None:
-            self._window.show_level(pct)
+            self._window.show_brightness(pct)
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        """Reload the overlay's sheet (hot-reload fan-out); silent no-op
+        headlessly, like every other method here."""
+        if self._window is not None:
+            self._window.apply_theme(preset)

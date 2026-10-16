@@ -1,0 +1,405 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app_index import AppEntry
+
+
+class HomePage:
+    """Home page builder and widget/slot behavior for ShellWindow.
+
+    Holds only a reference to the window; all state (labels, launcher,
+    config) stays on the window so bare-instance headless tests keep
+    working. Method names mirror the ShellWindow delegators in window.py.
+    """
+
+    def __init__(self, win) -> None:
+        self._win = win
+
+    def _build_home_page(self):
+        from gi.repository import Gtk
+        from home_launcher import HomeLauncher
+
+        win = self._win
+        # Home rows draw under .shell-root: their sheet lives in the window's
+        # theme provider (reloaded on every hot reload from the resolved
+        # preset), never as a per-build display provider that would leak one
+        # registration per construction and miss custom themes.
+
+        # --- Top 1/3: widget block — config-driven, vertically centered ---
+        win.clock_label.set_xalign(0.5)
+        win.date_label.set_xalign(0.5)
+        win.weather_label.set_xalign(0.5)
+        win.status_strip.set_xalign(0.5)
+
+        win._clock_tap_timer = None
+
+        clock_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        clock_inner.set_halign(Gtk.Align.FILL)
+        clock_inner.set_hexpand(True)
+        win._widget_block = clock_inner
+        win._widget_taps_wired = set()
+        self._build_widget_block()
+
+        self._init_weather()
+
+        # Equal spacers above and below clock_inner → vertically centered in top pane
+        top_pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        top_pane.set_hexpand(True)
+        top_pane.set_vexpand(True)
+        sp_top = Gtk.Box()
+        sp_top.set_vexpand(True)
+        sp_bot = Gtk.Box()
+        sp_bot.set_vexpand(True)
+        top_pane.append(sp_top)
+        top_pane.append(clock_inner)
+        top_pane.append(sp_bot)
+
+        # --- Bottom 2/3: launcher — vertically centered ---
+        def _get_home_slots() -> list[dict]:
+            return win.config.home_slots
+
+        def _launch_slot(slot: dict) -> None:
+            win._launch_slot(slot)
+
+        win._home_launcher = HomeLauncher(
+            open_dialer_fn=win._open_dialer,
+            get_slots_fn=_get_home_slots,
+            on_launch_slot=_launch_slot,
+            on_member_long_press=lambda w, s, m: win.item_actions.show_member_menu(w, s, m),
+            on_slot_move=win._move_slot,
+            on_slot_remove=win._remove_slot,
+            on_slot_rename=win._rename_slot,
+            on_edit_action=win._on_edit_action,
+            is_paused_fn=win.focus_state.is_paused_app,
+            get_alignment_fn=lambda: win.config.home_alignment,
+        )
+
+        launcher_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        launcher_inner.set_valign(Gtk.Align.CENTER)
+        launcher_inner.set_vexpand(True)
+        launcher_inner.set_hexpand(True)
+        launcher_inner.append(win._home_launcher)
+
+        launcher_scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        launcher_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        launcher_scroll.set_has_frame(False)
+        launcher_scroll.add_css_class('home-scroll')
+        launcher_scroll.set_child(launcher_inner)
+
+        bot_pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        bot_pane.set_hexpand(True)
+        bot_pane.set_vexpand(True)
+        bot_pane.set_margin_bottom(24)
+        bot_pane.append(launcher_scroll)
+
+        # Long-press anywhere on home → slot edit mode (design.md "Home screen")
+        edit_press = Gtk.GestureLongPress.new()
+        edit_press.set_touch_only(False)
+        edit_press.connect('pressed', win._on_home_long_press)
+        bot_pane.add_controller(edit_press)
+
+        # --- 1/3 widgets / 2/3 launcher — a homogeneous grid, so there is
+        # no Paned divider bar and no realize-time ratio hack. The widget
+        # block centers in the top third; the slot list centers in the rest.
+        grid = Gtk.Grid()
+        grid.set_row_homogeneous(True)
+        grid.set_hexpand(True)
+        grid.set_vexpand(True)
+        grid.attach(top_pane, 0, 0, 1, 1)
+        grid.attach(bot_pane, 0, 1, 1, 2)
+        return grid
+
+    def _launch_slot(self, slot: dict) -> None:
+        """Launch an app or command from a home slot."""
+        win = self._win
+        app_id = slot.get('app_id')
+        if app_id and win.focus_state.is_paused_app(str(app_id)):
+            win._show_focus_notice(slot.get('label', 'App'))
+            return
+        # Record usage
+        if app_id:
+            win.config.record_launch(app_id)
+
+        # Launch based on type
+        slot_type = slot.get('type')
+        if slot_type == 'app':
+            android_pkg = slot.get('app_id')
+            cmd = slot.get('cmd')
+            label = slot.get('label', '')
+
+            if label == 'Phone' and not android_pkg and not cmd:
+                # Built-in dialer
+                win._open_dialer()
+            elif android_pkg:
+                # Desktop-file ids (incl. waydroid.*.desktop wrappers) launch
+                # via Gio; only bare Android package names go through waydroid
+                if str(android_pkg).endswith('.desktop'):
+                    win._launch_app_id(str(android_pkg))
+                else:
+                    from home_launcher import _launch_android
+                    _launch_android(android_pkg)
+                    win.drop_to_background()
+            elif cmd:
+                # Command
+                from home_launcher import _launch_cmd
+                _launch_cmd(cmd)
+                win.drop_to_background()
+
+    def _build_widget_block(self) -> None:
+        win = self._win
+        block = win._widget_block
+        child = block.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            block.remove(child)
+            child = nxt
+        widget_map = {
+            'time': win.clock_label,
+            'date': win.date_label,
+            'weather': win.weather_label,
+            'battery': win.status_strip,
+        }
+        for key, _conf in win.config.ordered_widgets():
+            widget = widget_map.get(key)
+            if widget is None:
+                continue
+            if key not in win._widget_taps_wired:
+                self._wire_widget_tap(widget, key)
+                win._widget_taps_wired.add(key)
+            block.append(widget)
+
+    def _current_tap(self, key: str) -> object:
+        # Read at dispatch time so a hot-reloaded config takes effect
+        return self._win.config.widgets.get(key, {}).get('tap', 'default')
+
+    def _wire_widget_tap(self, widget, key: str) -> None:
+        from gi.repository import Gtk
+
+        win = self._win
+        if key == 'time':
+            # The clock keeps double-tap-to-lock; a single tap (after the
+            # double-tap window passes) runs the configured action
+            tap_gesture = Gtk.GestureClick.new()
+            tap_gesture.connect(
+                'pressed', lambda _g, n, _x, _y: win._on_clock_tapped(n))
+            widget.add_controller(tap_gesture)
+            return
+        gesture = Gtk.GestureClick.new()
+        gesture.connect(
+            'pressed',
+            lambda _g, _n, _x, _y, k=key: win._dispatch_widget_tap(k, win._current_tap(k)))
+        widget.add_controller(gesture)
+
+    def _on_clock_tapped(self, n_press: int) -> None:
+        from gi.repository import GLib
+
+        win = self._win
+        if n_press == 2:
+            if win._clock_tap_timer is not None:
+                GLib.source_remove(win._clock_tap_timer)
+                win._clock_tap_timer = None
+            win._show_lock_screen()
+            return
+        if n_press == 1 and win._clock_tap_timer is None:
+            def _fire() -> bool:
+                win._clock_tap_timer = None
+                tap = win._current_tap('time')
+                if tap != 'none':
+                    win._dispatch_widget_tap('time', tap)
+                return GLib.SOURCE_REMOVE
+            win._clock_tap_timer = GLib.timeout_add(280, _fire)
+
+    def _dispatch_widget_tap(self, key: str, tap: object) -> None:
+        win = self._win
+        if isinstance(tap, dict) and tap.get('app'):
+            win._launch_app_id(str(tap['app']))
+            return
+        if tap == 'refresh' or (key == 'weather' and tap == 'default'):
+            win._refresh_weather(force=True)
+            return
+        if tap != 'default':
+            return
+        if key == 'time':
+            win._launch_first_matching('clock')
+        elif key == 'date':
+            win._launch_first_matching('calendar')
+        elif key == 'battery':
+            win.stack.set_visible_child_name('settings')
+
+    def _launch_first_matching(self, needle: str) -> None:
+        win = self._win
+        entry = next(
+            (e for e in win.app_index.entries if needle in e.name.casefold()), None)
+        if entry is not None:
+            win._launch_entry(entry)
+
+    def _init_weather(self) -> None:
+        from gi.repository import GLib
+        from weather import WeatherProvider
+
+        win = self._win
+        win._weather = WeatherProvider(win.config)
+        # No placeholder: the line stays hidden until real data arrives.
+        win.weather_label.set_visible(False)
+        win._refresh_weather()
+        GLib.timeout_add_seconds(900, win._tick_weather)
+
+    def _tick_weather(self) -> bool:
+        self._refresh_weather()
+        return True
+
+    def _refresh_weather(self, force: bool = False) -> None:
+        from weather import PLACEHOLDER
+
+        win = self._win
+
+        def _apply(text: str) -> None:
+            if text == PLACEHOLDER:
+                win.weather_label.set_visible(False)
+                return
+            win.weather_label.set_text(text)
+            win.weather_label.set_visible(True)
+
+        win._weather.refresh(_apply, force=force)
+
+    def _refresh_clock(self) -> None:
+        win = self._win
+        now = datetime.now()
+        win.clock_label.set_text(now.strftime('%H:%M'))
+        win.date_label.set_text(now.strftime('%a, %b %d').replace(' 0', ' '))
+
+    def _tick_clock(self) -> bool:
+        self._refresh_clock()
+        return True
+
+    def _refresh_status(self) -> None:
+        from system_status import status_line_async
+
+        win = self._win
+
+        def _done(line: str) -> None:
+            from privacy_monitor import format_indicator
+            try:
+                indicator = format_indicator(
+                    getattr(win, '_privacy_snapshot', None) or {})
+            except Exception:
+                indicator = ''
+            if indicator:
+                line = f'{line}  ·  {indicator}' if line else indicator
+            try:
+                win.status_strip.set_text(line)
+            except Exception:
+                pass
+        status_line_async(_done)
+
+    def set_privacy_snapshot(self, snapshot: dict | None) -> None:
+        """Feed the privacy monitor snapshot; the status strip gains the
+        `● mic · cam · loc` tail while something is in use."""
+        win = self._win
+        try:
+            win._privacy_snapshot = {
+                kind: set(apps)
+                for kind, apps in dict(snapshot or {}).items()}
+        except Exception:
+            win._privacy_snapshot = {}
+        try:
+            win._refresh_status()
+        except Exception:
+            pass
+
+    def _tick_status(self) -> bool:
+        self._refresh_status()
+        return True
+
+    # -- home edit mode ----------------------------------------------------
+
+    def _on_home_long_press(self, gesture, _x: float, _y: float) -> None:
+        from gi.repository import Gtk
+
+        win = self._win
+        if win._home_launcher.edit_mode:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        win._home_launcher.set_edit_mode(True)
+
+    def _on_edit_action(self, action: str, widget) -> None:
+        win = self._win
+        if action == 'done':
+            win._home_launcher.set_edit_mode(False)
+        elif action == 'settings':
+            win._home_launcher.set_edit_mode(False)
+            win.stack.set_visible_child_name('settings')
+        elif action == 'add_app':
+            win._pick_slot_mode = True
+            win.stack.set_visible_child_name('apps')
+            win._show_status('Tap an app to add it to home.')
+        elif action == 'new_folder':
+            win.item_actions._show_entry_dialog(
+                widget, 'New folder', '', 'Create', win._create_folder_slot)
+
+    def _add_app_slot(self, entry: AppEntry) -> None:
+        win = self._win
+        slots = win.config.home_slots
+        if len(slots) >= 8:
+            win._show_status('Home is full — remove a slot first.')
+            return
+        display = win.config.label_for(entry.app_id, entry.name)
+        slots.append({'type': 'app', 'label': display, 'app_id': entry.app_id,
+                      'cmd': None, 'folder': None})
+        win.config.set_home_slots(slots)
+        win.stack.set_visible_child_name('home')
+        win._home_launcher.refresh()
+        win._populate_apps(win.apps_search.get_text())
+        win._show_status(f'{display} added to home.')
+
+    def _create_folder_slot(self, name: str) -> None:
+        win = self._win
+        slots = win.config.home_slots
+        if len(slots) >= 8:
+            win._show_status('Home is full — remove a slot first.')
+            return
+        slots.append({'type': 'folder', 'label': name, 'app_id': None, 'cmd': None, 'folder': []})
+        win.config.set_home_slots(slots)
+        win._home_launcher.refresh()
+        win._home_launcher.set_edit_mode(True)
+
+    def _move_slot(self, idx: int, delta: int) -> None:
+        win = self._win
+        slots = win.config.home_slots
+        new_idx = idx + delta
+        if not (0 <= idx < len(slots) and 0 <= new_idx < len(slots)):
+            return
+        slots[idx], slots[new_idx] = slots[new_idx], slots[idx]
+        win.config.set_home_slots(slots)
+        win._home_launcher.refresh(preserve_folder=True)
+
+    def _remove_slot(self, idx: int) -> None:
+        win = self._win
+        slots = win.config.home_slots
+        if not (0 <= idx < len(slots)):
+            return
+        removed = slots.pop(idx)
+        win.config.set_home_slots(slots)
+        win._home_launcher.refresh(preserve_folder=True)
+        win._populate_apps(win.apps_search.get_text())
+        win._show_status(f'{removed.get("label", "Slot")} removed from home.')
+
+    def _rename_slot(self, widget, idx: int) -> None:
+        win = self._win
+        slots = win.config.home_slots
+        if not (0 <= idx < len(slots)):
+            return
+
+        def _commit(text: str) -> None:
+            slots[idx]['label'] = text
+            app_id = slots[idx].get('app_id')
+            if slots[idx].get('type') == 'app' and app_id:
+                win.config.set_app_label(str(app_id), text)
+            win.config.set_home_slots(slots)
+            win._refresh_after_item_action()
+
+        win.item_actions._show_entry_dialog(
+            widget, 'Rename', slots[idx].get('label', ''), 'Rename', _commit)

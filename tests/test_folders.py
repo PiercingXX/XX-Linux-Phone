@@ -174,7 +174,10 @@ def test_stale_open_folder_closes_on_refresh(window, monkeypatch):
 def test_populate_wiring_uses_the_seam(window):
     """Row insertion needs live GTK; pin the wiring by source instead."""
     import inspect
-    src = inspect.getsource(window.ShellWindow._populate_apps)
-    assert 'self._drawer_folder_slots()' in src
+
+    import drawer_page
+    src = inspect.getsource(drawer_page.DrawerPage._populate_apps)
+    assert 'win._drawer_folder_slots()' in src
     assert 'for idx, slot, members in folder_slots:' in src
     assert 'for m_idx, member in members:' in src
+

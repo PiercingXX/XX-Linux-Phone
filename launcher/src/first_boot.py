@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import gi
-import subprocess
 from collections.abc import Callable
 
 _LAYER_SHELL = False
@@ -31,7 +30,7 @@ def theme_css(preset: ThemePreset) -> str:
     color: {preset.foreground};
 }}
 .wizard-title {{
-    font-size: 22pt;
+    font-size: 18pt;
     font-weight: 300;
     color: {preset.foreground};
 }}
@@ -129,6 +128,101 @@ _TIMEZONES = [
     'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Kolkata', 'Australia/Sydney',
 ]
 
+_TIMEDATE1 = 'org.freedesktop.timedate1'
+_TIMEDATE1_PATH = '/org/freedesktop/timedate1'
+
+#: Shown on the timezone step when the system zone cannot be set from the
+#: wizard (the installer owns it then).
+_TIMEZONE_FAILURE_MESSAGE = 'Set the time zone in the installer'
+
+_wizard_base_provider: Gtk.CssProvider | None = None
+_wizard_live_provider: Gtk.CssProvider | None = None
+_wizard_providers_added = False
+
+
+def _apply_wizard_theme(theme: ThemePreset) -> None:
+    """Wizard display sheets: register both providers once, reload per build.
+
+    Replaying the tour (`xx-wm --welcome`) rebuilds the wizard window; a
+    new display-level provider per replay would accumulate without bound —
+    same add-once discipline as font_theme and the lock screen. The live
+    provider holds the theme-row preview the base sheet cannot (it carries
+    the per-preset swatch rows).
+    """
+    global _wizard_base_provider, _wizard_live_provider, _wizard_providers_added
+    if _wizard_base_provider is None:
+        _wizard_base_provider = Gtk.CssProvider()
+    if _wizard_live_provider is None:
+        _wizard_live_provider = Gtk.CssProvider()
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    if not _wizard_providers_added:
+        Gtk.StyleContext.add_provider_for_display(
+            display,
+            _wizard_base_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
+        )
+        Gtk.StyleContext.add_provider_for_display(
+            display,
+            _wizard_live_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
+        )
+        _wizard_providers_added = True
+    _wizard_base_provider.load_from_data(
+        theme_css(theme).encode('utf-8') + _THEME_ROWS_CSS)
+    _wizard_live_provider.load_from_data(theme_css(theme).encode('utf-8'))
+
+
+def set_timezone_async(timezone: str,
+                       on_done: Callable[[bool, str], None] | None = None,
+                       bus=None) -> None:
+    """Set the system timezone via timedate1 without blocking the UI thread.
+
+    Shelling out to set the zone prompts polkit with no agent in-session,
+    so it fails silently; the D-Bus call carries interactive=true and
+    `on_done(ok, message)` fires on the main loop either way. Never raises.
+    """
+    from gi.repository import Gio, GLib
+
+    def _fail(reason: str) -> None:
+        if on_done is None:
+            return
+
+        def _deliver() -> bool:
+            if on_done is not None:
+                on_done(False, reason)
+            return False
+        GLib.idle_add(_deliver)
+
+    if bus is None:
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        except Exception as error:
+            _fail(str(error) or 'no system bus')
+            return
+
+    def _reply(conn, result) -> None:
+        if on_done is None:
+            return
+        try:
+            conn.call_finish(result)
+        except Exception as error:
+            message = (getattr(error, 'message', None) or str(error)
+                       or 'SetTimezone failed')
+            on_done(False, message)
+            return
+        on_done(True, '')
+
+    try:
+        bus.call(
+            _TIMEDATE1, _TIMEDATE1_PATH, _TIMEDATE1, 'SetTimezone',
+            GLib.Variant('(sb)', (timezone, True)),
+            None, Gio.DBusCallFlags.NONE, 30000, None, _reply,
+        )
+    except Exception as error:
+        _fail(str(error) or 'SetTimezone failed')
+
 
 def keyboard_step_available() -> bool:
     """True when squeekboard + the Colemak layouts are installed (18.3)."""
@@ -176,24 +270,20 @@ class FirstBootWizard(Gtk.Window):
         self._pin_buf = ''
         self._confirm_buf = ''
 
-        self._theme_provider = Gtk.CssProvider()
-
-        provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(self._config.theme).encode('utf-8') + _THEME_ROWS_CSS)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
-        )
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            self._theme_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
-        )
+        # Display sheets register once per display and reload per build —
+        # replaying the tour must not stack a new provider every time.
+        _apply_wizard_theme(self._config.theme)
+        self._theme_provider = _wizard_live_provider
 
         # Instant page switches — slide animations stutter on phone GPUs at
         # scale 3, and text-first means no transition chrome anyway
         self._stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.NONE)
+        # Same homogeneous-stack trap as the shell window: the widest title
+        # ("Shade & quick settings" at 22pt measured 436 px) stretched every
+        # page, clipping "Get started" on the Welcome page.
+        self._stack.set_hhomogeneous(False)
+        self._stack.set_vhomogeneous(False)
+        self._stack.set_interpolate_size(False)
 
         self._stack.add_named(self._build_welcome(), 'welcome')
         self._stack.add_named(self._build_pin_step(), 'pin')
@@ -235,10 +325,20 @@ class FirstBootWizard(Gtk.Window):
         box.set_margin_top(88)
         title = Gtk.Label(label=title_text)
         title.add_css_class('wizard-title')
+        # Long titles ("Do Not Disturb & Focus") wrap instead of forcing the
+        # page wider than the phone screen.
+        title.set_xalign(0.5)
+        title.set_justify(Gtk.Justification.CENTER)
+        title.set_wrap(True)
+        title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        title.set_max_width_chars(18)
         box.append(title)
         if sub_text:
             sub = Gtk.Label(label=sub_text, justify=Gtk.Justification.CENTER, wrap=True)
             sub.add_css_class('wizard-subtitle')
+            sub.set_xalign(0.5)
+            sub.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            sub.set_max_width_chars(30)
             box.append(sub)
         return box
 
@@ -257,6 +357,7 @@ class FirstBootWizard(Gtk.Window):
 
         next_btn = Gtk.Button(label='Get started')
         next_btn.add_css_class('wizard-next')
+        next_btn.set_hexpand(True)
         next_btn.connect('clicked', lambda _b: self._stack.set_visible_child_name('pin'))
 
         page.append(self._title_block(
@@ -290,11 +391,13 @@ class FirstBootWizard(Gtk.Window):
 
         next_btn = Gtk.Button(label='Next')
         next_btn.add_css_class('wizard-next')
+        next_btn.set_hexpand(True)
         next_btn.connect('clicked', self._on_pin_next)
 
         skip_btn = Gtk.Button(label='Skip (no PIN)')
         skip_btn.add_css_class('flat')
         skip_btn.add_css_class('wizard-skip')
+        skip_btn.set_hexpand(True)
         skip_btn.connect('clicked', lambda _b: self._stack.set_visible_child_name('theme'))
 
         page.append(self._title_block(
@@ -327,6 +430,7 @@ class FirstBootWizard(Gtk.Window):
 
         confirm_btn = Gtk.Button(label='Set PIN')
         confirm_btn.add_css_class('wizard-next')
+        confirm_btn.set_hexpand(True)
         confirm_btn.connect('clicked', self._on_pin_confirm)
 
         page.append(self._title_block('Confirm PIN', 'Enter the same PIN again.'))
@@ -341,18 +445,23 @@ class FirstBootWizard(Gtk.Window):
             ('7', 'PQRS'),('8', 'TUV'), ('9', 'WXYZ'),
             ('',  ''),    ('0', ''),    ('←', ''),
         ]
+        # Columns share the available width equally (no fixed pixel keys),
+        # so the pad fits a 320 px screen and stretches on wider ones.
         grid = Gtk.Grid(row_spacing=6, column_spacing=6)
-        grid.set_halign(Gtk.Align.CENTER)
+        grid.set_halign(Gtk.Align.FILL)
+        grid.set_hexpand(True)
+        grid.set_column_homogeneous(True)
         for idx, (digit, sub) in enumerate(_KEYS):
             col, row = idx % 3, idx // 3
             if not digit:
                 spacer = Gtk.Box()
-                spacer.set_size_request(80, 64)
+                spacer.set_hexpand(True)
                 grid.attach(spacer, col, row, 1, 1)
             elif digit == '←':
                 btn = Gtk.Button(label='←')
                 btn.add_css_class('pin-key')
                 btn.add_css_class('del')
+                btn.set_hexpand(True)
                 btn.connect('clicked', lambda _b, fn=on_delete: fn())
                 grid.attach(btn, col, row, 1, 1)
             else:
@@ -366,6 +475,7 @@ class FirstBootWizard(Gtk.Window):
                     inner.append(s)
                 btn = Gtk.Button()
                 btn.add_css_class('pin-key')
+                btn.set_hexpand(True)
                 btn.set_child(inner)
                 btn.connect('clicked', lambda _b, d=digit, fn=on_digit: fn(d))
                 grid.attach(btn, col, row, 1, 1)
@@ -418,6 +528,7 @@ class FirstBootWizard(Gtk.Window):
 
         next_btn = Gtk.Button(label='Next')
         next_btn.add_css_class('wizard-next')
+        next_btn.set_hexpand(True)
         next_btn.connect('clicked', self._on_theme_next)
 
         page.append(self._title_block('Pick a theme'))
@@ -442,12 +553,19 @@ class FirstBootWizard(Gtk.Window):
         scroller.set_vexpand(True)
         scroller.set_child(self._tz_list)
 
+        self._tz_status = Gtk.Label(label='')
+        self._tz_status.add_css_class('wizard-subtitle')
+        self._tz_status.set_halign(Gtk.Align.CENTER)
+        self._tz_status.set_wrap(True)
+
         finish_btn = Gtk.Button(label='Done')
         finish_btn.add_css_class('wizard-next')
+        finish_btn.set_hexpand(True)
         finish_btn.connect('clicked', self._on_finish)
 
         page.append(self._title_block('Timezone'))
         page.append(scroller)
+        page.append(self._tz_status)
         page.append(finish_btn)
         return page
 
@@ -512,6 +630,7 @@ class FirstBootWizard(Gtk.Window):
         skip = Gtk.Button(label='Skip')
         skip.add_css_class('flat')
         skip.add_css_class('wizard-skip')
+        skip.set_hexpand(True)
         skip.connect('clicked', lambda _b: self._advance_tour())
         return skip
 
@@ -545,8 +664,10 @@ class FirstBootWizard(Gtk.Window):
         page, footer = self._tour_scaffold(title_text, body_text)
         next_btn = Gtk.Button(label='Next')
         next_btn.add_css_class('wizard-next')
+        next_btn.set_hexpand(True)
         next_btn.connect('clicked', lambda _b: self._advance_tour())
         footer.append(next_btn)
+        footer.append(self._skip_button())
         return page
 
     def _keyboard_page(self) -> Gtk.Widget:
@@ -556,12 +677,15 @@ class FirstBootWizard(Gtk.Window):
             'appears whenever you need to type.')
         entry = Gtk.Entry()
         entry.set_placeholder_text('Type something…')
+        entry.set_hexpand(True)
         # The centered content zone sits between the title block and footer
         page.get_first_child().get_next_sibling().append(entry)
         next_btn = Gtk.Button(label='Next')
         next_btn.add_css_class('wizard-next')
+        next_btn.set_hexpand(True)
         next_btn.connect('clicked', lambda _b: self._advance_tour())
         footer.append(next_btn)
+        footer.append(self._skip_button())
         return page
 
     def _final_page(self) -> Gtk.Widget:
@@ -574,6 +698,7 @@ class FirstBootWizard(Gtk.Window):
             'xx-wm --welcome')
         done_btn = Gtk.Button(label='Done')
         done_btn.add_css_class('wizard-next')
+        done_btn.set_hexpand(True)
         done_btn.connect('clicked', lambda _b: self._finish_tour())
         footer.append(done_btn)
         return page
@@ -619,26 +744,24 @@ class FirstBootWizard(Gtk.Window):
         # Setup is durable from here even if the walkthrough is skipped
         self._config.save()
         self._advance_tour()
-        # timedatectl blocks on polkit and gsettings can stall — never on the
-        # UI thread; the wizard moves on while these land in the background
-        import threading
-        threading.Thread(
-            target=self._apply_system_settings, args=(tz,), daemon=True).start()
+        # timedate1 answers asynchronously, so the wizard moves on while the
+        # zone lands in the background. The Colemak OSK needs no settings
+        # daemon help: squeekboard's own layout files provide it, and writing
+        # the desktop input sources key would leak into other desktop
+        # sessions on the same account.
+        set_timezone_async(tz, on_done=self._on_timezone_result)
 
-    @staticmethod
-    def _apply_system_settings(tz: str) -> None:
+    def _on_timezone_result(self, ok: bool, message: str) -> None:
+        """Timedate1 reply lands here on the main loop: success stays silent,
+        failure pages back to the timezone step with the installer pointer
+        instead of pretending the setting landed."""
+        if ok:
+            return
+        from shell_log import get_logger
+        get_logger('first_boot').warning('SetTimezone failed: %s', message)
         try:
-            subprocess.run(['timedatectl', 'set-timezone', tz],
-                           check=True, timeout=15, capture_output=True)
-        except (OSError, subprocess.SubprocessError):
-            pass
-        # Colemak is the shipped keyboard layout; squeekboard and the Phosh
-        # OSK both follow org.gnome.desktop.input-sources
-        try:
-            subprocess.run(
-                ['gsettings', 'set', 'org.gnome.desktop.input-sources',
-                 'sources', "[('xkb', 'us+colemak')]"],
-                timeout=15, capture_output=True,
-            )
-        except (OSError, subprocess.SubprocessError):
-            pass
+            self._tz_status.set_text(_TIMEZONE_FAILURE_MESSAGE)
+            self._stack.set_visible_child_name('timezone')
+        except Exception as error:
+            get_logger('first_boot').warning(
+                'could not show timezone error: %s', error)

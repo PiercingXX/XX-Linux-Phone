@@ -1,0 +1,57 @@
+# Notifications
+
+The shell owns `org.freedesktop.Notifications` on the session bus
+(`launcher/src/notif_daemon.py`, in-process daemon). When another daemon
+(dunst, mako, fnott) already owns the name, the shell backs off and the
+shade reads through its fallback subscription path instead.
+
+Capabilities advertised: `body`, `body-markup`, `actions`, `persistence`.
+
+Every `Notify` reaches the shade with its id, app name, summary, body,
+desktop entry, raw hints dict, and decoded `[(key, label), ...]` action
+pairs. Tapping an action emits `ActionInvoked` on the bus as usual; the
+shade then dismisses the notification (resident rows stay).
+
+## Muting
+
+`muted_apps: {app_id: until_epoch}` in the shell config discards an
+app's notifications for 1/2/4/8 hours (see "Disable for…" in
+`../design.md`): no banner, no sound, nothing in the shade. The mute
+expires silently.
+
+## Action targets: reaching an exited service
+
+Some actions belong to a background service that has already exited by
+the time the user taps: the dialer policy service posts Call back /
+Ring next time / Block on its silenced-call cards and then idle-exits,
+and the TxxT daemon posts Reply / Open the same way. A plain
+`ActionInvoked` signal would go nowhere, because signals do not
+auto-start services.
+
+Such a notification carries the hint `x-xx-wm-action-target` (string):
+
+```
+"<bus_name> <object_path> <interface>"
+```
+
+When the user invokes an action on a notification with a well-formed
+hint, the shell emits `ActionInvoked` as usual **and** calls
+
+```
+<interface>.HandleNotificationAction(in u id, in s action_key)
+```
+
+on that target with auto-start allowed (async, 5 s timeout,
+fire-and-forget, DEBUG log on failure), so the bus daemon starts the
+service and it acts. A missing or malformed hint is ignored: the three
+parts must be a well-formed bus name (well-known or unique),
+object path, and interface, e.g.
+
+```
+x-xx-wm-action-target:
+  "io.piercingxx.XXDialer.Policy /io/piercingxx/XXDialer/Policy io.piercingxx.XXDialer.Policy1"
+```
+
+with actions `call-back` / `ring-next-time` / `block-contact`. The
+service implements `HandleNotificationAction` with the same `(u, s)`
+signature and dispatches on the action key it posted.

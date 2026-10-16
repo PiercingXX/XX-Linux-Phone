@@ -20,7 +20,13 @@ def _install_headless_gi() -> None:
 
 _install_headless_gi()
 
-from hud import Hud, _HAS_GTK, _HUD_HOLD_MS  # noqa: E402
+from hud import (  # noqa: E402
+    Hud,
+    _HAS_GTK,
+    _HUD_HOLD_MS,
+    brightness_label,
+    volume_label,
+)
 
 assert _HAS_GTK is False
 
@@ -95,3 +101,34 @@ class TestHudApi:
             assert hud._window is None
         else:
             assert hud._window is not None
+
+
+class TestHudLabels:
+    """The HUD names the level it shows: volume reads 'Volume N%' ('Muted'
+    at 0), brightness reads 'Brightness N%'."""
+
+    def test_volume_label_names_level(self):
+        assert volume_label(40) == 'Volume 40%'
+
+    def test_volume_zero_is_muted(self):
+        assert volume_label(0) == 'Muted'
+
+    def test_volume_label_clamps(self):
+        assert volume_label(150) == 'Volume 100%'
+        assert volume_label(-5) == 'Muted'
+
+    def test_brightness_label_names_level(self):
+        assert brightness_label(40) == 'Brightness 40%'
+
+    def test_brightness_zero_names_zero(self):
+        assert brightness_label(0) == 'Brightness 0%'
+
+    def test_apply_theme_noop_headless(self):
+        """apply_theme joins the silent-absence contract: no window, no
+        raise; with GTK the overlay reloads instead of no-oping."""
+        from config import THEME_PRESETS
+        hud = Hud()
+        assert hud.apply_theme() is None
+        assert hud.apply_theme(THEME_PRESETS['forest']) is None
+        if not _HAS_GTK:
+            assert hud._window is None

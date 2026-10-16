@@ -145,6 +145,15 @@ def timer_glib(monkeypatch):
     return glib
 
 
+@pytest.fixture(autouse=True)
+def _inline_workers(monkeypatch):
+    """Run the W1 worker seam inline: expand() reads sliders off-thread in
+    production, so these synchronous assertions drive the worker directly.
+    Real-thread interleaving is covered in test_w1_notifications."""
+    monkeypatch.setattr(quick_actions, '_spawn_worker_thread',
+                        lambda target: target())
+
+
 def _bare_panel(hud=None) -> quick_actions.QuickActionsPanel:
     panel = object.__new__(quick_actions.QuickActionsPanel)
     panel._hud = hud

@@ -7,6 +7,42 @@ set -u
 
 REPO_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
+# --- unattended mode (automation/CI) ----------------------------------------
+# TUI stays the default; --unattended disables every prompt and whiptail.
+UNATTENDED=0
+DEVICE_ARG=""
+AUTOLOGIN=0
+NO_FONTS=0
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --unattended) UNATTENDED=1 ;;
+            --device)
+                DEVICE_ARG=${2:-}
+                [ -n "$DEVICE_ARG" ] || {
+                    echo "error: --device needs a name" >&2
+                    return 1
+                }
+                shift
+                ;;
+            --device=*) DEVICE_ARG=${1#--device=} ;;
+            --autologin) AUTOLOGIN=1 ;;
+            --no-fonts) NO_FONTS=1 ;;
+            -h|--help)
+                echo "Usage: $0 [--unattended [--device NAME] [--autologin] [--no-fonts]]"
+                return 0
+                ;;
+            *)
+                echo "Unknown argument: $1" >&2
+                return 1
+                ;;
+        esac
+        shift
+    done
+}
+parse_args "$@" || exit 1
+
 # --- privilege helper (postmarketOS ships doas) -----------------------------
 if command -v doas >/dev/null 2>&1; then
     SUDO=doas
@@ -34,8 +70,10 @@ if command -v apk >/dev/null 2>&1; then
     PKG=apk
 elif command -v apt >/dev/null 2>&1; then
     PKG=apt
+elif command -v pacman >/dev/null 2>&1; then
+    PKG=pacman
 else
-    echo "Unsupported distro: need apk or apt." >&2
+    echo "Unsupported distro: need apk, apt, or pacman." >&2
     exit 1
 fi
 
@@ -43,15 +81,20 @@ pkg_install() {
     # Never hard-fail the menu on one missing package
     if [ "$PKG" = apk ]; then
         $SUDO apk add "$@" || echo "warn: some packages failed: $*" >&2
+    elif [ "$PKG" = pacman ]; then
+        $SUDO pacman -S --needed --noconfirm "$@" || echo "warn: some packages failed: $*" >&2
     else
         $SUDO apt install -y "$@" || echo "warn: some packages failed: $*" >&2
     fi
 }
 
-# --- whiptail ---------------------------------------------------------------
-if ! command -v whiptail >/dev/null 2>&1; then
+# --- whiptail (TUI only; unattended never prompts) ---------------------------
+if [ "$UNATTENDED" != 1 ] && ! command -v whiptail >/dev/null 2>&1; then
     echo "Installing whiptail..."
-    if [ "$PKG" = apk ]; then pkg_install newt; else pkg_install whiptail; fi
+    if [ "$PKG" = apk ]; then pkg_install newt
+    elif [ "$PKG" = pacman ]; then pkg_install libnewt
+    else pkg_install whiptail
+    fi
 fi
 
 # --- cached sudo (doas has no timestamp cache; skip there) ------------------
@@ -62,7 +105,11 @@ if [ "$SUDO" = sudo ]; then
 fi
 
 msg_box() {
-    whiptail --msgbox "$1" 0 0 0
+    if [ "${UNATTENDED:-0}" = 1 ]; then
+        printf '%s\n' "$1"
+    else
+        whiptail --msgbox "$1" 0 0 0
+    fi
 }
 
 install_deps() {
@@ -70,11 +117,148 @@ install_deps() {
     if [ "$PKG" = apk ]; then
         pkg_install py3-gobject3 gtk4.0 libadwaita gtk4-layer-shell \
             meson ninja rsync git squeekboard phoc lisgd wl-clipboard
+        pkg_install py3-wayland
+        pkg_install geoclue
+        pkg_install networkmanager
+        pkg_install brightnessctl
+    elif [ "$PKG" = pacman ]; then
+        pkg_install python-gobject gtk4 libadwaita gtk4-layer-shell \
+            meson ninja rsync git squeekboard phoc python-pywayland \
+            wl-clipboard geoclue networkmanager brightnessctl
+        if command -v lisgd >/dev/null 2>&1; then
+            echo "lisgd already present: $(command -v lisgd)"
+        else
+            echo "SKIP: lisgd is not in Arch repos. Build from https://git.sr.ht/~mil/lisgd (libevdev + libinput). This tablet already has /usr/bin/lisgd."
+        fi
     else
         pkg_install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
             libgtk4-layer-shell0 meson ninja-build rsync git squeekboard \
             phoc lisgd wl-clipboard
+        pkg_install python3-pywayland
+        pkg_install geoclue-2.0
+        pkg_install network-manager
+        pkg_install brightnessctl
     fi
+    install_portals
+}
+
+install_portals() {
+    # File pickers (Gtk.FileDialog), screenshot/screencast and Settings
+    # portals need the broker plus a GTK frontend and the wlroots backend
+    # phoc speaks. Install only when the broker itself is missing.
+    if command -v xdg-desktop-portal >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ "$PKG" = apk ]; then
+        pkg_install xdg-desktop-portal xdg-desktop-portal-gtk \
+            xdg-desktop-portal-wlr
+    elif [ "$PKG" = pacman ]; then
+        pkg_install xdg-desktop-portal xdg-desktop-portal-gtk \
+            xdg-desktop-portal-wlr
+    else
+        pkg_install xdg-desktop-portal xdg-desktop-portal-gtk \
+            xdg-desktop-portal-wlr
+    fi
+}
+
+download_nerd_font_fallback() {
+    # Distro packages don't always carry the Nerd Font variant (the shell's
+    # default). When no JetBrainsMono Nerd Font is visible, fetch the
+    # upstream release zip into the user font dir. Best effort: never fatal.
+    if command -v fc-list >/dev/null 2>&1 && \
+       fc-list 2>/dev/null | grep -qi "JetBrainsMono Nerd Font"; then
+        return 0
+    fi
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        echo "warn: no curl/wget — skipping Nerd Font download" >&2
+        return 0
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        echo "warn: no unzip — skipping Nerd Font download" >&2
+        return 0
+    fi
+    _zip_url=${XX_WM_NERD_FONT_URL:-https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/JetBrainsMono.zip}
+    _fontdir=${XX_WM_FONT_DIR:-$HOME/.local/share/fonts}
+    mkdir -p "$_fontdir" || return 0
+    _tmpzip=$(mktemp /tmp/xx-wm-fonts.XXXXXX.zip) || return 0
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "$_tmpzip" "$_zip_url" || {
+            rm -f "$_tmpzip"
+            echo "warn: Nerd Font download failed" >&2
+            return 0
+        }
+    else
+        wget -q -O "$_tmpzip" "$_zip_url" || {
+            rm -f "$_tmpzip"
+            echo "warn: Nerd Font download failed" >&2
+            return 0
+        }
+    fi
+    unzip -o -j "$_tmpzip" -d "$_fontdir" >/dev/null 2>&1 || \
+        echo "warn: Nerd Font unzip failed" >&2
+    rm -f "$_tmpzip"
+    return 0
+}
+
+install_fonts() {
+    if [ "${NO_FONTS:-0}" = 1 ]; then
+        echo "Skipping fonts (--no-fonts)."
+        return 0
+    fi
+    echo "Installing fonts (optional — never fails the install)..."
+    if [ "$PKG" = pacman ]; then
+        pkg_install ttf-jetbrains-mono-nerd
+        pkg_install ttf-jetbrains-mono
+        pkg_install ttf-space-mono-nerd
+        pkg_install ttf-space-mono
+    elif [ "$PKG" = apk ]; then
+        pkg_install font-jetbrains-mono-nerd
+        pkg_install font-jetbrains-mono
+        pkg_install font-space-mono
+    else
+        pkg_install fonts-jetbrains-mono
+        echo "warn: no Space Mono distro package — skipping (not installing a stand-in)" >&2
+    fi
+    download_nerd_font_fallback || true
+    $SUDO fc-cache -f >/dev/null 2>&1 || true
+    return 0
+}
+
+check_layer_shell() {
+    # meson intentionally has no gtk4-layer-shell dependency (it would pull
+    # the whole GTK4 dev stack just to install Python files); the runtime
+    # requirement is checked here via the typelib the shell actually loads.
+    if python3 -c "import gi; gi.require_version('Gtk4LayerShell', '1.0')" \
+        >/dev/null 2>&1; then
+        echo "Gtk4LayerShell typelib present."
+        return 0
+    fi
+    echo "warn: Gtk4LayerShell typelib not found — install gtk4-layer-shell for your distro (layer surfaces fall back to plain windows without it)" >&2
+    return 1
+}
+
+install_logind_dropin() {
+    src=/etc/systemd/logind.conf.d/10-xx-wm-power.conf
+    if [ ! -f "$src" ]; then
+        src="$REPO_DIR/launcher/data/logind/10-xx-wm-power.conf"
+    fi
+    if [ ! -f "$src" ]; then
+        return 0
+    fi
+    if [ -d /etc/elogind ] || command -v elogind >/dev/null 2>&1; then
+        $SUDO mkdir -p /etc/elogind/logind.conf.d || true
+        $SUDO cp "$src" /etc/elogind/logind.conf.d/10-xx-wm-power.conf || \
+            echo "warn: could not install elogind power-key drop-in" >&2
+    fi
+    return 0
+}
+
+link_squeekboard_layouts() {
+    # squeekboard only reads the user path — symlink the installed layouts.
+    # Shared by every install path (Install, Update, unattended), not just TUI.
+    mkdir -p "$HOME/.local/share/squeekboard" || return 0
+    ln -sfn /usr/share/xx-wm/squeekboard \
+        "$HOME/.local/share/squeekboard/keyboards"
 }
 
 build_install() {
@@ -84,17 +268,18 @@ build_install() {
     $SUDO meson install -C build || return 1
     cd "$REPO_DIR" || return 1
 
-    # squeekboard only reads the user path — symlink the installed layouts
-    mkdir -p "$HOME/.local/share/squeekboard"
-    ln -sfn /usr/share/xx-wm/squeekboard \
-        "$HOME/.local/share/squeekboard/keyboards"
+    link_squeekboard_layouts
+    check_layer_shell || true
 
     # piercing-dots phone profile (parallel task — tolerate its loud failure)
     sh "$REPO_DIR/scripts/bootstrap-dots.sh" || \
         echo "warn: piercing-dots phone profile not applied yet" >&2
 
-    select_phoc_scale
+    install_fonts
+    install_logind_dropin
+    select_phoc_scale || return 1
     enable_service
+    setup_greeter
     add_input_group
 }
 
@@ -102,22 +287,109 @@ build_install() {
 # The tablet's panel reports as DSI-1 (wanting scale 1.5) and collides with
 # the FP5's DSI-1 (scale 2.5), so a single phoc.ini cannot serve both. Prompt
 # for the device and copy its fragment over the meson-installed default.
-# Cancelling the prompt keeps the default (FP5+FLX1) file.
-select_phoc_scale() {
-    dev=$(whiptail --backtitle "GitHub.com/PiercingXX" --title "Device" \
+# A cancelled prompt must not silently keep the FP5 default (DSI-1 scale
+# 2.5): detect_phoc_device prefers tablet on 1200x1920 DSI-1 modes, and an
+# empty detection requires an explicit selection.
+detect_phoc_device() {
+    _drm=${XX_WM_SYSFS_DRM:-/sys/class/drm}
+    for _modes in "$_drm"/card*-Virtual-1/modes; do
+        [ -f "$_modes" ] || continue
+        echo "qemu"
+        return 0
+    done
+    for _modes in "$_drm"/card*-DSI-1/modes; do
+        [ -f "$_modes" ] || continue
+        if grep -q "1200x1920" "$_modes" 2>/dev/null || \
+           grep -q "1920x1200" "$_modes" 2>/dev/null; then
+            echo "tablet"
+            return 0
+        fi
+        if grep -q "2340x1080" "$_modes" 2>/dev/null || \
+           grep -q "1080x2340" "$_modes" 2>/dev/null; then
+            echo "fairphone-5"
+            return 0
+        fi
+        if grep -q "720x1440" "$_modes" 2>/dev/null || \
+           grep -q "1440x720" "$_modes" 2>/dev/null; then
+            echo "librem-5"
+            return 0
+        fi
+    done
+    for _modes in "$_drm"/card*-HWCOMPOSER-1/modes; do
+        [ -f "$_modes" ] || continue
+        echo "furiphone-flx1"
+        return 0
+    done
+    echo ""
+    return 0
+}
+
+_ask_device() {
+    whiptail --backtitle "GitHub.com/PiercingXX" --title "Device" \
         --menu "Which device is this? (sets phoc.ini scale)" 0 0 0 \
         "fairphone-5"    "FP5 — DSI-1, scale 2.5" \
         "furiphone-flx1" "FLX1 — HWCOMPOSER-1, scale 3" \
         "librem-5"       "Librem 5 — DSI-1, scale 2" \
         "tablet"         "x86 tablet — DSI-1, scale 1.5" \
-        3>&1 1>&2 2>&3) || return 0
+        "qemu"           "QEMU/UTM VM — Virtual-1, scale 2" \
+        3>&1 1>&2 2>&3
+}
+
+select_phoc_scale() {
+    # detected names a DRM-modes match (1200x1920 DSI-1 → tablet); empty
+    # means no recognizable panel, so a cancelled prompt must loop.
+    detected=$(detect_phoc_device)
+    dev=""
+    if [ "${UNATTENDED:-0}" = 1 ]; then
+        if [ -n "${DEVICE_ARG:-}" ]; then
+            dev="$DEVICE_ARG"
+        elif [ -n "$detected" ]; then
+            dev="$detected"
+            echo "using detected device: $dev"
+        else
+            echo "error: no device detected and no --device given (phoc.ini scale needs one)" >&2
+            return 1
+        fi
+    elif [ ! -t 0 ]; then
+        if [ -n "$detected" ]; then
+            dev="$detected"
+            echo "using detected device: $dev"
+        else
+            echo "A device is required so phoc.ini scale is not the Fairphone 5 default (need a TTY or DRM sysfs)." >&2
+            return 1
+        fi
+    else
+        dev=$(_ask_device) || dev=""
+        if [ -z "$dev" ]; then
+            if [ -n "$detected" ]; then
+                dev="$detected"
+                echo "using detected device: $dev"
+            else
+                msg_box "A device is required so phoc.ini scale is not the Fairphone 5 default."
+                while [ -z "$dev" ]; do
+                    dev=$(_ask_device) || dev=""
+                done
+            fi
+        fi
+    fi
     frag="$REPO_DIR/launcher/data/phoc/$dev.ini"
     if [ ! -f "$frag" ]; then
+        frag="/usr/share/xx-wm/phoc/$dev.ini"
+    fi
+    if [ ! -f "$frag" ]; then
         echo "warn: no phoc.ini fragment for '$dev' — keeping default" >&2
+        if [ "${UNATTENDED:-0}" = 1 ]; then
+            return 1
+        fi
         return 0
     fi
-    $SUDO cp "$frag" /usr/share/xx-wm/phoc.ini || \
+    $SUDO cp "$frag" "${XX_WM_PHOC_DEST:-/usr/share/xx-wm/phoc.ini}" || {
         echo "warn: could not install phoc.ini fragment for '$dev'" >&2
+        if [ "${UNATTENDED:-0}" = 1 ]; then
+            return 1
+        fi
+        return 0
+    }
 }
 
 # --- input group (20.3) -----------------------------------------------------
@@ -130,23 +402,47 @@ add_input_group() {
     if id -nG "$user" 2>/dev/null | grep -qw input; then
         return 0
     fi
-    $SUDO usermod -aG input "$user" 2>/dev/null || {
-        echo "warn: could not add '$user' to the input group" >&2
-        return 1
-    }
+    $SUDO usermod -aG input "$user" 2>/dev/null || \
+        $SUDO addgroup "$user" input 2>/dev/null || {
+            echo "warn: could not add '$user' to the input group" >&2
+            return 1
+        }
     echo "Added '$user' to the input group — re-login (or reboot) for it to take effect."
 }
 
+is_systemd() {
+    # Never infer the init system from the package manager: postmarketOS
+    # v26.06 Phosh images install via apk yet run systemd, where rc-update
+    # does not exist. The runtime marker is /run/systemd/system, which only
+    # exists when systemd is running.
+    [ -d "${XX_WM_SYSTEMD_RUN_DIR:-/run/systemd/system}" ]
+}
+
+has_openrc() {
+    # OpenRC counts only when systemd is NOT running and openrc-run exists.
+    ! is_systemd && { [ -x /sbin/openrc-run ] || \
+        command -v openrc-run >/dev/null 2>&1; }
+}
+
 enable_service() {
-    init_comm=$(ps -p 1 -o comm= 2>/dev/null || echo unknown)
-    if [ "$init_comm" = systemd ]; then
+    if is_systemd; then
         systemctl --user daemon-reload 2>/dev/null || true
-        systemctl --user enable xx-wm 2>/dev/null || \
-            echo "warn: enable the service after first login: systemctl --user enable xx-wm" >&2
-    else
-        # postmarketOS default images are OpenRC
+        if [ -f /usr/share/wayland-sessions/xx-wm.desktop ]; then
+            systemctl --user disable --now xx-wm 2>/dev/null || true
+            echo "wayland-session installed; systemd --user xx-wm disabled (would double-start under GDM)."
+            echo "Opt-in only from a session that is NOT already xx-wm-session:"
+            echo "  systemctl --user start xx-wm"
+            echo "Do not 'enable --now' under GDM: WantedBy=graphical-session.target would start a second Python shell."
+        else
+            systemctl --user enable xx-wm 2>/dev/null || \
+                echo "warn: enable the service after first login: systemctl --user enable xx-wm" >&2
+        fi
+    elif has_openrc; then
+        # OpenRC hosts (older pmOS images): no systemd unit to fight with.
         $SUDO rc-update add xx-wm default 2>/dev/null || \
             echo "warn: rc-update add xx-wm default failed" >&2
+    else
+        echo "warn: no supported init detected (neither systemd nor OpenRC) — start xx-wm-session from your display manager" >&2
     fi
 }
 
@@ -204,13 +500,127 @@ install_gdm_osk() {
     msg_box "GDM now types Colemak on the login screen.\nRestore QWERTY with:\n  sudo cp $bak $dst"
 }
 
+# --- greetd / phrog (postmarketOS v26.06 Phosh) ------------------------------
+# pmOS Phosh images greet with greetd + phrog; the greeter's session list
+# comes from /usr/share/wayland-sessions, so the meson-installed
+# xx-wm.desktop entry already appears there. Autologin writes an
+# [initial_session] (session command + installing user) into the greetd
+# config file actually in use — the one named by greetd.service's ExecStart
+# -c/--config on pmOS, e.g. /etc/phrog/greetd-config.toml — backed up first,
+# and only ever with an explicit opt-in (--autologin, or the TUI prompt).
+greetd_detected() {
+    command -v greetd >/dev/null 2>&1 || \
+    [ -f /etc/phrog/greetd-config.toml ] || \
+    [ -f /etc/greetd/config.toml ]
+}
+
+greetd_config_path() {
+    _svc=$(systemctl cat greetd 2>/dev/null || true)
+    _cfg=$(printf '%s\n' "$_svc" | grep -o -- '-c [^[:space:]]*' 2>/dev/null | \
+        head -n 1 | cut -d ' ' -f 2)
+    if [ -z "$_cfg" ]; then
+        _cfg=$(printf '%s\n' "$_svc" | \
+            grep -o -- '--config[ =][^[:space:]]*' 2>/dev/null | \
+            head -n 1 | sed 's/^--config[ =]//')
+    fi
+    if [ -z "$_cfg" ]; then
+        if [ -f /etc/phrog/greetd-config.toml ]; then
+            _cfg=/etc/phrog/greetd-config.toml
+        else
+            _cfg=/etc/greetd/config.toml
+        fi
+    fi
+    printf '%s\n' "$_cfg"
+}
+
+setup_greetd_autologin() {
+    _cfg=$(greetd_config_path)
+    _user=$(id -un)
+    _cmd=${XX_WM_SESSION_BIN:-/usr/libexec/xx-wm-session}
+    _bak="$_cfg.xx-wm-backup"
+    if [ ! -f "$_cfg" ]; then
+        echo "warn: greetd config $_cfg not found — skipping autologin" >&2
+        return 1
+    fi
+    if grep -q '^\[initial_session\]' "$_cfg" 2>/dev/null; then
+        echo "greetd config already has [initial_session] — leaving as-is."
+        return 0
+    fi
+    if [ ! -f "$_bak" ]; then
+        $SUDO cp "$_cfg" "$_bak" || {
+            echo "warn: could not back up $_cfg" >&2
+            return 1
+        }
+    fi
+    {
+        printf '\n[initial_session]\n'
+        printf 'command = "%s"\n' "$_cmd"
+        printf 'user = "%s"\n' "$_user"
+    } | $SUDO tee -a "$_cfg" >/dev/null || {
+        echo "warn: could not write autologin to $_cfg" >&2
+        return 1
+    }
+    echo "greetd autologin enabled for '$_user' (backup: $_bak)."
+}
+
+setup_greeter() {
+    if greetd_detected; then
+        echo "greetd/phrog detected: pick XX-WM in the greeter's Session menu at next login."
+        if [ "${AUTOLOGIN:-0}" = 1 ]; then
+            setup_greetd_autologin || true
+        elif [ "${UNATTENDED:-0}" != 1 ] && [ -t 0 ]; then
+            if whiptail --backtitle "GitHub.com/PiercingXX" \
+                --title "greetd autologin" --yesno \
+                "Log straight into XX-WM (writes [initial_session] to the greetd config)? The original is backed up first." 0 0; then
+                setup_greetd_autologin || true
+            fi
+        fi
+    else
+        echo "At next login, select the XX-WM session from your display manager."
+    fi
+    return 0
+}
+
 do_install() {
     install_deps
     if build_install; then
-        msg_box "XX-WM installed. Select the PiercingOS session at next login, or reboot."
+        msg_box "XX-WM installed. Select the XX-WM session at next login (not PiercingXX), or reboot."
     else
         msg_box "Install hit an error — check the terminal output."
     fi
+}
+
+do_unattended() {
+    # Automation/CI: no prompts, no dialogs. A failed required step exits
+    # non-zero; a summary closes the run either way.
+    install_deps
+    build_install || {
+        echo "error: unattended install failed — see output above" >&2
+        return 1
+    }
+    echo "--- XX-WM install summary ---"
+    echo "mode: unattended"
+    if [ -n "${DEVICE_ARG:-}" ]; then
+        echo "device: $DEVICE_ARG"
+    else
+        echo "device: $(detect_phoc_device) (auto-detected)"
+    fi
+    if [ "${NO_FONTS:-0}" = 1 ]; then
+        echo "fonts: skipped"
+    else
+        echo "fonts: installed"
+    fi
+    if [ "${AUTOLOGIN:-0}" = 1 ]; then
+        echo "autologin: requested"
+    else
+        echo "autologin: off"
+    fi
+    if greetd_detected; then
+        echo "greeter: greetd/phrog — pick XX-WM in the Session menu"
+    else
+        echo "greeter: pick XX-WM in your display manager"
+    fi
+    return 0
 }
 
 do_update() {
@@ -238,6 +648,11 @@ menu() {
     whiptail --backtitle "GitHub.com/PiercingXX" --title "XX-WM" \
         --menu "Run options in order:" 0 0 0 "$@" 3>&1 1>&2 2>&3
 }
+
+if [ "$UNATTENDED" = 1 ]; then
+    do_unattended
+    exit $?
+fi
 
 while true; do
     clear

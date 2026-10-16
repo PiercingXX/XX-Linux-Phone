@@ -51,6 +51,8 @@ def theme_css(preset: ThemePreset) -> str:
     font-size: 13pt;
     font-weight: 300;
     padding: 4px 12px;
+    min-width: 44px;
+    min-height: 44px;
     background: transparent;
     border: none;
     color: {preset.muted};
@@ -59,6 +61,7 @@ def theme_css(preset: ThemePreset) -> str:
     font-size: 13pt;
     font-weight: 300;
     padding: 10px 0;
+    min-height: 44px;
     background: transparent;
     border: none;
     color: {preset.muted};
@@ -84,21 +87,33 @@ def _waydroid_session_running() -> bool:
 
 
 def _launch_android(pkg: str) -> None:
-    try:
-        if not _waydroid_session_running():
-            # Start the session in background; app will come up once it's ready
-            subprocess.Popen(
-                ['waydroid', 'session', 'start'],
-                env=_WAYDROID_ENV, close_fds=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
+    """Start the session check off the GTK thread: `waydroid status` can
+    block for the full 2 s timeout on every home tap while the container
+    is down. The actual launches stay fire-and-forget Popen (never waited)."""
+    import threading
+
+    def _work() -> None:
+        try:
+            running = _waydroid_session_running()
+        except Exception:
+            return
+        from gi.repository import GLib
+        if not running:
+            try:
+                # Start the session in background; app comes up once ready
+                subprocess.Popen(
+                    ['waydroid', 'session', 'start'],
+                    env=_WAYDROID_ENV, close_fds=True,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except FileNotFoundError:
+                return
             # Give the session a moment before launching the app
-            from gi.repository import GLib
             GLib.timeout_add(5000, lambda p=pkg: _do_launch_android(p) or False)
             return
-        _do_launch_android(pkg)
-    except FileNotFoundError:
-        pass
+        GLib.idle_add(lambda p=pkg: _do_launch_android(p) or False)
+
+    threading.Thread(target=_work, daemon=True, name='waydroid-launch').start()
 
 
 def _do_launch_android(pkg: str) -> None:
@@ -117,6 +132,13 @@ def _launch_cmd(cmd: list[str]) -> None:
         subprocess.Popen(cmd, close_fds=True, env=_WAYDROID_ENV)
     except FileNotFoundError:
         pass
+
+
+def folder_row_markup(label: str) -> str:
+    """Folder slot text: the escaped name plus a smaller, dimmed chevron."""
+    from gi.repository import GLib
+    return (GLib.markup_escape_text(label)
+            + ' <span size="52%" alpha="60%">›</span>')
 
 
 class HomeLauncher(Gtk.Box):
@@ -228,9 +250,14 @@ class HomeLauncher(Gtk.Box):
         label_text = slot.get('label', '')
         if slot.get('type') == 'folder':
             label_text += ' ›'
+        from gi.repository import Pango
         name_btn = Gtk.Button(label=label_text)
         name_btn.add_css_class('home-edit-ctl')
         name_btn.add_css_class('home-edit-label')
+        child = name_btn.get_child()
+        if isinstance(child, Gtk.Label):
+            child.set_ellipsize(Pango.EllipsizeMode.END)
+            child.set_max_width_chars(16)
         name_btn.connect('clicked', lambda _b, w=name_btn, i=idx: self._on_slot_rename(w, i))
         row.append(name_btn)
 
@@ -282,11 +309,22 @@ class HomeLauncher(Gtk.Box):
         return {'left': Gtk.Align.START, 'right': Gtk.Align.END}.get(
             self._get_alignment(), Gtk.Align.CENTER)
 
+    def _row_xalign(self) -> float:
+        return {'left': 0.0, 'right': 1.0}.get(self._get_alignment(), 0.5)
+
     def _make_row(self, label: str, on_tap: Callable[[], None],
                   paused: bool = False) -> Gtk.Button:
+        from gi.repository import Pango
         lbl = Gtk.Label(label=label + (' · paused' if paused else ''))
-        lbl.set_halign(self._row_halign())
+        # Fill the row and align the text, rather than centering a box sized
+        # to the label's natural width: at fractional scale that width rounds
+        # a pixel short and the label ellipsizes ("Calenda…") on a wide row.
+        lbl.set_halign(Gtk.Align.FILL)
+        lbl.set_xalign(self._row_xalign())
         lbl.set_hexpand(True)
+        # 27pt names like "Mozilla Firefox" would otherwise force the page
+        # wider than the phone screen.
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
         lbl.add_css_class('home-item-label')
 
         btn = Gtk.Button()
@@ -299,17 +337,16 @@ class HomeLauncher(Gtk.Box):
         return btn
 
     def _make_folder_row(self, slot: dict, idx: int) -> Gtk.Button:
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        row.set_halign(self._row_halign())
+        from gi.repository import Pango
+        # One label (name + dimmed chevron as markup) filling the row, for
+        # the same rounding reason as _make_row.
+        row = Gtk.Label()
+        row.set_markup(folder_row_markup(slot.get('label', '')))
+        row.add_css_class('home-item-label')
+        row.set_halign(Gtk.Align.FILL)
+        row.set_xalign(self._row_xalign())
         row.set_hexpand(True)
-
-        lbl = Gtk.Label(label=slot.get('label', ''))
-        lbl.add_css_class('home-item-label')
-        ind = Gtk.Label(label='›')
-        ind.add_css_class('home-folder-indicator')
-
-        row.append(lbl)
-        row.append(ind)
+        row.set_ellipsize(Pango.EllipsizeMode.END)
 
         btn = Gtk.Button()
         btn.add_css_class('home-item-btn')

@@ -8,7 +8,15 @@ import pytest
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
-from backup import export_backup, restore_backup, validate_backup
+from backup import (
+    backup_export_dir,
+    backup_label,
+    discover_backups,
+    export_backup,
+    parse_backup_timestamp,
+    restore_backup,
+    validate_backup,
+)
 from config import ShellConfig
 
 
@@ -240,3 +248,65 @@ class TestHostileFontFamily:
         assert validate_backup(payload)[0]
         assert restore_backup(fresh, payload)
         assert fresh.data['custom_font_family'] == FONT_FAMILIES[DEFAULT_CONFIG['font']]
+
+
+def _touch(directory: Path, name: str) -> Path:
+    path = directory / name
+    path.write_text('{}', encoding='utf-8')
+    return path
+
+
+class TestBackupDiscovery:
+    def test_finds_home_and_documents_newest_first(self, tmp_path):
+        home = tmp_path / 'home'
+        docs = home / 'Documents'
+        docs.mkdir(parents=True)
+        _touch(home, 'xx-wm-backup-20240102_080000.json')
+        _touch(docs, 'xx-wm-backup-20240304_120000.json')
+        _touch(docs, 'xx-wm-backup-20240203_090000.json')
+        _touch(home, 'notes.txt')
+
+        found = discover_backups([docs, home])
+        assert [p.name for p in found] == [
+            'xx-wm-backup-20240304_120000.json',
+            'xx-wm-backup-20240203_090000.json',
+            'xx-wm-backup-20240102_080000.json',
+        ]
+
+    def test_missing_directories_give_empty_list(self, tmp_path):
+        assert discover_backups([tmp_path / 'nope']) == []
+
+    def test_limit_caps_choices(self, tmp_path):
+        home = tmp_path / 'home'
+        home.mkdir()
+        for day in range(1, 15):
+            _touch(home, f'xx-wm-backup-202401{day:02d}_080000.json')
+        found = discover_backups([home], limit=10)
+        assert len(found) == 10
+        assert found[0].name == 'xx-wm-backup-20240114_080000.json'
+
+
+class TestBackupLabels:
+    def test_label_is_parsed_date_and_time(self):
+        assert backup_label('xx-wm-backup-20240304_120000.json') == '2024-03-04 12:00'
+
+    def test_unparseable_name_falls_back_to_stem(self):
+        assert backup_label('xx-wm-backup-manual.json') == 'xx-wm-backup-manual'
+
+    def test_bad_calendar_date_gives_no_timestamp(self):
+        assert parse_backup_timestamp('xx-wm-backup-20241345_999999.json') is None
+        assert parse_backup_timestamp('notes.txt') is None
+
+
+class TestExportDestination:
+    def test_prefers_documents_when_present(self, tmp_path, monkeypatch):
+        home = tmp_path / 'home'
+        (home / 'Documents').mkdir(parents=True)
+        monkeypatch.setenv('HOME', str(home))
+        assert backup_export_dir() == home / 'Documents'
+
+    def test_falls_back_to_home(self, tmp_path, monkeypatch):
+        home = tmp_path / 'home'
+        home.mkdir()
+        monkeypatch.setenv('HOME', str(home))
+        assert backup_export_dir() == home

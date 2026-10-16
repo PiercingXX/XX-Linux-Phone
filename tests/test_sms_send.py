@@ -1,11 +1,13 @@
-"""SMS send pipeline (P2-D).
+"""SMS send pipeline (P2-D, W1 telephony).
 
---messaging-create-sms only CREATES the message; the returned SMS object
-must then be sent with ``-s <path> --send`` (upstream mmcli has no
---messaging-send-sms verb; verified against cli/mmcli-common.c and the
-mmcli(8) examples). Payload values are single-quoted and sanitized
-because mmcli splits key=value pairs on commas outside quotes and its
-scanner cannot carry control chars or embedded quotes.
+Send prefers Messaging.Create + Sms.Send over D-Bus (exact text, no
+output scraping); the mmcli fallback still only CREATES with
+--messaging-create-sms and must then send with ``-s <path> --send``
+(upstream mmcli has no --messaging-send-sms verb; verified against
+cli/mmcli-common.c and the mmcli(8) examples). Fallback payload values
+are single-quoted and sanitized because mmcli splits key=value pairs on
+commas outside quotes and its scanner cannot carry control chars or
+embedded quotes.
 """
 import subprocess
 import sys
@@ -67,6 +69,7 @@ def _install_fake_gi() -> None:
 
 _install_fake_gi()
 
+import modem_monitor  # noqa: E402  (needs fake gi modules installed first)
 import sms  # noqa: E402  (needs fake gi modules installed first)
 
 
@@ -123,82 +126,134 @@ _SMS_OK = ('Successfully created new SMS:\n'
            '/org/freedesktop/ModemManager1/SMS/22 (unknown)\n')
 
 
-class TestSendArgv:
-    def test_create_then_send_with_parsed_path(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        conv = _make_conversation(monkeypatch)
+def _script_dbus_send(monkeypatch, result):
+    """Script the D-Bus send layer; returns captured (number, text)."""
+    seen = []
+
+    def _send(number, text):
+        seen.append((number, text))
+        return result
+
+    monkeypatch.setattr(modem_monitor, 'messaging_create_and_send', _send)
+    return seen
+
+
+class TestSendMessage:
+    def test_dbus_success_never_touches_mmcli(self, monkeypatch):
+        seen = _script_dbus_send(
+            monkeypatch, (True, '/org/freedesktop/ModemManager1/SMS/22'))
+        calls = _script_mmcli(monkeypatch, [])
+        assert sms.send_message('+15550001111', 'hello, world') == \
+            (True, '/org/freedesktop/ModemManager1/SMS/22')
+        assert seen == [('+15550001111', 'hello, world')]
+        assert calls == []
+
+    def test_multiline_text_reaches_dbus_intact(self, monkeypatch):
+        seen = _script_dbus_send(monkeypatch, (True, '/SMS/1'))
+        _script_mmcli(monkeypatch, [])
+        ok, _ = sms.send_message('+15550001111', 'line1\nline2, one message')
+        assert ok is True
+        assert seen == [('+15550001111', 'line1\nline2, one message')]
+
+    def test_dbus_failure_falls_back_to_mmcli_with_resolved_modem(
+            self, monkeypatch):
+        _script_dbus_send(monkeypatch, (False, 'bus wedged'))
+        monkeypatch.setattr(sms, '_resolved_modem',
+                            lambda: '/org/freedesktop/ModemManager1/Modem/3')
         calls = _script_mmcli(monkeypatch, [
             (True, _SMS_OK),
             (True, 'successfully sent the SMS\n'),
         ])
-        msg = sms.Message('hello, world', outgoing=True)
-        conv._deliver(msg, '+15550001111')
+        assert sms.send_message('+15550001111', 'hello, world')[0] is True
         assert calls == [
-            ['-m', '0',
+            ['-m', '/org/freedesktop/ModemManager1/Modem/3',
              "--messaging-create-sms=number='+15550001111',text='hello, world'"],
-            ['-m', '0', '-s', '/org/freedesktop/ModemManager1/SMS/22', '--send'],
+            ['-m', '/org/freedesktop/ModemManager1/Modem/3',
+             '-s', '/org/freedesktop/ModemManager1/SMS/22', '--send'],
         ]
-        flush()
-        assert msg.failed is False
+
+    def test_dbus_exception_still_falls_back(self, monkeypatch):
+        def _boom(number, text):
+            raise RuntimeError('transport exploded')
+
+        monkeypatch.setattr(modem_monitor, 'messaging_create_and_send', _boom)
+        monkeypatch.setattr(sms, '_resolved_modem', lambda: '0')
+        calls = _script_mmcli(monkeypatch, [(True, _SMS_OK), (True, 'sent\n')])
+        assert sms.send_message('+15550001111', 'hi')[0] is True
+        assert len(calls) == 2
 
     def test_comma_and_newline_text_stays_intact_inside_quotes(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        conv = _make_conversation(monkeypatch)
+        _script_dbus_send(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(sms, '_resolved_modem', lambda: '0')
         calls = _script_mmcli(monkeypatch, [(True, _SMS_OK), (True, 'sent\n')])
-        msg = sms.Message("line1\nline2, still one message", outgoing=True)
-        conv._deliver(msg, '+15550001111')
+        ok, _ = sms.send_message('+15550001111',
+                                 'line1\nline2, still one message')
+        assert ok is True
         payload = calls[0][2]
         assert payload.startswith('--messaging-create-sms=')
         kv = payload.split('=', 1)[1]
         assert '\n' not in kv
         assert "number='+15550001111'" in kv
         assert "text='line1 line2, still one message'" in kv
-        flush()
-        assert msg.failed is False
 
     def test_apostrophe_swapped_to_keep_quoting(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        conv = _make_conversation(monkeypatch)
+        _script_dbus_send(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(sms, '_resolved_modem', lambda: '0')
         calls = _script_mmcli(monkeypatch, [(True, _SMS_OK), (True, 'sent\n')])
-        msg = sms.Message("it's alive", outgoing=True)
-        conv._deliver(msg, '+15550001111')
+        ok, _ = sms.send_message('+15550001111', "it's alive")
+        assert ok is True
         kv = calls[0][2].split('=', 1)[1]
         assert "'" not in sms._payload_value("it's")
         assert "text='it\u2019s alive'" in kv
-        flush()
-        assert msg.failed is False
 
     def test_create_failure_never_attempts_send(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        conv = _make_conversation(monkeypatch)
+        _script_dbus_send(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(sms, '_resolved_modem', lambda: '0')
         calls = _script_mmcli(monkeypatch, [
             (False, "error: couldn't find the ModemManager process\n"),
         ])
-        msg = sms.Message('hi', outgoing=True)
-        conv._deliver(msg, '+15550001111')
-        assert len(calls) == 1
-        flush()
-        assert msg.failed is True
+        ok, out = sms.send_message('+15550001111', 'hi')
+        assert (ok, len(calls)) == (False, 1)
+        assert 'ModemManager' in out
 
-    def test_create_success_without_path_marks_failed(self, monkeypatch):
+    def test_create_success_without_path_reports_failure(self, monkeypatch):
+        _script_dbus_send(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(sms, '_resolved_modem', lambda: '0')
+        calls = _script_mmcli(monkeypatch, [(True, 'unexpected output\n')])
+        ok, out = sms.send_message('+15550001111', 'hi')
+        assert (ok, len(calls)) == (False, 1)
+        assert out == 'modem returned no SMS path'
+
+    def test_send_failure_reports_detail(self, monkeypatch):
+        _script_dbus_send(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(sms, '_resolved_modem', lambda: '0')
+        _script_mmcli(monkeypatch, [
+            (True, _SMS_OK),
+            (False, 'error: modem is busy\n'),
+        ])
+        ok, out = sms.send_message('+15550001111', 'hi')
+        assert ok is False
+        assert 'busy' in out
+
+
+class TestDeliver:
+    def test_deliver_marks_sent_on_dbus_success(self, monkeypatch):
         flush = _flush_idle(monkeypatch)
         conv = _make_conversation(monkeypatch)
-        calls = _script_mmcli(monkeypatch, [(True, 'unexpected output\n')])
-        msg = sms.Message('hi', outgoing=True)
+        monkeypatch.setattr(sms, 'send_message',
+                            lambda n, t: (True, '/SMS/1'))
+        msg = sms.Message('hello, world', outgoing=True)
         conv._deliver(msg, '+15550001111')
-        assert len(calls) == 1
         flush()
-        assert msg.failed is True
+        assert msg.failed is False
 
     def test_send_failure_marks_message_failed(self, monkeypatch):
         flush = _flush_idle(monkeypatch)
         conv = _make_conversation(monkeypatch)
         rebuilds = []
         conv._rebuild_messages = lambda: rebuilds.append(1)
-        _script_mmcli(monkeypatch, [
-            (True, _SMS_OK),
-            (False, 'error: modem is busy\n'),
-        ])
+        monkeypatch.setattr(sms, 'send_message',
+                            lambda n, t: (False, 'error: modem is busy\n'))
         msg = sms.Message('hi', outgoing=True)
         conv._messages.append(msg)
         conv._deliver(msg, '+15550001111')

@@ -1,28 +1,71 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 
+_SUPPLY_ROOT = Path('/sys/class/power_supply')
 
-def battery_pct() -> int | None:
-    """Read battery level from sysfs. Returns 0–100 or None if unavailable."""
-    for path in Path('/sys/class/power_supply').glob('*/capacity'):
+
+def _supplies(root: Path = _SUPPLY_ROOT) -> list[Path]:
+    try:
+        return sorted(p for p in root.iterdir() if p.is_dir())
+    except OSError:
+        return []
+
+
+def _read_supply(path: Path) -> str | None:
+    try:
+        return path.read_text().strip()
+    except (OSError, ValueError):
+        return None
+
+
+def _battery_supply(root: Path = _SUPPLY_ROOT) -> Path | None:
+    """The main battery supply: type Battery whose scope is not Device.
+
+    The first glob match is often a peripheral (headset, stylus) battery, so
+    prefer a system battery and only fall back to any supply with capacity.
+    A missing scope file counts as eligible — not every kernel exposes it.
+    """
+    first_capacity: Path | None = None
+    for supply in _supplies(root):
+        capacity = supply / 'capacity'
         try:
-            return int(path.read_text())
+            int(capacity.read_text().strip())
         except (OSError, ValueError):
-            pass
-    return None
+            continue
+        if first_capacity is None:
+            first_capacity = supply
+        supply_type = _read_supply(supply / 'type')
+        if supply_type != 'Battery':
+            continue
+        scope = _read_supply(supply / 'scope')
+        if scope is not None and scope == 'Device':
+            continue
+        return supply
+    return first_capacity
 
 
-def battery_charging() -> bool:
-    """True if any power supply reports Charging or Full status."""
-    for path in Path('/sys/class/power_supply').glob('*/status'):
-        try:
-            status = path.read_text().strip()
-            if status in ('Charging', 'Full'):
-                return True
-        except OSError:
-            pass
+def battery_pct(root: Path = _SUPPLY_ROOT) -> int | None:
+    """Read battery level from sysfs. Returns 0–100 or None if unavailable."""
+    supply = _battery_supply(root)
+    if supply is None:
+        return None
+    try:
+        return int((supply / 'capacity').read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def battery_charging(root: Path = _SUPPLY_ROOT) -> bool:
+    """True if any non-peripheral power supply reports Charging or Full."""
+    candidates = [s for s in _supplies(root)
+                 if _read_supply(s / 'scope') != 'Device']
+    for supply in candidates or _supplies(root):
+        status = _read_supply(supply / 'status')
+        if status in ('Charging', 'Full'):
+            return True
     return False
 
 
@@ -36,36 +79,57 @@ def battery_label() -> str:
 
 
 def wifi_ssid() -> str | None:
-    """Return connected WiFi SSID, or None if not connected."""
-    try:
-        out = subprocess.check_output(
-            ['iwgetid', '-r'], text=True, timeout=1,
-        ).strip()
-        return out or None
-    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        pass
+    """Return connected WiFi SSID, or None if not connected.
 
-    # Fallback: nmcli
+    Never rescans: `dev wifi list` rescans when its cache is older than 30 s
+    and then blocks up to the 2 s timeout on the calling thread, which used
+    to freeze the home screen every minute.
+    """
     try:
         out = subprocess.check_output(
-            ['nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi'],
-            text=True, timeout=2,
+            ['nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi',
+             'list', '--rescan', 'no'],
+            text=True, timeout=5,
         )
         for line in out.splitlines():
             if line.startswith('yes:'):
                 return line[4:] or None
-    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired):
         pass
-
     return None
+
+
+_MM1 = 'org.freedesktop.ModemManager1'
+_MODEM_IFACE = 'org.freedesktop.ModemManager1.Modem'
+
+
+def modem_paths() -> list[str]:
+    """D-Bus object paths of every ModemManager modem, or []."""
+    try:
+        from gi.repository import Gio, GLib
+        bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        objects = bus.call_sync(
+            _MM1, '/org/freedesktop/ModemManager1',
+            'org.freedesktop.DBus.ObjectManager', 'GetManagedObjects',
+            None, GLib.VariantType('(a{oa{sa{sv}}})'),
+            Gio.DBusCallFlags.NONE, 4000, None,
+        ).unpack()[0]
+    except Exception:
+        return []
+    return [path for path, ifaces in objects.items()
+            if _MODEM_IFACE in ifaces]
 
 
 def mobile_signal() -> str | None:
     """Return mobile signal strength label (bars) or None if no modem."""
+    modems = modem_paths()
+    if not modems:
+        return None
     try:
         out = subprocess.check_output(
-            ['mmcli', '-m', '0', '--output-keyvalue'],
-            text=True, timeout=2,
+            ['mmcli', '-m', modems[0], '--output-keyvalue'],
+            text=True, timeout=5,
         )
         for line in out.splitlines():
             if 'signal-quality.value' in line:
@@ -94,3 +158,25 @@ def status_line() -> str:
         parts.append(bat)
 
     return '  ·  '.join(parts)
+
+
+def status_line_async(callback) -> None:
+    """Collect status_line() off the GTK thread, deliver on the main loop.
+
+    `callback(line)` fires exactly once via GLib.idle_add, even on failure
+    (with ''). Never raises.
+    """
+    from gi.repository import GLib
+
+    def _worker() -> None:
+        try:
+            line = status_line()
+        except Exception:
+            line = ''
+
+        def _deliver() -> bool:
+            callback(line)
+            return False
+        GLib.idle_add(_deliver)
+
+    threading.Thread(target=_worker, daemon=True).start()

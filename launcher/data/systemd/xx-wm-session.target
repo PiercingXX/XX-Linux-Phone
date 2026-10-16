@@ -1,0 +1,10 @@
+[Unit]
+Description=XX-WM graphical session
+# Pulls graphical-session.target in (BindsTo implies Requires): nothing
+# else starts it in an xx-wm-session, and xdg-desktop-portal.service has
+# Requisite=graphical-session.target, so without this the broker never
+# starts and every FileDialog/screenshot/screencast/Settings portal fails.
+# Stops with it too, so the portals leave with the session.
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target

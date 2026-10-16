@@ -1,12 +1,13 @@
 """
 Weather widget backend — Open-Meteo current conditions, no API key.
 
-Coordinates come from the `weather_lat`/`weather_lon` config floats (set
-manually — iio location is device-gated). Results cache to
-~/.cache/xx-wm/weather.json and refresh at most every 15 minutes.
-Offline or unset → the widget silently shows `--°`. Fetches run on a daemon
-thread; the UI callback is dispatched via an injectable dispatcher
-(GLib.idle_add at runtime, synchronous in tests).
+Coordinates come from the `weather_lat`/`weather_lon` config floats or the
+`weather_location` string (`lat,lon`), set manually — iio location is
+device-gated. Results cache to ~/.cache/xx-wm/weather.json and refresh at
+most every 15 minutes. Offline or unset → the provider reports `--°` and the
+home screen hides the weather line entirely (never a placeholder). Fetches
+run on a daemon thread; the UI callback is dispatched via an injectable
+dispatcher (GLib.idle_add at runtime, synchronous in tests).
 """
 from __future__ import annotations
 
@@ -79,13 +80,34 @@ class WeatherProvider:
 
     # -- coordinates -------------------------------------------------------
 
+    @staticmethod
+    def parse_location(raw: object) -> tuple[float, float] | None:
+        """Parse a `weather_location` string as `lat,lon`. Anything else
+        (city names need a network geocoder) yields None."""
+        if not isinstance(raw, str) or ',' not in raw:
+            return None
+        try:
+            lat_raw, lon_raw = raw.split(',', 1)
+            lat, lon = float(lat_raw.strip()), float(lon_raw.strip())
+        except (TypeError, ValueError):
+            return None
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            return None
+        return lat, lon
+
     def coordinates(self) -> tuple[float, float] | None:
         try:
             lat = float(self._config.data.get('weather_lat'))
             lon = float(self._config.data.get('weather_lon'))
         except (TypeError, ValueError):
-            return None
-        return lat, lon
+            lat, lon = None, None
+        if lat is not None and lon is not None:
+            return lat, lon
+        try:
+            location = self._config.data.get('weather_location')
+        except AttributeError:
+            location = None
+        return self.parse_location(location)
 
     # -- cache -------------------------------------------------------------
 

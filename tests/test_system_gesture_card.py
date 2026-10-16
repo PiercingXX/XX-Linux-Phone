@@ -136,9 +136,12 @@ def test_reset_restores_default(window):
 
 
 def test_card_wiring_pins_both_row_sets(window):
+    import settings_page
     assert set(window._SYSTEM_GESTURE_TITLES) == {
         'swipe_up_short', 'swipe_up_long', 'swipe_down_top', 'swipe_left_edge'}
-    src = inspect.getsource(window.ShellWindow._build_gestures_card)
+    assert set(settings_page._SYSTEM_GESTURE_TITLES) == set(
+        window._SYSTEM_GESTURE_TITLES)
+    src = inspect.getsource(settings_page.SettingsPage._build_gestures_card)
     assert '_GESTURE_TITLES' in src
     assert '_SYSTEM_GESTURE_TITLES' in src
     assert '_pick_system_gesture' in src

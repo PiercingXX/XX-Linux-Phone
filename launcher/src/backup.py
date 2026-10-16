@@ -4,13 +4,81 @@ Backup and restore — versioned JSON export of the shell configuration.
 Scope (design.md "Backup / restore"): home slots, folders + membership,
 pins, app rename labels, widget config + tap actions, theme, hidden apps,
 gestures, prefs (sounds, DnD, Focus, lock screen, weather coords, search).
-Excluded: PIN hash (security), launch counts (noise), active mutes and
-focus breaks (transient), custom font files (only the family name travels).
+Excluded: PIN hash (security), escalating-lockout resume point and the
+Smart Lock 4-hour PIN clock (device-local transients — a restore must
+not clear a live lockout), launch counts (noise), active mutes and
+focus breaks (transient), custom font files (only the family name
+travels).
 Restore validates the entire payload first and never writes on invalid input.
+The export below is allowlist-built, so excluded keys can never leak in —
+_EXCLUDED_KEYS pins that contract for tests.
 """
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from pathlib import Path
+
+_EXCLUDED_KEYS = ('pin_hash', 'lock_screen_lockout')
+
+_BACKUP_GLOB = 'xx-wm-backup-*.json'
+_BACKUP_FILENAME_RE = re.compile(r'^xx-wm-backup-(\d{8})_(\d{6})\.json$')
+_MAX_RESTORE_CHOICES = 10
+
+
+def parse_backup_timestamp(filename: str) -> datetime | None:
+    """Timestamp embedded in an export filename, or None when it is absent.
+
+    Export names carry %Y%m%d_%H%M%S, so lexicographic order is chronological
+    — but sorting parses the stamp explicitly instead of trusting that."""
+    match = _BACKUP_FILENAME_RE.match(Path(filename).name)
+    if match is None:
+        return None
+    try:
+        return datetime.strptime(match.group(1) + match.group(2), '%Y%m%d%H%M%S')
+    except ValueError:
+        return None
+
+
+def backup_label(path: str | Path) -> str:
+    """Menu label for a backup file: the date/time from its filename."""
+    stamp = parse_backup_timestamp(str(path))
+    if stamp is None:
+        return Path(path).stem
+    return stamp.strftime('%Y-%m-%d %H:%M')
+
+
+def discover_backups(search_dirs: list[Path] | None = None,
+                     limit: int = _MAX_RESTORE_CHOICES) -> list[Path]:
+    """Backup files in ~ and ~/Documents, newest first, capped at `limit`.
+
+    The restore menu runs on the layer-shell TOP layer, where a file chooser
+    cannot open — so restore picks from this list instead of a dialog."""
+    if search_dirs is None:
+        home = Path.home()
+        search_dirs = [home / 'Documents', home]
+    found: list[Path] = []
+    seen: set[str] = set()
+    for directory in search_dirs:
+        try:
+            candidates = sorted(directory.glob(_BACKUP_GLOB))
+        except OSError:
+            continue
+        for path in candidates:
+            key = str(path.resolve() if path.exists() else path.absolute())
+            if key not in seen:
+                seen.add(key)
+                found.append(path)
+    found.sort(key=lambda p: (parse_backup_timestamp(p.name)
+                              or datetime.min, p.name),
+               reverse=True)
+    return found[:limit]
+
+
+def backup_export_dir() -> Path:
+    """Exports land in ~/Documents when it exists, else directly in ~."""
+    docs = Path.home() / 'Documents'
+    return docs if docs.is_dir() else Path.home()
 
 _BOOL_KEYS = (
     'prefer_dark',
@@ -27,6 +95,8 @@ _LIST_KEYS = (
     'dnd_starred_numbers',
     'focus_apps',
     'focus_schedules',
+    'smart_lock_bt_devices',
+    'smart_lock_wifi_ssids',
 )
 
 
@@ -43,6 +113,13 @@ def export_backup(config) -> dict:
         'home_alignment': config.home_alignment,
         'auto_lock_timeout': config.auto_lock_timeout,
         'lock_screen_notifications': config.lock_screen_notifications,
+        # Medical ID is user data, not a secret: it travels with the
+        # backup, unlike pin_hash and the lockout resume point.
+        'lock_screen_medical_id': config.lock_screen_medical_id,
+        'medical_id': config.medical_id,
+        'charge_limit': config.data.get('charge_limit'),
+        'app_time_limits': config.data.get('app_time_limits', {}),
+        'app_limit_ignored': config.data.get('app_limit_ignored', {}),
         'weather_lat': config.data.get('weather_lat'),
         'weather_lon': config.data.get('weather_lon'),
     }
@@ -131,6 +208,45 @@ def validate_backup(payload: dict) -> tuple[bool, str | None]:
     if payload.get('lock_screen_notifications', 'summary') not in ('summary', 'count', 'off'):
         return False, 'lock_screen_notifications must be summary/count/off'
 
+    if 'lock_screen_medical_id' in payload and not isinstance(
+            payload['lock_screen_medical_id'], bool):
+        return False, 'lock_screen_medical_id must be a boolean'
+
+    if 'charge_limit' in payload and payload['charge_limit'] is not None:
+        try:
+            number = int(payload['charge_limit'])
+        except (TypeError, ValueError):
+            return False, 'charge_limit must be a number or null'
+        if not 50 <= number <= 100:
+            return False, 'charge_limit must be between 50 and 100'
+
+    for key in ('app_time_limits', 'app_limit_ignored'):
+        if key in payload and not isinstance(payload[key], dict):
+            return False, f'{key} must be a dict'
+
+    if 'medical_id' in payload:
+        from config import _MEDICAL_ID_CONTACT_KEYS, _MEDICAL_ID_STRING_KEYS
+        medical = payload['medical_id']
+        if not isinstance(medical, dict):
+            return False, 'medical_id must be a dict'
+        for key in _MEDICAL_ID_STRING_KEYS:
+            if key in medical and not isinstance(medical[key], str):
+                return False, f'medical_id.{key} must be a string'
+        if 'organ_donor' in medical and not isinstance(medical['organ_donor'], bool):
+            return False, 'medical_id.organ_donor must be a boolean'
+        contacts = medical.get('emergency_contacts')
+        if 'emergency_contacts' in medical:
+            if not isinstance(contacts, list):
+                return False, 'medical_id.emergency_contacts must be a list'
+            for i, entry in enumerate(contacts):
+                if not isinstance(entry, dict):
+                    return False, f'medical_id.emergency_contacts[{i}] must be a dict'
+                for key in _MEDICAL_ID_CONTACT_KEYS:
+                    if key in entry and not isinstance(entry[key], str):
+                        return False, (
+                            f'medical_id.emergency_contacts[{i}].{key} must be a string'
+                        )
+
     for key in _BOOL_KEYS:
         if key in payload and not isinstance(payload[key], bool):
             return False, f'{key} must be a boolean'
@@ -169,6 +285,23 @@ def restore_backup(config, payload: dict) -> bool:
         return False
 
     data = config.data
+    if isinstance(payload.get('medical_id'), dict):
+        from config import sanitize_medical_id
+        data['medical_id'] = sanitize_medical_id(payload['medical_id'])
+    if isinstance(payload.get('lock_screen_medical_id'), bool):
+        data['lock_screen_medical_id'] = payload['lock_screen_medical_id']
+    if payload.get('charge_limit') is None:
+        data['charge_limit'] = None
+    elif isinstance(payload.get('charge_limit'), int):
+        data['charge_limit'] = max(50, min(100, payload['charge_limit']))
+    if isinstance(payload.get('app_time_limits'), dict):
+        data['app_time_limits'] = {
+            k: v for k, v in payload['app_time_limits'].items()
+            if isinstance(k, str) and isinstance(v, int) and v > 0}
+    if isinstance(payload.get('app_limit_ignored'), dict):
+        data['app_limit_ignored'] = {
+            k: v for k, v in payload['app_limit_ignored'].items()
+            if isinstance(k, str) and isinstance(v, str) and v}
     passthrough = (
         ('app_labels', dict), ('widgets', dict), ('theme', str),
         ('custom_background', str), ('font', str), ('custom_font_family', str),

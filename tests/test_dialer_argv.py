@@ -1,10 +1,11 @@
-"""Dialer mmcli argv contract (P2-D).
+"""Dialer call placement (P2-D, W1 telephony).
 
-Dialing must be a two-step mmcli sequence — create the call object, then
-start it via the returned object path selected with ``-o`` (upstream
-mmcli has no ``--voice-call`` verb; verified against cli/mmcli-common.c
-and the mmcli(8) CALL OPTIONS section). Failures surface in the dialer
-status label instead of being discarded.
+Dialing prefers Voice.CreateCall + Call.Start over D-Bus and falls back
+to the two-step mmcli sequence — create the call object, then start it
+via the returned object path selected with ``-o`` (upstream mmcli has no
+``--voice-call`` verb; verified against cli/mmcli-common.c and the
+mmcli(8) CALL OPTIONS section) against the D-Bus-resolved modem path.
+Failures surface in the dialer status label instead of being discarded.
 """
 import subprocess
 import sys
@@ -46,6 +47,7 @@ def _install_fake_gi() -> None:
 
 _install_fake_gi()
 
+import modem_monitor  # noqa: E402  (needs fake gi modules installed first)
 import dialer  # noqa: E402  (needs fake gi modules installed first)
 
 
@@ -102,63 +104,108 @@ def _flush_idle(monkeypatch):
     return lambda: [cb(*args) for cb, args in list(pending)]
 
 
-class TestDialArgv:
-    def test_create_then_start_sequence(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        d = _make_dialer(monkeypatch)
+def _script_dbus_call(monkeypatch, result):
+    def _place(number):
+        return result
+
+    monkeypatch.setattr(modem_monitor, 'voice_create_and_start', _place)
+
+
+class TestPlaceCall:
+    def test_dbus_success_never_touches_mmcli(self, monkeypatch):
+        _script_dbus_call(
+            monkeypatch, (True, '/org/freedesktop/ModemManager1/Call/3'))
+        calls = _script_mmcli(monkeypatch, [])
+        assert dialer.place_call('5551234567') == \
+            (True, '/org/freedesktop/ModemManager1/Call/3')
+        assert calls == []
+
+    def test_dbus_failure_falls_back_with_resolved_modem(self, monkeypatch):
+        _script_dbus_call(monkeypatch, (False, 'bus wedged'))
+        monkeypatch.setattr(dialer, '_resolved_modem',
+                            lambda: '/org/freedesktop/ModemManager1/Modem/2')
         calls = _script_mmcli(monkeypatch, [
             (True, 'Successfully created new call: /org/freedesktop/ModemManager1/Call/1\n'),
             (True, 'successfully started the call\n'),
         ])
-        d._initiate_call('5551234567')
+        assert dialer.place_call('5551234567')[0] is True
         assert calls == [
-            ['-m', '0', '--voice-create-call=number=5551234567'],
-            ['-m', '0', '-o', '/org/freedesktop/ModemManager1/Call/1', '--start'],
+            ['-m', '/org/freedesktop/ModemManager1/Modem/2',
+             '--voice-create-call=number=5551234567'],
+            ['-m', '/org/freedesktop/ModemManager1/Modem/2',
+             '-o', '/org/freedesktop/ModemManager1/Call/1', '--start'],
         ]
-        flush()
-        assert d._status.text == 'Dialing…'
+
+    def test_dbus_exception_still_falls_back(self, monkeypatch):
+        def _boom(number):
+            raise RuntimeError('transport exploded')
+
+        monkeypatch.setattr(modem_monitor, 'voice_create_and_start', _boom)
+        monkeypatch.setattr(dialer, '_resolved_modem', lambda: '0')
+        calls = _script_mmcli(monkeypatch, [
+            (True, '/org/freedesktop/ModemManager1/Call/2\n'),
+            (True, 'started\n'),
+        ])
+        assert dialer.place_call('5551234567')[0] is True
+        assert len(calls) == 2
 
     def test_create_failure_surfaces_stderr(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        d = _make_dialer(monkeypatch)
+        _script_dbus_call(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(dialer, '_resolved_modem', lambda: '0')
         calls = _script_mmcli(monkeypatch, [
             (False, "error: couldn't find modem\n"),
         ])
-        d._initiate_call('5551234567')
-        assert len(calls) == 1
-        flush()
-        assert "Call failed: error: couldn't find modem" in d._status.text
+        ok, out = dialer.place_call('5551234567')
+        assert (ok, len(calls)) == (False, 1)
+        assert "couldn't find modem" in out
 
     def test_missing_call_path_surfaces(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        d = _make_dialer(monkeypatch)
+        _script_dbus_call(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(dialer, '_resolved_modem', lambda: '0')
         _script_mmcli(monkeypatch, [(True, 'unexpected output\n')])
-        d._initiate_call('5551234567')
-        flush()
-        assert d._status.text == 'Call failed: modem returned no call path'
+        assert dialer.place_call('5551234567') == \
+            (False, 'modem returned no call path')
 
     def test_start_failure_surfaces(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        d = _make_dialer(monkeypatch)
+        _script_dbus_call(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(dialer, '_resolved_modem', lambda: '0')
         _script_mmcli(monkeypatch, [
             (True, '/org/freedesktop/ModemManager1/Call/2\n'),
             (False, 'error: call state change failed\n'),
         ])
-        d._initiate_call('5551234567')
-        flush()
-        assert d._status.text == 'Call failed: error: call state change failed'
+        ok, out = dialer.place_call('5551234567')
+        assert ok is False
+        assert out == 'error: call state change failed'
 
     def test_missing_binary_degrades_gracefully(self, monkeypatch):
-        flush = _flush_idle(monkeypatch)
-        d = _make_dialer(monkeypatch)
+        _script_dbus_call(monkeypatch, (False, 'bus down'))
+        monkeypatch.setattr(dialer, '_resolved_modem', lambda: '0')
 
         def _boom(*a, **k):
             raise FileNotFoundError('mmcli')
 
         monkeypatch.setattr(dialer.subprocess, 'run', _boom)
+        assert dialer.place_call('5551234567') == (False, 'mmcli not installed')
+
+
+class TestDialStatus:
+    def test_success_status(self, monkeypatch):
+        flush = _flush_idle(monkeypatch)
+        d = _make_dialer(monkeypatch)
+        monkeypatch.setattr(dialer, 'place_call',
+                            lambda number: (True, '/Call/1'))
         d._initiate_call('5551234567')
         flush()
-        assert d._status.text == 'Call failed: mmcli not installed'
+        assert d._status.text == 'Dialing…'
+
+    def test_failure_status(self, monkeypatch):
+        flush = _flush_idle(monkeypatch)
+        d = _make_dialer(monkeypatch)
+        monkeypatch.setattr(dialer, 'place_call',
+                            lambda number: (False, "error: couldn't find modem\n"))
+        d._initiate_call('5551234567')
+        flush()
+        assert "Call failed: error: couldn't find modem" in d._status.text
 
 
 class TestRunMmcli:
@@ -185,11 +232,11 @@ class TestStatusLabelWiring:
         d = _make_dialer(monkeypatch)
         seen_at_call = []
 
-        def _run(args):
+        def _place(number):
             seen_at_call.append(d._status.text)
             return True, '/org/freedesktop/ModemManager1/Call/1'
 
-        monkeypatch.setattr(dialer, '_run_mmcli', _run)
+        monkeypatch.setattr(dialer, 'place_call', _place)
         d._initiate_call('5551234567')
         assert seen_at_call[0] == 'Calling (555) 123-4567…'
         flush()

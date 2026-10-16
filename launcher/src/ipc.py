@@ -15,10 +15,58 @@ _log = get_logger('ipc')
 # (the watch callback runs on the UI thread), so reads are bounded.
 CONN_TIMEOUT_S = 0.25
 
+# IPC verbs dropped while the first-boot tour is visible: lisgd's real
+# gestures would otherwise fire under the tour's own swipe steps.
+TOUR_SUPPRESSED_VERBS = frozenset(
+    {'gesture.shade', 'gesture.switcher', 'gesture.home'})
+
+# Page-driving verbs for rigs and scripts (no gesture timing needed):
+# page.home / page.apps / page.settings switch the stack page, and
+# settings.open[:section] reuses the settings deep-link
+# (open_settings(section): wifi | bluetooth | mobile deep-link, anything
+# else opens the top of the page).
+PAGE_COMMANDS = {
+    'page.home': 'home',
+    'page.apps': 'apps',
+    'page.settings': 'settings',
+}
+
+
+def parse_page_command(command: str) -> tuple[str, str | None] | None:
+    """Split a page-driving IPC command.
+
+    Returns ('page', <stack name>) for page.home/apps/settings and
+    ('settings.open', <section | None>) for settings.open[:section];
+    None for anything else. Pure so rigs and tests share the dispatch
+    table with the application.
+    """
+    page = PAGE_COMMANDS.get(command)
+    if page is not None:
+        return ('page', page)
+    if command == 'settings.open' or command.startswith('settings.open:'):
+        return ('settings.open', command.partition(':')[2] or None)
+    return None
+
+
+def suppress_during_tour(command: str, tour_visible: bool) -> bool:
+    """True when `command` must be dropped because the tour is up."""
+    return bool(tour_visible) and command in TOUR_SUPPRESSED_VERBS
+
 
 def _socket_path() -> str:
-    runtime = os.environ.get('XDG_RUNTIME_DIR', str(Path.home() / '.local' / 'share' / 'xx-wm'))
+    runtime = os.environ.get('XDG_RUNTIME_DIR') or str(Path.home() / '.local' / 'share' / 'xx-wm')
     return os.path.join(runtime, 'xx-wm.sock')
+
+
+def _socket_is_live(path: str) -> bool:
+    try:
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        probe.settimeout(0.5)
+        probe.connect(path)
+        probe.close()
+    except OSError:
+        return False
+    return True
 
 
 class IPCServer:
@@ -26,7 +74,8 @@ class IPCServer:
     Lightweight Unix-socket IPC server. Line-based protocol:
       lock | shade.show | shade.hide | switcher.show | switcher.hide |
       gesture.back | gesture.home | gesture.shade | gesture.keyboard |
-      gesture.switcher | welcome
+      gesture.switcher | welcome | page.home | page.apps | page.settings |
+      settings.open[:section]
     There is deliberately no unlock verb: the socket must never bypass the
     lock screen. Other surfaces or external scripts (e.g. wake hook) connect,
     send one line, disconnect.
@@ -43,6 +92,10 @@ class IPCServer:
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
+        if _socket_is_live(path):
+            _log.error(
+                'ipc socket %r already serves a shell; not starting a second server', path)
+            return
         try:
             os.unlink(path)
         except FileNotFoundError:

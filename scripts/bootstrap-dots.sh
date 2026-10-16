@@ -13,15 +13,19 @@
 set -eu
 
 REPO="https://github.com/PiercingXX/piercing-dots"
-DEST="${HOME}/.cache/piercing-dots"
 
 if command -v git >/dev/null 2>&1; then :; else
     echo "git is required (apk add git / sudo apt install git)" >&2
     exit 1
 fi
 
-rm -rf "$DEST"
-git clone --depth 1 "$REPO" "$DEST"
+if [ -d "${HOME}/piercing-dots" ]; then
+    DEST="${HOME}/piercing-dots"
+else
+    DEST="${HOME}/.cache/piercing-dots"
+    rm -rf "$DEST"
+    git clone --depth 1 "$REPO" "$DEST"
+fi
 
 if [ -x "$DEST/install.sh" ] && grep -q -- '--profile' "$DEST/install.sh"; then
     exec sh "$DEST/install.sh" --profile phone

@@ -82,6 +82,43 @@ _SMS_PATH_RE = re.compile(r'/org/freedesktop/ModemManager1/SMS/\d+')
 _MMCLI_TIMEOUT_S = 15
 
 
+def _resolved_modem() -> str:
+    """Modem selector for mmcli, resolved from D-Bus; falls back to '0'."""
+    try:
+        from modem_monitor import resolve_modem_path
+        return resolve_modem_path() or '0'
+    except Exception:
+        return '0'
+
+
+def send_message(number: str, text: str) -> tuple[bool, str]:
+    """Send an SMS; returns (success, error detail).
+
+    Prefers Messaging.Create + Sms.Send over D-Bus (no mmcli output
+    scraping, so multi-line text survives intact); falls back to mmcli
+    (create, then send via the returned SMS object — -s selects SMS
+    objects) only when the D-Bus transport fails. Blocking: worker thread.
+    """
+    try:
+        from modem_monitor import messaging_create_and_send
+        ok, detail = messaging_create_and_send(number, text)
+        if ok:
+            return True, detail
+    except Exception as err:
+        detail = str(err)
+    modem = _resolved_modem()
+    # mmcli only CREATES with --messaging-create-sms; the returned SMS
+    # object must then be sent explicitly (-s selects SMS objects).
+    payload = f"number='{_payload_value(number)}',text='{_payload_value(text)}'"
+    ok, out = _run_mmcli(['-m', modem, f'--messaging-create-sms={payload}'])
+    match = _SMS_PATH_RE.search(out) if ok else None
+    if match is not None:
+        ok, out = _run_mmcli(['-m', modem, '-s', match.group(0), '--send'])
+    elif ok:
+        ok, out = False, 'modem returned no SMS path'
+    return ok, out.strip()
+
+
 def _run_mmcli(args: list[str]) -> tuple[bool, str]:
     """Run mmcli; returns (success, stdout on success or error detail)."""
     try:
@@ -220,15 +257,7 @@ class SMSConversation(Gtk.Window):
         threading.Thread(target=self._deliver, args=(msg, self._number), daemon=True).start()
 
     def _deliver(self, msg: Message, number: str) -> None:
-        # mmcli only CREATES with --messaging-create-sms; the returned SMS
-        # object must then be sent explicitly (-s selects SMS objects).
-        payload = f"number='{_payload_value(number)}',text='{_payload_value(msg.text)}'"
-        ok, out = _run_mmcli(['-m', '0', f'--messaging-create-sms={payload}'])
-        match = _SMS_PATH_RE.search(out) if ok else None
-        if match is not None:
-            ok, out = _run_mmcli(['-m', '0', '-s', match.group(0), '--send'])
-        elif ok:
-            ok, out = False, 'modem returned no SMS path'
+        ok, out = send_message(number, msg.text)
         if not ok:
             from shell_log import get_logger
             get_logger('sms').warning('send to %s failed: %s', number, out)

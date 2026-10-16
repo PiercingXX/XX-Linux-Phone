@@ -6,7 +6,10 @@ project(
 
 python = import('python').find_installation('python3')
 
-dependency('gtk4-layer-shell-0', required: true)
+# No gtk4-layer-shell build probe here: this package only installs Python
+# files, and a compile-time pkg-config probe would drag the whole GTK4
+# development stack onto the device. The installer checks for the
+# Gtk4LayerShell typelib at install time instead (scripts/install.sh).
 
 prefix       = get_option('prefix')
 bindir       = join_paths(prefix, get_option('bindir'))
@@ -26,6 +29,14 @@ install_data(
   [
     'src/main.py',
     'src/window.py',
+    'src/home_page.py',
+    'src/drawer_page.py',
+    'src/settings_page.py',
+    'src/settings_standby.py',
+    'src/settings_permissions.py',
+    'src/settings_smart_lock.py',
+    'src/call_wiring.py',
+    'src/call_screen.py',
     'src/lock_screen.py',
     'src/notification_shade.py',
     'src/app_switcher.py',
@@ -33,6 +44,8 @@ install_data(
     'src/gesture_config.py',
     'src/gesture_bindings.py',
     'src/system_status.py',
+    'src/toplevel_manager.py',
+    'src/wayland_bindings.py',
     'src/first_boot.py',
     'src/call_ui.py',
     'src/dialer.py',
@@ -42,6 +55,8 @@ install_data(
     'src/notif_daemon.py',
     'src/modem_monitor.py',
     'src/app_index.py',
+    'src/app_names.py',
+    'src/app_standby.py',
     'src/config.py',
     'src/contacts.py',
     'src/als_brightness.py',
@@ -60,6 +75,27 @@ install_data(
     'src/sound.py',
     'src/system_settings.py',
     'src/weather.py',
+    'src/hud.py',
+    'src/lock_lines.py',
+    'src/smart_lock.py',
+    'src/banner.py',
+    'src/output_power.py',
+    'src/usage_stats.py',
+    'src/helper_client.py',
+    'src/media_controls.py',
+    'src/settings_charging.py',
+    'src/settings_battery_use.py',
+    'src/settings_screentime.py',
+    'src/settings_medical.py',
+    'src/privacy_monitor.py',
+    'src/captions.py',
+    'src/app_permissions.py',
+    'src/capture.py',
+    'src/capture_stitch.py',
+    'src/xxdb.py',
+    'src/xxdb_controller.py',
+    'src/xxdb_daemon.py',
+    'src/xxdb_input.py',
   ],
   install_dir: shell_datadir,
 )
@@ -82,26 +118,20 @@ install_data(
   'data/phoc/furiphone-flx1.ini',
   'data/phoc/librem-5.ini',
   'data/phoc/tablet.ini',
+  'data/phoc/qemu.ini',
   install_dir: join_paths(shell_datadir, 'phoc'),
 )
 
-# Vendored Wayland protocol XML (core + wlr foreign-toplevel-management).
-# Used by the shell's pywayland client to bind globals at runtime.
+# Wayland protocol XML (core + wlr foreign-toplevel-management). Installed
+# next to the shell modules; the pywayland client generates its bindings from
+# these at runtime with the installed pywayland's own scanner (see
+# src/wayland_bindings.py), cached per pywayland version.
 install_data(
   'data/wayland.xml',
   'data/wlr-foreign-toplevel-management-unstable-v1.xml',
+  'data/wlr-output-power-management-unstable-v1.xml',
+  'data/virtual-pointer-unstable-v1.xml',
   install_dir: shell_datadir,
-)
-
-# Vendored pywayland protocol classes (generated from the XMLs above by the
-# pywayland scanner; upstream pywayland ships no wlr module). Installed as a
-# package subdirectory of shell_datadir so `import wayland_proto` resolves
-# with the shell dir on sys.path. See src/wayland_proto/README.md.
-install_data(
-  'src/wayland_proto/__init__.py',
-  'src/wayland_proto/wayland.py',
-  'src/wayland_proto/wlr_foreign_toplevel_management_unstable_v1.py',
-  install_dir: join_paths(shell_datadir, 'wayland_proto'),
 )
 
 install_data(
@@ -217,9 +247,34 @@ configure_file(
   install_dir: join_paths(get_option('datadir'), 'systemd', 'user'),
 )
 
-# OpenRC init script (postmarketOS default images)
+# Session target, started by the in-session wrapper once phoc is up: pulls
+# graphical-session.target in (BindsTo), which xdg-desktop-portal.service
+# needs (Requisite=...). Static file, no substitution.
 install_data(
-  'data/openrc/xx-wm',
+  'data/systemd/xx-wm-session.target',
+  install_dir: join_paths(get_option('datadir'), 'systemd', 'user'),
+)
+
+# Portal preferences, picked by the lowercased XDG_CURRENT_DESKTOP
+# (XX-WM → xx-wm-portals.conf, see portals.conf(5)). GTK everywhere except
+# screenshot/screencast, where phoc needs the wlroots backend.
+install_data(
+  'data/xx-wm-portals.conf',
+  install_dir: join_paths(get_option('datadir'), 'xdg-desktop-portal'),
+)
+
+# OpenRC init script (for OpenRC-based images). The build output must NOT be
+# plain 'xx-wm': the launcher wrapper above already produces build/xx-wm and
+# the later file would win, shipping the init script as /usr/bin/xx-wm.
+# Configure to xx-wm.openrc, then install it renamed to init.d/xx-wm.
+openrc_cfg = configure_file(
+  input: 'data/openrc/xx-wm',
+  output: 'xx-wm.openrc',
+  configuration: session_conf,
+)
+install_data(
+  openrc_cfg,
+  rename: 'xx-wm',
   install_dir: join_paths(get_option('sysconfdir'), 'init.d'),
   install_mode: 'rwxr-xr-x',
 )
@@ -228,4 +283,60 @@ install_data(
 install_data(
   'data/logind/10-xx-wm-power.conf',
   install_dir: join_paths(get_option('sysconfdir'), 'systemd', 'logind.conf.d'),
+)
+
+# Privileged helper (root D-Bus system service io.piercingxx.XXWM.Helper1).
+# The daemon itself: helper script with the python path baked in.
+helper_conf = configuration_data()
+helper_conf.set('python', python.full_path())
+helper_conf.set('libexecdir', libexecdir)
+
+configure_file(
+  input: 'helper/xx_wm_helper.py',
+  output: 'xx-wm-helper',
+  configuration: helper_conf,
+  install: true,
+  install_dir: get_option('libexecdir'),
+  install_mode: 'rwxr-xr-x',
+)
+
+# D-Bus activation (.service) + bus policy (.conf): the bus launches the
+# helper on demand as root; per-method authorization stays polkit's job.
+configure_file(
+  input: 'data/dbus-1/system-services/io.piercingxx.XXWM.Helper1.service',
+  output: 'io.piercingxx.XXWM.Helper1.service',
+  configuration: helper_conf,
+  install: true,
+  install_dir: join_paths(get_option('datadir'), 'dbus-1', 'system-services'),
+)
+
+install_data(
+  'data/dbus-1/system.d/io.piercingxx.XXWM.Helper1.conf',
+  install_dir: join_paths(get_option('datadir'), 'dbus-1', 'system.d'),
+)
+
+install_data(
+  'data/polkit-1/actions/io.piercingxx.XXWM.Helper.policy',
+  install_dir: join_paths(get_option('datadir'), 'polkit-1', 'actions'),
+)
+
+# Boot re-apply of the persisted charge limit and nft blocks (oneshot,
+# `--apply-saved`). Output names must stay unique: meson maps every
+# configure_file output into the same build directory, so two outputs
+# sharing a basename collide even with different inputs/install dirs.
+configure_file(
+  input: 'data/systemd/xx-wm-helper-boot.service',
+  output: 'xx-wm-helper-boot.service',
+  configuration: helper_conf,
+  install: true,
+  install_dir: join_paths(get_option('datadir'), 'systemd', 'system'),
+)
+
+configure_file(
+  input: 'data/openrc/xx-wm-helper-boot',
+  output: 'xx-wm-helper-boot',
+  configuration: helper_conf,
+  install: true,
+  install_dir: join_paths(get_option('sysconfdir'), 'init.d'),
+  install_mode: 'rwxr-xr-x',
 )

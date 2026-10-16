@@ -100,11 +100,17 @@ class TestSkipUnchangedSave:
         assert len(_replace_spy) == 3
 
     def test_repeated_launches_of_same_app_write_only_once(self, tmp_path, _replace_spy):
+        # Batched launch counts: the first record flushes, rapid follow-ups
+        # stay in memory, and the shutdown flush persists them (Wave 4).
         config = _config(tmp_path)
         config.record_launch('notes.desktop')
         assert len(_replace_spy) == 1
 
-        config.record_launch('notes.desktop')  # count grew → payload differs
+        config.record_launch('notes.desktop')  # count grew, still in memory
+        assert len(_replace_spy) == 1
+        assert config.launch_counts == {'notes.desktop': 2}
+
+        config.flush_launch_counts()  # shutdown/single write
         assert len(_replace_spy) == 2
 
     def test_externally_edited_file_is_rewritten(self, tmp_path, _replace_spy):

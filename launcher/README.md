@@ -10,7 +10,7 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" nam
 - **Notification shade** (`notification_shade.py`) — TOP layer, date/time header with inline month calendar (`calendar_grid.py`), Settings entry, in-process daemon (`notif_daemon.py`), tap-to-launch, swipe-to-dismiss, clear all, quick actions embedded.
 - **DnD & Focus** (`dnd.py`, `focus_mode.py`) — Pixel-model Do Not Disturb (schedules, starred contacts, repeat callers) and Focus Mode (paused apps, held notifications, take-a-break), wired through tiles, calls, and the notification path.
 - **Quick actions** (`quick_actions.py`) — WiFi, BT, mobile data, airplane, torch, DnD, Focus; brightness/volume sliders; hardware-gated tiles hide themselves.
-- **App switcher** (`app_switcher.py`, `toplevel_manager.py`) — live window list over `wlr-foreign-toplevel-management-unstable-v1`: `python-pywayland` on a GLib fd-watch (never blocks the GTK loop), protocol XMLs vendored under `data/`. Cards are app name + title text only; tap → activate, ✕ or swipe-up dismiss → close; own surfaces filtered out; graceful empty state when the compositor doesn't offer the protocol.
+- **App switcher** (`app_switcher.py`, `toplevel_manager.py`, `wayland_bindings.py`) — live window list over `wlr-foreign-toplevel-management-unstable-v1`: `python-pywayland` on a GLib fd-watch (never blocks the GTK loop), bindings generated at runtime by the installed pywayland's own scanner from the protocol XMLs under `data/` into a version-keyed cache. Rows are app name + window title text only; tap → activate (hands the screen to the app), ✕ or left/right swipe → close; own and keyboard surfaces filtered out; graceful empty state when the compositor doesn't offer the protocol.
 - **Volume/brightness HUD** (`hud.py`) — in-shell overlay on the layer-shell OVERLAY layer: flashes the new volume/brightness level on hardware key presses, auto-hides after ~1 s. No external process involved, and it silently no-ops where GTK or the layer shell can't init.
 - **Sounds** (`sound.py`, `data/sounds/`) — ringtone loop + notification sound via paplay/pw-play, gated by config, DnD, mutes.
 - **Weather** (`weather.py`) — Open-Meteo current conditions, 15-min cache, silent offline fallback.
@@ -18,11 +18,24 @@ GTK4/libadwaita launcher + shell surfaces for Linux phones. Despite the "WM" nam
 - **Backup** (`backup.py`) — versioned JSON export/restore with validate-before-write.
 - **Call UI / Dialer / SMS** (`call_ui.py`, `dialer.py`, `sms.py`) — mmcli/ModemManager telephony surfaces; dialer rows star contacts for DnD.
 - **First-boot wizard** (`first_boot.py`) — PIN, theme, timezone, then the interactive gesture walkthrough (replay with `xx-wm --welcome`).
-- **IPC server** (`ipc.py`) — Unix socket at `$XDG_RUNTIME_DIR/xx-wm.sock` (`lock`, `shade.*`, `switcher.*`, `gesture.*`, `welcome`).
+- **IPC server** (`ipc.py`) — Unix socket at `$XDG_RUNTIME_DIR/xx-wm.sock` (`lock`, `shade.*`, `switcher.*`, `gesture.*`, `welcome`, plus page-driving `page.home` / `page.apps` / `page.settings` and `settings.open[:section]` for rigs and scripts — no gesture timing needed; `settings.open` reuses the `open_settings(section)` deep-link).
 - **Modem monitor** (`modem_monitor.py`) — ModemManager DBus watcher for call events.
 - **Back arrow overlay** (`back_gesture.py`) — visual feedback only; gesture detection is lisgd's job, delivered via `gesture.*` IPC commands.
 - **Theming** — every surface derives its CSS from the active theme preset (`theme_css(preset)`); intentional semantic colors (danger red, warning orange, destructive tint) live as named constants in `config.py`.
 - **GDM Colemak OSK** (`data/gnome-osk/us.json`) — Colemak layout in GNOME Shell's osk-layouts JSON schema (derived from the squeekboard YAMLs, which remain the source of truth), installed to `datadir/xx-wm/gnome-osk/` with an install.sh step guarded to GDM hosts (stock `us.json` backed up before overwrite).
+
+## Privileged helper (root D-Bus service)
+
+Battery charge limits, per-app network blocks, and cgroup freezing need
+root, so they live in `io.piercingxx.XXWM.Helper1`
+(`helper/xx_wm_helper.py`, installed to `$libexecdir/xx-wm-helper`,
+D-Bus activated, idle-exits after 60 s). Per-method polkit
+authorization plus caller-uid cgroup confinement; state in
+`/var/lib/xx-wm-helper/state.json`, re-applied at boot by
+`xx-wm-helper-boot` (systemd + OpenRC units under `data/`). The shell
+side is `src/helper_client.py` (async, cached capability probe,
+graceful when the helper isn't installed). Full contract:
+`../docs/helper.md`.
 
 ## What's not done yet (device-gated)
 
@@ -66,11 +79,22 @@ gate, and ruff resolves via the venv python first so it needn't be on PATH.
 ```bash
 # WiFi SSH (USB data drops while charging on the FP5)
 export PIERCING_DEVICE=<device-ip>
-export XX_WM_USER=user   # pmos default; check per device
+export XX_WM_USER=dr3k   # tablet default; pmos default is user — check per device
 ./scripts/deploy.sh
 ```
 
-`deploy.sh` rsyncs `src/` to the device and restarts the shell service (systemd user unit or OpenRC). `--dry-run` prints the commands without touching anything. Full installs go through `scripts/install.sh` (whiptail menu: Install / Update / Install phone apps).
+`deploy.sh` stages `launcher/src/` (`*.py`, `style.css`, `wayland_proto/`)
+in `/tmp/xx-wm-deploy/` on the device, then `sudo rsync`s it into the
+installed datadir `/usr/share/xx-wm/` (no `--delete` there, so `phoc.ini`
+and sounds survive) and restarts the running shell: `systemctl --user
+restart xx-wm` only when that unit is active, otherwise `SIGUSR1` to the
+unique `python3 /usr/share/xx-wm/main.py` child (the `/usr/bin/xx-wm`
+supervisor respawns it; never `TERM`/`HUP` — `Gio.Application` maps those
+to quit and the session would end). It never updates `/usr/bin/xx-wm`
+itself — wrapper changes need `meson install`. Needs passwordless sudo
+on the device (`scripts/grant-tablet-sudo.sh`). `--dry-run` prints the
+real paths without touching anything. Full installs go through
+`scripts/install.sh` (whiptail menu: Install / Update / Install phone apps).
 
 ## Device checks to run first
 
@@ -82,13 +106,27 @@ pactl info | grep -i server
 ps -p 1                            # systemd or OpenRC?
 ```
 
+## Troubleshooting
+
+- Shell stderr (tracebacks): the session wrapper redirects the shell's
+  stderr to `~/.local/share/xx-wm/stderr.log`, rotated to `stderr.log.1`
+  past 1 MB at each restart — phoc's own stderr is `/dev/tty7`, so
+  without this tracebacks vanish on a phone. The structured shell log
+  stays at `~/.local/share/xx-wm/shell.log`.
+- From a paired host, `xxdb logcat` tails both logs (`[shell.log]` and
+  `[stderr.log]` sources) plus the journal snapshot.
+- Blank screen after a restart: fixed by the output-power reconciler
+  (forces outputs on at bind); portals missing: check
+  `systemctl --user status xx-wm-session.target` and that
+  `XDG_CURRENT_DESKTOP` is `XX-WM`.
+
 ## Session config
 
 - Wayland session: `wayland-sessions/xx-wm.desktop` (display managers only scan `*.desktop`)
 - Session launcher: `libexec/xx-wm-session` (phoc wrapper, sets GTK_THEME from config); the in-session `bin/xx-wm` starts squeekboard before the shell
-- systemd user service: `share/systemd/user/xx-wm.service` (`Restart=on-failure`); OpenRC: `data/openrc/xx-wm` → `/etc/init.d/` (postmarketOS default images)
+- systemd user service: `share/systemd/user/xx-wm.service` (`Restart=on-failure`); OpenRC: `data/openrc/xx-wm` → `/etc/init.d/` (OpenRC-based images only — pmOS v26.06 Phosh runs systemd; install.sh detects via `/run/systemd/system`)
 - Keyboard layouts: `data/squeekboard/` (PiercingXX Colemak, incl. terminal/email/url variants) → `datadir/xx-wm/squeekboard`, symlinked by install.sh to `~/.local/share/squeekboard/keyboards/`
-- phoc.ini: default `data/phoc.ini` plus per-device fragments under `data/phoc/` (`fairphone-5`, `furiphone-flx1`, `librem-5`, `tablet`) selected by install.sh; scale notes per device in `devices/*/notes.md`
+- phoc.ini: default `data/phoc.ini` plus per-device fragments under `data/phoc/` (`fairphone-5`, `furiphone-flx1`, `librem-5`, `tablet`, `qemu` for the Virtual-1 VM display) selected by install.sh; scale notes per device in `devices/*/notes.md`
 
 ## Fonts
 

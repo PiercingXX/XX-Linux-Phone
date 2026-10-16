@@ -120,9 +120,9 @@ def hud_mod():
     True and the ``_HudWindow`` seam exists. Both the hud cache and the gi
     namespace are restored afterwards: test_hud_module pins hud's first-
     import branch, so this file must leave no trace either way."""
-    _install_fake_gi()
     saved_hud = sys.modules.pop('hud', None)
     saved_gi = {k: sys.modules[k] for k in _gi_keys()}
+    _install_fake_gi()
     try:
         import hud
         yield hud

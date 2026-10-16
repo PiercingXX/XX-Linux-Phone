@@ -147,9 +147,32 @@ class TestShellConfig:
         config.record_launch('org.example.A')
         config.record_launch('org.example.A')
         config.record_launch('org.example.B')
+        config.flush_launch_counts()
         config.load()
 
         assert config.launch_counts == {'org.example.A': 2, 'org.example.B': 1}
+
+    def test_launch_counts_batch_to_one_write_per_minute(self, tmp_path):
+        import time
+        config = ShellConfig()
+        config.config_dir = tmp_path / 'config'
+        config.config_path = config.config_dir / 'config.json'
+
+        config.record_launch('org.example.A')
+        mtime = config.config_path.stat().st_mtime_ns
+        # Rapid follow-ups stay in memory: no second flash write.
+        config.record_launch('org.example.A')
+        config.record_launch('org.example.B')
+        assert config.launch_counts == {'org.example.A': 2, 'org.example.B': 1}
+        assert config.config_path.stat().st_mtime_ns == mtime
+        # Shutdown flush persists them.
+        config.flush_launch_counts()
+        fresh = ShellConfig()
+        fresh.config_dir = config.config_dir
+        fresh.config_path = config.config_path
+        fresh.load()
+        assert fresh.launch_counts == {'org.example.A': 2, 'org.example.B': 1}
+        assert time.monotonic() - config._last_launch_flush < 60.0
 
     def test_launch_counts_corrupt_values_skipped(self, tmp_path):
         config = ShellConfig()

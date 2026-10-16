@@ -99,7 +99,7 @@ def test_hide_keyboard_sends_setvisible_false(window):
     """_set_osk_visible(False) -- the seam _hide_keyboard() drives -- tells
     squeekboard to disappear."""
     calls = _install_dbus(window)
-    window._set_osk_visible(False)
+    window._set_osk_visible(False).join(timeout=5)
 
     assert len(calls) == 1
     name, path, iface, method, params = calls[0][:5]
@@ -112,7 +112,7 @@ def test_show_keyboard_sends_setvisible_true(window):
     """_set_osk_visible(True) -- the seam _show_keyboard() drives -- still
     raises squeekboard after the 20.1 refactor."""
     calls = _install_dbus(window)
-    window._set_osk_visible(True)
+    window._set_osk_visible(True).join(timeout=5)
 
     assert len(calls) == 1
     params = calls[0][4]
@@ -154,6 +154,10 @@ def test_tap_outside_editable_hides_keyboard(window):
         _hide_keyboard=lambda: window._set_osk_visible(False),
     )
     window.ShellWindow._on_tap_outside(shell, None, 1, 0, 0)
+    import time as _time
+    _deadline = _time.monotonic() + 5
+    while not calls and _time.monotonic() < _deadline:
+        _time.sleep(0.01)
     assert len(calls) == 1
     name, path, iface, method, params = calls[0][:5]
     assert (name, path, iface, method) == (

@@ -136,6 +136,115 @@ class TestSocketSetup:
         assert mode == 0o600
 
 
+class TestSocketPathResolution:
+    def test_unset_runtime_dir_uses_home_fallback(self, monkeypatch, tmp_path):
+        monkeypatch.delenv('XDG_RUNTIME_DIR', raising=False)
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+        expected = tmp_path / 'home' / '.local' / 'share' / 'xx-wm' / 'xx-wm.sock'
+        assert ipc._socket_path() == str(expected)
+
+    def test_empty_runtime_dir_uses_home_fallback(self, monkeypatch, tmp_path):
+        monkeypatch.setenv('XDG_RUNTIME_DIR', '')
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+        expected = tmp_path / 'home' / '.local' / 'share' / 'xx-wm' / 'xx-wm.sock'
+        assert ipc._socket_path() == str(expected)
+
+    def test_client_template_shares_resolver(self):
+        template = (Path(__file__).parent.parent / 'launcher' / 'data'
+                    / 'xx-wm-ipc.in').read_text(encoding='utf-8')
+        assert 'XDG_RUNTIME_DIR' in template
+        assert os.path.join('.local', 'share', 'xx-wm') in template
+        assert 'xx-wm.sock' in template
+
+    def test_client_template_is_cheap_and_loud(self):
+        template = (Path(__file__).parent.parent / 'launcher' / 'data'
+                    / 'xx-wm-ipc.in').read_text(encoding='utf-8')
+        assert '-S' in template and '-E' in template
+        assert 'SystemExit(1)' in template or 'exit 1' in template
+
+
+def _client_python_body():
+    template = (Path(__file__).parent.parent / 'launcher' / 'data'
+                / 'xx-wm-ipc.in').read_text(encoding='utf-8')
+    start = template.index("<<'PYEOF'") + len("<<'PYEOF'")
+    end = template.rindex('PYEOF')
+    return template[start:end]
+
+
+class TestIpcClient:
+    def test_client_delivers_to_live_server(self, make_server, runtime, tmp_path):
+        import subprocess
+        handled = []
+        server = make_server(handled.append)
+        body_file = tmp_path / 'ipc_body.py'
+        body_file.write_text(_client_python_body(), encoding='utf-8')
+        env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime))
+        proc = subprocess.run(
+            [sys.executable, '-S', '-E', str(body_file), 'lock'],
+            capture_output=True, text=True, env=env, timeout=30)
+        assert proc.returncode == 0, proc.stderr
+        _pump(server)
+        assert handled == ['lock']
+
+    def test_client_exits_nonzero_when_unreachable(self, tmp_path):
+        import subprocess
+        body_file = tmp_path / 'ipc_body.py'
+        body_file.write_text(_client_python_body(), encoding='utf-8')
+        env = dict(os.environ, XDG_RUNTIME_DIR=str(tmp_path / 'no-such-runtime'))
+        proc = subprocess.run(
+            [sys.executable, '-S', '-E', str(body_file), 'lock'],
+            capture_output=True, text=True, env=env, timeout=30)
+        assert proc.returncode != 0
+
+    def test_client_exits_nonzero_without_command(self, tmp_path):
+        import subprocess
+        body_file = tmp_path / 'ipc_body.py'
+        body_file.write_text(_client_python_body(), encoding='utf-8')
+        env = dict(os.environ)
+        proc = subprocess.run(
+            [sys.executable, '-S', '-E', str(body_file)],
+            capture_output=True, text=True, env=env, timeout=30)
+        assert proc.returncode != 0
+
+
+class TestSecondInstance:
+    def test_second_server_does_not_steal_socket(
+        self, make_server, runtime, caplog,
+    ):
+        first_handled = []
+        second_handled = []
+        first = make_server(first_handled.append)
+        assert ipc._socket_is_live(ipc._socket_path())
+        with caplog.at_level(logging.ERROR, logger='piercing.ipc'):
+            second = make_server(second_handled.append)
+        assert second._sock is None
+        client = _connect_send(runtime / 'xx-wm.sock', b'lock\n')
+        client.close()
+        # Two liveness probes (the assert above and the second server's
+        # own start check) queued silent connections ahead of the real
+        # one; the first pumps absorb them, the last delivers.
+        for _ in range(2):
+            assert first._on_incoming(first._sock.fileno(), None, first._sock) is True
+            _GLIB.drain_idles()
+        assert first_handled == []
+        assert first._on_incoming(first._sock.fileno(), None, first._sock) is True
+        _GLIB.drain_idles()
+        assert first_handled == ['lock']
+        assert second_handled == []
+
+    def test_bind_succeeds_after_first_stops(self, runtime):
+        first = ipc.IPCServer(lambda cmd: None)
+        try:
+            assert ipc._socket_is_live(ipc._socket_path())
+        finally:
+            first.stop()
+        second = ipc.IPCServer(lambda cmd: None)
+        try:
+            assert second._sock is not None
+        finally:
+            second.stop()
+
+
 class TestWatchLifecycle:
     def test_stop_removes_io_watch_source(self, make_server, runtime):
         server = make_server(lambda cmd: None)

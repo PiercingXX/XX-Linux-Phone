@@ -1,8 +1,11 @@
-"""GTK4 dialog conversion: _on_restore_backup must wire a 'response' signal
-handler (dialog.run() no longer exists) that destroys the dialog and runs the
-restore on the chosen path only for ResponseType.OK. Headless: window.py is
-imported against a minimal fake gi stack; the dialog construction seam
-(_build_restore_dialog) is stubbed so no GTK object is ever constructed."""
+"""In-shell restore flow: no file chooser (a toplevel would open UNDER the
+layer-shell TOP surface). "Restore from backup" lists xx-wm-backup-*.json
+from ~ and ~/Documents (newest first, date labels, max 10) plus Cancel in
+the themed action menu; picking one confirms, then restores from the path.
+
+Headless: window.py is imported against a minimal fake gi stack and driven
+on bare ShellWindow instances; backup discovery runs against a tmp HOME."""
+import json
 import sys
 import types
 from pathlib import Path
@@ -10,9 +13,6 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
-
-_RESPONSE_OK = -5
-_RESPONSE_CANCEL = -6
 
 
 @pytest.fixture
@@ -27,8 +27,6 @@ def window_module(monkeypatch):
     repo = types.ModuleType('gi.repository')
     for name in ('Gdk', 'GLib', 'Gtk', 'Pango', 'Gio'):
         setattr(repo, name, types.ModuleType(f'gi.repository.{name}'))
-    repo.Gtk.ResponseType = types.SimpleNamespace(
-        OK=_RESPONSE_OK, CANCEL=_RESPONSE_CANCEL)
     adw = types.ModuleType('gi.repository.Adw')
     adw.ApplicationWindow = type('ApplicationWindow', (), {})
     repo.Adw = adw
@@ -45,66 +43,188 @@ def window_module(monkeypatch):
     return window
 
 
-class _FakeDialog:
+def _write_backup(directory: Path, stamp: str) -> Path:
+    payload = {'version': 1, 'home_slots': [], 'theme': 'amoled',
+               'font': 'jetbrains-mono-nerd'}
+    path = directory / f'xx-wm-backup-{stamp}.json'
+    path.write_text(json.dumps(payload), encoding='utf-8')
+    return path
+
+
+@pytest.fixture
+def home_with_backups(tmp_path, monkeypatch):
+    home = tmp_path / 'home'
+    docs = home / 'Documents'
+    docs.mkdir(parents=True)
+    _write_backup(home, '20240102_080000')
+    _write_backup(docs, '20240304_120000')
+    _write_backup(docs, '20240203_090000')
+    (home / 'notes.txt').write_text('not a backup', encoding='utf-8')
+    monkeypatch.setenv('HOME', str(home))
+    return home
+
+
+class _Menus:
     def __init__(self):
-        self.handler = None
-        self.shown = False
-        self.destroyed = False
-        self.filename: str | None = '/home/user/backup.json'
+        self.calls: list[tuple] = []
 
-    def connect(self, signal, callback):
-        assert signal == 'response'
-        self.handler = callback
-
-    def show(self):
-        self.shown = True
-
-    def get_filename(self):
-        return self.filename
-
-    def destroy(self):
-        self.destroyed = True
+    def _show_action_menu(self, anchor, title, actions):
+        self.calls.append((anchor, title, list(actions)))
 
 
-def _shell_harness(window_module, dialog):
-    restored: list[str | None] = []
+def _restore_session(window_module, tmp_path, monkeypatch):
+    from config import ShellConfig
+    monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+    (tmp_path / 'home').mkdir(parents=True, exist_ok=True)
+    menus = _Menus()
+    statuses: list[str] = []
+    applied: list[str] = []
     shell = types.SimpleNamespace(
-        _build_restore_dialog=lambda: dialog,
-        _restore_from_path=restored.append,
-        _show_status=lambda message: None,
+        config=ShellConfig(),
+        item_actions=menus,
+        _restore_btn=object(),
+        _show_status=statuses.append,
+        _apply_config_change=lambda: applied.append('applied'),
     )
-    window_module.ShellWindow._on_restore_backup(shell)
-    return restored
+    _write_backup(tmp_path / 'home', '20240102_080000')
+    shell._restore_from_path = (
+        window_module.ShellWindow._restore_from_path.__get__(shell))
+    shell._confirm_restore_backup = (
+        window_module.ShellWindow._confirm_restore_backup.__get__(shell))
+    window_module.ShellWindow._on_restore_backup(shell, object())
+    return menus, statuses, applied
 
 
-class TestRestoreDialogWiring:
-    def test_dialog_shown_with_response_handler(self, window_module):
-        dialog = _FakeDialog()
-        _shell_harness(window_module, dialog)
-        assert dialog.shown
-        assert callable(dialog.handler)
-        assert not dialog.destroyed
+def _by_label(actions):
+    return {label: callback for label, callback in actions}
 
-    def test_ok_response_destroys_then_restores(self, window_module):
-        dialog = _FakeDialog()
-        restored = _shell_harness(window_module, dialog)
-        dialog.handler(dialog, _RESPONSE_OK)
-        assert dialog.destroyed
-        assert restored == ['/home/user/backup.json']
 
-    def test_cancel_response_destroys_without_restoring(self, window_module):
-        dialog = _FakeDialog()
-        restored = _shell_harness(window_module, dialog)
-        dialog.handler(dialog, _RESPONSE_CANCEL)
-        assert dialog.destroyed
-        assert restored == []
+class TestRestoreMenu:
+    def test_lists_backups_newest_first_with_date_labels_and_cancel(
+            self, window_module, home_with_backups):
+        shell = types.SimpleNamespace(
+            item_actions=_Menus(), _restore_btn=object(),
+            _show_status=lambda message: None,
+        )
+        window_module.ShellWindow._on_restore_backup(shell, object())
+        menus = shell.item_actions
+        assert len(menus.calls) == 1
+        _anchor, title, actions = menus.calls[0]
+        assert title == 'Restore from backup'
+        assert [label for label, _cb in actions] == [
+            '2024-03-04 12:00', '2024-02-03 09:00', '2024-01-02 08:00',
+            'Cancel',
+        ]
 
-    def test_filename_read_before_destroy(self, window_module):
-        dialog = _FakeDialog()
-        order: list[str] = []
-        dialog.get_filename = lambda: order.append('read') or '/home/user/backup.json'
-        dialog.destroy = lambda: order.append('destroy')
-        restored = _shell_harness(window_module, dialog)
-        dialog.handler(dialog, _RESPONSE_OK)
-        assert order == ['read', 'destroy']
-        assert restored == ['/home/user/backup.json']
+    def test_empty_shows_status_and_no_menu(
+            self, window_module, tmp_path, monkeypatch):
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+        (tmp_path / 'home').mkdir(parents=True, exist_ok=True)
+        statuses: list[str] = []
+        menus = _Menus()
+        shell = types.SimpleNamespace(
+            item_actions=menus, _restore_btn=object(),
+            _show_status=statuses.append,
+        )
+        window_module.ShellWindow._on_restore_backup(shell, object())
+        assert statuses == ['No backups found in ~ or ~/Documents']
+        assert menus.calls == []
+
+    def test_no_file_chooser_left(self, window_module):
+        import inspect
+
+        import settings_page
+        src = inspect.getsource(settings_page.SettingsPage._on_restore_backup)
+        assert 'FileChooser' not in src
+        assert 'get_filename' not in src
+        assert '_show_action_menu' in src
+
+
+class TestRestoreConfirm:
+    def test_pick_confirms_then_restores(
+            self, window_module, tmp_path, monkeypatch):
+        menus, statuses, applied = _restore_session(
+            window_module, tmp_path, monkeypatch)
+        _anchor, _title, actions = menus.calls[0]
+        _by_label(actions)['2024-01-02 08:00']()
+        assert len(menus.calls) == 2
+        _anchor, title, confirm_actions = menus.calls[1]
+        assert title == ('Restore backup from 2024-01-02 08:00? '
+                        'This replaces your home layout and settings.')
+        _by_label(confirm_actions)['Restore']()
+        assert applied == ['applied']
+        assert statuses == ['Backup restored successfully']
+
+    def test_confirm_cancel_restores_nothing(
+            self, window_module, tmp_path, monkeypatch):
+        menus, statuses, applied = _restore_session(
+            window_module, tmp_path, monkeypatch)
+        _anchor, _title, actions = menus.calls[0]
+        _by_label(actions)['2024-01-02 08:00']()
+        _anchor, _title, confirm_actions = menus.calls[1]
+        _by_label(confirm_actions)['Cancel']()
+        assert applied == []
+        assert statuses == []
+
+    def test_list_cancel_restores_nothing(
+            self, window_module, tmp_path, monkeypatch):
+        menus, statuses, applied = _restore_session(
+            window_module, tmp_path, monkeypatch)
+        _anchor, _title, actions = menus.calls[0]
+        _by_label(actions)['Cancel']()
+        assert applied == []
+        assert statuses == []
+        assert len(menus.calls) == 1
+
+    def test_invalid_payload_reports_without_applying(
+            self, window_module, tmp_path, monkeypatch):
+        from config import ShellConfig
+        monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+        home = tmp_path / 'home'
+        home.mkdir(parents=True, exist_ok=True)
+        bad = home / 'xx-wm-backup-20240102_080000.json'
+        bad.write_text('{"version": 99}', encoding='utf-8')
+        statuses: list[str] = []
+        applied: list[str] = []
+        shell = types.SimpleNamespace(
+            config=ShellConfig(),
+            _show_status=statuses.append,
+            _apply_config_change=lambda: applied.append('applied'),
+        )
+        shell._restore_from_path = (
+            window_module.ShellWindow._restore_from_path.__get__(shell))
+        shell._restore_from_path(str(bad))
+        assert applied == []
+        assert len(statuses) == 1
+        assert statuses[0].startswith('Invalid backup:')
+
+
+class TestExportDestination:
+    def _export_shell(self, window_module):
+        from config import ShellConfig
+        statuses: list[str] = []
+        shell = types.SimpleNamespace(
+            config=ShellConfig(), _show_status=statuses.append)
+        window_module.ShellWindow._on_export_backup(shell)
+        return statuses
+
+    def test_export_prefers_documents(
+            self, window_module, tmp_path, monkeypatch):
+        home = tmp_path / 'home'
+        (home / 'Documents').mkdir(parents=True)
+        monkeypatch.setenv('HOME', str(home))
+        statuses = self._export_shell(window_module)
+        exported = list((home / 'Documents').glob('xx-wm-backup-*.json'))
+        assert len(exported) == 1
+        assert list(home.glob('xx-wm-backup-*.json')) == []
+        assert statuses == [f'Backup exported to {exported[0]}']
+
+    def test_export_falls_back_to_home(
+            self, window_module, tmp_path, monkeypatch):
+        home = tmp_path / 'home'
+        home.mkdir(parents=True)
+        monkeypatch.setenv('HOME', str(home))
+        statuses = self._export_shell(window_module)
+        exported = list(home.glob('xx-wm-backup-*.json'))
+        assert len(exported) == 1
+        assert statuses == [f'Backup exported to {exported[0]}']

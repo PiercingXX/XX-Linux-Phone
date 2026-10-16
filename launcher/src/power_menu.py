@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import subprocess
+import threading
+from typing import Callable
 
 import gi
 
@@ -11,52 +12,224 @@ except ValueError:
     _HAS_LAYER = False
 
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gdk, Gtk
+gi.require_version('Adw', '1')
+from gi.repository import Adw, Gdk, Gtk
 
 if _HAS_LAYER:
     from gi.repository import Gtk4LayerShell as LayerShell
 
 from config import ShellConfig, ThemePreset
+from shell_log import get_logger
+
+_log = get_logger('power')
+
+_LOGIN1 = 'org.freedesktop.login1'
+_LOGIN1_PATH = '/org/freedesktop/login1'
+_LOGIN1_MANAGER = 'org.freedesktop.login1.Manager'
+
+# systemctl does not exist on OpenRC (postmarketOS), so power actions go
+# through logind's Manager interface — which elogind implements too.
+_ACTIONS = {
+    'suspend': 'Suspend',
+    'reboot': 'Reboot',
+    'poweroff': 'PowerOff',
+}
+
+# Only the destructive actions arm on first tap; lock/suspend/cancel fire
+# at once. The arming text is shown inline on the row itself.
+CONFIRM_TIMEOUT_S = 3
+_CONFIRM_LABELS = {
+    'reboot': 'Tap again to restart',
+    'poweroff': 'Tap again to power off',
+}
+
+
+def confirm_label(action: str) -> str:
+    """Inline arming text for a destructive power action."""
+    return _CONFIRM_LABELS.get(action, 'Tap again?')
+
+
+class ConfirmState:
+    """Pure two-tap confirm machine: first tap arms, second confirms.
+
+    Widget-free so headless tests drive the exact state machine the menu
+    runs; the menu only adds the 3 s expiry around it.
+    """
+
+    def __init__(self) -> None:
+        self.pending: str | None = None
+
+    def tap(self, action: str) -> bool:
+        """Record a tap on `action`; True means confirmed — execute now."""
+        if self.pending == action:
+            self.pending = None
+            return True
+        self.pending = action
+        return False
+
+    def reset(self) -> None:
+        self.pending = None
+
+
+def suspend_visible(can_suspend: str | None) -> bool:
+    """Whether the Suspend row shows for a login1 CanSuspend value.
+
+    CanSuspend is a Manager method, not a property, answering 'yes'/'no'/
+    'challenge'/'na'. The row stays visible until the probe answers (None);
+    'yes' and 'challenge' (auth-gated, still offered) keep it — 'no', 'na'
+    and failures hide it.
+    """
+    if can_suspend is None:
+        return True
+    return can_suspend in ('yes', 'challenge')
+
+
+def visible_power_rows(can_suspend: str | None) -> list[str]:
+    """Row keys in display order for the current CanSuspend probe value.
+
+    Lock, Restart, Power off and Cancel always show; Suspend joins them
+    only while the probe is unanswered (None) or 'yes'/'challenge'. Pure,
+    so headless tests pin the exact rows the menu renders at 320x640.
+    """
+    rows = ['lock']
+    if suspend_visible(can_suspend):
+        rows.append('suspend')
+    rows.extend(('reboot', 'poweroff', 'cancel'))
+    return rows
+
+
+def query_can_suspend_async(on_done: Callable[[str | None], None],
+                            bus=None) -> None:
+    """Ask login1 for CanSuspend without blocking the GTK thread.
+
+    CanSuspend is a method on the Manager (not a Properties.Get key):
+    it takes no arguments and returns one string out-arg
+    ('yes'/'no'/'challenge'/'na'). `on_done(value)` fires on the main
+    loop with that string, or None when the call cannot be made. Never
+    raises.
+    """
+    from gi.repository import Gio, GLib
+
+    def _fail(reason: str) -> bool:
+        _log.warning('CanSuspend probe failed: %s', reason)
+        on_done(None)
+        return False
+
+    if bus is None:
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        except Exception as error:
+            GLib.idle_add(_fail, str(error) or 'no system bus')
+            return
+
+    def _reply(conn, result) -> None:
+        try:
+            # Gio replies are tuples of out-args; CanSuspend returns (s,).
+            value = conn.call_finish(result).unpack()[0]
+        except Exception as error:
+            _fail(getattr(error, 'message', None) or str(error)
+                  or 'CanSuspend call failed')
+            return
+        on_done(value if isinstance(value, str) else None)
+
+    try:
+        bus.call(
+            _LOGIN1, _LOGIN1_PATH, _LOGIN1_MANAGER, 'CanSuspend',
+            None,
+            None, Gio.DBusCallFlags.NONE, 5000, None, _reply,
+        )
+    except Exception as error:
+        GLib.idle_add(_fail, str(error) or 'CanSuspend call failed')
+
+
+def power_action_sync(action: str, bus=None) -> tuple[bool, str]:
+    """Run one power action via login1. Returns (ok, message)."""
+    method = _ACTIONS.get(action)
+    if method is None:
+        return False, f'Unknown power action: {action}'
+    try:
+        from gi.repository import Gio, GLib
+        conn = bus if bus is not None else Gio.bus_get_sync(
+            Gio.BusType.SYSTEM, None)
+        conn.call_sync(
+            _LOGIN1, _LOGIN1_PATH, _LOGIN1_MANAGER, method,
+            GLib.Variant('(b)', (False,)),
+            None, Gio.DBusCallFlags.NONE, 30000, None,
+        )
+        return True, ''
+    except Exception as error:
+        message = getattr(error, 'message', None) or str(error)
+        _log.warning('power %s failed: %s', action, message)
+        return False, message or f'{action} failed'
+
+
+def power_action_async(action: str,
+                       on_done: Callable[[bool, str], None] | None = None,
+                       bus=None) -> None:
+    """Run one power action off the GTK thread.
+
+    `on_done(ok, message)` fires exactly once on the main loop. Never raises.
+    """
+
+    def _worker() -> None:
+        from gi.repository import GLib
+        ok, message = power_action_sync(action, bus=bus)
+
+        def _deliver() -> bool:
+            if on_done is not None:
+                on_done(ok, message)
+            return False
+        GLib.idle_add(_deliver)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def theme_css(preset: ThemePreset) -> str:
     return f"""
+window.power-menu-window {{
+    background: alpha({preset.background}, 0.85);
+}}
 .power-menu-scrim {{
-    background: alpha({preset.background}, 0.72);
+    background: alpha({preset.background}, 0.85);
 }}
-.power-menu-btn {{
-    font-size: 18pt;
+.power-menu-row {{
+    font-size: 20pt;
     font-weight: 300;
-    min-height: 80px;
-    min-width: 260px;
-    border-radius: 8px;
-    border: 1.5px solid alpha({preset.foreground}, 0.12);
-    background: alpha({preset.surface}, 0.95);
     color: {preset.foreground};
-    padding: 0 24px;
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    min-height: 64px;
 }}
-.power-menu-btn:hover, .power-menu-btn:active {{
-    background: alpha({preset.surface_alt}, 0.95);
-    border-color: alpha({preset.accent}, 0.6);
+.power-menu-row:hover {{
+    background: alpha({preset.surface_alt}, 0.6);
+}}
+.power-menu-row.armed {{
+    color: {preset.accent};
+    background: alpha({preset.surface}, 0.6);
 }}
 .power-menu-cancel {{
+    font-size: 15pt;
     color: {preset.muted};
-    border-color: alpha({preset.foreground}, 0.06);
-    background: alpha({preset.background}, 0.95);
+    min-height: 56px;
 }}
 """
 
 
 class PowerMenu(Gtk.Window):
     """
-    Full-screen semi-transparent overlay with Power off / Restart / Cancel.
-    Triggered by long-pressing the power button (≥600ms).
+    Full-screen scrim with a text-first action list — Lock, Suspend,
+    Restart, Power off, Cancel — triggered by long-pressing the power
+    button (≥600ms) or the shade power entry. Restart and Power off arm on
+    the first tap and execute on the second within 3 s.
     """
 
-    def __init__(self, config: ShellConfig | None = None) -> None:
+    def __init__(self, config: ShellConfig | None = None,
+                 on_lock: Callable[[], None] | None = None) -> None:
         super().__init__()
         self.set_decorated(False)
         self.set_resizable(False)
+        self.add_css_class('power-menu-window')
 
         if _HAS_LAYER and LayerShell.is_supported():
             LayerShell.init_for_window(self)
@@ -74,6 +247,9 @@ class PowerMenu(Gtk.Window):
         # The shell window threads its LIVE config so hot reloads reach this
         # surface; the fallback keeps direct no-arg construction working.
         self._config = config if config is not None else ShellConfig()
+        self._on_lock = on_lock
+        self._confirm = ConfirmState()
+        self._confirm_timeout: int | None = None
         self._theme_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), self._theme_provider,
@@ -83,7 +259,11 @@ class PowerMenu(Gtk.Window):
 
         self.set_child(self._build())
 
-        # Tap outside the card → cancel
+        # Suspend shows until the login1 probe answers (anything but
+        # yes/challenge hides it); the probe never blocks the menu.
+        query_can_suspend_async(self._on_can_suspend)
+
+        # Tap outside the list → cancel
         click = Gtk.GestureClick.new()
         click.connect('released', self._on_scrim_tap)
         self.get_child().add_controller(click)
@@ -103,42 +283,72 @@ class PowerMenu(Gtk.Window):
     def _build(self) -> Gtk.Widget:
         scrim = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         scrim.add_css_class('power-menu-scrim')
+        scrim.set_hexpand(True)
+        scrim.set_vexpand(True)
         scrim.set_halign(Gtk.Align.FILL)
         scrim.set_valign(Gtk.Align.FILL)
 
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        card.set_halign(Gtk.Align.CENTER)
-        card.set_valign(Gtk.Align.CENTER)
-        card.set_margin_start(32)
-        card.set_margin_end(32)
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        rows.set_hexpand(True)
 
-        suspend_btn = Gtk.Button(label='Suspend')
-        suspend_btn.add_css_class('power-menu-btn')
-        suspend_btn.connect('clicked', lambda _: self._action('suspend'))
+        self._action_rows: dict[str, tuple[Gtk.Button, str]] = {}
 
-        lock_btn = Gtk.Button(label='Log out')
-        lock_btn.add_css_class('power-menu-btn')
-        lock_btn.connect('clicked', lambda _: self._logout())
+        def _row(label: str, action: str | None,
+                 on_clicked, extra_class: str | None = None) -> Gtk.Button:
+            btn = Gtk.Button(label=label)
+            btn.add_css_class('power-menu-row')
+            if extra_class is not None:
+                btn.add_css_class(extra_class)
+            btn.set_hexpand(True)
+            btn.connect('clicked', on_clicked)
+            if action is not None:
+                self._action_rows[action] = (btn, label)
+            return btn
 
-        restart_btn = Gtk.Button(label='Restart')
-        restart_btn.add_css_class('power-menu-btn')
-        restart_btn.connect('clicked', lambda _: self._action('reboot'))
+        self._lock_row = _row('Lock', None, lambda _: self._lock())
+        self._suspend_row = _row(
+            'Suspend', None, lambda _: self._execute('suspend'))
+        self._restart_row = _row(
+            'Restart', 'reboot', lambda _: self._on_danger_tap('reboot'))
+        self._poweroff_row = _row(
+            'Power off', 'poweroff',
+            lambda _: self._on_danger_tap('poweroff'))
+        self._cancel_row = _row(
+            'Cancel', None, lambda _: self._dismiss(), 'power-menu-cancel')
 
-        poweroff_btn = Gtk.Button(label='Power off')
-        poweroff_btn.add_css_class('power-menu-btn')
-        poweroff_btn.connect('clicked', lambda _: self._action('poweroff'))
+        rows.append(self._lock_row)
+        rows.append(self._suspend_row)
+        rows.append(self._restart_row)
+        rows.append(self._poweroff_row)
+        rows.append(self._cancel_row)
 
-        cancel_btn = Gtk.Button(label='Cancel')
-        cancel_btn.add_css_class('power-menu-btn')
-        cancel_btn.add_css_class('power-menu-cancel')
-        cancel_btn.connect('clicked', lambda _: self._dismiss())
+        # The list fills the width with 24 px margins, capped at ~420 px and
+        # centered on wider screens — no min-width (it measured 374 px total
+        # on a 360 px screen).
+        clamp = Adw.Clamp(maximum_size=420)
+        clamp.set_child(rows)
+        clamp.set_hexpand(True)
+        clamp.set_margin_start(24)
+        clamp.set_margin_end(24)
 
-        card.append(suspend_btn)
-        card.append(lock_btn)
-        card.append(restart_btn)
-        card.append(poweroff_btn)
-        card.append(cancel_btn)
-        scrim.append(card)
+        # The scrolled middle shrinks instead of clipping: a short screen
+        # scrolls the list while the gaps collapse to nothing.
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_child(clamp)
+        scroll.set_hexpand(True)
+        scroll.set_vexpand(False)
+        scroll.set_valign(Gtk.Align.CENTER)
+
+        top_gap = Gtk.Box()
+        top_gap.set_vexpand(True)
+        bottom_gap = Gtk.Box()
+        bottom_gap.set_vexpand(True)
+
+        scrim.append(top_gap)
+        scrim.append(scroll)
+        scrim.append(bottom_gap)
+        self._scroll = scroll
         return scrim
 
     def show_menu(self) -> None:
@@ -146,32 +356,104 @@ class PowerMenu(Gtk.Window):
         self.present()
 
     def _dismiss(self) -> None:
+        self._clear_confirm_timeout()
+        self._confirm.reset()
+        self._restore_rows()
         self.set_visible(False)
 
-    def _action(self, cmd: str) -> None:
+    def _lock(self) -> None:
         self._dismiss()
+        # Explicit "Lock now": Smart Lock must demand the PIN at the next
+        # lock even inside trust, until a successful PIN unlock clears it.
         try:
-            subprocess.Popen(['systemctl', cmd], close_fds=True)
-        except FileNotFoundError:
+            from smart_lock import note_explicit_lock
+            note_explicit_lock()
+        except Exception:
             pass
+        if self._on_lock is not None:
+            try:
+                self._on_lock()
+            except Exception as error:
+                _log.warning('power lock failed: %s', error)
 
-    def _logout(self) -> None:
-        # Quitting the shell ends the phoc session (phoc -E child exits),
-        # returning to the display manager — the shell's "log out".
+    def _on_danger_tap(self, action: str) -> None:
+        if self._confirm.tap(action):
+            self._clear_confirm_timeout()
+            self._restore_rows()
+            self._execute(action)
+            return
+        self._show_armed(action)
+        self._restart_confirm_timeout(action)
+
+    def _show_armed(self, action: str) -> None:
+        for name, (btn, label) in self._action_rows.items():
+            if name == action:
+                btn.set_label(confirm_label(name))
+                btn.add_css_class('armed')
+            else:
+                btn.set_label(label)
+                btn.remove_css_class('armed')
+
+    def _restore_rows(self) -> None:
+        for btn, label in self._action_rows.values():
+            btn.set_label(label)
+            btn.remove_css_class('armed')
+
+    def _restart_confirm_timeout(self, action: str) -> None:
+        from gi.repository import GLib
+        self._clear_confirm_timeout()
+        self._confirm_timeout = GLib.timeout_add_seconds(
+            CONFIRM_TIMEOUT_S, self._on_confirm_expired, action)
+
+    def _clear_confirm_timeout(self) -> None:
+        if self._confirm_timeout is not None:
+            from gi.repository import GLib
+            GLib.source_remove(self._confirm_timeout)
+            self._confirm_timeout = None
+
+    def _on_confirm_expired(self, action: str) -> bool:
+        self._confirm_timeout = None
+        if self._confirm.pending == action:
+            self._confirm.reset()
+            self._restore_rows()
+        return False
+
+    def _on_can_suspend(self, can_suspend: str | None) -> None:
+        self._suspend_row.set_visible(
+            'suspend' in visible_power_rows(can_suspend))
+
+    def _execute(self, cmd: str) -> None:
         self._dismiss()
-        app = self.get_application()
-        if app is not None:
-            app.quit()
+        power_action_async(cmd, on_done=self._on_power_result)
+
+    def _on_power_result(self, ok: bool, message: str) -> None:
+        if ok:
+            return
+        detail = message or 'Power action failed.'
+        self._show_status(f'Power action failed: {detail}')
+
+    def _show_status(self, message: str) -> None:
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            modal=True,
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.CLOSE,
+            text='Power action failed',
+            secondary_text=message,
+        )
+        dialog.connect('response', lambda dlg, _resp: dlg.destroy())
+        dialog.present()
 
     def _on_scrim_tap(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
-        # Dismiss if tap lands outside the card widget
-        card = self.get_child().get_first_child()
-        alloc = card.get_allocation()
-        scrim_alloc = self.get_child().get_allocation()
-        # card is centered — compute its bounding box relative to scrim
-        card_x = (scrim_alloc.width - alloc.width) / 2
-        card_y = (scrim_alloc.height - alloc.height) / 2
-        if not (card_x <= x <= card_x + alloc.width and card_y <= y <= card_y + alloc.height):
+        # Dismiss if the tap lands outside the list: the scrolled middle is
+        # a direct child of the scrim, so its allocation and the gesture
+        # coordinates share the same frame.
+        scroll = getattr(self, '_scroll', None)
+        if scroll is None:
+            return
+        alloc = scroll.get_allocation()
+        if not (alloc.x <= x <= alloc.x + alloc.width
+                and alloc.y <= y <= alloc.y + alloc.height):
             self._dismiss()
 
     def _on_key(self, _ctrl: Gtk.EventControllerKey, keyval: int, _code: int, _state: object) -> bool:

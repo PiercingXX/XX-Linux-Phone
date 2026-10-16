@@ -80,6 +80,67 @@ class FakeStack:
         self.visible = name
 
 
+class FakeToggle:
+    def __init__(self):
+        self.active = False
+
+    def set_active(self, value):
+        self.active = bool(value)
+
+    def get_active(self):
+        return self.active
+
+
+class FakeBox:
+    def __init__(self):
+        self.visible = False
+
+    def set_visible(self, value):
+        self.visible = bool(value)
+
+
+class FakeRinger:
+    def __init__(self):
+        self.calls = []
+
+    def start(self):
+        self.calls.append('start')
+
+    def stop(self):
+        self.calls.append('stop')
+
+    def silence(self):
+        self.calls.append('silence')
+
+
+class FakeAudio:
+    def __init__(self):
+        self.calls = []
+
+    def enter_call(self):
+        self.calls.append('enter')
+
+    def exit_call(self):
+        self.calls.append('exit')
+
+    def set_speaker(self, enabled):
+        self.calls.append(('speaker', enabled))
+
+    def set_mic_mute(self, muted):
+        self.calls.append(('mute', muted))
+
+
+class FakeProximity:
+    def __init__(self):
+        self.calls = []
+
+    def start(self, display_mgr, surface):
+        self.calls.append('start')
+
+    def stop(self):
+        self.calls.append('stop')
+
+
 def _make_call_ui(accept_fn=None, hangup_fn=None):
     ui = call_ui.CallUI.__new__(call_ui.CallUI)
     ui._events = []
@@ -88,17 +149,47 @@ def _make_call_ui(accept_fn=None, hangup_fn=None):
     ui._on_hangup = lambda: ui._events.append('hangup')
     ui._accept_fn = accept_fn or (lambda path, done: done(True, None))
     ui._hangup_fn = hangup_fn or (lambda path, done: done(True, None))
+    ui._hold_accept_fn = lambda modem, done: done(True, None)
+    ui._dtmf_fn = lambda path, digit, done: done(True, None)
     ui._incoming_call_path = '/org/freedesktop/ModemManager1/Call/3'
+    ui._incoming_path = '/org/freedesktop/ModemManager1/Call/3'
+    ui._primary_path = '/org/freedesktop/ModemManager1/Call/3'
+    ui._waiting_path = None
+    ui._action_path = None
     ui._pending_action = None
+    ui._surface_live = True
+    ui._minimized = False
+    ui._presented_page = None
+    ui._presented_path = None
+    ui._live_snapshot = []
     ui._current_caller = 'Incoming call'
     ui._current_number = '+15550001111'
+    ui._muted = False
+    ui._speakerphone = False
+    ui._timed_path = None
+    ui._call_start_mono = None
+    ui._close_src = None
+    ui._close_btns = []
+    ui._bar = None
+    ui._display_mgr = None
+    ui._ringer = FakeRinger()
+    ui._audio = FakeAudio()
+    ui._proximity = FakeProximity()
     ui._inc_caller = FakeLabel()
     ui._inc_number = FakeLabel()
+    ui._out_caller = FakeLabel()
+    ui._out_number = FakeLabel()
     ui._act_caller = FakeLabel()
     ui._act_number = FakeLabel()
+    ui._act_timer = FakeLabel('0:00')
+    ui._mute_btn = FakeToggle()
+    ui._speaker_btn = FakeToggle()
+    ui._keypad_btn = FakeToggle()
+    ui._keypad_grid = FakeBox()
+    ui._waiting_box = FakeBox()
+    ui._waiting_label = FakeLabel()
     ui._stack = FakeStack()
     ui._timer_id = None
-    ui._call_start = None
     ui.presented = 0
     ui.hidden = 0
     ui.present = lambda: setattr(ui, 'presented', ui.presented + 1)
@@ -177,13 +268,14 @@ class TestAcceptFlow:
         assert ui._incoming_call_path == '/org/freedesktop/ModemManager1/Call/9'
         assert ui._inc_caller.get_text() == '+15550002222'
 
-    def test_accept_failure_stays_incoming_and_logs(self, caplog):
+    def test_accept_failure_closes_surface_and_logs(self, caplog):
         ui = _make_call_ui(accept_fn=lambda p, done: done(False, 'mm1 timed out'))
         ui.show_incoming('Mom', '+15550001111', '/org/freedesktop/ModemManager1/Call/3')
         with caplog.at_level(logging.WARNING):
             ui._on_accept_clicked(None)
         assert 'accept' not in ui._events
-        assert ui._stack.visible == 'incoming'
+        assert ui.hidden == 1
+        assert ui._pending_action is None  # buttons responsive again
         assert any('accept' in r.getMessage() and 'mm1 timed out' in r.getMessage()
                    for r in caplog.records)
 
@@ -210,6 +302,7 @@ class TestAcceptFlow:
         dispatched = []
         ui = _make_call_ui(accept_fn=lambda p, done: dispatched.append(p))
         ui._incoming_call_path = None
+        ui._incoming_path = None
         with caplog.at_level(logging.WARNING):
             ui._on_accept_clicked(None)
         assert dispatched == []
@@ -238,13 +331,13 @@ class TestDeclineFlow:
         assert ui.hidden == 1
         assert ui._incoming_call_path is None
 
-    def test_decline_failure_keeps_surface_and_logs(self, caplog):
+    def test_decline_failure_closes_surface_and_logs(self, caplog):
         ui = _make_call_ui(hangup_fn=lambda p, done: done(False, 'No such object'))
         with caplog.at_level(logging.WARNING):
             ui._on_decline_clicked(None)
         assert ui._events == []
-        assert ui.hidden == 0
-        assert ui._incoming_call_path == '/org/freedesktop/ModemManager1/Call/3'
+        assert ui.hidden == 1
+        assert ui._pending_action is None  # buttons responsive again
         assert any('decline' in r.getMessage() and 'No such object' in r.getMessage()
                    for r in caplog.records)
 
@@ -262,12 +355,13 @@ class TestHangupFlow:
         assert ui.hidden == 1
         assert ui._incoming_call_path is None
 
-    def test_hangup_failure_stays_active_and_logs(self, caplog):
+    def test_hangup_failure_closes_surface_and_logs(self, caplog):
         ui = _make_call_ui(hangup_fn=lambda p, done: done(False, 'call stuck'))
         with caplog.at_level(logging.WARNING):
             ui._on_hangup_clicked(None)
         assert ui._events == []
-        assert ui.hidden == 0
+        assert ui.hidden == 1
+        assert ui._pending_action is None  # buttons responsive again
         assert any('hang up' in r.getMessage() and 'call stuck' in r.getMessage()
                    for r in caplog.records)
 

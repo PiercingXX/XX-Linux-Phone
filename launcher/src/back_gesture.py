@@ -72,10 +72,14 @@ class _ArrowOverlay(Gtk.Window):
 
         self.set_default_size(76, 64)
 
-        css = Gtk.CssProvider()
-        css.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
+        # Registered once; apply_theme() reloads this same provider so hot
+        # reloads never stack a new display provider per call.
+        self._theme_provider = Gtk.CssProvider()
+        self._theme_provider.load_from_data(
+            theme_css(self._display_preset()).encode('utf-8'))
         Gtk.StyleContext.add_provider_for_display(
-            self.get_display(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+            self.get_display(), self._theme_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
         win_css = Gtk.CssProvider()
@@ -92,7 +96,34 @@ class _ArrowOverlay(Gtk.Window):
         box.append(label)
         self.set_child(box)
 
+        # The edge strip spans the full screen height while visible; drop
+        # the input region so it never swallows touches meant for apps.
+        self.connect('realize', self._on_realize)
+
         self.set_opacity(0.0)
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        """Reload this overlay's display-level sheet. The shell window
+        passes the freshly resolved preset on hot-reload fan-out;
+        standalone falls back to the injected config's own preset."""
+        data = theme_css(
+            preset if preset is not None else self._display_preset())
+        self._theme_provider.load_from_data(data.encode('utf-8'))
+
+    def _on_realize(self, _widget) -> None:
+        self._drop_input()
+
+    def _drop_input(self) -> None:
+        """Empty input region so the transparent overlay never swallows
+        touches. Without cairo there is nothing smaller to fall back to —
+        the window is already anchored to a single edge."""
+        try:
+            import cairo
+        except ImportError:
+            return
+        surface = self.get_surface()
+        if surface is not None:
+            surface.set_input_region(cairo.Region())
 
     def _display_preset(self) -> ThemePreset:
         """Preset this overlay renders with: window.resolve_theme over the
@@ -150,3 +181,8 @@ class BackGestureLayer:
     def flash_back(self, from_left: bool = True) -> None:
         arrow = self._left_arrow if from_left else self._right_arrow
         arrow.flash()
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        """Reload both arrows' sheets (hot-reload fan-out)."""
+        self._left_arrow.apply_theme(preset)
+        self._right_arrow.apply_theme(preset)

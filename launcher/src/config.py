@@ -78,7 +78,8 @@ DEFAULT_CONFIG = {
     'pinned': [],
     'hidden_apps': [],
     'prefer_dark': True,
-    'auto_lock_timeout': 120,
+    'auto_lock_timeout': 0,
+    'display_blank_timeout': 60,
     'text_size_scale': 1.0,
     'home_alignment': 'center',
     'update_script': '~/.scripts/PiercingXX-Settings-Menu/update-system.sh',
@@ -91,6 +92,11 @@ DEFAULT_CONFIG = {
     'app_labels': {},
     'muted_apps': {},
     'lock_screen_notifications': 'summary',
+    'lock_screen_medical_id': True,
+    'medical_id': {},
+    'smart_lock_bt_devices': [],
+    'smart_lock_wifi_ssids': [],
+    'smart_lock_last_pin_time': 0.0,
     'dnd_enabled': False,
     'dnd_schedules': [],
     'dnd_starred_numbers': [],
@@ -98,8 +104,20 @@ DEFAULT_CONFIG = {
     'focus_apps': [],
     'focus_schedules': [],
     'focus_break_until': 0.0,
+    'app_standby_minutes': 10,
+    'standby_exempt': [],
+    'battery_saver': False,
+    'battery_saver_auto': True,
+    'battery_saver_auto_pct': 15,
+    'privacy_indicators': True,
+    'network_denied_apps': [],
     'sound_ringtone': True,
     'sound_notifications': True,
+    'record_audio': False,
+    'usage_stats_enabled': True,
+    'charge_limit': None,
+    'app_time_limits': {},
+    'app_limit_ignored': {},
     'widgets': {
         'time': {'enabled': True, 'order': 1, 'tap': 'default'},
         'date': {'enabled': True, 'order': 2, 'tap': 'default'},
@@ -108,11 +126,59 @@ DEFAULT_CONFIG = {
     },
     'weather_lat': None,
     'weather_lon': None,
+    'weather_location': '',
+    'xxdb_enabled': False,
+    'xxdb_persistent': False,
 }
 
 # Free-form string keys (docs/config.md); a container value here would
 # crash set_text() consumers when the settings page is built.
-_STRING_KEYS = ('apn', 'apn_user', 'apn_pass')
+_STRING_KEYS = ('apn', 'apn_user', 'apn_pass', 'weather_location')
+
+# Escalating-lockout resume point (fail count + wall-clock lockout-until).
+# Private device-local state: kept out of backups and restores.
+_LOCKOUT_STATE_KEY = 'lock_screen_lockout'
+
+# Medical ID fields (docs/config.md): every value is optional; unknown
+# keys are dropped by sanitize_medical_id, bad types ignored, never crash.
+_MEDICAL_ID_STRING_KEYS = (
+    'name', 'date_of_birth', 'blood_type', 'allergies',
+    'medications', 'conditions', 'notes',
+)
+_MEDICAL_ID_CONTACT_KEYS = ('name', 'number', 'relation')
+
+
+def sanitize_medical_id(raw: object) -> dict:
+    """Validated Medical ID: known string fields kept only when strings,
+    organ_donor only when a bool, emergency_contacts only well-formed
+    entries. Bad types are dropped, never raised — the same fail-soft
+    rule as the container-key guards in load(). Pure."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for key in _MEDICAL_ID_STRING_KEYS:
+        value = raw.get(key)
+        if isinstance(value, str):
+            out[key] = value
+    donor = raw.get('organ_donor')
+    if isinstance(donor, bool):
+        out['organ_donor'] = donor
+    contacts = raw.get('emergency_contacts')
+    if isinstance(contacts, list):
+        clean: list[dict] = []
+        for entry in contacts:
+            if not isinstance(entry, dict):
+                continue
+            contact = {}
+            for key in _MEDICAL_ID_CONTACT_KEYS:
+                value = entry.get(key)
+                if isinstance(value, str):
+                    contact[key] = value
+            # A row with neither a name nor a number dials nothing.
+            if contact.get('name') or contact.get('number'):
+                clean.append(contact)
+        out['emergency_contacts'] = clean
+    return out
 
 
 class ShellConfig:
@@ -284,6 +350,46 @@ class ShellConfig:
         self.save()
 
     @property
+    def display_blank_timeout(self) -> int:
+        val = self.data.get('display_blank_timeout',
+                            DEFAULT_CONFIG['display_blank_timeout'])
+        try:
+            return max(0, int(val))
+        except (TypeError, ValueError):
+            return int(DEFAULT_CONFIG['display_blank_timeout'])
+
+    def set_display_blank_timeout(self, seconds: int) -> None:
+        self.data['display_blank_timeout'] = max(0, seconds)
+        self.save()
+
+    def get_lockout_state(self) -> tuple[int, float]:
+        """Escalating-lockout resume point: (wrong-attempt count,
+        lockout-until wall-clock epoch). Private device-local state —
+        never backed up, never restored — so a shell restart cannot
+        reset the escalation. Corrupt values fail open to (0, 0.0)."""
+        raw = self.data.get(_LOCKOUT_STATE_KEY)
+        if not isinstance(raw, dict):
+            return (0, 0.0)
+        try:
+            fails = max(0, int(raw.get('fails', 0)))
+            until = max(0.0, float(raw.get('until', 0.0)))
+        except (TypeError, ValueError):
+            return (0, 0.0)
+        return (fails, until)
+
+    def set_lockout_state(self, fails: int, until: float) -> None:
+        self.data[_LOCKOUT_STATE_KEY] = {
+            'fails': max(0, int(fails)),
+            'until': max(0.0, float(until)),
+        }
+        self.save()
+
+    def clear_lockout_state(self) -> None:
+        if _LOCKOUT_STATE_KEY in self.data:
+            del self.data[_LOCKOUT_STATE_KEY]
+            self.save()
+
+    @property
     def hidden_apps(self) -> list[str]:
         val = self.data.get('hidden_apps', [])
         if isinstance(val, list):
@@ -355,11 +461,32 @@ class ShellConfig:
                 continue
         return out
 
+    # eMMC wear: launch counts accumulate in memory and reach flash at
+    # most once per minute, plus once on shutdown (see flush_launch_counts).
+    _LAUNCH_FLUSH_SECONDS = 60.0
+
     def record_launch(self, app_id: str) -> None:
+        import time
         counts = self.launch_counts
         counts[app_id] = counts.get(app_id, 0) + 1
         self.data['launch_counts'] = counts
+        now = time.monotonic()
+        last = getattr(self, '_last_launch_flush', None)
+        if last is None or now - last >= self._LAUNCH_FLUSH_SECONDS:
+            self.save()
+            self._last_launch_flush = now
+        else:
+            self._launch_dirty = True
+
+    def flush_launch_counts(self) -> None:
+        """Write pending launch counts to flash. Called on shutdown; a no-op
+        when nothing was recorded since the last flush."""
+        import time
+        if not getattr(self, '_launch_dirty', False):
+            return
+        self._launch_dirty = False
         self.save()
+        self._last_launch_flush = time.monotonic()
 
     @property
     def default_layout_applied(self) -> bool:
@@ -458,12 +585,159 @@ class ShellConfig:
         return val if val in ('summary', 'count', 'off') else 'summary'
 
     @property
+    def medical_id(self) -> dict:
+        """Validated Medical ID (docs/config.md): all fields optional,
+        bad types dropped by sanitize_medical_id, never crash."""
+        return sanitize_medical_id(self.data.get('medical_id'))
+
+    def set_medical_id(self, medical: dict) -> None:
+        self.data['medical_id'] = sanitize_medical_id(medical)
+        self.save()
+
+    @property
+    def lock_screen_medical_id(self) -> bool:
+        """Medical info visible from the lock screen. Default true; a
+        corrupt non-bool value fails open to visible — and emergency
+        calling itself can never be disabled by this flag."""
+        value = self.data.get('lock_screen_medical_id', True)
+        return value if isinstance(value, bool) else True
+
+    def set_lock_screen_medical_id(self, enabled: bool) -> None:
+        self.data['lock_screen_medical_id'] = bool(enabled)
+        self.save()
+
+    @property
+    def smart_lock_bt_devices(self) -> list[str]:
+        """Trusted Bluetooth addresses for Smart Lock (docs/config.md):
+        upper-cased, opt-in, empty by default."""
+        from smart_lock import sanitize_bt_devices
+        return sanitize_bt_devices(self.data.get('smart_lock_bt_devices'))
+
+    def set_smart_lock_bt_devices(self, addresses: list[str]) -> None:
+        from smart_lock import sanitize_bt_devices
+        self.data['smart_lock_bt_devices'] = sanitize_bt_devices(addresses)
+        self.save()
+
+    @property
+    def smart_lock_wifi_ssids(self) -> list[str]:
+        """Trusted Wi-Fi SSIDs for Smart Lock: verbatim, opt-in, empty."""
+        from smart_lock import sanitize_ssids
+        return sanitize_ssids(self.data.get('smart_lock_wifi_ssids'))
+
+    def set_smart_lock_wifi_ssids(self, ssids: list[str]) -> None:
+        from smart_lock import sanitize_ssids
+        self.data['smart_lock_wifi_ssids'] = sanitize_ssids(ssids)
+        self.save()
+
+    @property
+    def smart_lock_last_pin_time(self) -> float:
+        """Wall-clock epoch of the last successful PIN unlock (Smart Lock
+        4-hour clock). Device-local transient like the lockout resume
+        point: never backed up, never restored. Corrupt values read as
+        never, which fails closed to PIN-required."""
+        try:
+            return max(0.0, float(self.data.get('smart_lock_last_pin_time', 0.0)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def record_smart_lock_pin_time(self, timestamp: float) -> None:
+        self.data['smart_lock_last_pin_time'] = max(0.0, float(timestamp))
+        self.save()
+
+    @property
     def sound_ringtone(self) -> bool:
         return bool(self.data.get('sound_ringtone', True))
 
     @property
     def sound_notifications(self) -> bool:
         return bool(self.data.get('sound_notifications', True))
+
+    @property
+    def record_audio(self) -> bool:
+        return bool(self.data.get(
+            'record_audio', DEFAULT_CONFIG['record_audio']))
+
+    def set_record_audio(self, enabled: bool) -> None:
+        self.data['record_audio'] = bool(enabled)
+        self.save()
+
+    @property
+    def usage_stats_enabled(self) -> bool:
+        return bool(self.data.get(
+            'usage_stats_enabled', DEFAULT_CONFIG['usage_stats_enabled']))
+
+    def set_usage_stats_enabled(self, enabled: bool) -> None:
+        self.data['usage_stats_enabled'] = bool(enabled)
+        self.save()
+
+    @property
+    def charge_limit(self) -> int | None:
+        """Charge-limit choice in percent, None when Off (docs/config.md):
+        an int outside 50..100 reads as Off rather than crashing."""
+        value = self.data.get('charge_limit', None)
+        if value is None:
+            return None
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if 50 <= number <= 100 else None
+
+    def set_charge_limit(self, percent: int | None) -> None:
+        if percent is None:
+            self.data['charge_limit'] = None
+        else:
+            try:
+                number = int(percent)
+            except (TypeError, ValueError):
+                number = 100
+            self.data['charge_limit'] = max(50, min(100, number))
+        self.save()
+
+    @property
+    def app_time_limits(self) -> dict:
+        """Per-app daily screen-time limits in minutes (docs/config.md):
+        {app_id: minutes}; bad shapes read as no limits, never crash."""
+        raw = self.data.get('app_time_limits', {})
+        if not isinstance(raw, dict):
+            return {}
+        out: dict = {}
+        for key, value in raw.items():
+            try:
+                minutes = int(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            if isinstance(key, str) and key and minutes > 0:
+                out[key] = minutes
+        return out
+
+    def set_app_time_limit(self, app_id: str, minutes: int) -> None:
+        limits = self.app_time_limits
+        if minutes <= 0:
+            limits.pop(app_id, None)
+        else:
+            limits[app_id] = int(minutes)
+        self.data['app_time_limits'] = limits
+        self.save()
+
+    @property
+    def app_limit_ignored(self) -> dict:
+        """{app_id: 'YYYY-MM-DD'} the limit was ignored for (docs/config.md):
+        only today's rows matter; bad shapes read as none, never crash."""
+        raw = self.data.get('app_limit_ignored', {})
+        if not isinstance(raw, dict):
+            return {}
+        return {k: v for k, v in raw.items()
+                if isinstance(k, str) and isinstance(v, str) and v}
+
+    def set_app_limit_ignored(self, app_id: str, day: str | None) -> None:
+        ignored = self.app_limit_ignored
+        if day is None:
+            ignored.pop(app_id, None)
+        else:
+            ignored[app_id] = str(day)
+        self.data['app_limit_ignored'] = ignored
+        self.save()
 
     @property
     def search_auto_launch(self) -> bool:
@@ -523,6 +797,108 @@ class ShellConfig:
     def custom_background(self) -> str | None:
         val = self.data.get('custom_background')
         return str(val) if val else None
+
+    @property
+    def app_standby_minutes(self) -> int:
+        try:
+            return max(0, int(self.data.get(
+                'app_standby_minutes',
+                DEFAULT_CONFIG['app_standby_minutes'])))
+        except (TypeError, ValueError):
+            return int(DEFAULT_CONFIG['app_standby_minutes'])
+
+    def set_app_standby_minutes(self, minutes: int) -> None:
+        try:
+            self.data['app_standby_minutes'] = max(0, int(minutes))
+        except (TypeError, ValueError):
+            return
+        self.save()
+
+    @property
+    def standby_exempt(self) -> list[str]:
+        val = self.data.get('standby_exempt', [])
+        if isinstance(val, list):
+            return [str(x) for x in val]
+        return []
+
+    def set_standby_exempt(self, app_ids: list[str]) -> None:
+        self.data['standby_exempt'] = [str(x) for x in app_ids]
+        self.save()
+
+    @property
+    def battery_saver(self) -> bool:
+        return bool(self.data.get(
+            'battery_saver', DEFAULT_CONFIG['battery_saver']))
+
+    def set_battery_saver(self, enabled: bool) -> None:
+        self.data['battery_saver'] = bool(enabled)
+        self.save()
+
+    @property
+    def battery_saver_auto(self) -> bool:
+        return bool(self.data.get(
+            'battery_saver_auto', DEFAULT_CONFIG['battery_saver_auto']))
+
+    def set_battery_saver_auto(self, enabled: bool) -> None:
+        self.data['battery_saver_auto'] = bool(enabled)
+        self.save()
+
+    @property
+    def battery_saver_auto_pct(self) -> int:
+        """Auto-saver battery percent (docs/config.md): clamped 1..100,
+        corrupt values fail to the compiled-in default."""
+        try:
+            from app_standby import SAVER_AUTO_BATTERY_PCT
+        except ImportError:
+            SAVER_AUTO_BATTERY_PCT = 15
+        try:
+            return max(1, min(100, int(self.data.get(
+                'battery_saver_auto_pct', SAVER_AUTO_BATTERY_PCT))))
+        except (TypeError, ValueError):
+            return SAVER_AUTO_BATTERY_PCT
+
+    def set_battery_saver_auto_pct(self, pct: int) -> None:
+        try:
+            self.data['battery_saver_auto_pct'] = max(1, min(100, int(pct)))
+        except (TypeError, ValueError):
+            return
+        self.save()
+
+    @property
+    def privacy_indicators(self) -> bool:
+        """Mic/camera/location indicators on home and in the shade
+        (docs/config.md). Default on; corrupt values fail open to shown."""
+        value = self.data.get('privacy_indicators', True)
+        return value if isinstance(value, bool) else True
+
+    def set_privacy_indicators(self, enabled: bool) -> None:
+        self.data['privacy_indicators'] = bool(enabled)
+        self.save()
+
+    @property
+    def network_denied_apps(self) -> list[str]:
+        val = self.data.get('network_denied_apps', [])
+        if isinstance(val, list):
+            return [str(x) for x in val]
+        return []
+
+    def set_network_denied_apps(self, app_ids: list[str]) -> None:
+        self.data['network_denied_apps'] = [str(x) for x in app_ids]
+        self.save()
+
+    @property
+    def xxdb_enabled(self) -> bool:
+        return bool(self.data.get('xxdb_enabled', False))
+
+    @property
+    def xxdb_persistent(self) -> bool:
+        """Keep wireless debugging on across restarts. Default off: xxdb
+        turns itself off on every shell restart/reboot unless opted in."""
+        return bool(self.data.get('xxdb_persistent', False))
+
+    def set_xxdb_persistent(self, enabled: bool) -> None:
+        self.data['xxdb_persistent'] = bool(enabled)
+        self.save()
 
     def set_custom_background(self, color: str) -> bool:
         """Set custom background color. Returns True if valid."""

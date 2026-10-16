@@ -37,14 +37,15 @@ migration steps are ever required.
 | `app_labels` | dict | `{}` | `{app_id: label}` renames; shown everywhere, searched alongside original names. |
 | `pinned` | list | `[]` | App ids surfaced first in the drawer browse list, in this order. |
 | `hidden_apps` | list | `[]` | App ids hidden from the drawer browse list (still searchable). |
-| `launch_counts` | dict | `{}` | Usage counters (recorded automatically; excluded from backups). |
+| `launch_counts` | dict | `{}` | Usage counters (recorded automatically; excluded from backups). Kept in memory and flushed to flash at most once per minute plus once on shutdown. |
 
 ### Widgets
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `widgets` | dict | all enabled | Per-widget `{enabled, order, tap}` for `time`, `date`, `weather`, `battery`. `tap` ∈ `"default"`, `"none"`, `"refresh"`, or `{"app": "<app_id>"}`. Defaults: order time→date→weather→battery; weather tap `refresh`. The clock also keeps double-tap-to-lock. |
-| `weather_lat` / `weather_lon` | float\|null | `null` | Coordinates for the weather widget (Open-Meteo, no API key). Unset → the widget shows `--°`. |
+| `weather_lat` / `weather_lon` | float\|null | `null` | Coordinates for the weather widget (Open-Meteo, no API key). Explicit floats win over `weather_location`. Unset → the weather line is hidden (never a `--°` placeholder). |
+| `weather_location` | string | `""` | Location for the weather widget as `lat,lon` (e.g. `"48.85,2.35"`), used when `weather_lat`/`weather_lon` are unset. Anything else is ignored. |
 
 ### Drawer & search
 
@@ -61,6 +62,20 @@ migration steps are ever required.
 | `sound_notifications` | bool | `true` | Play `notify.wav` on notifications (DnD, mutes, and `suppress-sound` still win). |
 | `muted_apps` | dict | `{}` | `{app_id: until_epoch}` from "Disable for…" — notifications are discarded until the deadline. Expires silently; excluded from backups. |
 | `lock_screen_notifications` | string | `"summary"` | `summary` (app + summary rows), `count`, or `off`. Hidden while DnD is active. |
+
+### Screen capture
+
+Power + Volume-down takes a screenshot (`grim`) to
+`~/Pictures/Screenshots/Screenshot_YYYY-MM-DD_HH-MM-SS.png` with a
+flash, a "Screenshot saved" notification (Share / Delete /
+Capture more for a scrolling stitch), and the "Record" quick-settings
+tile (expanded tier, hidden while `wf-recorder` is absent) records to
+`~/Videos/Screenrecordings/`. Recording stops on screen blank and at
+≤5% battery.
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `record_audio` | bool | `false` | Pass `--audio` to `wf-recorder` so screen recordings capture microphone audio. |
 
 ### Do Not Disturb
 
@@ -79,15 +94,169 @@ migration steps are ever required.
 | `focus_schedules` | list | `[]` | Same shape as `dnd_schedules`. |
 | `focus_break_until` | float | `0.0` | Break deadline (set by "Take a break" 5/10/15 min); transient, excluded from backups. |
 
+### Screen time
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `usage_stats_enabled` | bool | `true` | Record foreground seconds per app, unlocks, and notification counts (Settings → Screen time reads them back). While `false`, nothing is recorded and existing files are left alone. |
+| `app_time_limits` | dict | `{}` | Per-app daily screen-time limits in minutes (`{app_id: minutes}`); reaching one shows a banner and greys the app in the drawer until midnight. |
+| `app_limit_ignored` | dict | `{}` | `{app_id: "YYYY-MM-DD"}` the limit was ignored for ("Ignore for today"); only today's rows matter. |
+
+Counts accumulate only while the screen is on and unlocked. Storage is
+`~/.local/share/xx-wm/usage/YYYY-MM-DD.json` (atomic writes, mode 0600),
+flushed at most every 5 minutes and on blank/lock — never per event.
+Day files older than 35 days are pruned; day boundaries are local
+midnight, and a session spanning midnight splits across both days.
+Query API for the future UI lives in `launcher/src/usage_stats.py`
+(`daily_totals`, `week`, `unlocks`, `notifications`).
+
+### Emergency & Medical ID
+
+The lock screen always shows an **Emergency** text button (bottom, in every
+state — resting, keypad revealed, lockout). It opens an emergency surface
+without unlocking: a dial pad that only places calls to emergency numbers,
+one row per configured emergency contact (tap to call — explicitly allowed
+from the lock screen), and Medical info. Emergency numbers are the built-in
+list `112`, `911`, `999`, `000`, `08`, `110`, `118`, `119`, `100`, `101`,
+`102`, `108` plus the modem/SIM's own list when ModemManager exposes one;
+anything else typed on that pad is refused. Emergency calling itself cannot
+be disabled.
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `medical_id` | dict | `{}` | Medical ID shown read-only from Emergency → Medical info: `{name, date_of_birth, blood_type, allergies, medications, conditions, organ_donor (bool), notes, emergency_contacts: [{name, number, relation}]}`. Every field is optional; bad types are ignored, never crash. User data, not a secret: included in backup export/restore. |
+| `lock_screen_medical_id` | bool | `true` | Show Medical info on the lock screen. `false` hides it; emergency calling stays available. |
+
+### Smart Lock
+
+Android parity: while the phone sits in a trusted situation, swipe-up
+unlocks without the PIN. Both trust agents are opt-in and both lists are
+empty by default (Smart Lock off). On-body detection is **not**
+implemented — there is no reliable on-body sensor on this hardware.
+
+Trust agents:
+
+- A trusted Bluetooth device is currently connected (BlueZ
+  `org.bluez.Device1` `Connected` for an address in
+  `smart_lock_bt_devices`).
+- The phone is connected to a trusted Wi-Fi network (the active
+  NetworkManager connection's SSID is in `smart_lock_wifi_ssids`).
+
+Even inside trust, the PIN is always required: after boot until the
+first successful PIN unlock, when the last successful PIN unlock was
+more than 4 hours ago, after 5 failed attempts / while any lockout
+runs, and after tapping "Lock now" in the power menu (until the next
+successful PIN unlock). Trust never unlocks the phone on its own — a
+swipe is always required — and a trusted device that disconnects while
+unlocked never locks the phone; the next lock simply requires the PIN
+again. The lock screen shows a small muted line (`Kept unlocked by
+<device / network>`) while trust waives the keypad, and the PIN-required
+reason otherwise — but only while Smart Lock is configured.
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `smart_lock_bt_devices` | list | `[]` | Trusted Bluetooth addresses (`AA:BB:CC:DD:EE:FF`; matched case-insensitively). Included in backups. |
+| `smart_lock_wifi_ssids` | list | `[]` | Trusted Wi-Fi SSIDs (matched verbatim — SSIDs are case-sensitive). Included in backups. |
+| `smart_lock_last_pin_time` | float | `0.0` | Wall-clock epoch of the last successful PIN unlock (the 4-hour clock). Written automatically; device-local transient — never exported in backups and never overwritten by a restore. |
+
+### App standby & battery saver
+
+Android Doze / app-standby parity: apps the shell launches are placed in
+their own transient systemd user scope
+(`app-xxwm-<app id>-<pid>.scope`) and frozen when unused — thawed
+instantly on return (relaunch, switcher activation, notification tap, or
+any other toplevel activation). Only shell-launched apps are ever frozen;
+the shell, phoc, and everything else are never touched.
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `app_standby_minutes` | int | `10` | Idle minutes (screen on) before an unused app freezes; `0` disables standby entirely. |
+| `standby_exempt` | list | `[]` | App ids that are never frozen (compared without `.desktop`, case-insensitive). |
+| `battery_saver` | bool | `false` | Manual saver toggle (also the "Saver" quick-settings tile). Halves `app_standby_minutes` (floor 1), freezes 30 s after blank instead of 2 min, and pauses automatic weather/update checks (manual refresh still works). |
+| `battery_saver_auto` | bool | `true` | Turn the saver on automatically at low battery (see `battery_saver_auto_pct`); it stays on until the device is charging (or rises 5 points above the threshold). |
+| `battery_saver_auto_pct` | int | `15` | Battery percent that trips the automatic saver (standby settings card: 10/15/20/25). Clamped 1..100. |
+| `charge_limit` | int or null | `null` | Battery charge cap in percent (`null` = Off). Written through the root helper (50..100, clamped); the Settings → Charging control only appears when the battery driver exposes a charge-cap sysfs knob. |
+
+Per-app CPU time for Settings → Battery use is read from each app's own
+scope (`app-xxwm-<app id>-<pid>.scope` `cpu.stat` `usage_usec`) — the same
+scopes standby already places — combined with foreground screen time into
+an estimate labeled as such. There is no per-app power meter on Linux, so
+shares are honest approximations, not measurements.
+
+Always exempt regardless of timers: apps with an MPRIS player in Playing
+state, apps holding a live PipeWire stream, voice-call apps (GNOME Calls,
+xx-dialer, or whichever app currently owns `org.gnome.Calls`), the
+on-screen keyboard (squeekboard/stevia), and apps whose notification
+action was invoked in the last 60 s. On devices where systemd is not the
+user manager (OpenRC) there are no scopes: pids are recorded and freezing
+degrades to per-process SIGSTOP/SIGCONT.
+
+### Privacy indicators & per-app permissions
+
+Android/GrapheneOS parity for the three sensitive capabilities. The home
+status strip gains a `● mic · cam · loc` tail (only the kinds currently in
+use, in the theme accent color), and the same line sits at the right of
+the notification-shade header — tapping it there reveals which apps hold
+each kind. Text-first throughout: no dots-versus-icons, no colors outside
+the active preset.
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `network_denied_apps` | list | `[]` | App ids with no network access (compared without `.desktop`, case-insensitive, like `standby_exempt`). Enforced per launch by blocking the app's systemd scope cgroup through the root helper. |
+| `privacy_indicators` | bool | `true` | Mic/camera/location indicators on home and in the shade. While `false`, snapshots are dropped before they reach the UI; the "recently used" log (`~/.local/share/xx-wm/privacy-usage.json`, last 24 h) keeps recording. |
+
+Mic/camera detection reads the PipeWire graph (`pw-dump --monitor`, one
+long-lived child off the main thread, restarted with backoff; polling
+single-shot `pw-dump` every 3 s while the screen is on when the binary is
+absent). A `Stream/Input/Audio` (mic) or `Stream/Input/Video` (camera)
+node in state `running` counts as in-use, attributed by
+`pipewire.access.portal.app_id` / `application.id` / `application.name`
+(preferring the human name). Location users are the GeoClue2 clients
+holding a live fix, read from the shell's existing GeoClue agent state —
+no second agent is registered.
+
+Network enforcement ordering per launch is: place the pid in its scope,
+then `SetAppNetwork(scope_cgroup, False)` through the helper, then the
+app runs. The residual race is honest: the pid exists before its scope
+does, so packets sent between exec and the nft rule landing cannot be
+stopped from the shell — closing it would need exec interception (a
+helper fork), which does not exist yet. Scope names embed the pid, so the
+block is re-applied on every launch and never persists stale paths; the
+cgroup path is always verified against `/proc/<pid>/cgroup`, never
+assumed.
+
+Camera/microphone/location policy per app lives in the xdg-desktop-portal
+PermissionStore (`org.freedesktop.impl.portal.PermissionStore`, tables
+`devices` with ids `camera`, `microphone`, `speakers`, and `location`
+with id `location`; values `yes`/`no`, deleting resets to ask). This
+governs portal-mediated access only — Flatpak and portal-using apps.
+Native apps reach `/dev/video*` and PipeWire directly, bypassing the
+store entirely; for those the live indicators above are the control
+surface, not the store.
+
 ### System
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `auto_lock_timeout` | int | `120` | Idle seconds before the lock screen; `0` disables. |
+| `auto_lock_timeout` | int | `0` | Seconds the display must stay blanked (idle blank or power-key blank) before the lock screen shows; `0` locks immediately on blank. Old values keep working — they now count darkness, not shell-window idleness. Never locks while a call is non-terminated. |
+| `display_blank_timeout` | int | `60` | Idle seconds before the display blanks (backlight off); `0` never blanks. |
 | `pin_hash` | string | — | SHA-256 of the PIN (minimum 6 digits). Never exported in backups. |
+| `lock_screen_lockout` | dict | — | Private escalating-lockout resume point (`{fails, until}` wall-clock epoch), written automatically on wrong PINs and cleared on unlock. Survives shell restarts; never exported in backups and never overwritten by a restore. |
 | `apn` / `apn_user` / `apn_pass` | string | — | Mobile-data APN pushed to NetworkManager (Settings page owns these). |
 | `update_script` | string | PiercingXX menu path | Script run by "Update system". |
 | `update_last_check` / `update_snooze_until` | float | `0.0` | Daily update-check bookkeeping. |
+
+### Wireless debugging (xxdb)
+
+The phone-side daemon from the Settings page's Developer section. Off by
+default; enabling it is always an explicit user action (the switch). Keys
+and paired-host fingerprints live under `~/.local/share/xx-wm/xxdb/`
+(files are 0600).
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `xxdb_enabled` | bool | `false` | Whether wireless debugging is on. Written by the switch; reset to `false` on every shell restart/reboot unless `xxdb_persistent` is true. |
+| `xxdb_persistent` | bool | `false` | When true, an enabled daemon stays enabled across shell restarts/reboots. Even then it still turns itself off after 60 minutes with no connected client. |
 
 ## gestures.json
 
@@ -101,15 +270,21 @@ Four slots are system-level: lisgd fires them even while an app is
 focused. Their bindings are generated at session start from this file,
 and their value may be an IPC verb — `gesture.home`, `gesture.shade`,
 `gesture.back`, `gesture.keyboard`, or `gesture.switcher` (exactly the
-gesture commands the shell dispatches). Any other value keeps that slot's
-default verb; rebinding applies at the next session start.
+gesture commands the shell dispatches). Action names map to verbs via
+`ACTION_TO_VERB`: `home`→`gesture.home`,
+`app_switcher`→`gesture.switcher`,
+`notification_shade`→`gesture.shade`, `back`→`gesture.back`,
+`search`→`gesture.keyboard`. A valid action with no verb mapping
+(`launch:`, `camera`, `none`, …) keeps that slot's legacy `DEFAULT_VERBS`
+entry; a truly invalid value is ignored at load so the default action
+mapping applies instead. Rebinding applies at the next session start.
 
 | Gesture | Default | Notes |
 |---|---|---|
-| `swipe_down_top` | `notification_shade` | In-shell honors any action (`search` is the design's swipe-down choice); the lisgd binding defaults to `gesture.shade`. Verb-rebindable. |
-| `swipe_up_short` | `home` | System-level via lisgd → `gesture.keyboard` by default. Verb-rebindable. |
-| `swipe_up_long` | `app_switcher` | System-level via lisgd → `gesture.home` by default. Verb-rebindable. |
-| `swipe_left_edge` | `back` | System-level via lisgd → `gesture.back` by default, on both edges. Verb-rebindable. |
+| `swipe_down_top` | `notification_shade` | lisgd → `gesture.shade`. Verb-rebindable. |
+| `swipe_up_short` | `home` | lisgd → `gesture.home`. Verb-rebindable. |
+| `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. |
+| `swipe_left_edge` | `back` | lisgd → `gesture.back` on both edges. Verb-rebindable. |
 | `long_press_bottom` | `search` | |
 | `double_tap_home` | `lock_screen` | Kept on Linux deliberately. |
 | `long_press_home` | `settings` | The shell opens slot edit mode on this. |
@@ -122,6 +297,7 @@ default verb; rebinding applies at the next session start.
 ## Not in these files
 
 - Contacts: `~/.local/share/xx-wm/contacts.json` or GNOME Contacts VCF.
+- Usage statistics: `~/.local/share/xx-wm/usage/YYYY-MM-DD.json` (see Screen time above).
 - Weather cache: `~/.cache/xx-wm/weather.json` (safe to delete).
 - Logs: `~/.local/share/xx-wm/shell.log`.
 - Backups: versioned JSON via Settings → Backup; see `launcher/src/backup.py` for the exact scope.

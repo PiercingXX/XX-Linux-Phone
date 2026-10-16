@@ -245,7 +245,15 @@ class TestWiringChainReachesPanel:
         # with a stub lacking require_version before tests run, so re-install
         # the full fake here to make importing notification_shade's module-level
         # GTK code resolve in this test regardless of collection order.
+        saved_gi = {name: mod for name, mod in sys.modules.items()
+                    if name == 'gi' or name.startswith('gi.')}
         _install_fake_gi()
-        from notification_shade import NotificationShade
-        params = inspect.signature(NotificationShade.__init__).parameters
-        assert 'hud' in params
+        try:
+            from notification_shade import NotificationShade
+            params = inspect.signature(NotificationShade.__init__).parameters
+            assert 'hud' in params
+        finally:
+            for name in [name for name in sys.modules
+                         if name == 'gi' or name.startswith('gi.')]:
+                del sys.modules[name]
+            sys.modules.update(saved_gi)

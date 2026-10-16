@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 from typing import NamedTuple, Callable
 
@@ -9,8 +10,48 @@ import gi
 gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gio, Gtk
-from als_brightness import ALSBrightness
+from als_brightness import ALSBrightness, apply_backlight_pct
 from config import ShellConfig, ThemePreset
+
+
+def _spawn_worker_thread(target: Callable[[], None]):
+    """Run target off the GTK main thread; never raises.
+
+    Slow D-Bus probes and subprocess reads belong here. Results must come
+    back via _post_to_main — GTK widgets stay on the main thread.
+    """
+    try:
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        return thread
+    except Exception:
+        try:
+            target()
+        except Exception:
+            pass
+        return None
+
+
+def _post_to_main(callback: Callable, *args):
+    """Deliver callback results to the GTK main thread.
+
+    Falls back to a direct call when GLib.idle_add is unavailable, which
+    only happens under the headless test seams.
+    """
+    idle_add = getattr(GLib, 'idle_add', None)
+    if idle_add is None:
+        return callback(*args)
+    try:
+        idle_add(callback, *args)
+    except Exception:
+        pass
+
+
+_NM_PATH = '/org/freedesktop/NetworkManager'
+_NM_IFACE = 'org.freedesktop.NetworkManager'
+_BLUEZ_ADAPTER_PATH = '/org/bluez/hci0'
+_BLUEZ_ADAPTER_IFACE = 'org.bluez.Adapter1'
+_PROPS_IFACE = 'org.freedesktop.DBus.Properties'
 
 
 def theme_css(preset: ThemePreset) -> str:
@@ -20,28 +61,28 @@ def theme_css(preset: ThemePreset) -> str:
     color: {preset.foreground};
 }}
 .qa-tile {{
-    min-width: 80px;
-    min-height: 72px;
+    min-height: 64px;
     border-radius: 16px;
     background: {preset.surface};
     color: {preset.muted};
-    border: none;
+    border: 1px solid {preset.background};
     padding: 0;
 }}
 .qa-tile.active {{
-    background: {preset.accent};
-    color: {preset.background};
+    background: {preset.surface_alt};
+    color: {preset.foreground};
+    border: 1px solid {preset.accent};
 }}
 .qa-tile:hover {{
     background: {preset.surface_alt};
 }}
 .qa-tile.active:hover {{
-    background: mix({preset.accent}, {preset.background}, 0.85);
+    background: {preset.surface_alt};
+    border-color: {preset.accent};
 }}
 .tile-label {{
     font-size: 10pt;
     font-weight: 600;
-    letter-spacing: 0.05em;
 }}
 .tile-state {{
     font-size: 8pt;
@@ -51,7 +92,22 @@ def theme_css(preset: ThemePreset) -> str:
 .qa-slider-label {{
     font-size: 10pt;
     color: {preset.muted};
-    min-width: 60px;
+}}
+.shade-slider trough {{
+    background: {preset.surface_alt};
+    min-height: 6px;
+    border-radius: 3px;
+}}
+.shade-slider highlight {{
+    background: {preset.foreground};
+    border-radius: 3px;
+}}
+.shade-slider slider {{
+    background: {preset.foreground};
+    border: none;
+    border-radius: 999px;
+    min-width: 18px;
+    min-height: 18px;
 }}
 """
 
@@ -171,6 +227,136 @@ def _toggle_airplane(enabled: bool) -> None:
     _bluez_set(not enabled)
 
 
+def _get_airplane_state() -> bool | None:
+    """Airplane reads back ON only while both radios report disabled.
+
+    Either property unknown (service down) means unknown — never a guess.
+    Runs on a worker thread; callers must not invoke it on the main loop.
+    """
+    wifi = _nm_get('WirelessEnabled')
+    wwan = _nm_get('WwanEnabled')
+    if wifi is None or wwan is None:
+        return None
+    return (not wifi) and (not wwan)
+
+
+def format_tile_state(key: str, active: bool, detail: str | None = None) -> str:
+    """Second-line text under a tile label: the connected SSID / BT device
+    while on, plain On/Off otherwise."""
+    if not active:
+        return 'Off'
+    if key in ('wifi', 'bt') and detail:
+        return detail
+    return 'On'
+
+
+_TILE_SETTINGS_SECTIONS = {
+    'wifi': 'wifi',
+    'bt': 'bluetooth',
+    'data': 'mobile',
+    'airplane': 'mobile',
+}
+
+
+def tile_settings_section(key: str) -> str | None:
+    """Settings page section a tile long-press opens (None = top of page)."""
+    return _TILE_SETTINGS_SECTIONS.get(key)
+
+
+def _has_backlight() -> bool:
+    """True when a kernel backlight node exists; without one the brightness
+    row would be a dead slider, so the panel hides it entirely."""
+    try:
+        return any(Path('/sys/class/backlight').glob('*/brightness'))
+    except OSError:
+        return False
+
+
+def _get_wifi_ssid() -> str | None:
+    """Connected SSID without triggering a scan (--rescan no); None when
+    offline or nmcli is absent. Worker thread only: it spawns a process."""
+    import shutil
+    if shutil.which('nmcli') is None:
+        return None
+    try:
+        out = subprocess.run(
+            ['nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi',
+             'list', '--rescan', 'no'],
+            capture_output=True, text=True, timeout=3,
+        ).stdout
+    except Exception:
+        return None
+    for line in out.splitlines():
+        active, _, ssid = line.partition(':')
+        if active.strip() == 'yes' and ssid.strip():
+            return ssid.strip()
+    return None
+
+
+def _variant_text(value: object) -> object:
+    unpack = getattr(value, 'unpack', None)
+    if callable(unpack):
+        try:
+            return unpack()
+        except Exception:
+            return value
+    return value
+
+
+def _get_bt_device_name() -> str | None:
+    """Name of a Connected BlueZ device via ObjectManager; None when none.
+    Worker thread only: synchronous D-Bus with a short timeout."""
+    bus = _dbus_system()
+    if bus is None:
+        return None
+    try:
+        objects = bus.call_sync(
+            'org.bluez', '/',
+            'org.freedesktop.DBus.ObjectManager', 'GetManagedObjects',
+            None,
+            GLib.VariantType('(a{oa{sa{sv}}})'),
+            Gio.DBusCallFlags.NONE, 800, None,
+        ).unpack()[0]
+    except Exception:
+        return None
+    if not isinstance(objects, dict):
+        return None
+    for interfaces in objects.values():
+        if not isinstance(interfaces, dict):
+            continue
+        props = interfaces.get('org.bluez.Device1')
+        if not isinstance(props, dict):
+            continue
+        if not bool(_variant_text(props.get('Connected', False))):
+            continue
+        for prop in ('Name', 'Alias'):
+            name = _variant_text(props.get(prop, ''))
+            if isinstance(name, str) and name:
+                return name
+        address = _variant_text(props.get('Address', ''))
+        if isinstance(address, str) and address:
+            return address
+    return None
+
+
+def _query_tile_details() -> dict[str, str]:
+    """Per-tile detail strings (SSID / BT name); best-effort, worker only."""
+    details: dict[str, str] = {}
+    try:
+        ssid = _get_wifi_ssid()
+    except Exception:
+        ssid = None
+    if ssid:
+        details['wifi'] = ssid
+    try:
+        name = _get_bt_device_name()
+    except Exception:
+        name = None
+    if name:
+        details['bt'] = name
+    return details
+
+
 def _toggle_torch(enabled: bool) -> None:
     for led in Path('/sys/class/leds').glob('*torch*'):
         bright = led / 'brightness'
@@ -262,6 +448,8 @@ def _get_hotspot_state() -> bool | None:
 # denies all clients (and revokes live ones).
 _GEOCLUE_NAME = 'org.freedesktop.GeoClue2'
 _GEOCLUE_MGR_PATH = '/org/freedesktop/GeoClue2/Manager'
+_GEOCLUE_MGR_IFACE = 'org.freedesktop.GeoClue2.Manager'
+_GEOCLUE_CLIENT_IFACE = 'org.freedesktop.GeoClue2.Client'
 _AGENT_IFACE = 'org.freedesktop.GeoClue2.Agent'
 _AGENT_PATH = '/org/xxwm/GeoClueAgent'
 _AGENT_XML = (
@@ -279,6 +467,17 @@ _AGENT_XML = (
 
 # GClueAccuracyLevel: NONE=0 … EXACT=8
 _ACC_EXACT = 8
+
+
+def max_accuracy_changed_params(level: int, glib=None):
+    """``(sa{sv}as)`` PropertiesChanged body for MaxAccuracyLevel, built in
+    one step with a plain dict (never nest a prebuilt container Variant)."""
+    glib = glib if glib is not None else GLib
+    return glib.Variant('(sa{sv}as)', (
+        _AGENT_IFACE,
+        {'MaxAccuracyLevel': glib.Variant('u', int(level))},
+        [],
+    ))
 
 
 class LocationState:
@@ -303,6 +502,46 @@ class LocationState:
                 self._on_owner_appeared, self._on_owner_vanished)
         except Exception:
             pass
+
+    def active_clients(self, bus=None) -> list[str]:
+        """Desktop ids with a live location fix (clients that called Start
+        and are still active). Worker thread only; [] when geoclue is
+        unreachable. The privacy monitor consumes this instead of running
+        its own agent — geoclue serves one agent system-wide."""
+        if bus is None:
+            bus = _dbus_system()
+        if bus is None:
+            return []
+        try:
+            paths = bus.call_sync(
+                _GEOCLUE_NAME, _GEOCLUE_MGR_PATH, _GEOCLUE_MGR_IFACE,
+                'GetClients', None,
+                GLib.VariantType('(ao)'),
+                Gio.DBusCallFlags.NONE, 1500, None,
+            ).unpack()[0]
+        except Exception:
+            return []
+        users: list[str] = []
+        for path in paths or ():
+            try:
+                props = bus.call_sync(
+                    _GEOCLUE_NAME, str(path),
+                    'org.freedesktop.DBus.Properties', 'GetAll',
+                    GLib.Variant('(s)', (_GEOCLUE_CLIENT_IFACE,)),
+                    GLib.VariantType('(a{sv})'),
+                    Gio.DBusCallFlags.NONE, 1500, None,
+                ).unpack()[0]
+            except Exception:
+                continue
+            if not isinstance(props, dict):
+                continue
+            if not bool(_variant_text(props.get('Active', False))):
+                continue
+            desktop = _variant_text(props.get('DesktopId', ''))
+            label = str(desktop).strip() if desktop else ''
+            if label and label not in users:
+                users.append(label)
+        return users
 
     def available(self) -> bool:
         """Read-only probe: daemon reachable and no live rejection. Never
@@ -448,12 +687,7 @@ class LocationState:
             bus.emit_signal(
                 None, _AGENT_PATH, 'org.freedesktop.DBus.Properties',
                 'PropertiesChanged',
-                GLib.Variant('(sa{sv}as)', (
-                    _AGENT_IFACE,
-                    {'MaxAccuracyLevel': GLib.Variant('u',
-                                                      self._max_accuracy())},
-                    [],
-                )),
+                max_accuracy_changed_params(self._max_accuracy()),
             )
         except Exception:
             pass
@@ -501,12 +735,9 @@ def _set_brightness_pct(pct: int) -> None:
         return
     except FileNotFoundError:
         pass
-    for path in Path('/sys/class/backlight').glob('*/brightness'):
-        try:
-            max_val = int((path.parent / 'max_brightness').read_text())
-            path.write_text(str(max(0, min(max_val, int(pct * max_val / 100)))))
-        except (OSError, ValueError):
-            pass
+    # brightnessctl is absent: logind's Session.SetBrightness next, sysfs
+    # only as a last resort (direct writes fail with EACCES as the user).
+    apply_backlight_pct(pct)
 
 
 def _get_volume_pct() -> int:
@@ -545,14 +776,112 @@ class _TileDef(NamedTuple):
     tier: int  # 1 = always shown, 2 = expanded only
 
 
+def _recorder_available() -> bool:
+    """True when wf-recorder is installed; without it the Record tile
+    hides entirely instead of offering a fake fallback."""
+    try:
+        import capture
+        return bool(capture.recorder_available())
+    except Exception:
+        return False
+
+
+def _get_record_state() -> bool | None:
+    try:
+        import capture
+        return bool(capture.get_recorder().is_recording())
+    except Exception:
+        return None
+
+
+def _set_record_state(value: bool) -> None:
+    try:
+        import capture
+        capture.get_recorder().set_recording(bool(value))
+    except Exception:
+        pass
+
+
+def _captions_installed() -> bool:
+    """True when xx-captions is installed; without it the Captions tile
+    hides entirely instead of offering a dead toggle."""
+    try:
+        import captions
+        return bool(captions.captions_installed())
+    except Exception:
+        return False
+
+
+def _captions_controller(panel: object) -> object | None:
+    return getattr(panel, '_captions', None)
+
+
+def _get_captions_state(panel: object) -> bool | None:
+    ctrl = _captions_controller(panel)
+    if ctrl is None:
+        return None
+    try:
+        return bool(ctrl.active)
+    except Exception:
+        return None
+
+
+def _set_captions_state(panel: object, value: bool) -> None:
+    ctrl = _captions_controller(panel)
+    if ctrl is None:
+        return
+    try:
+        ctrl.set_enabled(bool(value))
+    except Exception:
+        pass
+
+
+def _make_captions_controller(on_change) -> object | None:
+    try:
+        import captions
+        return captions.CaptionsController(on_change=on_change)
+    except Exception:
+        return None
+
+
+def _open_captions_overlay() -> None:
+    try:
+        import captions
+        captions.open_overlay()
+    except Exception:
+        pass
+
+
+def _get_saver_state() -> bool | None:
+    """Battery-saver tile state: the standby controller's effective saver
+    (manual toggle or automatic low-battery). Reached through the
+    process-wide registry so the tile list needs no panel wiring."""
+    try:
+        from app_standby import get_standby
+        return bool(get_standby().saver_effective)
+    except Exception:
+        return None
+
+
+def _set_saver_state(value: bool) -> None:
+    try:
+        from app_standby import get_standby
+        get_standby().set_saver(bool(value))
+    except Exception:
+        pass
+
+
 _TILES: list[_TileDef] = [
     _TileDef('wifi',     'WiFi',     lambda: _nm_get('WirelessEnabled'), lambda v: _nm_set('WirelessEnabled', v), 1),
     _TileDef('bt',       'BT',       _bluez_get,                          _bluez_set,                              1),
     _TileDef('data',     'Data',     lambda: _nm_get('WwanEnabled'),      lambda v: _nm_set('WwanEnabled', v),     1),
-    _TileDef('airplane', 'Airplane', lambda: None,                        _toggle_airplane,                        1),
+    _TileDef('airplane', 'Airplane', _get_airplane_state,                _toggle_airplane,                        1),
     _TileDef('torch',    'Torch',    lambda: None,                        _toggle_torch,                           2),
     _TileDef('dnd',      'DnD',      lambda: None,                        lambda _v: None,                         2),
     _TileDef('focus',    'Focus',    lambda: None,                        lambda _v: None,                         2),
+    _TileDef('saver',    'Saver',    _get_saver_state,                    _set_saver_state,                        2),
+    _TileDef('record',   'Record',   _get_record_state,                   _set_record_state,                     2),
+    _TileDef('captions', 'Captions', lambda: None,                        lambda _v: None,                         2),
     _TileDef('auto_br',  'Auto',     lambda: None,                        lambda _v: None,                         2),
     _TileDef('location', 'Location', lambda: None,                        lambda _v: None,                         2),
     _TileDef('hotspot',  'Hotspot',  _get_hotspot_state,                  _toggle_hotspot,                         2),
@@ -568,12 +897,14 @@ class QuickActionsPanel(Gtk.Box):
     def __init__(self, dnd_state: object | None = None,
                  focus_state: object | None = None,
                  hud: object | None = None,
-                 config: ShellConfig | None = None) -> None:
+                 config: ShellConfig | None = None,
+                 on_open_settings: object | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add_css_class('qa-panel')
 
         self._dnd = dnd_state
         self._focus = focus_state
+        self._on_open_settings = on_open_settings
         # Volume/brightness HUD overlay (plan T3/T4). Optional: when absent the
         # sliders still adjust brightness/volume, just without an on-screen
         # indicator (silent absence — see _show_brightness_hud).
@@ -584,10 +915,16 @@ class QuickActionsPanel(Gtk.Box):
         self._config = config if config is not None else ShellConfig()
         self._tile_buttons: dict[str, Gtk.ToggleButton] = {}
         self._tile_state: dict[str, bool] = {}
+        self._tile_details: dict[str, str] = {}
         self._state_labels: dict[str, Gtk.Label] = {}
         self._updating = False
         self._als = ALSBrightness()
         self._location = LocationState(on_change=self._on_location_changed)
+        self._captions = _make_captions_controller(self._on_captions_changed)
+        # Hardware gates (torch/ALS/hotspot/location) cache after first probe
+        # so rebuilds never re-hit D-Bus or sysfs from the main thread.
+        self._hw_gate_cache: dict[str, bool] = {}
+        self._worker_threads: list = []
         self._slider_pending: dict[str, int] = {}
         self._slider_timers: dict[str, int] = {}
         self._syncing_sliders = False
@@ -596,16 +933,36 @@ class QuickActionsPanel(Gtk.Box):
             'vol': _set_volume_pct,
         }
 
-        provider = Gtk.CssProvider()
-        provider.load_from_data(theme_css(self._display_preset()).encode('utf-8'))
+        self._theme_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
-            provider,
+            self._theme_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
         )
+        self.apply_theme()
 
+        # Fast tier only: the slow D-Bus gates (hotspot/location) fill in
+        # from a worker so first paint never waits on service timeouts.
         self._build()
-        GLib.idle_add(self._refresh_all_states)
+        self._probe_slow_gates_async()
+        self._connect_captions_async()
+        self.refresh_states()
+        self._subscribe_hardware_signals()
+
+    def apply_theme(self, preset: ThemePreset | None = None) -> None:
+        """Reload this panel's single display-level sheet.
+
+        The shade forwards its own hot-reload here so tiles restyle too.
+        """
+        try:
+            resolved = preset if preset is not None else self._display_preset()
+        except Exception:
+            return
+        try:
+            self._theme_provider.load_from_data(
+                theme_css(resolved).encode('utf-8'))
+        except Exception:
+            pass
 
     def _display_preset(self) -> ThemePreset:
         """Preset this panel renders with: window.resolve_theme over the
@@ -618,18 +975,61 @@ class QuickActionsPanel(Gtk.Box):
         from window import resolve_theme
         return resolve_theme(self._config)
 
-    def _tiles(self) -> list[_TileDef]:
+    def _cached_gate(self, key: str, probe: Callable[[], bool]) -> bool:
+        """Hardware-gate probe with a per-panel cache.
+
+        Panels built headlessly in tests carry no cache and probe directly.
+        """
+        cache = getattr(self, '_hw_gate_cache', None)
+        if cache is None:
+            return bool(probe())
+        if key not in cache:
+            cache[key] = bool(probe())
+        return cache[key]
+
+    def invalidate_gate_cache(self, key: str | None = None) -> None:
+        """Forget cached hardware gates (e.g. geoclue restarted)."""
+        cache = getattr(self, '_hw_gate_cache', None)
+        if cache is None:
+            return
+        if key is None:
+            cache.clear()
+        else:
+            cache.pop(key, None)
+
+    def _tiles(self, include_slow_gates: bool = True) -> list[_TileDef]:
         tiles = []
+        cache = getattr(self, '_hw_gate_cache', None)
         for tile in _TILES:
             # Hardware/service-gated tiles stay hidden without their backend
-            if tile.key == 'auto_br' and not self._als.available():
+            if tile.key == 'auto_br' and not self._cached_gate(
+                    'auto_br', self._als.available):
                 continue
-            if tile.key == 'torch' and not any(Path('/sys/class/leds').glob('*torch*')):
+            if tile.key == 'torch' and not self._cached_gate(
+                    'torch',
+                    lambda: any(Path('/sys/class/leds').glob('*torch*'))):
                 continue
-            if tile.key == 'hotspot' and not _nm_has_wifi_device():
+            if tile.key == 'record' and not self._cached_gate(
+                    'record', _recorder_available):
                 continue
+            if tile.key == 'captions':
+                if not self._cached_gate('captions', _captions_installed):
+                    continue
+                tile = tile._replace(
+                    get_state=lambda: _get_captions_state(self),
+                    set_state=lambda v: _set_captions_state(self, v),
+                )
+            if tile.key == 'hotspot':
+                if (not include_slow_gates and cache is not None
+                        and 'hotspot' not in cache):
+                    continue
+                if not self._cached_gate('hotspot', _nm_has_wifi_device):
+                    continue
             if tile.key == 'location':
-                if not self._location.available():
+                if (not include_slow_gates and cache is not None
+                        and 'location' not in cache):
+                    continue
+                if not self._cached_gate('location', self._location.available):
                     continue
                 tile = tile._replace(
                     get_state=lambda: bool(self._location.is_active()),
@@ -652,16 +1052,84 @@ class QuickActionsPanel(Gtk.Box):
             tiles.append(tile)
         return tiles
 
+    def _spawn_panel_worker(self, target: Callable[[], None]):
+        """Run target off the main thread, tracked for tests to join."""
+        thread = _spawn_worker_thread(target)
+        workers = getattr(self, '_worker_threads', None)
+        if workers is None:
+            self._worker_threads = workers = []
+        if thread is not None:
+            workers.append(thread)
+        return thread
+
+    def _probe_slow_gates_async(self) -> None:
+        """Resolve the D-Bus hardware gates (hotspot/location) off-thread.
+
+        First paint only ever waits on the fast sysfs/None gates; newly
+        available tiles are inserted (in tier order) when the probe lands.
+        """
+        cache = getattr(self, '_hw_gate_cache', None)
+        if cache is None:
+            return
+        pending = [k for k in ('hotspot', 'location') if k not in cache]
+        if not pending:
+            return
+
+        def _work() -> None:
+            fresh: dict[str, bool] = {}
+            try:
+                if 'hotspot' in pending:
+                    try:
+                        fresh['hotspot'] = bool(_nm_has_wifi_device())
+                    except Exception:
+                        fresh['hotspot'] = False
+                if 'location' in pending:
+                    try:
+                        fresh['location'] = bool(self._location.available())
+                    except Exception:
+                        fresh['location'] = False
+            except Exception:
+                return
+            _post_to_main(self._finish_slow_gates, fresh)
+
+        self._spawn_panel_worker(_work)
+
+    def _finish_slow_gates(self, fresh: dict[str, bool] | None) -> bool:
+        cache = getattr(self, '_hw_gate_cache', None)
+        if cache is not None:
+            for key, value in (fresh or {}).items():
+                cache.setdefault(key, bool(value))
+        try:
+            tier2 = [t for t in self._tiles() if t.tier == 2]
+        except Exception:
+            return False
+        for idx, tile in enumerate(tier2):
+            buttons = getattr(self, '_tile_buttons', None)
+            if buttons is None or tile.key in buttons:
+                continue
+            try:
+                self.tier2_grid.attach(
+                    self._make_tile(tile), idx % 4, idx // 4, 1, 1)
+            except Exception:
+                pass
+        try:
+            self.refresh_states()
+        except Exception:
+            pass
+        return False
+
     def _build(self) -> None:
-        tiles = self._tiles()
+        tiles = self._tiles(include_slow_gates=False)
         tier1 = [t for t in tiles if t.tier == 1]
         tier2 = [t for t in tiles if t.tier == 2]
 
-        self.tier1_grid = Gtk.Grid(row_spacing=8, column_spacing=8)
+        self.tier1_grid = Gtk.Grid(row_spacing=8, column_spacing=8,
+                                     column_homogeneous=True)
         for col, tile in enumerate(tier1):
             self.tier1_grid.attach(self._make_tile(tile), col, 0, 1, 1)
 
-        self.tier2_grid = Gtk.Grid(row_spacing=8, column_spacing=8)
+        self.tier2_grid = Gtk.Grid(row_spacing=8, column_spacing=8,
+                                   column_homogeneous=True)
         for idx, tile in enumerate(tier2):
             self.tier2_grid.attach(self._make_tile(tile), idx % 4, idx // 4, 1, 1)
 
@@ -681,11 +1149,20 @@ class QuickActionsPanel(Gtk.Box):
         self.sliders_box.set_visible(False)
 
     def _make_tile(self, tile: _TileDef) -> Gtk.ToggleButton:
-        label_w = Gtk.Label(label=tile.label)
+        try:
+            from gi.repository import Pango
+            ellipsize = Pango.EllipsizeMode.END
+        except Exception:
+            ellipsize = None
+        label_w = Gtk.Label(label=tile.label, max_width_chars=9)
         label_w.add_css_class('tile-label')
+        if ellipsize is not None:
+            label_w.set_ellipsize(ellipsize)
 
-        state_w = Gtk.Label(label='—')
+        state_w = Gtk.Label(label='…', max_width_chars=14)
         state_w.add_css_class('tile-state')
+        if ellipsize is not None:
+            state_w.set_ellipsize(ellipsize)
         self._state_labels[tile.key] = state_w
 
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -696,6 +1173,7 @@ class QuickActionsPanel(Gtk.Box):
 
         btn = Gtk.ToggleButton()
         btn.add_css_class('qa-tile')
+        btn.set_hexpand(True)
         btn.set_child(inner)
         btn.connect('toggled', self._on_tile_toggled, tile)
         if tile.key == 'focus':
@@ -704,8 +1182,40 @@ class QuickActionsPanel(Gtk.Box):
             long_press.set_touch_only(False)
             long_press.connect('pressed', self._on_focus_long_press, btn)
             btn.add_controller(long_press)
+        else:
+            settings_press = Gtk.GestureLongPress.new()
+            settings_press.set_touch_only(False)
+            settings_press.connect(
+                'pressed', self._on_tile_long_press, tile.key)
+            btn.add_controller(settings_press)
         self._tile_buttons[tile.key] = btn
         return btn
+
+    def _on_tile_long_press(self, gesture: Gtk.GestureLongPress,
+                            _x: float, _y: float, key: str) -> None:
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        if key == 'captions':
+            # Long-press opens the overlay's model screen, not Settings.
+            ctrl = _captions_controller(self)
+            try:
+                if ctrl is not None:
+                    ctrl.open_model_screen()
+                else:
+                    _open_captions_overlay()
+            except Exception:
+                pass
+            return
+        callback = getattr(self, '_on_open_settings', None)
+        if not callable(callback):
+            return
+        section = tile_settings_section(key)
+        try:
+            callback(section)
+        except TypeError:
+            try:
+                callback()
+            except Exception:
+                pass
 
     def _on_focus_long_press(self, gesture: Gtk.GestureLongPress,
                              _x: float, _y: float, btn: Gtk.Widget) -> None:
@@ -734,11 +1244,12 @@ class QuickActionsPanel(Gtk.Box):
         self.refresh_states()
 
     def _build_sliders(self) -> None:
-        for label_text, key in [('Bright', 'bright'), ('Volume', 'vol')]:
+        for label_text, key in [('Brightness', 'bright'), ('Volume', 'vol')]:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             lbl = Gtk.Label(label=label_text, xalign=0)
             lbl.add_css_class('qa-slider-label')
             slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+            slider.add_css_class('shade-slider')
             slider.set_hexpand(True)
             slider.set_draw_value(False)
             slider.set_value(_SLIDER_DEFAULT_PCT)
@@ -757,8 +1268,15 @@ class QuickActionsPanel(Gtk.Box):
 
             if key == 'bright':
                 self._bright_slider = slider
+                self._bright_row = row
+                row.set_visible(_has_backlight())
             else:
                 self._vol_slider = slider
+
+        try:
+            self._build_captions_row()
+        except Exception:
+            pass
 
     def _on_brightness_changed(self, pct: int) -> None:
         """Brightness slider moved: the trailing value is applied (with a HUD
@@ -805,6 +1323,9 @@ class QuickActionsPanel(Gtk.Box):
         if tile.key == 'auto_br':
             self._toggle_auto_brightness(new_state)
         else:
+            # Setters are single synchronous property writes (no scans, no
+            # long timeouts); the location test pins the immediate snap-back,
+            # so toggles stay on the main thread by allow-list entry.
             try:
                 tile.set_state(new_state)
             except Exception:
@@ -813,6 +1334,11 @@ class QuickActionsPanel(Gtk.Box):
             # Registration may have failed: show the actual state, never the
             # requested one.
             self._apply_tile_state(tile.key, self._location.is_active())
+            return
+        if tile.key == 'captions':
+            # Async Start/Stop: paint the controller state
+            # (starting/error), never the requested toggle.
+            self._refresh_captions_ui()
             return
         self._apply_tile_ui(tile.key, new_state)
 
@@ -835,31 +1361,261 @@ class QuickActionsPanel(Gtk.Box):
         btn = self._tile_buttons.get('location')
         if btn is None:
             return
-        shown = self._location.available()
+        self.invalidate_gate_cache('location')
+        shown = self._cached_gate('location', self._location.available)
         btn.set_visible(shown)
         self._apply_tile_state('location',
                                shown and self._location.is_active())
 
-    def _refresh_all_states(self) -> bool:
+    def _connect_captions_async(self) -> None:
+        """Open the captions service off-thread; live state lands through
+        the controller's on_change callback on the main loop."""
+        ctrl = _captions_controller(self)
+        if ctrl is None:
+            return
+
+        def _work() -> None:
+            try:
+                ctrl.connect()
+            except Exception:
+                pass
+
+        self._spawn_panel_worker(_work)
+
+    def _on_captions_changed(self) -> None:
+        try:
+            self._refresh_captions_ui()
+        except Exception:
+            pass
+
+    def _captions_visual(self) -> tuple:
+        """(button_active, highlighted, label, error) from the controller."""
+        ctrl = _captions_controller(self)
+        if ctrl is None:
+            raise RuntimeError('no captions controller')
+        return (bool(ctrl.active),
+                ctrl.tile_state in ('on', 'starting'),
+                str(ctrl.label), ctrl.error)
+
+    def _refresh_captions_ui(self) -> None:
+        """Repaint the tile and the volume-row toggle from the controller."""
+        try:
+            button_active, _visual, _label, _error = self._captions_visual()
+        except Exception:
+            return
+        self._updating = True
+        try:
+            btn = (getattr(self, '_tile_buttons', None) or {}).get('captions')
+            if btn is not None:
+                btn.set_active(button_active)
+            row_btn = getattr(self, '_captions_row_btn', None)
+            if row_btn is not None:
+                row_btn.set_active(button_active)
+        except Exception:
+            pass
+        finally:
+            self._updating = False
+        self._paint_captions_tile()
+
+    def _paint_captions_tile(self) -> None:
+        try:
+            _active, visual, label, error = self._captions_visual()
+        except Exception:
+            return
+        btn = (getattr(self, '_tile_buttons', None) or {}).get('captions')
+        if btn is not None:
+            try:
+                if visual:
+                    btn.add_css_class('active')
+                else:
+                    btn.remove_css_class('active')
+            except Exception:
+                pass
+            if error:
+                try:
+                    btn.set_tooltip_text(str(error))
+                except Exception:
+                    pass
+        lbl = (getattr(self, '_state_labels', None) or {}).get('captions')
+        if lbl is not None:
+            try:
+                lbl.set_text(label)
+            except Exception:
+                pass
+        row_label = getattr(self, '_captions_row_label', None)
+        if row_label is not None:
+            try:
+                row_label.set_text(label)
+            except Exception:
+                pass
+        row_btn = getattr(self, '_captions_row_btn', None)
+        if row_btn is not None:
+            try:
+                row_btn.set_label(self._captions_row_action())
+            except Exception:
+                pass
+
+    def _captions_row_action(self) -> str:
+        try:
+            state = _captions_controller(self).tile_state
+        except Exception:
+            return 'Turn on'
+        return {'on': 'Turn off', 'starting': 'Stop',
+                'no-model': 'Get model', 'error': 'Retry'}.get(state,
+                                                               'Turn on')
+
+    def _on_captions_row_toggled(self, btn) -> None:
+        if getattr(self, '_updating', False):
+            return
+        ctrl = _captions_controller(self)
+        if ctrl is None:
+            return
+        try:
+            if ctrl.tile_state == 'no-model':
+                ctrl.open_model_screen()
+            else:
+                ctrl.set_enabled(bool(btn.get_active()))
+        except Exception:
+            pass
+        self._refresh_captions_ui()
+
+    def _build_captions_row(self) -> None:
+        """Compact captions toggle next to the volume row: the contract's
+        HUD entry, same state as the tile in a smaller footprint."""
+        self._captions_row = None
+        self._captions_row_label = None
+        self._captions_row_btn = None
+        if not _captions_installed():
+            return
+        try:
+            from gi.repository import Pango
+            ellipsize = Pango.EllipsizeMode.END
+        except Exception:
+            ellipsize = None
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        lbl = Gtk.Label(label='Captions', xalign=0)
+        lbl.add_css_class('qa-slider-label')
+        state = Gtk.Label(label='Off', xalign=0)
+        state.add_css_class('tile-state')
+        state.set_hexpand(True)
+        if ellipsize is not None:
+            state.set_ellipsize(ellipsize)
+        btn = Gtk.ToggleButton(label='Turn on')
+        btn.connect('toggled', self._on_captions_row_toggled)
+        row.append(lbl)
+        row.append(state)
+        row.append(btn)
+        self.sliders_box.append(row)
+        self._captions_row = row
+        self._captions_row_label = state
+        self._captions_row_btn = btn
+        self._refresh_captions_ui()
+
+    def _query_tile_states(self) -> dict[str, bool]:
+        """Read every tile state; blocking D-Bus goes here, off-thread."""
+        states: dict[str, bool] = {}
         for tile in self._tiles():
             try:
                 state = tile.get_state()
             except Exception:
                 state = None
             if state is not None:
-                self._apply_tile_state(tile.key, state)
+                states[tile.key] = state
+        return states
+
+    def _apply_queried_states(self, states: dict[str, bool] | None,
+                              details: dict[str, str] | None = None) -> bool:
+        if details is not None:
+            try:
+                self._tile_details = dict(details)
+            except Exception:
+                pass
+        for key, state in (states or {}).items():
+            try:
+                if details is None:
+                    self._apply_tile_state(key, state)
+                else:
+                    self._apply_tile_state(key, state, details.get(key))
+            except Exception:
+                pass
         return False
 
-    def _apply_tile_state(self, key: str, state: bool) -> None:
+    def _refresh_all_states(self) -> bool:
+        self._apply_queried_states(self._query_tile_states())
+        return False
+
+    def _subscribe_hardware_signals(self) -> None:
+        """Track external radio changes live.
+
+        NetworkManager WirelessEnabled/WwanEnabled and BlueZ Adapter1
+        Powered can move under us (gnome-control-center, rfkill, another
+        session); PropertiesChanged on either re-reads tile states instead
+        of showing stale switches until the next manual refresh.
+        """
+        try:
+            bus = _dbus_system()
+        except Exception:
+            return
+        if bus is None:
+            return
+        try:
+            bus.signal_subscribe(
+                'org.freedesktop.NetworkManager', _PROPS_IFACE,
+                'PropertiesChanged', _NM_PATH, None,
+                Gio.DBusSignalFlags.NONE,
+                self._on_hardware_properties_changed, None,
+            )
+            bus.signal_subscribe(
+                'org.bluez', _PROPS_IFACE, 'PropertiesChanged',
+                _BLUEZ_ADAPTER_PATH, None, Gio.DBusSignalFlags.NONE,
+                self._on_hardware_properties_changed, None,
+            )
+        except Exception:
+            pass
+
+    def _on_hardware_properties_changed(
+        self, _conn, _sender, path, _iface, _signal, params, _user_data,
+    ) -> None:
+        try:
+            changed_iface, changed, _invalid = params.unpack()
+        except Exception:
+            return
+        try:
+            if path == _NM_PATH and changed_iface == _NM_IFACE:
+                if any(k in changed for k in ('WirelessEnabled', 'WwanEnabled')):
+                    self.refresh_states()
+            elif (path == _BLUEZ_ADAPTER_PATH
+                    and changed_iface == _BLUEZ_ADAPTER_IFACE):
+                if 'Powered' in changed:
+                    self.refresh_states()
+        except Exception:
+            pass
+
+    def _apply_tile_state(self, key: str, state: bool,
+                            detail: str | None = None) -> None:
         self._tile_state[key] = state
+        if detail is not None:
+            try:
+                self._tile_details[key] = detail
+            except Exception:
+                pass
+        elif key in getattr(self, '_tile_details', {}):
+            detail = self._tile_details[key]
         btn = self._tile_buttons.get(key)
         if btn:
             self._updating = True
             btn.set_active(state)
             self._updating = False
-        self._apply_tile_ui(key, state)
+        self._apply_tile_ui(key, state, detail)
 
-    def _apply_tile_ui(self, key: str, state: bool) -> None:
+    def _apply_tile_ui(self, key: str, state: bool,
+                       detail: str | None = None) -> None:
+        if key == 'captions':
+            self._paint_captions_tile()
+            return
+        if detail is None:
+            stored = getattr(self, '_tile_details', None) or {}
+            detail = stored.get(key)
         btn = self._tile_buttons.get(key)
         if btn:
             if state:
@@ -868,23 +1624,52 @@ class QuickActionsPanel(Gtk.Box):
                 btn.remove_css_class('active')
         lbl = self._state_labels.get(key)
         if lbl:
-            lbl.set_text('on' if state else 'off')
+            lbl.set_text(format_tile_state(key, state, detail))
 
     def expand(self, expanded: bool) -> None:
         self.tier2_grid.set_visible(expanded)
         self.sep.set_visible(expanded)
         self.sliders_box.set_visible(expanded)
         if expanded:
-            self._sync_sliders_to_live_state()
+            self._sync_sliders_to_live_state_async()
 
     def _sync_sliders_to_live_state(self) -> None:
         # One getter batch per expand feeds every slider; the sync guard keeps
         # the set_value round-trip from queueing a redundant apply.
         bright, vol = _read_slider_values()
+        self._apply_slider_values(bright, vol)
+
+    def _apply_slider_values(self, bright: int, vol: int) -> bool:
         self._syncing_sliders = True
-        self._bright_slider.set_value(bright)
-        self._vol_slider.set_value(vol)
-        self._syncing_sliders = False
+        try:
+            self._bright_slider.set_value(bright)
+            self._vol_slider.set_value(vol)
+        finally:
+            self._syncing_sliders = False
+        return False
+
+    def _sync_sliders_to_live_state_async(self) -> None:
+        """brightnessctl/pactl reads leave the main thread on expand."""
+        def _work() -> None:
+            try:
+                vals = _read_slider_values()
+            except Exception:
+                return
+            _post_to_main(self._apply_slider_values, *vals)
+
+        self._spawn_panel_worker(_work)
 
     def refresh_states(self) -> None:
-        GLib.idle_add(self._refresh_all_states)
+        """Re-read every tile state off-thread; results apply on the main loop."""
+        def _work() -> None:
+            try:
+                states = self._query_tile_states()
+            except Exception:
+                return
+            try:
+                details = _query_tile_details()
+            except Exception:
+                details = {}
+            _post_to_main(self._apply_queried_states, states, details)
+
+        self._spawn_panel_worker(_work)

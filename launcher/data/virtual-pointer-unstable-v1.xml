@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="virtual_pointer_unstable_v1">
+  <copyright>
+    Copyright © 2019 Simon Ser
+
+    Permission to use, copy, modify, distribute, and sell this
+    software and its documentation for any purpose is hereby granted
+    without fee, provided that the above copyright notice appear in
+    all copies and that both that copyright notice and this permission
+    notice appear in supporting documentation, and that the name of
+    the copyright holders not be used in advertising or publicity
+    pertaining to distribution of the software without specific,
+    written prior permission.  The copyright holders make no
+    representations about the suitability of this software for any
+    purpose.  It is provided "as is" without express or implied
+    warranty.
+
+    THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
+    SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+    FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
+    SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+    WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN
+    AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+    ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+    THIS SOFTWARE.
+  </copyright>
+
+  <interface name="zwlr_virtual_pointer_manager_v1" version="2">
+    <description summary="virtual pointer">
+      The virtual pointer manager is a singleton global object that
+      provides the ability to emulate pointer input.
+
+      The virtual pointer will produce events as if the input device is
+      a real device, e.g. to trigger a screen scroll the client needs to
+      send axis events with a source of finger followed by a frame.
+    </description>
+
+    <request name="create_virtual_pointer">
+      <description summary="Create a new virtual pointer">
+        Creates a new virtual pointer. Note that the pointer will only be
+        usable once a seat is provided: the compositor may ignore virtual
+        pointer objects without a bound seat.
+      </description>
+      <arg name="seat" type="object" interface="wl_seat"/>
+      <arg name="id" type="new_id" interface="zwlr_virtual_pointer_v1"/>
+    </request>
+
+    <request name="create_virtual_pointer_with_output">
+      <since version="2"/>
+      <description summary="Create a new virtual pointer with an output">
+        Creates a new virtual pointer associated with the given output.
+        Scroll and motion events are delivered relative to that output.
+      </description>
+      <arg name="seat" type="object" interface="wl_seat"/>
+      <arg name="output" type="object" interface="wl_output"/>
+      <arg name="id" type="new_id" interface="zwlr_virtual_pointer_v1"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="Destroy the manager">
+        Destroys the virtual pointer manager. Virtual pointers created
+        from this manager are unaffected by destruction of the manager.
+      </description>
+    </request>
+  </interface>
+
+  <interface name="zwlr_virtual_pointer_v1" version="1">
+    <description summary="virtual pointer">
+      A virtual pointer produces pointer events that are indistinguishable
+      from a physical device. Axis values follow wl_pointer conventions:
+      axis 0 is vertical scroll, axis 1 is horizontal scroll.
+    </description>
+
+    <enum name="axis_source">
+      <description summary="axis source types, mirroring wl_pointer">
+        The values match wl_pointer.axis_source so compositors forward
+        them unchanged.
+      </description>
+      <entry name="wheel" value="0" summary="a physical wheel"/>
+      <entry name="finger" value="1" summary="finger on a touch device"/>
+      <entry name="continuous" value="2" summary="continuous scrolling device"/>
+      <entry name="wheel_tilt" value="3" summary="a wheel tilt"/>
+    </enum>
+
+    <request name="motion">
+      <description summary="pointer motion event">
+        The pointer has moved from its previous position.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="dx" type="fixed" summary="displacement on the x-axis"/>
+      <arg name="dy" type="fixed" summary="displacement on the y-axis"/>
+    </request>
+
+    <request name="motion_absolute">
+      <description summary="pointer motion absolute event">
+        The pointer has moved to an absolute position.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="x" type="uint" summary="x-coordinate in the output's coordinate space"/>
+      <arg name="y" type="uint" summary="y-coordinate in the output's coordinate space"/>
+      <arg name="x_extent" type="uint" summary="extent of the x-axis"/>
+      <arg name="y_extent" type="uint" summary="extent of the y-axis"/>
+    </request>
+
+    <request name="button">
+      <description summary="pointer button event">
+        A button was pressed or released.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="button" type="uint" summary="the button that was pressed or released"/>
+      <arg name="state" type="uint" summary="button state (pressed or released)"/>
+    </request>
+
+    <request name="axis">
+      <description summary="pointer axis event">
+        Scroll and other axis movement. The axis argument follows
+        wl_pointer: 0 is vertical scroll, 1 is horizontal scroll.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="axis" type="uint" summary="axis type (0 vertical, 1 horizontal)"/>
+      <arg name="value" type="fixed" summary="length of vector in surface coordinates"/>
+    </request>
+
+    <request name="frame">
+      <description summary="end of a pointer event sequence">
+        Indicates the end of a set of events that logically belong together.
+      </description>
+    </request>
+
+    <request name="axis_source">
+      <description summary="specify the axis source">
+        Source information for the following axis events. Scrolling
+        screenshots use the finger source so apps treat the scroll as a
+        touch drag rather than a wheel tick.
+      </description>
+      <arg name="axis_source" type="uint" summary="source of the axis events"/>
+    </request>
+
+    <request name="axis_stop">
+      <description summary="stop scrolling">
+        Stop notification for scrolling devices.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="axis" type="uint" summary="the axis stopped (0 vertical, 1 horizontal)"/>
+    </request>
+
+    <request name="axis_discrete">
+      <description summary="scroll in discrete steps">
+        Discrete step information for scroll and other axes.
+      </description>
+      <arg name="time" type="uint" summary="timestamp with millisecond granularity"/>
+      <arg name="axis" type="uint" summary="axis type (0 vertical, 1 horizontal)"/>
+      <arg name="value" type="fixed" summary="length of vector in surface coordinates"/>
+      <arg name="discrete" type="int" summary="number of steps"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the virtual pointer">
+        Destroys the virtual pointer object.
+      </description>
+    </request>
+  </interface>
+</protocol>

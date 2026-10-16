@@ -7,7 +7,7 @@ import threading
 
 gi.require_version('Gtk', '4.0')
 
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk
 from config import ShellConfig, ThemePreset
 from contacts import Contact, ContactBook
 
@@ -88,6 +88,41 @@ _CALL_PATH_RE = re.compile(r'/org/freedesktop/ModemManager1/Call/\d+')
 _MMCLI_TIMEOUT_S = 15
 
 
+def _resolved_modem() -> str:
+    """Modem selector for mmcli, resolved from D-Bus: modems re-index after
+    resets, so the hardcoded index 0 breaks. Falls back to '0' offline."""
+    try:
+        from modem_monitor import resolve_modem_path
+        return resolve_modem_path() or '0'
+    except Exception:
+        return '0'
+
+
+def place_call(number: str) -> tuple[bool, str]:
+    """Place a voice call to ``number``; (success, detail for the status line).
+
+    Prefers Voice.CreateCall + Call.Start over D-Bus; only when that
+    transport fails does it fall back to mmcli (create, then start via the
+    returned object path — mmcli has no single dial verb, -o selects Call
+    objects). Blocking: call only from a worker thread."""
+    try:
+        from modem_monitor import voice_create_and_start
+        ok, detail = voice_create_and_start(number)
+        if ok:
+            return True, detail
+    except Exception as err:
+        detail = str(err)
+    modem = _resolved_modem()
+    ok, out = _run_mmcli(['-m', modem, f'--voice-create-call=number={number}'])
+    if not ok:
+        return False, out.strip()
+    match = _CALL_PATH_RE.search(out)
+    if match is None:
+        return False, 'modem returned no call path'
+    ok, out = _run_mmcli(['-m', modem, '-o', match.group(0), '--start'])
+    return ok, out.strip()
+
+
 def _run_mmcli(args: list[str]) -> tuple[bool, str]:
     """Run mmcli; returns (success, stdout on success or error detail)."""
     try:
@@ -104,6 +139,124 @@ def _run_mmcli(args: list[str]) -> tuple[bool, str]:
     return True, proc.stdout
 
 
+BUILTIN_EMERGENCY_NUMBERS = frozenset({
+    '112', '911', '999', '000', '08', '110',
+    '118', '119', '100', '101', '102', '108',
+})
+
+EMERGENCY_REFUSAL = 'Only emergency calls from the lock screen'
+
+_MODEM3GPP_IFACE = 'org.freedesktop.ModemManager1.Modem.Modem3gpp'
+_MODEM_IFACE = 'org.freedesktop.ModemManager1.Modem'
+_SIM_IFACE = 'org.freedesktop.ModemManager1.Sim'
+_PROPS_IFACE = 'org.freedesktop.DBus.Properties'
+_MM_BUS = 'org.freedesktop.ModemManager1'
+_DBUS_TIMEOUT_MS = 5000
+
+
+def normalize_emergency_number(raw: str) -> str:
+    """Digits-only form of a dial string for emergency matching: spaces,
+    dashes, dots, parens and a leading + never change which service is
+    dialed, so they are stripped before comparison. Pure."""
+    if not isinstance(raw, str):
+        return ''
+    return re.sub(r'\D', '', raw)
+
+
+def is_emergency_number(raw: str, extra: object = None) -> bool:
+    """True when ``raw`` dials an emergency service: the built-in list
+    union the modem's own list (``extra``). Exact match on the
+    digits-only form — a longer number merely containing 112 is not an
+    emergency call. Pure."""
+    norm = normalize_emergency_number(raw)
+    if not norm:
+        return False
+    if norm in BUILTIN_EMERGENCY_NUMBERS:
+        return True
+    if isinstance(extra, (list, tuple, set, frozenset)):
+        for candidate in extra:
+            if isinstance(candidate, str) and normalize_emergency_number(candidate) == norm:
+                return True
+    return False
+
+
+def _str_list(value: object) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
+
+
+def get_modem_emergency_numbers(bus=None, modem: str | None = None,
+                                timeout_ms: int = _DBUS_TIMEOUT_MS) -> list[str]:
+    """Emergency numbers the modem/SIM reports: the Modem3gpp
+    EmergencyNumbers property, then the SIM's EmergencyNumbers property
+    via the modem's Sim path. [] on any failure — every source is
+    optional, and a modem without either list still places the built-in
+    numbers. Blocking: call only from a worker thread."""
+    try:
+        if bus is None:
+            bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+        if bus is None:
+            return []
+        if modem is None:
+            from modem_monitor import resolve_modem_path
+            modem = resolve_modem_path()
+        if not modem:
+            return []
+        found: list[str] = []
+        try:
+            props = dict(bus.call_sync(
+                _MM_BUS, modem, _PROPS_IFACE, 'GetAll',
+                GLib.Variant('(s)', (_MODEM3GPP_IFACE,)), None,
+                Gio.DBusCallFlags.NONE, timeout_ms, None,
+            ).unpack()[0])
+            found.extend(_str_list(props.get('EmergencyNumbers')))
+        except Exception:
+            pass
+        try:
+            sim_path = bus.call_sync(
+                _MM_BUS, modem, _PROPS_IFACE, 'Get',
+                GLib.Variant('(ss)', (_MODEM_IFACE, 'Sim')), None,
+                Gio.DBusCallFlags.NONE, timeout_ms, None,
+            ).unpack()[0]
+        except Exception:
+            sim_path = None
+        if sim_path and sim_path != '/':
+            try:
+                sim_props = dict(bus.call_sync(
+                    _MM_BUS, str(sim_path), _PROPS_IFACE, 'GetAll',
+                    GLib.Variant('(s)', (_SIM_IFACE,)), None,
+                    Gio.DBusCallFlags.NONE, timeout_ms, None,
+                ).unpack()[0])
+                found.extend(_str_list(sim_props.get('EmergencyNumbers')))
+            except Exception:
+                pass
+        seen: set[str] = set()
+        out: list[str] = []
+        for number in found:
+            norm = normalize_emergency_number(number)
+            if norm and norm not in seen:
+                seen.add(norm)
+                out.append(norm)
+        return out
+    except Exception:
+        return []
+
+
+def place_emergency_call(number: str, extra: object = None) -> tuple[bool, str]:
+    """Place ``number`` only when it dials an emergency service; anything
+    else is refused without touching the modem. Blocking: call only from
+    a worker thread — ModemManager places emergency calls even without
+    a SIM when the modem allows, no unlock needed."""
+    if not is_emergency_number(number, extra):
+        return False, EMERGENCY_REFUSAL
+    try:
+        from modem_monitor import voice_create_and_start
+        return voice_create_and_start(number)
+    except Exception as err:
+        return False, str(err)
+
+
 class Dialer(Gtk.Window):
     """Standalone dialer window — numeric keypad + contact search + call via ModemManager."""
 
@@ -113,6 +266,7 @@ class Dialer(Gtk.Window):
         self.set_default_size(420, 860)
 
         self._digits = ''
+        self._suppress_zero_click = False
         self._contact_book = ContactBook()
         self._dnd = dnd_state
         # The shell window threads its LIVE config so hot reloads reach this
@@ -153,10 +307,12 @@ class Dialer(Gtk.Window):
         header.set_margin_bottom(8)
         root.append(header)
 
-        # Swipe down anywhere to close
+        # Swipe down on the header row closes. It must not live on the root:
+        # a downward swipe starting over the keypad is dialing-adjacent,
+        # not a close gesture.
         swipe = Gtk.GestureSwipe.new()
         swipe.connect('swipe', lambda _g, vx, vy: self.close() if vy > 300 else None)
-        root.add_controller(swipe)
+        header.add_controller(swipe)
 
         # Number display
         self._display = Gtk.Label(label='', xalign=1)
@@ -231,9 +387,28 @@ class Dialer(Gtk.Window):
         btn.add_css_class('dialer-button')
         btn.set_child(inner)
         btn.connect('clicked', self._on_digit, digit)
+        if digit == '0':
+            # Long-press 0 enters '+': the release click that follows the
+            # hold is suppressed so the digit is not appended twice.
+            zero_hold = Gtk.GestureLongPress.new()
+            zero_hold.set_touch_only(False)
+            zero_hold.connect('pressed', self._on_zero_longpress)
+            btn.add_controller(zero_hold)
         return btn
 
+    def _on_zero_longpress(
+        self, _gesture: Gtk.GestureLongPress, _x: float, _y: float,
+    ) -> None:
+        self._suppress_zero_click = True
+        if len(self._digits) < 20:
+            self._digits = '+' if not self._digits else f'{self._digits}+'
+            self._update_display()
+            self._refresh_suggestions()
+
     def _on_digit(self, _btn: Gtk.Button, digit: str) -> None:
+        if digit == '0' and self._suppress_zero_click:
+            self._suppress_zero_click = False
+            return
         if len(self._digits) < 20:
             self._digits += digit
             self._update_display()
@@ -333,18 +508,8 @@ class Dialer(Gtk.Window):
         threading.Thread(target=self._place_call, args=(number,), daemon=True).start()
 
     def _place_call(self, number: str) -> None:
-        # mmcli has no single dial verb: a call object must be created first,
-        # then started via the returned object path (-o selects Call objects).
-        ok, out = _run_mmcli(['-m', '0', f'--voice-create-call=number={number}'])
-        if not ok:
-            self._finish_dial(f'Call failed: {out.strip()}')
-            return
-        match = _CALL_PATH_RE.search(out)
-        if match is None:
-            self._finish_dial('Call failed: modem returned no call path')
-            return
-        ok, out = _run_mmcli(['-m', '0', '-o', match.group(0), '--start'])
-        self._finish_dial('Dialing…' if ok else f'Call failed: {out.strip()}')
+        ok, detail = place_call(number)
+        self._finish_dial('Dialing…' if ok else f'Call failed: {detail.strip()}')
 
     def _finish_dial(self, message: str) -> None:
         GLib.idle_add(self._set_status, message)

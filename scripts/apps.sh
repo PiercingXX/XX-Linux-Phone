@@ -9,7 +9,9 @@ set -u
 PKG=${1:-}
 SUDO=${2:-}
 if [ -z "$PKG" ] || [ -z "$SUDO" ]; then
-    if command -v apk >/dev/null 2>&1; then PKG=apk; else PKG=apt; fi
+    if command -v apk >/dev/null 2>&1; then PKG=apk
+    elif command -v pacman >/dev/null 2>&1; then PKG=pacman
+    else PKG=apt; fi
     if command -v doas >/dev/null 2>&1; then SUDO=doas; else SUDO=sudo; fi
 fi
 
@@ -19,6 +21,8 @@ mkdir -p "$APPDIR"
 pkg_install() {
     if [ "$PKG" = apk ]; then
         $SUDO apk add "$@" || echo "warn: install failed: $*" >&2
+    elif [ "$PKG" = pacman ]; then
+        $SUDO pacman -S --needed --noconfirm "$@" || echo "warn: install failed: $*" >&2
     else
         $SUDO apt install -y "$@" || echo "warn: install failed: $*" >&2
     fi

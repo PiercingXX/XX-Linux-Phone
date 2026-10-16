@@ -167,5 +167,164 @@ def test_toplevel_dataclass_fields() -> None:
     assert t.handle == 'h1'
 
 
+def test_squeekboard_surface_filtered(backend: FakeBackend, manager: ToplevelManager) -> None:
+    backend.add('h1', 'org.a.App', 'A')
+    backend.add('h2', 'squeekboard', 'Keyboard')
+    backend.add('h3', 'org.b.App', 'B')
+    assert [t.handle for t in manager.list()] == ['h1', 'h3']
+
+
+def test_squeekboard_match_is_case_insensitive(
+    backend: FakeBackend, manager: ToplevelManager,
+) -> None:
+    backend.add('h1', 'sm.puri.Squeekboard', 'Keyboard')
+    assert manager.list() == []
+
+
+class StubDeferredBackend:
+    """Test double for DeferredWaylandBackend with a manual ready trigger."""
+
+    def __init__(self) -> None:
+        self._callback = None
+        self._ready: list[object] = []
+        self._available = False
+        self.activated: list[object] = []
+        self.closed: list[object] = []
+
+    def available(self) -> bool:
+        return self._available
+
+    def connect(self, callback) -> None:
+        self._callback = callback
+
+    def on_ready(self, callback) -> None:
+        self._ready.append(callback)
+
+    def activate(self, handle: object) -> None:
+        self.activated.append(handle)
+
+    def close(self, handle: object) -> None:
+        self.closed.append(handle)
+
+    def emit(self, handle: object, app_id: str, title: str) -> None:
+        self._callback(handle, app_id, title)
+
+    def fire_ready(self) -> None:
+        self._available = True
+        for callback in self._ready:
+            callback()
+
+
+def test_manager_starts_unavailable_with_deferred_backend() -> None:
+    mgr = ToplevelManager(backend=StubDeferredBackend())
+    assert mgr.available is False
+    assert mgr.list() == []
+
+
+def test_manager_connects_and_notifies_when_deferred_backend_readies() -> None:
+    stub = StubDeferredBackend()
+    mgr = ToplevelManager(backend=stub)
+    calls: list[list[Toplevel]] = []
+    mgr.on_change(lambda: calls.append(mgr.list()))
+    stub.emit('h1', 'org.a.App', 'A')
+    assert [t.handle for t in mgr.list()] == ['h1']
+    stub.fire_ready()
+    assert mgr.available is True
+    assert len(calls) == 2
+    assert [t.handle for t in calls[-1]] == ['h1']
+
+
+def test_manager_ignores_backends_without_ready_hook() -> None:
+    mgr = ToplevelManager(backend=FakeBackend(available=False))
+    assert mgr.available is False
+    assert mgr.list() == []
+
+
+def test_real_deferred_backend_reports_unavailable_until_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    import toplevel_manager
+    import wayland_bindings
+
+    monkeypatch.setattr(toplevel_manager, '_post_to_main',
+                        lambda callback, *args: callback(*args))
+    gate = threading.Event()
+
+    def _blocked_ensure():
+        assert gate.wait(timeout=10)
+        return None
+
+    monkeypatch.setattr(wayland_bindings, 'ensure_bindings', _blocked_ensure)
+    mgr = ToplevelManager(backend=toplevel_manager.DeferredWaylandBackend())
+    assert mgr.available is False
+    gate.set()
+
+
+def test_real_deferred_backend_wires_and_notifies_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+    import time
+
+    import toplevel_manager
+    import wayland_bindings
+
+    monkeypatch.setattr(toplevel_manager, '_post_to_main',
+                        lambda callback, *args: callback(*args))
+    release = threading.Event()
+
+    def _gated_ensure():
+        assert release.wait(timeout=10)
+        return {'WlSeat': object,
+                'ZwlrForeignToplevelManagerV1': object,
+                'ZwlrForeignToplevelHandleV1': object}
+
+    monkeypatch.setattr(wayland_bindings, 'ensure_bindings', _gated_ensure)
+    activated: list[object] = []
+
+    class FakeRealBackend:
+        def __init__(self, **kwargs) -> None:
+            self._callback = None
+
+        def available(self) -> bool:
+            return True
+
+        def connect(self, callback) -> None:
+            self._callback = callback
+
+        def activate(self, handle: object) -> None:
+            activated.append(handle)
+
+        def close(self, handle: object) -> None:
+            pass
+
+    monkeypatch.setattr(toplevel_manager, 'WaylandToplevelBackend', FakeRealBackend)
+    backend = toplevel_manager.DeferredWaylandBackend()
+    mgr = ToplevelManager(backend=backend)
+    assert mgr.available is False
+    fired: list[bool] = []
+    mgr.on_change(lambda: fired.append(mgr.available))
+    release.set()
+    deadline = time.time() + 10
+    while not mgr.available and time.time() < deadline:
+        time.sleep(0.01)
+    assert mgr.available is True
+    assert fired and fired[-1] is True
+    mgr.activate('h1')
+    assert activated == ['h1']
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+def test_registry_global_handler_matches_wl_registry_global_event():
+    # pywayland dispatches wl_registry.global as (proxy, name, interface,
+    # version); an extra parameter makes every global raise TypeError and
+    # the manager is never bound (seen on a real phoc session).
+    import inspect
+    import toplevel_manager
+    params = list(inspect.signature(
+        toplevel_manager.WaylandToplevelBackend._on_registry_global).parameters)
+    assert params == ['self', 'registry', 'name', 'interface', 'version']

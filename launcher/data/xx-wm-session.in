@@ -21,11 +21,15 @@ else
     export GTK_THEME=Adwaita
 fi
 
-# Ensure Space Mono and JetBrains Mono are on the font path if installed into the overlay
-export FONTCONFIG_PATH="@datadir@/xx-wm/fonts:${FONTCONFIG_PATH:-/etc/fonts}"
-
 # Marks the real session — enables session-only behavior (app preloading)
 export XX_WM_SESSION=1
+
+# Desktop/session identity for portals and D-Bus activation: greetd and
+# bare `phoc` launches may not set these, and xdg-desktop-portal picks
+# xx-wm-portals.conf by the lowercased XDG_CURRENT_DESKTOP.
+: "${XDG_CURRENT_DESKTOP:=XX-WM}"
+: "${XDG_SESSION_TYPE:=wayland}"
+export XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 
 # Phone behavior: every app opens maximized (full-screen), never floating.
 # phoc reads this from the sm.puri.phoc GSetting (not phoc.ini) — set it

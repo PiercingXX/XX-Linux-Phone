@@ -1,0 +1,14 @@
+[Unit]
+Description=XX-WM privileged helper: re-apply saved charge limit and app network blocks
+Documentation=https://github.com/piercingxx/linux-phone
+DefaultDependencies=no
+After=sysinit.target local-fs.target
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=@libexecdir@/xx-wm-helper --apply-saved
+RemainAfterExit=no
+
+[Install]
+WantedBy=sysinit.target

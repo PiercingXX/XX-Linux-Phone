@@ -6,6 +6,8 @@ This file is the live work order. It is not a changelog. Git history holds the c
 
 **Sequence:** tablet first, then FLX1, then Librem 5. Fairphone 5 is parked. The tablet is up and SSH-able; drive as much as possible over SSH. Operator-at-glass steps are marked **GLASS**.
 
+**Build-out (2026-10-15):** `docs/buildout.md` is the current plan — Waves 1–4 (make it work, UI pass, telephony, performance) run before the device workstreams below. Its findings supersede the "Current state" section where they disagree.
+
 ## Ground rules
 
 - **Spec**: `design.md` wins. Where this file and design.md disagree, design.md is right; flag the conflict in the commit message.

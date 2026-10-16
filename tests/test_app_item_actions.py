@@ -1,11 +1,13 @@
 """Tests for app_item_actions.py mutation helpers — no widgets shown."""
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
+import app_item_actions
 from config import ShellConfig
 
 gi = pytest.importorskip('gi')
@@ -110,3 +112,180 @@ class TestMuteNormalization:
         assert config.is_app_muted('org.gnome.Calculator')
         assert config.is_app_muted('org.gnome.Calculator.desktop')
         assert not config.is_app_muted('org.gnome.Clocks')
+
+
+class _FakeLabel:
+    def __init__(self, label='', xalign=0, wrap=False):
+        self.text = label
+        self.calls = {}
+
+    def add_css_class(self, _name):
+        pass
+
+    def set_xalign(self, value):
+        self.calls['xalign'] = value
+
+    def set_wrap(self, value):
+        self.calls['wrap'] = value
+
+    def set_wrap_mode(self, value):
+        self.calls['wrap_mode'] = value
+
+    def set_max_width_chars(self, value):
+        self.calls['max_width_chars'] = value
+
+    def set_ellipsize(self, value):
+        self.calls['ellipsize'] = value
+
+
+class _FakeButton:
+    def __init__(self, label=''):
+        self.label = label
+        self.child = _FakeLabel(label)
+        self.handlers = {}
+
+    def add_css_class(self, _name):
+        pass
+
+    def get_child(self):
+        return self.child
+
+    def connect(self, signal, callback):
+        self.handlers[signal] = callback
+
+
+class _FakeBox:
+    def __init__(self, orientation=None, spacing=0):
+        self.children = []
+
+    def append(self, widget):
+        self.children.append(widget)
+
+
+class _FakeEntry:
+    def __init__(self):
+        self.text = ''
+        self.calls = {}
+        self.handlers = {}
+
+    def set_text(self, value):
+        self.text = value
+
+    def get_text(self):
+        return self.text
+
+    def select_region(self, start, end):
+        self.calls['select_region'] = (start, end)
+
+    def set_visibility(self, value):
+        self.calls['visibility'] = value
+
+    def set_input_purpose(self, value):
+        self.calls['input_purpose'] = value
+
+    def set_max_width_chars(self, value):
+        self.calls['max_width_chars'] = value
+
+    def connect(self, signal, callback):
+        self.handlers[signal] = callback
+
+    def grab_focus(self):
+        self.calls['grab_focus'] = True
+
+
+class _FakePopover:
+    def __init__(self):
+        self.popped_down = False
+
+    def popdown(self):
+        self.popped_down = True
+
+
+@pytest.fixture
+def faked_toolkit(monkeypatch):
+    """Recorder Gtk/Pango: constructing real widgets segfaults headless."""
+    gtk = SimpleNamespace(
+        Box=_FakeBox, Label=_FakeLabel, Button=_FakeButton,
+        Entry=_FakeEntry,
+        Orientation=SimpleNamespace(HORIZONTAL=0, VERTICAL=1),
+        InputPurpose=SimpleNamespace(PASSWORD='password'),
+    )
+    pango = SimpleNamespace(
+        WrapMode=SimpleNamespace(WORD='word', WORD_CHAR='word-char'),
+        EllipsizeMode=SimpleNamespace(END='end'),
+    )
+    monkeypatch.setattr(app_item_actions, 'Gtk', gtk)
+    monkeypatch.setattr(app_item_actions, 'Pango', pango)
+    return gtk, pango
+
+
+def _show_dialog(actions, password, entered):
+    captured = {}
+    popover = _FakePopover()
+
+    def _capture(_anchor, content):
+        captured['box'] = content
+        return popover
+
+    actions._show_popover = _capture
+    committed = []
+    actions._show_entry_dialog(object(), 'Password for HomeNet', '', 'Connect',
+                               committed.append, password=password)
+    box = captured['box']
+    entry = next(c for c in box.children if isinstance(c, _FakeEntry))
+    entry.text = entered
+    return box, entry, popover, committed
+
+
+class TestPasswordEntryDialog:
+    def test_password_mode_hides_and_preserves_spaces(
+            self, actions, faked_toolkit):
+        _gtk, _pango = faked_toolkit
+        _box, entry, popover, committed = _show_dialog(
+            actions, True, '  p@ss w0rd  ')
+        assert entry.calls['visibility'] is False
+        assert entry.calls['input_purpose'] == 'password'
+        assert 'select_region' not in entry.calls
+        entry.handlers['activate']()
+        assert popover.popped_down
+        assert committed == ['  p@ss w0rd  ']
+
+    def test_default_mode_strips_and_selects(self, actions, faked_toolkit):
+        _box, entry, popover, committed = _show_dialog(actions, False, '  Calc  ')
+        assert 'visibility' not in entry.calls
+        assert 'input_purpose' not in entry.calls
+        assert entry.calls['select_region'] == (0, -1)
+        entry.handlers['activate']()
+        assert committed == ['Calc']
+
+    def test_password_mode_uses_password_purpose_constant(
+            self, actions, faked_toolkit):
+        _gtk, _pango = faked_toolkit
+        _box, entry, _popover, _committed = _show_dialog(
+            actions, True, 'x')
+        assert entry.calls['input_purpose'] == _gtk.InputPurpose.PASSWORD
+
+
+class TestPopoverWidthCaps:
+    def test_action_items_wrap_word_char_at_28(
+            self, actions, faked_toolkit):
+        _gtk, pango = faked_toolkit
+        box = actions._action_list(
+            [('android.com.google.android.apps.youtube.music', lambda: None)],
+            title='A very long menu title that exceeds the cap width')
+        heading, btn = box.children
+        assert heading.calls['ellipsize'] == pango.EllipsizeMode.END
+        assert heading.calls['max_width_chars'] == 28
+        child = btn.child
+        assert child.calls['xalign'] == 0
+        assert child.calls['wrap'] is True
+        assert child.calls['wrap_mode'] == pango.WrapMode.WORD_CHAR
+        assert child.calls['max_width_chars'] == 28
+
+    def test_entry_dialog_caps(self, actions, faked_toolkit):
+        _gtk, pango = faked_toolkit
+        box, entry, _popover, _committed = _show_dialog(actions, False, 'x')
+        heading = box.children[0]
+        assert heading.calls['ellipsize'] == pango.EllipsizeMode.END
+        assert heading.calls['max_width_chars'] == 28
+        assert entry.calls['max_width_chars'] == 28

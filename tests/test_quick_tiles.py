@@ -686,14 +686,14 @@ class TestLocationPanelHonesty:
         panel._on_location_changed()
         assert btn.visible is False
         assert panel._tile_state['location'] is False
-        assert panel._state_labels['location'].text == 'off'
+        assert panel._state_labels['location'].text == 'Off'
 
         loc.ok = True
         loc.enabled = True
         panel._on_location_changed()
         assert btn.visible is True
         assert panel._tile_state['location'] is True
-        assert panel._state_labels['location'].text == 'on'
+        assert panel._state_labels['location'].text == 'On'
 
     def test_failed_enable_snaps_tile_back_off_immediately(
             self, monkeypatch):
@@ -712,7 +712,7 @@ class TestLocationPanelHonesty:
         assert state.available() is False
         assert btn.active is False
         assert 'active' not in btn.css
-        assert panel._state_labels['location'].text == 'off'
+        assert panel._state_labels['location'].text == 'Off'
 
     def test_successful_enable_marks_tile_on(self, monkeypatch):
         _pin_dbus_seams(monkeypatch)
@@ -728,7 +728,7 @@ class TestLocationPanelHonesty:
 
         assert btn.active is True
         assert 'active' in btn.css
-        assert panel._state_labels['location'].text == 'on'
+        assert panel._state_labels['location'].text == 'On'
 
 
 # --- mid-session disappearance ----------------------------------------------

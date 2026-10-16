@@ -22,6 +22,7 @@ EXPECTED = {
     'furiphone-flx1': ('HWCOMPOSER-1', '3'),
     'librem-5': ('DSI-1', '2'),
     'tablet': ('DSI-1', '1.5'),
+    'qemu': ('Virtual-1', '2'),
 }
 
 
@@ -67,11 +68,41 @@ def test_fragment_disables_xwayland():
 def test_install_script_selects_fragment(install_script):
     """install.sh must copy the chosen device's fragment over phoc.ini."""
     body = _function_body(install_script, 'select_phoc_scale')
-    assert 'whiptail' in body
+    assert 'whiptail' in body or '_ask_device' in body
     assert 'launcher/data/phoc' in body
     assert '.ini' in body
     assert 'cp' in body
     assert '/usr/share/xx-wm/phoc.ini' in body
+
+
+def test_detect_probes_drm_modes(install_script):
+    """detect_phoc_device must probe DRM sysfs (no wlr-randr on device)."""
+    assert '1200x1920' in install_script
+    assert '/sys/class/drm' in install_script
+    body = _function_body(install_script, 'detect_phoc_device')
+    assert body, 'detect_phoc_device not defined'
+    assert 'HWCOMPOSER-1' in body
+
+
+def test_cancel_does_not_keep_default(install_script):
+    """Cancelling the prompt must not silently keep the FP5 scale."""
+    body = _function_body(install_script, 'select_phoc_scale')
+    assert '|| return 0' not in body
+    assert 'detect' in body
+    assert '1200x1920' in body
+
+
+def test_non_tty_empty_detection_fails(install_script):
+    """Without a TTY and without detection, fail instead of spinning."""
+    body = _function_body(install_script, 'select_phoc_scale')
+    assert '-t 0' in body
+    assert 'return 1' in body
+
+
+def test_installed_fragment_fallback(install_script):
+    """Post-install (no repo tree) the fragment ships under the datadir."""
+    body = _function_body(install_script, 'select_phoc_scale')
+    assert '/usr/share/xx-wm/phoc/' in body
 
 
 def test_wired_into_install_path(install_script):

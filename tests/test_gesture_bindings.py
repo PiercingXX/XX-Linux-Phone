@@ -1,8 +1,9 @@
 """Tests for gesture_bindings.py — generated lisgd system-level bindings.
 
-The default-generated invocation is pinned byte-for-byte against the
-bindings launcher/data/xx-wm.in hardcoded before they became generated:
-same commands, same order.
+gestures.json stores action names (home, app_switcher, ...); lisgd can only
+exec xx-wm-ipc verbs, so ACTION_TO_VERB maps them at generation time.
+LEGACY_BINDINGS pins the invalid-value fallback (DEFAULT_VERBS);
+DEFAULT_BINDINGS pins the mapped defaults.
 """
 import json
 import os
@@ -16,14 +17,24 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
 import gesture_config
-from gesture_bindings import DEFAULT_VERBS, generate_bindings
+from gesture_bindings import ACTION_TO_VERB, DEFAULT_VERBS, generate_bindings
 from gesture_config import GestureConfig
 
-# Literal bindings formerly hardcoded in data/xx-wm.in, with @bindir@
-# resolved to /usr/bin. Order matters: it is lisgd's argument order.
+# Fallback verbs for valid-but-unmapped values (launch:, camera, none).
+# Truly invalid values are dropped at load, revealing the default action
+# mapping instead. Order matters: it is lisgd's argument order.
 LEGACY_BINDINGS = [
     '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.keyboard',
     '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.home',
+    '1,UD,T,*,R,/usr/bin/xx-wm-ipc gesture.shade',
+    '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.back',
+    '1,RL,R,*,R,/usr/bin/xx-wm-ipc gesture.back',
+]
+
+# Defaults resolve through _DEFAULTS action names mapped via ACTION_TO_VERB.
+DEFAULT_BINDINGS = [
+    '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.home',
+    '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.switcher',
     '1,UD,T,*,R,/usr/bin/xx-wm-ipc gesture.shade',
     '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.back',
     '1,RL,R,*,R,/usr/bin/xx-wm-ipc gesture.back',
@@ -36,18 +47,39 @@ def _isolate_config(tmp_path, monkeypatch):
                         lambda: tmp_path / 'gestures.json')
 
 
-class TestDefaultByteEquivalence:
-    def test_defaults_match_former_hardcoded_bindings(self):
-        assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
+class TestDefaultActionNameMapping:
+    def test_defaults_map_action_names_to_verbs(self):
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
     def test_bindir_is_substituted(self):
         out = generate_bindings('/usr/local/bin')
-        assert out[0] == '1,DU,B,S,R,/usr/local/bin/xx-wm-ipc gesture.keyboard'
-        assert len(out) == len(LEGACY_BINDINGS)
+        assert out[0] == '1,DU,B,S,R,/usr/local/bin/xx-wm-ipc gesture.home'
+        assert len(out) == len(DEFAULT_BINDINGS)
 
     def test_default_verbs_cover_every_slot(self):
         from gesture_bindings import _LISGD_GEOMETRY
         assert set(DEFAULT_VERBS) == set(_LISGD_GEOMETRY)
+
+    def test_explicit_action_names_map(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'home',
+            'swipe_up_long': 'app_switcher',
+            'swipe_down_top': 'notification_shade',
+            'swipe_left_edge': 'back',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
+        assert ACTION_TO_VERB['home'] == 'gesture.home'
+        assert ACTION_TO_VERB['app_switcher'] == 'gesture.switcher'
+        assert ACTION_TO_VERB['notification_shade'] == 'gesture.shade'
+        assert ACTION_TO_VERB['back'] == 'gesture.back'
+        assert ACTION_TO_VERB['search'] == 'gesture.keyboard'
+
+    def test_launch_home_swipes_do_not_change_lisgd(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_left_home': 'launch:htop.desktop',
+            'swipe_right_home': 'launch:org.gnome.Nautilus.desktop',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
 
 class TestRebinding:
@@ -58,7 +90,7 @@ class TestRebinding:
         }), encoding='utf-8')
         assert generate_bindings('/usr/bin') == [
             '1,DU,B,S,R,/usr/bin/xx-wm-ipc gesture.switcher',
-            '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.home',
+            '1,DU,B,L,R,/usr/bin/xx-wm-ipc gesture.switcher',
             '1,UD,T,*,R,/usr/bin/xx-wm-ipc gesture.shade',
             '1,LR,L,*,R,/usr/bin/xx-wm-ipc gesture.home',
             '1,RL,R,*,R,/usr/bin/xx-wm-ipc gesture.home',
@@ -66,23 +98,29 @@ class TestRebinding:
 
     def test_invalid_values_fall_back_silently(self, tmp_path):
         (tmp_path / 'gestures.json').write_text(json.dumps({
-            'swipe_up_short': 'explode',
+            'swipe_up_short': 'camera',
             'swipe_up_long': 'launch:org.some.App.desktop',
             'swipe_down_top': 'camera',
             'swipe_left_edge': 'none',
         }), encoding='utf-8')
         assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
 
+    def test_garbage_falls_back_to_mapped_default(self, tmp_path):
+        (tmp_path / 'gestures.json').write_text(json.dumps({
+            'swipe_up_short': 'explode',
+        }), encoding='utf-8')
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
+
     def test_non_system_slots_are_ignored(self, tmp_path):
         (tmp_path / 'gestures.json').write_text(
             '{"squeeze": "gesture.home", "double_tap_home": "gesture.shade"}',
             encoding='utf-8',
         )
-        assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
     def test_corrupt_config_file_falls_back(self, tmp_path):
         (tmp_path / 'gestures.json').write_text('{not json', encoding='utf-8')
-        assert generate_bindings('/usr/bin') == LEGACY_BINDINGS
+        assert generate_bindings('/usr/bin') == DEFAULT_BINDINGS
 
 
 class TestGestureConfigVerbValues:
@@ -112,7 +150,7 @@ class TestCli:
         proc = subprocess.run(
             [sys.executable, str(script), '--bindir', '/usr/bin'],
             capture_output=True, text=True, env=env, timeout=30, check=True)
-        assert proc.stdout.splitlines() == LEGACY_BINDINGS
+        assert proc.stdout.splitlines() == DEFAULT_BINDINGS
 
 
 if __name__ == '__main__':

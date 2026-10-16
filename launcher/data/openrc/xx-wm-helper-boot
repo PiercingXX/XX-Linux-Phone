@@ -1,0 +1,14 @@
+#!/sbin/openrc-run
+# XX-WM privileged helper — OpenRC equivalent of xx-wm-helper-boot.service.
+# Re-applies the persisted charge limit and app network blocks once at boot.
+
+name="xx-wm-helper-boot"
+description="XX-WM helper: re-apply saved charge limit and network blocks"
+
+command="@libexecdir@/xx-wm-helper"
+command_args="--apply-saved"
+
+depend() {
+    need localmount
+    after bootmisc
+}

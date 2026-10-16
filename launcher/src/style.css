@@ -120,12 +120,14 @@ entry {
 }
 
 .alpha-jump {
-  font-size: 8pt;
+  font-size: 10pt;
   font-weight: 600;
-  min-width: 22px;
-  min-height: 20px;
-  padding: 1px 2px;
-  border-radius: 4px;
+  /* Real touch targets: 44 px in both dimensions. The strip rides in its
+     own scroller, so 27 tall letters never size the drawer page. */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 2px;
+  border-radius: 8px;
   letter-spacing: 0;
 }
 .folder-member {

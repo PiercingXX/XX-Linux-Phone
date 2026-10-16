@@ -3,7 +3,6 @@ from __future__ import annotations
 import gi
 import os
 import re
-from datetime import datetime
 from pathlib import Path
 
 _LAYER_SHELL = False
@@ -30,49 +29,158 @@ from config import (
     THEME_PRESETS,
     _derive_shades,
 )
-from gesture_config import GestureConfig, IPC_VERBS, VALID_ACTIONS
-from system_status import status_line
+from gesture_config import GestureConfig
 
 _PAGE_ORDER = ['home', 'apps', 'settings']
 
-# Home side-swipe gestures the user can bind to an app in Settings
-_GESTURE_TITLES = {
-    'swipe_left_home': 'Swipe left',
-    'swipe_right_home': 'Swipe right',
+# Pages whose widgets take text input (drawer search, settings entries and
+# every entry popover anchored on them). Showing one needs keyboard focus,
+# which on phoc's layer-shell v3 means TOP + EXCLUSIVE (ON_DEMAND is v4+).
+_EDITABLE_STACK_PAGES = ('apps', 'settings')
+
+# Names that moved to the split modules (home_page, drawer_page,
+# settings_page, call_wiring) but stay importable from here, so old
+# `window.X` paths keep working. Resolved lazily (PEP 562): importing this
+# module never imports the split modules, and vice versa, so there is no
+# import-time cycle.
+_MOVED_NAMES = {
+    '_SETTINGS_SECTION_KEYS': 'settings_page',
+    '_GESTURE_TITLES': 'settings_page',
+    '_SYSTEM_GESTURE_TITLES': 'settings_page',
+    '_ACTION_LABELS': 'settings_page',
+    '_VERB_LABELS': 'settings_page',
+    '_UPDATE_NOTIF_ID': 'settings_page',
+    '_WEB_SEARCH_URL': 'drawer_page',
 }
 
-# System-level lisgd slots (design.md "Gestures"): they fire over any
-# focused app, so besides actions they accept the IPC verbs that
-# gesture_bindings.py materializes at session start.
-_SYSTEM_GESTURE_TITLES = {
-    'swipe_up_short': 'Swipe up (short)',
-    'swipe_up_long': 'Swipe up (long)',
-    'swipe_down_top': 'Swipe down (top)',
-    'swipe_left_edge': 'Edge swipe',
-}
 
-_ACTION_LABELS = {
-    'home': 'Home', 'app_switcher': 'App switcher',
-    'notification_shade': 'Notification shade', 'back': 'Back',
-    'search': 'Search', 'lock_screen': 'Lock screen', 'settings': 'Settings',
-    'camera': 'Camera', 'dialer': 'Dialer', 'assistant': 'Assistant',
-    'none': 'None',
-}
+def __getattr__(name: str):
+    if name in _MOVED_NAMES:
+        import importlib
+        return getattr(importlib.import_module(_MOVED_NAMES[name]), name)
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
 
-_VERB_LABELS = {
-    'gesture.back': 'Back (system)', 'gesture.home': 'Home (system)',
-    'gesture.shade': 'Shade (system)', 'gesture.keyboard': 'Keyboard (system)',
-    'gesture.switcher': 'Switcher (system)',
-}
 
-# Swipe-up velocity split: a gentle/short flick raises the keyboard, a
-# stronger/longer swipe opens the app drawer. Velocity-based since the
-# in-window GestureSwipe reports velocity, not distance (lisgd does distance).
+# Split-module helpers: composition, not mixins. Each helper holds only a
+# reference to the window; all state stays on ShellWindow. Module-level
+# functions (not methods) so the delegators below also work when they are
+# invoked unbound on bare namespaces that are not ShellWindow instances.
+# Imports stay inside the accessors: neither side imports the other at
+# module import time, so there are no circular imports.
+def _home(win):
+    helper = getattr(win, '_home_page', None)
+    if helper is None:
+        from home_page import HomePage
+        helper = HomePage(win)
+        win._home_page = helper
+    return helper
+
+
+def _drawer(win):
+    helper = getattr(win, '_drawer_page', None)
+    if helper is None:
+        from drawer_page import DrawerPage
+        helper = DrawerPage(win)
+        win._drawer_page = helper
+    return helper
+
+
+def _settings(win):
+    helper = getattr(win, '_settings_page', None)
+    if helper is None:
+        from settings_page import SettingsPage
+        helper = SettingsPage(win)
+        win._settings_page = helper
+    return helper
+
+
+def _calls(win):
+    helper = getattr(win, '_call_wiring', None)
+    if helper is None:
+        from call_wiring import CallWiring
+        helper = CallWiring(win)
+        win._call_wiring = helper
+    return helper
+
+
+def decide_layer_policy(page: str | None, popover_open: bool,
+                        over_apps: bool) -> tuple[str, str]:
+    """Pure layer/keyboard decision for the shell window.
+
+    Returns (layer_name, keyboard_mode_name) as plain strings so headless
+    tests can exercise the table without layer-shell bindings; the caller
+    maps them onto LayerShell.Layer / LayerShell.KeyboardMode.
+    """
+    if page in _EDITABLE_STACK_PAGES or popover_open:
+        return ('TOP', 'EXCLUSIVE')
+    if over_apps:
+        return ('TOP', 'NONE')
+    return ('BOTTOM', 'NONE')
+
+# Swipe-up split: a short flick raises the keyboard, a fast or long swipe
+# opens the app drawer. The stack's GestureSwipe path is velocity-only;
+# the home page's capture drag (see _build_root) decides by distance AND
+# release velocity (lisgd does distance).
 _LONG_SWIPE_UP_VEL = 900
+_SHORT_SWIPE_UP_VEL = 300
 
-_UPDATE_NOTIF_ID = 999901
+# Capture-drag thresholds: the drag claims the touch only after this much
+# vertical-dominant travel, so taps, long-presses and horizontal swipes
+# never get stolen. At/above _SWIPE_UP_DRAWER_PX of upward travel the
+# drawer opens regardless of speed.
+_SWIPE_UP_CLAIM_PX = 24
+_SWIPE_UP_DRAWER_PX = 120
 
-_WEB_SEARCH_URL = 'https://duckduckgo.com/?q='
+
+def should_claim_vertical_drag(offset_x: float, offset_y: float) -> bool:
+    """True once a drag owns the touch: vertical-dominant travel past the
+    claim threshold. Pure so the threshold is unit-testable — small taps
+    and horizontal swipes must never claim."""
+    return (abs(offset_y) > _SWIPE_UP_CLAIM_PX
+            and abs(offset_y) > abs(offset_x) * 1.5)
+
+
+def decide_swipe_up_action(
+    distance_px: float, velocity_y: float,
+) -> str | None:
+    """Map an upward drag's travel and release velocity to an action.
+
+    Returns 'drawer' for a fast or long swipe up, 'keyboard' for a short
+    one, None when the movement is too small or too slow (a tap, a hold,
+    or a list-scroll release). Only upward movement counts: distance is
+    up-positive px, velocity is px/s in GTK coordinates (up is negative).
+    Pure so the distance/velocity table is unit-testable.
+    """
+    if distance_px < _SWIPE_UP_CLAIM_PX or velocity_y > -_SHORT_SWIPE_UP_VEL:
+        return None
+    if (distance_px >= _SWIPE_UP_DRAWER_PX
+            or velocity_y <= -_LONG_SWIPE_UP_VEL):
+        return 'drawer'
+    return 'keyboard'
+
+
+def swipe_release_velocity(
+    samples: list[tuple[float, float, float]],
+) -> tuple[float, float]:
+    """Release velocity in px/s over the trailing ~120 ms of a drag.
+
+    Samples are (monotonic_ms, x, y) from drag-begin/update. (0, 0) when
+    fewer than two samples exist or time stands still. Pure so the window
+    calculation is unit-testable.
+    """
+    if len(samples) < 2:
+        return (0.0, 0.0)
+    window_ms = 120.0
+    t1, x1, y1 = samples[-1]
+    t0, x0, y0 = samples[0]
+    for stamp, x, y in reversed(samples[:-1]):
+        if t1 - stamp > window_ms:
+            break
+        t0, x0, y0 = stamp, x, y
+    dt = (t1 - t0) / 1000.0
+    if dt <= 0:
+        return (0.0, 0.0)
+    return ((x1 - x0) / dt, (y1 - y0) / dt)
 
 _CUSTOM_HEX_RE = re.compile(r'#[0-9a-fA-F]{6}')
 
@@ -121,22 +229,34 @@ def _set_osk_visible(visible: bool) -> None:
     Both _show_keyboard() and _hide_keyboard() route through here. It is the
     headless seam the tap-outside test drives: monkeypatching Gio's
     bus_get_sync lets a test assert the SetVisible payload without a display.
+
+    The bus round-trip runs on a worker thread: tap and swipe paths call
+    this synchronously, and a 500 ms call_sync on the GTK thread would
+    stall the gesture that asked for the keyboard. Returns the thread so
+    tests can join it.
     """
-    from gi.repository import Gio
-    try:
-        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        bus.call_sync(
-            'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible',
-            GLib.Variant('(b)', (visible,)), None,
-            Gio.DBusCallFlags.NONE, 500, None,
-        )
-    except Exception as error:
-        # A D-Bus failure (squeekboard absent, bus down) must not crash the
-        # shell, but it is a real fault on a data path — log it rather than
-        # silently dropping the show/hide request.
-        from shell_log import get_logger
-        get_logger('window').warning(
-            'set-OSK-visible(%s) over D-Bus failed: %s', visible, error)
+    import threading
+
+    def _work() -> None:
+        from gi.repository import Gio
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            bus.call_sync(
+                'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible',
+                GLib.Variant('(b)', (visible,)), None,
+                Gio.DBusCallFlags.NONE, 500, None,
+            )
+        except Exception as error:
+            # A D-Bus failure (squeekboard absent, bus down) must not crash
+            # the shell, but it is a real fault on a data path — log it
+            # rather than silently dropping the show/hide request.
+            from shell_log import get_logger
+            get_logger('window').warning(
+                'set-OSK-visible(%s) over D-Bus failed: %s', visible, error)
+
+    worker = threading.Thread(target=_work, daemon=True, name='osk-visible')
+    worker.start()
+    return worker
 
 
 class ShellWindow(Adw.ApplicationWindow):
@@ -173,11 +293,28 @@ class ShellWindow(Adw.ApplicationWindow):
         except Exception:
             pass  # first-boot seeding must never block the shell
 
-        self._idle_timer_id: int | None = None
+        # Blank-driven auto-lock: DisplayManager reports blank/wake via
+        # on_blank_changed; _lock_src is the pending "dark long enough"
+        # timer, cancelled on wake. _blanked mirrors the display state.
+        self._lock_src: int | None = None
+        self._blanked = False
+        # Layer/keyboard focus state for _apply_layer_policy: _over_apps is
+        # set by present_over_apps/drop_to_background, _popover_count tracks
+        # open app_item_actions popovers (entry dialogs need key focus).
+        self._over_apps = False
+        self._popover_count = 0
+        # Capture-drag swipe-up state: samples are (monotonic_ms, x, y)
+        # from the latest drag-begin/update; claimed once the threshold owns
+        # the touch (see should_claim_vertical_drag).
+        self._swipe_drag_samples: list[tuple[float, float, float]] = []
+        self._swipe_drag_claimed = False
         self._pick_slot_mode = False
         # When set to a gesture key ('swipe_left_home'/'swipe_right_home'),
         # the next drawer tap binds that app to the gesture instead of launching
         self._pick_gesture_key: str | None = None
+        # When True, the next drawer tap adds that app to the standby
+        # never-freeze list instead of launching (settings standby card)
+        self._pick_exempt_mode = False
         self._gesture_binding_labels: dict[str, Gtk.Label] = {}
         self._system_gesture_labels: dict[str, Gtk.Label] = {}
         self._drawer_open_folder: int | None = None
@@ -185,6 +322,12 @@ class ShellWindow(Adw.ApplicationWindow):
         self._last_search_results: list[AppEntry] = []
         self._call_ui: object | None = None
         self._call_bar: object | None = None
+        self.xxdb_controller = None
+        self._xxdb_switch_updating = False
+        self._xxdb_switch = None
+        self._xxdb_status = None
+        self._xxdb_hosts_box = None
+        self._xxdb_pending_box = None
         self._shade: object | None = None
         self._switcher: object | None = None
         self._dialer: object | None = None
@@ -196,7 +339,13 @@ class ShellWindow(Adw.ApplicationWindow):
             on_incoming=self._on_call_incoming,
             on_answered=self._on_call_answered,
             on_ended=self._on_call_ended,
+            on_calls_changed=self._on_calls_changed,
+            on_sms=self._on_sms_received,
         )
+        self._calls_owner_warned = False
+        self._chatty_owner_warned = False
+        self._txtt_owner_warned = False
+        self._sms_notif_seq = 0
 
         self.base_provider = Gtk.CssProvider()
         self.theme_provider = Gtk.CssProvider()
@@ -208,6 +357,12 @@ class ShellWindow(Adw.ApplicationWindow):
             transition_duration=200,
             transition_type=Gtk.StackTransitionType.NONE,
         )
+        # Each page sizes to itself: a homogeneous stack would stretch every
+        # page to the widest/tallest one (the settings page hit 624 px wide),
+        # pushing the window off a 360 px phone screen.
+        self.stack.set_hhomogeneous(False)
+        self.stack.set_vhomogeneous(False)
+        self.stack.set_interpolate_size(False)
         # Leaving the drawer disarms the pick modes so a later tap launches
         self.stack.connect(
             'notify::visible-child-name', self._on_stack_page_changed)
@@ -217,6 +372,7 @@ class ShellWindow(Adw.ApplicationWindow):
             on_changed=self._refresh_after_item_action,
             on_status=self._show_status,
             focus_state=self.focus_state,
+            on_popover_changed=self._on_item_popover,
         )
 
         # Right-aligned flat search, as in the PiercingXX Android launcher
@@ -240,9 +396,12 @@ class ShellWindow(Adw.ApplicationWindow):
 
         self.weather_label = Gtk.Label(xalign=0)
         self.weather_label.add_css_class('display-date')
+        self.weather_label.set_ellipsize(Pango.EllipsizeMode.END)
 
         self.status_strip = Gtk.Label(xalign=0)
         self.status_strip.add_css_class('dim-label')
+        # SSIDs can be long; never let the strip force the home page wider.
+        self.status_strip.set_ellipsize(Pango.EllipsizeMode.END)
 
         self.apps_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.apps_list.add_css_class('text-list')
@@ -251,10 +410,10 @@ class ShellWindow(Adw.ApplicationWindow):
         self.toast_overlay.set_child(self._build_root())
         self.set_content(self.toast_overlay)
 
-        # Idle monitoring — any motion or key event resets the auto-lock timer
-        motion = Gtk.EventControllerMotion.new()
-        motion.connect('motion', lambda *_: self._reset_idle_timer())
-        self.add_controller(motion)
+        # The display owns idle: auto-lock follows blank/wake reports from
+        # DisplayManager (on_blank_changed), never motion over this window —
+        # app use produces no shell-window input, so a motion timer would
+        # lock the phone mid-use.
         key_ctrl = Gtk.EventControllerKey.new()
         key_ctrl.connect('key-pressed', self._on_key_pressed)
         self.add_controller(key_ctrl)
@@ -263,8 +422,8 @@ class ShellWindow(Adw.ApplicationWindow):
         self._refresh_clock()
         self._populate_apps()
         self._refresh_status()
-        self._setup_idle_timer()
         self._setup_config_monitor()
+        self._setup_app_monitor()
         GLib.timeout_add_seconds(1, self._tick_clock)
         GLib.timeout_add_seconds(60, self._tick_status)
 
@@ -272,6 +431,14 @@ class ShellWindow(Adw.ApplicationWindow):
         self._update_checker = UpdateChecker(
             self.config, on_updates_available=self._on_updates_available,
         )
+        # Set the resting BOTTOM + NONE explicitly (previously the keyboard
+        # mode was never set, leaving it at the compositor default NONE only
+        # by accident and the layer at whatever init_for_window left).
+        self._apply_layer_policy()
+        # Apps mapped outside the shell must still land above it: the
+        # manager degrades to unavailable headless, so this never breaks
+        # construction.
+        self._wire_foreign_toplevels()
 
     def _load_css(self) -> None:
         style_path = Path(__file__).with_name('style.css')
@@ -279,6 +446,10 @@ class ShellWindow(Adw.ApplicationWindow):
         display = Gdk.Display.get_default()
         Gtk.StyleContext.add_provider_for_display(display, self.base_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         Gtk.StyleContext.add_provider_for_display(display, self.theme_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+
+    # -- split-module helpers live at module level (below): composition,
+    # not mixins. Each helper holds only a reference to the window; all
+    # state stays on ShellWindow.
 
     def _build_root(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -292,6 +463,23 @@ class ShellWindow(Adw.ApplicationWindow):
         swipe.set_touch_only(False)
         swipe.connect('swipe', self._on_stack_swipe)
         self.stack.add_controller(swipe)
+
+        # Swipe-up capture drag: the swipe above sits in the default BUBBLE
+        # phase, so a swipe starting on a home slot button is claimed by
+        # the button's click gesture first and never reaches it. This drag
+        # runs in CAPTURE (before the buttons) and claims only after a
+        # vertical-dominant threshold, so taps, long-press edit mode and
+        # horizontal swipes keep working; on release it decides drawer vs
+        # keyboard by distance and velocity. Only the home page claims —
+        # drawer/settings vertical drags scroll their lists via the swipe
+        # path above.
+        drag = Gtk.GestureDrag.new()
+        drag.set_touch_only(False)
+        drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        drag.connect('drag-begin', self._on_swipe_drag_begin)
+        drag.connect('drag-update', self._on_swipe_drag_update)
+        drag.connect('drag-end', self._on_swipe_drag_end)
+        self.stack.add_controller(drag)
 
         # Tap-outside → hide the OSK (20.1): a tap that lands on a non-editable
         # widget means the user is done typing, so drop squeekboard.
@@ -313,7 +501,7 @@ class ShellWindow(Adw.ApplicationWindow):
             elif vel_y < -_LONG_SWIPE_UP_VEL:
                 # Long/fast swipe up → app drawer
                 self.stack.set_visible_child_name('apps')
-            elif vel_y < -300:
+            elif vel_y < -_SHORT_SWIPE_UP_VEL:
                 # Short swipe up → on-screen keyboard
                 self._show_keyboard()
             return
@@ -351,6 +539,48 @@ class ShellWindow(Adw.ApplicationWindow):
             self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
             self.stack.set_visible_child_name(_PAGE_ORDER[idx - 1])
 
+    def _on_swipe_drag_begin(self, _gesture, start_x: float,
+                               start_y: float) -> None:
+        from gi.repository import GLib
+        now_ms = GLib.get_monotonic_time() / 1000.0
+        self._swipe_drag_samples = [(now_ms, start_x, start_y)]
+        self._swipe_drag_claimed = False
+
+    def _on_swipe_drag_update(self, gesture, offset_x: float,
+                              offset_y: float) -> None:
+        from gi.repository import GLib
+        now_ms = GLib.get_monotonic_time() / 1000.0
+        if self._swipe_drag_samples:
+            _t, start_x, start_y = self._swipe_drag_samples[0]
+            self._swipe_drag_samples.append(
+                (now_ms, start_x + offset_x, start_y + offset_y))
+        if (not self._swipe_drag_claimed
+                and self.stack.get_visible_child_name() == 'home'
+                and should_claim_vertical_drag(offset_x, offset_y)):
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            self._swipe_drag_claimed = True
+
+    def _on_swipe_drag_end(self, _gesture, offset_x: float,
+                           offset_y: float) -> None:
+        if not self._swipe_drag_claimed:
+            return
+        self._swipe_drag_claimed = False
+        _vel_x, vel_y = swipe_release_velocity(self._swipe_drag_samples)
+        self._swipe_drag_samples = []
+        if offset_y >= 0:
+            # Claimed downward drag: same action as a swipe down, with the
+            # same speed floor so a slow list scroll never opens the shade.
+            if vel_y > _SHORT_SWIPE_UP_VEL:
+                self._dispatch_gesture_action(
+                    self.gesture_config.get('swipe_down_top')
+                    or 'notification_shade')
+            return
+        action = decide_swipe_up_action(-offset_y, vel_y)
+        if action == 'drawer':
+            self.stack.set_visible_child_name('apps')
+        elif action == 'keyboard':
+            self._show_keyboard()
+
     def _dispatch_gesture_action(self, action: str) -> None:
         """Run a gesture_config action, including launch:<app_id> bindings."""
         if action.startswith('launch:'):
@@ -364,6 +594,7 @@ class ShellWindow(Adw.ApplicationWindow):
             self.apps_search.grab_focus()
         elif action == 'home':
             self.stack.set_visible_child_name('home')
+            self._apply_layer_policy()
         elif action == 'app_switcher':
             self._show_switcher()
         elif action == 'lock_screen':
@@ -430,19 +661,116 @@ class ShellWindow(Adw.ApplicationWindow):
         self.present_over_apps()
         return GLib.SOURCE_REMOVE
 
+    def _apply_layer_policy(self) -> None:
+        """Central layer/keyboard switch: editable pages and open entry
+        popovers need TOP + EXCLUSIVE (phoc v3 has no ON_DEMAND), home over
+        apps stays TOP + NONE, and home at rest is BOTTOM + NONE. Without
+        layer-shell this is a no-op — the window is a normal window then."""
+        if not (_LAYER_SHELL and LayerShell.is_supported()):
+            return
+        page = self.stack.get_visible_child_name()
+        layer_name, kb_name = decide_layer_policy(
+            page, self._popover_count > 0, self._over_apps)
+        LayerShell.set_layer(self, getattr(LayerShell.Layer, layer_name))
+        LayerShell.set_keyboard_mode(
+            self, getattr(LayerShell.KeyboardMode, kb_name))
+
+    def _on_item_popover(self, opened: bool) -> None:
+        self._popover_count = max(0, self._popover_count + (1 if opened else -1))
+        self._apply_layer_policy()
+
     def present_over_apps(self) -> None:
         """Raise the shell above regular app windows (the go-home gesture).
 
         Home lives on the BOTTOM layer, so a focused app covers it; until
         phoc grows foreign-toplevel management this hop to the TOP layer is
-        what makes 'swipe up → home' work while an app is open."""
-        if _LAYER_SHELL and LayerShell.is_supported():
-            LayerShell.set_layer(self, LayerShell.Layer.TOP)
+        what makes 'swipe up → home' work while an app is open. An editable
+        page keeps EXCLUSIVE so typing still works up there."""
+        self._over_apps = True
+        self._apply_layer_policy()
 
     def drop_to_background(self) -> None:
-        """Return the shell to the BOTTOM layer so launched apps show above."""
+        """Return the shell to BOTTOM + NONE so launched apps show above.
+
+        Explicit, not via the page policy: the drawer may still be open
+        underneath the fresh app window, and the policy would keep the shell
+        raised and keyboard-grabbing over the app. The next page change,
+        popover event or present_over_apps re-applies the policy."""
+        self._over_apps = False
         if _LAYER_SHELL and LayerShell.is_supported():
             LayerShell.set_layer(self, LayerShell.Layer.BOTTOM)
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
+
+    def _wire_foreign_toplevels(self, manager=None) -> None:
+        """Yield to apps mapped outside the shell (D-Bus activation,
+        systemd-run, notification actions): a new foreign toplevel means a
+        fresh app window, whether or not the shell launched it."""
+        try:
+            if manager is None:
+                from toplevel_manager import ToplevelManager
+                manager = ToplevelManager()
+            self._toplevel_manager = manager
+            try:
+                self._known_toplevels = {
+                    t.handle for t in manager.list()}
+            except Exception:
+                self._known_toplevels = set()
+            on_change = getattr(manager, 'on_change', None)
+            if callable(on_change):
+                on_change(self._on_foreign_toplevels)
+        except Exception:
+            pass
+
+    def _on_foreign_toplevels(self) -> None:
+        manager = getattr(self, '_toplevel_manager', None)
+        if manager is None:
+            return
+        try:
+            current = {t.handle for t in manager.list()}
+        except Exception:
+            return
+        try:
+            known = getattr(self, '_known_toplevels', None)
+            if not isinstance(known, set):
+                known = set()
+        except Exception:
+            known = set()
+        try:
+            self._known_toplevels = set(current)
+        except Exception:
+            pass
+        if current - known:
+            self._yield_to_foreign_app()
+
+    def _yield_to_foreign_app(self) -> None:
+        """Get out of a fresh app window's way, exactly as for a launch the
+        shell made itself: home page, BOTTOM + NONE, overlays closed."""
+        try:
+            stack = getattr(self, 'stack', None)
+            if stack is not None:
+                stack.set_visible_child_name('home')
+        except Exception:
+            pass
+        try:
+            self._drawer_open_folder = None
+        except Exception:
+            pass
+        for attr, hide in (('_shade', 'hide_shade'),
+                           ('_switcher', 'hide_switcher')):
+            try:
+                surface = getattr(self, attr, None)
+                if surface is not None and surface.get_visible():
+                    getattr(surface, hide)()
+            except Exception:
+                pass
+        try:
+            self.drop_to_background()
+        except Exception:
+            pass
+        try:
+            self._apply_layer_policy()
+        except Exception:
+            pass
 
     def _launch_app_id(self, app_id: str) -> None:
         from gi.repository import Gio
@@ -453,106 +781,29 @@ class ShellWindow(Adw.ApplicationWindow):
         if info is None:
             # Uninstalled target — behave like 'none' per Workstream 8.1
             return
+        tracker = getattr(self, 'standby', None)
+        if tracker is not None:
+            try:
+                tracker.thaw_for_launch(app_id)
+            except Exception:
+                pass
         try:
-            info.launch([], None)
+            if tracker is not None:
+                from app_standby import launch_with_pid
+                launch_with_pid(
+                    info,
+                    on_pid=lambda pid: tracker.track(app_id, pid),
+                )
+            else:
+                info.launch([], None)
             self.config.record_launch(app_id)
             self.drop_to_background()
         except GLib.Error as error:
             self._show_status(f'Failed to launch: {error.message}')
 
+    # -- home page (home_page.py) -----------------------------------------
     def _build_home_page(self) -> Gtk.Widget:
-        from home_launcher import HomeLauncher, theme_css
-        from gi.repository import Gdk
-
-        css = Gtk.CssProvider()
-        css.load_from_data(theme_css(self.config.theme).encode('utf-8'))
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
-        )
-
-        # --- Top 1/3: widget block — config-driven, vertically centered ---
-        self.clock_label.set_xalign(0.5)
-        self.date_label.set_xalign(0.5)
-        self.weather_label.set_xalign(0.5)
-        self.status_strip.set_xalign(0.5)
-
-        self._clock_tap_timer: int | None = None
-
-        clock_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        clock_inner.set_halign(Gtk.Align.FILL)
-        clock_inner.set_hexpand(True)
-        self._widget_block = clock_inner
-        self._widget_taps_wired: set[str] = set()
-        self._build_widget_block()
-
-        self._init_weather()
-
-        # Equal spacers above and below clock_inner → vertically centered in top pane
-        top_pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        top_pane.set_hexpand(True)
-        top_pane.set_vexpand(True)
-        sp_top = Gtk.Box()
-        sp_top.set_vexpand(True)
-        sp_bot = Gtk.Box()
-        sp_bot.set_vexpand(True)
-        top_pane.append(sp_top)
-        top_pane.append(clock_inner)
-        top_pane.append(sp_bot)
-
-        # --- Bottom 2/3: launcher — vertically centered ---
-        def _get_home_slots() -> list[dict]:
-            return self.config.home_slots
-
-        def _launch_slot(slot: dict) -> None:
-            self._launch_slot(slot)
-
-        self._home_launcher = HomeLauncher(
-            open_dialer_fn=self._open_dialer,
-            get_slots_fn=_get_home_slots,
-            on_launch_slot=_launch_slot,
-            on_member_long_press=lambda w, s, m: self.item_actions.show_member_menu(w, s, m),
-            on_slot_move=self._move_slot,
-            on_slot_remove=self._remove_slot,
-            on_slot_rename=self._rename_slot,
-            on_edit_action=self._on_edit_action,
-            is_paused_fn=self.focus_state.is_paused_app,
-            get_alignment_fn=lambda: self.config.home_alignment,
-        )
-
-        launcher_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        launcher_inner.set_valign(Gtk.Align.CENTER)
-        launcher_inner.set_vexpand(True)
-        launcher_inner.set_hexpand(True)
-        launcher_inner.append(self._home_launcher)
-
-        launcher_scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
-        launcher_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        launcher_scroll.set_has_frame(False)
-        launcher_scroll.add_css_class('home-scroll')
-        launcher_scroll.set_child(launcher_inner)
-
-        bot_pane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        bot_pane.set_hexpand(True)
-        bot_pane.set_vexpand(True)
-        bot_pane.set_margin_bottom(24)
-        bot_pane.append(launcher_scroll)
-
-        # Long-press anywhere on home → slot edit mode (design.md "Home screen")
-        edit_press = Gtk.GestureLongPress.new()
-        edit_press.set_touch_only(False)
-        edit_press.connect('pressed', self._on_home_long_press)
-        bot_pane.add_controller(edit_press)
-
-        # --- 1/3 widgets / 2/3 launcher — a homogeneous grid, so there is
-        # no Paned divider bar and no realize-time ratio hack. The widget
-        # block centers in the top third; the slot list centers in the rest.
-        grid = Gtk.Grid()
-        grid.set_row_homogeneous(True)
-        grid.set_hexpand(True)
-        grid.set_vexpand(True)
-        grid.attach(top_pane, 0, 0, 1, 1)
-        grid.attach(bot_pane, 0, 1, 1, 2)
-        return grid
+        return _home(self)._build_home_page()
 
     def _open_dialer(self) -> None:
         from dialer import Dialer
@@ -569,38 +820,7 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _launch_slot(self, slot: dict) -> None:
         """Launch an app or command from a home slot."""
-        app_id = slot.get('app_id')
-        if app_id and self.focus_state.is_paused_app(str(app_id)):
-            self._show_focus_notice(slot.get('label', 'App'))
-            return
-        # Record usage
-        if app_id:
-            self.config.record_launch(app_id)
-
-        # Launch based on type
-        slot_type = slot.get('type')
-        if slot_type == 'app':
-            android_pkg = slot.get('app_id')
-            cmd = slot.get('cmd')
-            label = slot.get('label', '')
-
-            if label == 'Phone' and not android_pkg and not cmd:
-                # Built-in dialer
-                self._open_dialer()
-            elif android_pkg:
-                # Desktop-file ids (incl. waydroid.*.desktop wrappers) launch
-                # via Gio; only bare Android package names go through waydroid
-                if str(android_pkg).endswith('.desktop'):
-                    self._launch_app_id(str(android_pkg))
-                else:
-                    from home_launcher import _launch_android
-                    _launch_android(android_pkg)
-                    self.drop_to_background()
-            elif cmd:
-                # Command
-                from home_launcher import _launch_cmd
-                _launch_cmd(cmd)
-                self.drop_to_background()
+        return _home(self)._launch_slot(slot)
 
     def _handle_back(self) -> None:
         """Called by BackGestureLayer on edge swipe from either side."""
@@ -643,97 +863,37 @@ class ShellWindow(Adw.ApplicationWindow):
             pass
 
     def _build_widget_block(self) -> None:
-        block = self._widget_block
-        child = block.get_first_child()
-        while child is not None:
-            nxt = child.get_next_sibling()
-            block.remove(child)
-            child = nxt
-        widget_map = {
-            'time': self.clock_label,
-            'date': self.date_label,
-            'weather': self.weather_label,
-            'battery': self.status_strip,
-        }
-        for key, _conf in self.config.ordered_widgets():
-            widget = widget_map.get(key)
-            if widget is None:
-                continue
-            if key not in self._widget_taps_wired:
-                self._wire_widget_tap(widget, key)
-                self._widget_taps_wired.add(key)
-            block.append(widget)
+        return _home(self)._build_widget_block()
 
     def _current_tap(self, key: str) -> object:
         # Read at dispatch time so a hot-reloaded config takes effect
-        return self.config.widgets.get(key, {}).get('tap', 'default')
+        return _home(self)._current_tap(key)
 
     def _wire_widget_tap(self, widget: Gtk.Widget, key: str) -> None:
-        if key == 'time':
-            # The clock keeps double-tap-to-lock; a single tap (after the
-            # double-tap window passes) runs the configured action
-            tap_gesture = Gtk.GestureClick.new()
-            tap_gesture.connect(
-                'pressed', lambda _g, n, _x, _y: self._on_clock_tapped(n))
-            widget.add_controller(tap_gesture)
-            return
-        gesture = Gtk.GestureClick.new()
-        gesture.connect(
-            'pressed',
-            lambda _g, _n, _x, _y, k=key: self._dispatch_widget_tap(k, self._current_tap(k)))
-        widget.add_controller(gesture)
+        return _home(self)._wire_widget_tap(widget, key)
 
     def _on_clock_tapped(self, n_press: int) -> None:
-        if n_press == 2:
-            if self._clock_tap_timer is not None:
-                GLib.source_remove(self._clock_tap_timer)
-                self._clock_tap_timer = None
-            self._show_lock_screen()
-            return
-        if n_press == 1 and self._clock_tap_timer is None:
-            def _fire() -> bool:
-                self._clock_tap_timer = None
-                tap = self._current_tap('time')
-                if tap != 'none':
-                    self._dispatch_widget_tap('time', tap)
-                return GLib.SOURCE_REMOVE
-            self._clock_tap_timer = GLib.timeout_add(280, _fire)
+        return _home(self)._on_clock_tapped(n_press)
 
     def _dispatch_widget_tap(self, key: str, tap: object) -> None:
-        if isinstance(tap, dict) and tap.get('app'):
-            self._launch_app_id(str(tap['app']))
-            return
-        if tap == 'refresh' or (key == 'weather' and tap == 'default'):
-            self._refresh_weather(force=True)
-            return
-        if tap != 'default':
-            return
-        if key == 'time':
-            self._launch_first_matching('clock')
-        elif key == 'date':
-            self._launch_first_matching('calendar')
-        elif key == 'battery':
-            self.stack.set_visible_child_name('settings')
+        return _home(self)._dispatch_widget_tap(key, tap)
 
     def _launch_first_matching(self, needle: str) -> None:
-        entry = next(
-            (e for e in self.app_index.entries if needle in e.name.casefold()), None)
-        if entry is not None:
-            self._launch_entry(entry)
+        return _home(self)._launch_first_matching(needle)
 
     def _init_weather(self) -> None:
-        from weather import WeatherProvider, PLACEHOLDER
-        self._weather = WeatherProvider(self.config)
-        self.weather_label.set_text(PLACEHOLDER)
-        self._refresh_weather()
-        GLib.timeout_add_seconds(900, self._tick_weather)
+        return _home(self)._init_weather()
 
     def _tick_weather(self) -> bool:
-        self._refresh_weather()
-        return True
+        return _home(self)._tick_weather()
 
     def _refresh_weather(self, force: bool = False) -> None:
-        self._weather.refresh(self.weather_label.set_text, force=force)
+        return _home(self)._refresh_weather(force=force)
+
+    def is_locked(self) -> bool:
+        """True while the lock screen is up; IPC verbs consult this."""
+        lock = getattr(self, '_lock_screen', None)
+        return lock is not None and bool(lock.get_visible())
 
     def _show_lock_screen(self) -> None:
         lock = getattr(self, '_lock_screen', None)
@@ -742,17 +902,30 @@ class ShellWindow(Adw.ApplicationWindow):
                 lock.prepare()
             lock.present()
             lock.set_visible(True)
+            lock.on_shown()
+            self._reassert_call_ui_above_lock()
             return
         from lock_screen import LockScreen
+        # The app owns the shared MPRIS watcher (main.py, next to the
+        # DisplayManager); the lock card renders transport-only from it.
+        mpris = getattr(self.get_application(), '_mpris', None)
         self._lock_screen = LockScreen(
             on_unlock=self._dismiss_lock_screen,
             config=self.config,
             get_notifications=lambda: self._ensure_shade().notifications_snapshot(),
             dnd_active_fn=lambda: self.dnd_state.is_active(),
             on_open_shade=self._show_shade,
+            media_watcher=mpris,
         )
         self._lock_screen.set_application(self.get_application())
         self._lock_screen.present()
+        self._lock_screen.on_shown()
+        self._reassert_call_ui_above_lock()
+
+    def _reassert_call_ui_above_lock(self) -> None:
+        """A live call stays reachable: re-present the call UI above the
+        lock (both are OVERLAY; the last mapped wins)."""
+        return _calls(self)._reassert_call_ui_above_lock()
 
     def _dismiss_lock_screen(self) -> None:
         lock = getattr(self, '_lock_screen', None)
@@ -770,15 +943,24 @@ class ShellWindow(Adw.ApplicationWindow):
             # The app (XXWMApplication) owns the Hud; the shade is created lazily
             # after _show_shell sets _hud, so it is always present here. getattr
             # keeps this safe even if the shade is ever built before the HUD.
-            hud = getattr(self.get_application(), '_hud', None)
+            app = self.get_application()
+            hud = getattr(app, '_hud', None)
+            # The app also owns the NotificationDaemon: passing it makes our
+            # name ownership authoritative and lets shade dismissals report
+            # back to sending apps.
+            daemon = getattr(app, '_notif_daemon', None)
+            # The app also owns the MPRIS watcher (main.py builds it next
+            # to the DisplayManager); the shade card renders from it.
+            mpris = getattr(app, '_mpris', None)
             self._shade = NotificationShade(
                 dnd_state=self.dnd_state,
                 focus_state=self.focus_state,
-                on_open_settings=lambda: (
-                    self.stack.set_visible_child_name('settings'), self.present()),
+                on_open_settings=self.open_settings,
                 on_power=self._show_power_menu,
                 hud=hud,
                 config=self.config,
+                notif_daemon=daemon,
+                media_watcher=mpris,
             )
             self._shade.set_application(self.get_application())
             # Same current-preset rule as _open_dialer: the shade can be
@@ -789,10 +971,28 @@ class ShellWindow(Adw.ApplicationWindow):
     def _show_shade(self) -> None:
         self._ensure_shade().show_shade()
 
+    # -- settings page (settings_page.py) ------------------------------------
+    def open_settings(self, section: str | None = None) -> None:
+        """Show the settings page, scrolled to a quick-tile section.
+
+        `section` is one of 'wifi' | 'bluetooth' | 'mobile' (or None for the
+        top); unknown values open the top. The linked section also refreshes:
+        a WiFi scan for 'wifi', a device list for 'bluetooth'."""
+        return _settings(self).open_settings(section)
+
+    def _scroll_settings_to(self, section: str | None) -> bool:
+        return _settings(self)._scroll_settings_to(section)
+
     def _show_power_menu(self) -> None:
-        if self._power_menu is None:
+        # Single instance: the application owns the power menu (hardware key
+        # path); the shade reuses it instead of building a second one.
+        app_menu = getattr(self.get_application(), '_power_menu', None)
+        if app_menu is not None:
+            self._power_menu = app_menu
+        elif self._power_menu is None:
             from power_menu import PowerMenu
-            self._power_menu = PowerMenu(config=self.config)
+            self._power_menu = PowerMenu(
+                config=self.config, on_lock=self._show_lock_screen)
             self._power_menu.set_application(self.get_application())
             # Same current-preset rule as _open_dialer.
             self._power_menu.apply_theme(resolve_theme(self.config))
@@ -830,93 +1030,21 @@ class ShellWindow(Adw.ApplicationWindow):
     def _show_switcher(self) -> None:
         if self._switcher is None:
             from app_switcher import AppSwitcher
-            self._switcher = AppSwitcher(config=self.config)
+            self._switcher = AppSwitcher(
+                config=self.config, on_activated=self.drop_to_background,
+            )
             self._switcher.set_application(self.get_application())
         self._switcher.show_switcher()
 
+    # -- app drawer (drawer_page.py) ------------------------------------------
     def _build_apps_page(self) -> Gtk.Widget:
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        outer.set_vexpand(True)
-        outer.set_margin_bottom(24)
-        outer.set_margin_start(24)
-        outer.set_margin_end(0)
-
-        self._sort_mode = 'az'
-
-        # No 'All apps' header or count — the drawer is just the list, like
-        # the PiercingXX Android launcher; the sort toggle rides alone, dim
-        self._sort_btn = Gtk.Button(label='A-Z')
-        self._sort_btn.add_css_class('flat')
-        self._sort_btn.add_css_class('dim-label')
-        self._sort_btn.set_halign(Gtk.Align.END)
-        self._sort_btn.connect('clicked', self._toggle_sort_mode)
-
-        header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        header_row.set_margin_end(24)
-        header_row.append(Gtk.Box(hexpand=True))
-        header_row.append(self._sort_btn)
-
-        self.apps_search.set_margin_end(24)
-
-        self.apps_scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
-        self.apps_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.apps_scroller.set_child(self.apps_list)
-
-        # A-Z jump strip on the right edge
-        self._alpha_letter_rows: dict[str, int] = {}
-        alpha_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        alpha_box.set_valign(Gtk.Align.CENTER)
-        alpha_box.set_margin_end(4)
-
-        for ch in '#ABCDEFGHIJKLMNOPQRSTUVWXYZ':
-            btn = Gtk.Button(label=ch)
-            btn.add_css_class('flat')
-            btn.add_css_class('alpha-jump')
-            btn.connect('clicked', self._on_alpha_jump, ch)
-            alpha_box.append(btn)
-
-        list_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        list_row.append(self.apps_scroller)
-        list_row.append(alpha_box)
-
-        # Search lives at the bottom where the thumb is; keyboard only on tap
-        outer.append(header_row)
-        outer.append(list_row)
-        outer.append(self.apps_search)
-
-        # The drawer leaves the top ~15% of the screen free so it reads as a
-        # sheet rather than a full-screen takeover.
-        spacer = Gtk.Box()
-        sheet = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        sheet.set_vexpand(True)
-        sheet.append(spacer)
-        sheet.append(outer)
-
-        def _set_sheet_ratio(w: Gtk.Box) -> None:
-            def _apply() -> bool:
-                h = w.get_height()
-                if h > 0:
-                    spacer.set_size_request(-1, int(h * 0.15))
-                    return GLib.SOURCE_REMOVE
-                return GLib.SOURCE_CONTINUE
-            GLib.idle_add(_apply)
-        sheet.connect('realize', _set_sheet_ratio)
-        return sheet
+        return _drawer(self)._build_apps_page()
 
     def _toggle_sort_mode(self, _btn: Gtk.Button) -> None:
-        self._sort_mode = 'install' if self._sort_mode == 'az' else 'az'
-        self._sort_btn.set_label('Install date' if self._sort_mode == 'install' else 'A-Z')
-        self._populate_apps(self.apps_search.get_text())
+        return _drawer(self)._toggle_sort_mode(_btn)
 
     def _home_slot_app_ids(self) -> set[str]:
-        ids: set[str] = set()
-        for slot in self.config.home_slots:
-            if slot.get('app_id'):
-                ids.add(str(slot['app_id']))
-            for member in slot.get('folder') or []:
-                if member.get('app_id'):
-                    ids.add(str(member['app_id']))
-        return ids
+        return _drawer(self)._home_slot_app_ids()
 
     def _drawer_folder_slots(self) -> list[tuple[int, dict, list[tuple[int, dict]]]]:
         """Folder slots the drawer shows, in home-slot order (folders first).
@@ -925,503 +1053,156 @@ class ShellWindow(Adw.ApplicationWindow):
         menu edits the right entry; members whose app is not installed are
         skipped at render, and empty folders never appear.
         """
-        installed = {entry.app_id for entry in self.app_index.entries}
-        out: list[tuple[int, dict, list[tuple[int, dict]]]] = []
-        for idx, slot in enumerate(self.config.home_slots):
-            if slot.get('type') != 'folder':
-                continue
-            members = [
-                (m_idx, m) for m_idx, m in enumerate(slot.get('folder') or [])
-                if m.get('app_id') and str(m['app_id']) in installed
-            ]
-            if members:
-                out.append((idx, slot, members))
-        return out
+        return _drawer(self)._drawer_folder_slots()
 
     @staticmethod
     def _install_time(entry: AppEntry) -> float:
-        try:
-            filename = entry.desktop_app.get_filename()
-            return Path(filename).stat().st_mtime if filename else 0.0
-        except OSError:
-            return 0.0
+        from drawer_page import DrawerPage
+        return DrawerPage._install_time(entry)
 
     def _on_alpha_jump(self, _btn: Gtk.Button, letter: str) -> None:
-        idx = self._alpha_letter_rows.get(letter)
-        if idx is None and letter == '#':
-            idx = 0
-        if idx is None:
-            return
-        row = self.apps_list.get_row_at_index(idx)
-        if row is None:
-            return
-        alloc = row.get_allocation()
-        adj = self.apps_scroller.get_vadjustment()
-        adj.set_value(max(0.0, alloc.y))
+        return _drawer(self)._on_alpha_jump(_btn, letter)
 
     def _on_stack_page_changed(self, stack: Gtk.Stack, _param: object) -> None:
         # Leaving the drawer disarms both pick modes so a later tap launches
         if stack.get_visible_child_name() != 'apps':
             self._pick_slot_mode = False
             self._pick_gesture_key = None
+            self._pick_exempt_mode = False
+        self._apply_layer_policy()
 
     def _gesture_binding_text(self, key: str) -> str:
-        action = self.gesture_config.get(key) or 'none'
-        if action == 'none':
-            return 'Not set'
-        if action in _VERB_LABELS:
-            return _VERB_LABELS[action]
-        if action == 'camera':
-            return 'Camera'
-        if action.startswith('launch:'):
-            app_id = action[len('launch:'):]
-            for entry in self.app_index.entries:
-                if entry.app_id == app_id:
-                    return self.config.label_for(app_id, entry.name)
-            return app_id
-        return action.replace('_', ' ').title()
+        return _settings(self)._gesture_binding_text(key)
 
     def _refresh_gesture_labels(self) -> None:
-        for key, label in self._gesture_binding_labels.items():
-            label.set_text(self._gesture_binding_text(key))
-        for key, label in self._system_gesture_labels.items():
-            label.set_text(self._gesture_binding_text(key))
+        return _settings(self)._refresh_gesture_labels()
+
+    def _build_gesture_row(self, title_text: str, binding: Gtk.Label,
+                           change: Gtk.Button, reset: Gtk.Button) -> Gtk.Widget:
+        """One gesture binding stacked title/binding/buttons: the binding
+        beside both buttons forced the settings page past 320 px."""
+        return _settings(self)._build_gesture_row(
+            title_text, binding, change, reset)
+
+    def _binding_label(self, key: str, store: dict[str, Gtk.Label]) -> Gtk.Label:
+        return _settings(self)._binding_label(key, store)
+
+    @staticmethod
+    def _link_button(label_text: str, css: str) -> Gtk.Button:
+        from settings_page import SettingsPage
+        return SettingsPage._link_button(label_text, css)
 
     def _build_gestures_card(self) -> Gtk.Widget:
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        card.add_css_class('settings-card')
-        for key, title in _GESTURE_TITLES.items():
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-
-            name = Gtk.Label(label=title, xalign=0)
-            name.set_hexpand(True)
-
-            binding = Gtk.Label(label=self._gesture_binding_text(key), xalign=1)
-            binding.add_css_class('dim-label')
-            self._gesture_binding_labels[key] = binding
-
-            change = Gtk.Button(label='Change')
-            change.add_css_class('flat')
-            change.add_css_class('action-link')
-            change.connect('clicked', lambda _b, k=key, t=title: self._pick_gesture_app(k, t))
-
-            clear = Gtk.Button(label='Clear')
-            clear.add_css_class('flat')
-            clear.add_css_class('dim-label')
-            clear.connect('clicked', lambda _b, k=key: self._clear_gesture_app(k))
-
-            row.append(name)
-            row.append(binding)
-            row.append(change)
-            row.append(clear)
-            card.append(row)
-
-        for key, title in _SYSTEM_GESTURE_TITLES.items():
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-
-            name = Gtk.Label(label=title, xalign=0)
-            name.set_hexpand(True)
-
-            binding = Gtk.Label(label=self._gesture_binding_text(key), xalign=1)
-            binding.add_css_class('dim-label')
-            self._system_gesture_labels[key] = binding
-
-            change = Gtk.Button(label='Change')
-            change.add_css_class('flat')
-            change.add_css_class('action-link')
-            change.connect(
-                'clicked', lambda b, k=key, t=title: self._pick_system_gesture(b, k, t))
-
-            clear = Gtk.Button(label='Default')
-            clear.add_css_class('flat')
-            clear.add_css_class('dim-label')
-            clear.connect('clicked', lambda _b, k=key: self._reset_system_gesture(k))
-
-            row.append(name)
-            row.append(binding)
-            row.append(change)
-            row.append(clear)
-            card.append(row)
-        return card
+        return _settings(self)._build_gestures_card()
 
     def _pick_system_gesture(self, anchor: Gtk.Widget, key: str, title: str) -> None:
-        choices = [(_ACTION_LABELS[a], lambda a=a: self._set_system_gesture(key, a))
-                   for a in sorted(VALID_ACTIONS)]
-        choices += [(_VERB_LABELS[v], lambda v=v: self._set_system_gesture(key, v))
-                    for v in sorted(IPC_VERBS)]
-        self.item_actions._show_action_menu(anchor, title, choices)
+        return _settings(self)._pick_system_gesture(anchor, key, title)
 
     def _set_system_gesture(self, key: str, value: str) -> None:
-        self.gesture_config.set(key, value)
-        self._refresh_gesture_labels()
+        return _settings(self)._set_system_gesture(key, value)
 
     def _reset_system_gesture(self, key: str) -> None:
-        self.gesture_config.reset(key)
-        self._refresh_gesture_labels()
+        return _settings(self)._reset_system_gesture(key)
 
     def _pick_gesture_app(self, key: str, title: str) -> None:
-        self._pick_gesture_key = key
-        self.stack.set_visible_child_name('apps')
-        self._show_status(f'Tap an app to bind to {title}.')
+        return _settings(self)._pick_gesture_app(key, title)
 
     def _clear_gesture_app(self, key: str) -> None:
-        self.gesture_config.set(key, 'none')
-        self._refresh_gesture_labels()
+        return _settings(self)._clear_gesture_app(key)
 
     def _build_settings_page(self) -> Gtk.Widget:
-        from importlib.metadata import version as get_version
-        try:
-            shell_version = get_version('xx-wm')
-        except Exception:
-            shell_version = '0.1.1'
+        return _settings(self)._build_settings_page()
 
-        scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.add_css_class('settings-page')
+    # -- Developer section: wireless debugging (xxdb) ----------------------
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
-        box.set_margin_top(36)
-        box.set_margin_bottom(24)
-        box.set_margin_start(24)
-        box.set_margin_end(24)
+    def _build_developer_card(self) -> Gtk.Widget:
+        return _settings(self)._build_developer_card()
 
-        title = Gtk.Label(label='Shell settings', xalign=0)
-        title.add_css_class('section-title')
+    def _refresh_xxdb_section(self) -> None:
+        return _settings(self)._refresh_xxdb_section()
 
-        # System updates
-        system_title = Gtk.Label(label='System', xalign=0)
-        system_title.add_css_class('section-title')
+    def _on_xxdb_switch_flipped(self, switch, _pspec) -> None:
+        return _settings(self)._on_xxdb_switch_flipped(switch, _pspec)
 
-        system_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        system_card.add_css_class('settings-card')
+    def _on_xxdb_pair_clicked(self) -> None:
+        return _settings(self)._on_xxdb_pair_clicked()
 
-        update_button = Gtk.Button(label='Update system')
-        update_button.add_css_class('flat')
-        update_button.add_css_class('action-link')
-        update_button.connect('clicked', self._on_update_clicked)
+    def _on_xxdb_forget(self, fingerprint: str) -> None:
+        return _settings(self)._on_xxdb_forget(fingerprint)
 
-        check_updates_button = Gtk.Button(label='Check for updates now')
-        check_updates_button.add_css_class('flat')
-        check_updates_button.add_css_class('action-link')
-        check_updates_button.connect('clicked', self._on_check_updates_clicked)
-
-        system_card.append(update_button)
-        system_card.append(check_updates_button)
-
-        # Backup & restore
-        backup_title = Gtk.Label(label='Backup & restore', xalign=0)
-        backup_title.add_css_class('section-title')
-
-        backup_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        backup_card.add_css_class('settings-card')
-
-        export_btn = Gtk.Button(label='Export backup')
-        export_btn.add_css_class('flat')
-        export_btn.add_css_class('action-link')
-        export_btn.connect('clicked', lambda _btn: self._on_export_backup())
-
-        restore_btn = Gtk.Button(label='Restore from backup')
-        restore_btn.add_css_class('flat')
-        restore_btn.add_css_class('action-link')
-        restore_btn.connect('clicked', lambda _btn: self._on_restore_backup())
-
-        backup_card.append(export_btn)
-        backup_card.append(restore_btn)
-
-        # WiFi
-        wifi_title = Gtk.Label(label='WiFi', xalign=0)
-        wifi_title.add_css_class('section-title')
-
-        wifi_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        wifi_card.add_css_class('settings-card')
-        self._wifi_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        wifi_scan_btn = Gtk.Button(label='Scan for networks')
-        wifi_scan_btn.add_css_class('flat')
-        wifi_scan_btn.add_css_class('action-link')
-        wifi_scan_btn.connect('clicked', lambda _b: self._refresh_wifi())
-        wifi_card.append(self._wifi_list_box)
-        wifi_card.append(wifi_scan_btn)
-
-        # Bluetooth
-        bt_title = Gtk.Label(label='Bluetooth', xalign=0)
-        bt_title.add_css_class('section-title')
-
-        bt_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        bt_card.add_css_class('settings-card')
-        self._bt_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        bt_scan_btn = Gtk.Button(label='Scan for devices')
-        bt_scan_btn.add_css_class('flat')
-        bt_scan_btn.add_css_class('action-link')
-        bt_scan_btn.connect('clicked', lambda _b: self._refresh_bluetooth(scan=True))
-        bt_card.append(self._bt_list_box)
-        bt_card.append(bt_scan_btn)
-
-        # Sound output
-        sound_title = Gtk.Label(label='Sound output', xalign=0)
-        sound_title.add_css_class('section-title')
-
-        sound_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        sound_card.add_css_class('settings-card')
-        self._sink_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        sound_card.append(self._sink_list_box)
-
-        # Battery
-        battery_title = Gtk.Label(label='Battery', xalign=0)
-        battery_title.add_css_class('section-title')
-
-        battery_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        battery_card.add_css_class('settings-card')
-        self._battery_label = Gtk.Label(label='Checking…', xalign=0)
-        self._battery_label.add_css_class('dim-label')
-        battery_card.append(self._battery_label)
-
-        # Refresh the quick sections whenever the settings page is opened
-        self.stack.connect(
-            'notify::visible-child-name',
-            lambda stack, _p: self._refresh_system_sections()
-            if stack.get_visible_child_name() == 'settings' else None,
-        )
-
-        # Mobile data / APN
-        network_title = Gtk.Label(label='Mobile data', xalign=0)
-        network_title.add_css_class('section-title')
-
-        apn_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        apn_card.add_css_class('settings-card')
-
-        self.apn_entry = Gtk.Entry()
-        self.apn_entry.set_placeholder_text('APN (e.g. internet)')
-        self.apn_entry.set_text(self.config.data.get('apn', ''))
-
-        self.apn_user_entry = Gtk.Entry()
-        self.apn_user_entry.set_placeholder_text('Username (leave blank if none)')
-        self.apn_user_entry.set_text(self.config.data.get('apn_user', ''))
-
-        self.apn_pass_entry = Gtk.Entry()
-        self.apn_pass_entry.set_visibility(False)
-        self.apn_pass_entry.set_placeholder_text('Password (leave blank if none)')
-        self.apn_pass_entry.set_text(self.config.data.get('apn_pass', ''))
-
-        apn_save_btn = Gtk.Button(label='Save APN')
-        apn_save_btn.add_css_class('flat')
-        apn_save_btn.add_css_class('action-link')
-        apn_save_btn.connect('clicked', self._on_apn_save)
-
-        apn_card.append(self._settings_row('APN', self.apn_entry))
-        apn_card.append(self._settings_row('Username', self.apn_user_entry))
-        apn_card.append(self._settings_row('Password', self.apn_pass_entry))
-        apn_card.append(apn_save_btn)
-
-        # About
-        about_title = Gtk.Label(label='About', xalign=0)
-        about_title.add_css_class('section-title')
-
-        about_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        about_card.add_css_class('settings-card')
-
-        version_label = Gtk.Label(label=f'Version: {shell_version}', xalign=0)
-        version_label.add_css_class('dim-label')
-
-        device_label = Gtk.Label(label=f'Device: {self._get_device_name()}', xalign=0)
-        device_label.add_css_class('dim-label')
-
-        about_card.append(version_label)
-        about_card.append(device_label)
-
-        gestures_title = Gtk.Label(label='Gestures', xalign=0)
-        gestures_title.add_css_class('section-title')
-
-        box.append(system_title)
-        box.append(system_card)
-        box.append(gestures_title)
-        box.append(self._build_gestures_card())
-        box.append(wifi_title)
-        box.append(wifi_card)
-        box.append(bt_title)
-        box.append(bt_card)
-        box.append(sound_title)
-        box.append(sound_card)
-        box.append(battery_title)
-        box.append(battery_card)
-        box.append(backup_title)
-        box.append(backup_card)
-        box.append(network_title)
-        box.append(apn_card)
-        box.append(about_title)
-        box.append(about_card)
-
-        scroll.set_child(box)
-        return scroll
+    def _on_xxdb_confirm(self, token: str, allow: bool) -> None:
+        return _settings(self)._on_xxdb_confirm(token, allow)
 
 
     # -- system settings sections (design.md "Settings scope") -------------
 
     @staticmethod
     def _run_bg(work, on_done) -> None:
-        import threading
-
-        def _worker() -> None:
-            result = None
-            try:
-                result = work()
-            except Exception:
-                pass
-            GLib.idle_add(lambda: on_done(result) and False or False)
-
-        threading.Thread(target=_worker, daemon=True).start()
+        from settings_page import SettingsPage
+        return SettingsPage._run_bg(work, on_done)
 
     @staticmethod
     def _replace_box_children(box: Gtk.Box, children: list[Gtk.Widget]) -> None:
-        child = box.get_first_child()
-        while child is not None:
-            nxt = child.get_next_sibling()
-            box.remove(child)
-            child = nxt
-        for widget in children:
-            box.append(widget)
+        from settings_page import SettingsPage
+        return SettingsPage._replace_box_children(box, children)
 
     def _section_placeholder(self, text: str) -> Gtk.Label:
-        label = Gtk.Label(label=text, xalign=0)
-        label.add_css_class('dim-label')
-        return label
+        return _settings(self)._section_placeholder(text)
+
+    @staticmethod
+    def _shrink_button_label(btn: Gtk.Button) -> None:
+        from settings_page import SettingsPage
+        return SettingsPage._shrink_button_label(btn)
+
+    @staticmethod
+    def _shrink_settings_entry(entry: Gtk.Entry) -> None:
+        from settings_page import SettingsPage
+        return SettingsPage._shrink_settings_entry(entry)
 
     def _refresh_system_sections(self) -> None:
-        import system_settings
-        self._run_bg(system_settings.battery_status, self._show_battery)
-        self._run_bg(system_settings.list_audio_sinks, self._show_sinks)
-        self._run_bg(system_settings.list_bt_devices, self._show_bt_devices)
+        return _settings(self)._refresh_system_sections()
 
     def _show_battery(self, status: str | None) -> None:
-        self._battery_label.set_text(status or 'No battery detected.')
+        return _settings(self)._show_battery(status)
 
     def _show_sinks(self, sinks) -> None:
-        if sinks is None:
-            self._replace_box_children(
-                self._sink_list_box,
-                [self._section_placeholder('Audio system unavailable.')])
-            return
-        rows = []
-        for sink in sinks:
-            marker = '● ' if sink.is_default else ''
-            btn = Gtk.Button(label=marker + sink.description)
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link' if sink.is_default else 'dim-label')
-            btn.get_child().set_xalign(0)
-            btn.connect('clicked', lambda _b, s=sink: self._on_sink_selected(s))
-            rows.append(btn)
-        self._replace_box_children(
-            self._sink_list_box,
-            rows or [self._section_placeholder('No output devices.')])
+        return _settings(self)._show_sinks(sinks)
 
     def _on_sink_selected(self, sink) -> None:
-        import system_settings
-        self._run_bg(
-            lambda: system_settings.set_default_sink(sink.name),
-            lambda ok: (self._show_status(
-                f'Output set to {sink.description}.' if ok else 'Could not switch output.'),
-                self._run_bg(system_settings.list_audio_sinks, self._show_sinks)),
-        )
+        return _settings(self)._on_sink_selected(sink)
 
     def _refresh_wifi(self) -> None:
-        import system_settings
-        self._replace_box_children(
-            self._wifi_list_box, [self._section_placeholder('Scanning…')])
-        self._run_bg(system_settings.list_wifi, self._show_wifi)
+        return _settings(self)._refresh_wifi()
 
     def _show_wifi(self, networks) -> None:
-        if networks is None:
-            self._replace_box_children(
-                self._wifi_list_box,
-                [self._section_placeholder('WiFi unavailable on this device.')])
-            return
-        rows = []
-        for net in networks[:12]:
-            marker = '● ' if net.in_use else ''
-            lock = '' if net.security == 'open' else '  ⚿'
-            btn = Gtk.Button(label=f'{marker}{net.ssid}{lock}  ({net.signal}%)')
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link' if net.in_use else 'dim-label')
-            btn.get_child().set_xalign(0)
-            btn.connect('clicked', lambda _b, n=net, w=btn: self._on_wifi_selected(n, w))
-            rows.append(btn)
-        self._replace_box_children(
-            self._wifi_list_box,
-            rows or [self._section_placeholder('No networks found.')])
+        return _settings(self)._show_wifi(networks)
 
     def _on_wifi_selected(self, net, widget: Gtk.Widget) -> None:
-        if net.in_use:
-            self._show_status(f'Already connected to {net.ssid}.')
-            return
-        if net.security == 'open':
-            self._connect_wifi(net.ssid, None)
-            return
-        self.item_actions._show_entry_dialog(
-            widget, f'Password for {net.ssid}', '', 'Connect',
-            lambda password: self._connect_wifi(net.ssid, password))
+        return _settings(self)._on_wifi_selected(net, widget)
 
-    def _connect_wifi(self, ssid: str, password: str | None) -> None:
-        import system_settings
-        self._show_status(f'Connecting to {ssid}…')
-        self._run_bg(
-            lambda: system_settings.connect_wifi(ssid, password),
-            lambda result: (self._show_status(result[1] if result else 'Connection failed.'),
-                            self._refresh_wifi()),
-        )
+    def _connect_wifi(self, ssid: str, password: str | None,
+                      security: str | None = None) -> None:
+        return _settings(self)._connect_wifi(ssid, password, security)
 
     def _refresh_bluetooth(self, scan: bool = False) -> None:
-        import system_settings
-        if scan:
-            self._replace_box_children(
-                self._bt_list_box, [self._section_placeholder('Scanning…')])
-            system_settings.start_bt_discovery()
-            GLib.timeout_add_seconds(
-                6, lambda: self._run_bg(system_settings.list_bt_devices,
-                                        self._show_bt_devices) or False)
-            return
-        self._run_bg(system_settings.list_bt_devices, self._show_bt_devices)
+        return _settings(self)._refresh_bluetooth(scan)
 
     def _show_bt_devices(self, devices) -> None:
-        if devices is None:
-            self._replace_box_children(
-                self._bt_list_box,
-                [self._section_placeholder('Bluetooth unavailable on this device.')])
-            return
-        rows = []
-        for dev in devices[:12]:
-            state = ' — connected' if dev.connected else (' — paired' if dev.paired else '')
-            btn = Gtk.Button(label=dev.name + state)
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link' if dev.connected else 'dim-label')
-            btn.get_child().set_xalign(0)
-            btn.connect('clicked', lambda _b, d=dev: self._on_bt_selected(d))
-            rows.append(btn)
-        self._replace_box_children(
-            self._bt_list_box,
-            rows or [self._section_placeholder('No devices — scan to discover.')])
+        return _settings(self)._show_bt_devices(devices)
 
     def _on_bt_selected(self, dev) -> None:
-        import system_settings
-        action = (system_settings.connect_bt_device if dev.paired
-                  else system_settings.pair_bt_device)
-        self._show_status(f'{"Connecting" if dev.paired else "Pairing"} {dev.name}…')
-        self._run_bg(
-            lambda: action(dev.address),
-            lambda result: (self._show_status(result[1] if result else 'Bluetooth error.'),
-                            self._refresh_bluetooth()),
-        )
+        return _settings(self)._on_bt_selected(dev)
 
     def _settings_row(self, title: str, control: Gtk.Widget) -> Gtk.Widget:
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        label = Gtk.Label(label=title, xalign=0)
-        label.set_hexpand(True)
-        row.append(label)
-        row.append(control)
-        return row
+        # Title above the control: label + entry side by side forced width.
+        return _settings(self)._settings_row(title, control)
 
     def _apply_theme(self, preset: ThemePreset | None = None) -> None:
         from font_theme import apply_global_font
+        from home_launcher import theme_css as home_theme_css
         apply_global_font(self.config.font_family)
         theme = preset if preset is not None else resolve_theme(self.config)
+        home_sheet = home_theme_css(theme)
         style_manager = Adw.StyleManager.get_default()
         if self.config.prefer_dark:
             style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
@@ -1510,24 +1291,47 @@ class ShellWindow(Adw.ApplicationWindow):
             background: {theme.surface_alt};
             color: {theme.foreground};
         }}
+
+        /* The drawer is one uniform surface sheet: the whole page paints
+           the surface color, never a grey list floating on the root. */
+        .shell-root .drawer-sheet {{
+            background: {theme.surface};
+        }}
+        .shell-root .drawer-sheet scrolledwindow,
+        .shell-root .drawer-sheet scrolledwindow > viewport {{
+            background: transparent;
+        }}
+
+        /* StockToolkit error dialogs (power-menu failure path) follow the
+           preset instead of the default light theme. */
+        message-dialog,
+        message-dialog decoration {{
+            background: {theme.surface};
+            color: {theme.foreground};
+        }}
+        message-dialog label {{
+            color: {theme.foreground};
+        }}
         """
+        css = css + '\n' + home_sheet
         self.theme_provider.load_from_data(css.encode('utf-8'))
 
     def _refresh_clock(self) -> None:
-        now = datetime.now()
-        self.clock_label.set_text(now.strftime('%H:%M'))
-        self.date_label.set_text(now.strftime('%a, %b %d').replace(' 0', ' '))
+        return _home(self)._refresh_clock()
 
     def _tick_clock(self) -> bool:
-        self._refresh_clock()
-        return True
+        return _home(self)._tick_clock()
 
     def _refresh_status(self) -> None:
-        self.status_strip.set_text(status_line())
+        return _home(self)._refresh_status()
+
+    def set_privacy_snapshot(self, snapshot: dict | None) -> None:
+        """Feed the privacy monitor snapshot; the status strip gains the
+        `● mic · cam · loc` tail while something is in use."""
+        return _home(self).set_privacy_snapshot(snapshot)
 
     def _tick_status(self) -> bool:
-        self._refresh_status()
-        return True
+        return _home(self)._tick_status()
 
     def _refresh_index(self, _button: Gtk.Button | None = None) -> None:
         self.app_index.refresh()
@@ -1536,282 +1340,57 @@ class ShellWindow(Adw.ApplicationWindow):
         self._show_status('Application index rebuilt.')
 
     def _populate_apps(self, query: str = '') -> None:
-        results = self.app_index.search(query)
-        labels = self.config.app_labels
-        trimmed = query.strip().casefold()
-
-        if trimmed:
-            # Search surfaces everything: hidden apps, home-slot apps, folder
-            # members — plus matches against renamed labels.
-            matched = {e.app_id for e in results}
-            renamed_hits = [
-                e for e in self.app_index.entries
-                if e.app_id not in matched and trimmed in labels.get(e.app_id, '').casefold()
-            ]
-            results = results + renamed_hits
-        else:
-            # The browse list hides hidden apps and everything already on home
-            browse_hidden = set(self.config.hidden_apps) | self._home_slot_app_ids()
-            results = [e for e in results if e.app_id not in browse_hidden]
-            if getattr(self, '_sort_mode', 'az') == 'install':
-                results = sorted(results, key=self._install_time, reverse=True)
-            # Pinned apps surface first, in their pinned order
-            pinned_order = {app_id: i for i, app_id in enumerate(self.config.pinned)}
-            pinned = sorted((e for e in results if e.app_id in pinned_order),
-                            key=lambda e: pinned_order[e.app_id])
-            results = pinned + [e for e in results if e.app_id not in pinned_order]
-
-        self._last_search_results = results if trimmed else []
-
-        # Home folders stay on home — the drawer only lists apps that are
-        # not already a slot or folder member (they remain searchable)
-        folder_slots = self._drawer_folder_slots()
-        if (self._drawer_open_folder is not None
-                and self._drawer_open_folder not in {i for i, _s, _m in folder_slots}):
-            self._drawer_open_folder = None
-
-        expanded_members = 0
-        for i, _slot, members in folder_slots:
-            if i == self._drawer_open_folder:
-                expanded_members = len(members)
-        row_offset = len(folder_slots) + expanded_members
-
-        # Build letter→first-row-index map for A-Z jump strip
-        self._alpha_letter_rows = {}
-        for idx, entry in enumerate(results):
-            display = labels.get(entry.app_id, entry.name)
-            first = display[0].upper() if display else '#'
-            letter = first if first.isalpha() else '#'
-            if letter not in self._alpha_letter_rows:
-                self._alpha_letter_rows[letter] = idx + row_offset
-
-        self._replace_rows(self.apps_list, results, 'No apps matched this search.', self._make_app_row)
-
-        # Folder drop-downs sit above the app rows (design.md "App drawer")
-        self._drawer_folder_header = None
-        insert_at = 0
-        for idx, slot, members in folder_slots:
-            header = self._make_drawer_folder_row(slot, idx)
-            if idx == self._drawer_open_folder:
-                self._drawer_folder_header = header
-            self.apps_list.insert(header, insert_at)
-            insert_at += 1
-            if idx == self._drawer_open_folder:
-                for m_idx, member in members:
-                    self.apps_list.insert(
-                        self._make_drawer_member_row(idx, m_idx, member), insert_at)
-                    insert_at += 1
-
-        # Synthetic "Launcher Settings" entry always sits at the very end
-        if not trimmed or trimmed in 'launcher settings':
-            self.apps_list.append(self._make_settings_row())
-
-        # Search results anchor at the bottom, above the search field, within
-        # thumb reach; a set that overflows the view still reads from the top.
-        self.apps_list.set_valign(Gtk.Align.END if trimmed else Gtk.Align.FILL)
-        if trimmed:
-            GLib.idle_add(self._scroll_apps_to_top)
-
-        if trimmed:
-            self.app_count_label.set_text(f'{len(results)} matches')
-        else:
-            self.app_count_label.set_text(f'{len(results)} apps indexed')
+        return _drawer(self)._populate_apps(query)
 
     def _scroll_apps_to_top(self) -> bool:
-        self.apps_scroller.get_vadjustment().set_value(0.0)
-        return GLib.SOURCE_REMOVE
+        return _drawer(self)._scroll_apps_to_top()
 
     def _refresh_after_item_action(self) -> None:
         # Keep any open folder drop-down open, mirroring the Android launcher
         self._home_launcher.refresh(preserve_folder=True)
         self._populate_apps(self.apps_search.get_text())
 
-    # -- home edit mode ----------------------------------------------------
+    # -- home edit mode (home_page.py) -----------------------------------------
 
     def _on_home_long_press(self, gesture: Gtk.GestureLongPress, _x: float, _y: float) -> None:
-        if self._home_launcher.edit_mode:
-            return
-        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        self._home_launcher.set_edit_mode(True)
+        return _home(self)._on_home_long_press(gesture, _x, _y)
 
     def _on_edit_action(self, action: str, widget: Gtk.Widget) -> None:
-        if action == 'done':
-            self._home_launcher.set_edit_mode(False)
-        elif action == 'settings':
-            self._home_launcher.set_edit_mode(False)
-            self.stack.set_visible_child_name('settings')
-        elif action == 'add_app':
-            self._pick_slot_mode = True
-            self.stack.set_visible_child_name('apps')
-            self._show_status('Tap an app to add it to home.')
-        elif action == 'new_folder':
-            self.item_actions._show_entry_dialog(
-                widget, 'New folder', '', 'Create', self._create_folder_slot)
+        return _home(self)._on_edit_action(action, widget)
 
     def _add_app_slot(self, entry: AppEntry) -> None:
-        slots = self.config.home_slots
-        if len(slots) >= 8:
-            self._show_status('Home is full — remove a slot first.')
-            return
-        display = self.config.label_for(entry.app_id, entry.name)
-        slots.append({'type': 'app', 'label': display, 'app_id': entry.app_id,
-                      'cmd': None, 'folder': None})
-        self.config.set_home_slots(slots)
-        self.stack.set_visible_child_name('home')
-        self._home_launcher.refresh()
-        self._populate_apps(self.apps_search.get_text())
-        self._show_status(f'{display} added to home.')
+        return _home(self)._add_app_slot(entry)
 
     def _create_folder_slot(self, name: str) -> None:
-        slots = self.config.home_slots
-        if len(slots) >= 8:
-            self._show_status('Home is full — remove a slot first.')
-            return
-        slots.append({'type': 'folder', 'label': name, 'app_id': None, 'cmd': None, 'folder': []})
-        self.config.set_home_slots(slots)
-        self._home_launcher.refresh()
-        self._home_launcher.set_edit_mode(True)
+        return _home(self)._create_folder_slot(name)
 
     def _move_slot(self, idx: int, delta: int) -> None:
-        slots = self.config.home_slots
-        new_idx = idx + delta
-        if not (0 <= idx < len(slots) and 0 <= new_idx < len(slots)):
-            return
-        slots[idx], slots[new_idx] = slots[new_idx], slots[idx]
-        self.config.set_home_slots(slots)
-        self._home_launcher.refresh(preserve_folder=True)
+        return _home(self)._move_slot(idx, delta)
 
     def _remove_slot(self, idx: int) -> None:
-        slots = self.config.home_slots
-        if not (0 <= idx < len(slots)):
-            return
-        removed = slots.pop(idx)
-        self.config.set_home_slots(slots)
-        self._home_launcher.refresh(preserve_folder=True)
-        self._populate_apps(self.apps_search.get_text())
-        self._show_status(f'{removed.get("label", "Slot")} removed from home.')
+        return _home(self)._remove_slot(idx)
 
     def _rename_slot(self, widget: Gtk.Widget, idx: int) -> None:
-        slots = self.config.home_slots
-        if not (0 <= idx < len(slots)):
-            return
-
-        def _commit(text: str) -> None:
-            slots[idx]['label'] = text
-            app_id = slots[idx].get('app_id')
-            if slots[idx].get('type') == 'app' and app_id:
-                self.config.set_app_label(str(app_id), text)
-            self.config.set_home_slots(slots)
-            self._refresh_after_item_action()
-
-        self.item_actions._show_entry_dialog(
-            widget, 'Rename', slots[idx].get('label', ''), 'Rename', _commit)
+        return _home(self)._rename_slot(widget, idx)
 
     def _make_drawer_folder_row(self, slot: dict, slot_index: int) -> Gtk.ListBoxRow:
-        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        title = Gtk.Label(label=slot.get('label', ''), xalign=0)
-        title.add_css_class('app-name')
-        indicator = Gtk.Label(label='⌄' if slot_index == self._drawer_open_folder else '›')
-        indicator.add_css_class('dim-label')
-        inner.append(title)
-        inner.append(indicator)
-        inner.set_hexpand(True)
-
-        btn = Gtk.Button()
-        btn.add_css_class('flat')
-        btn.add_css_class('app-entry')
-        btn.set_child(inner)
-        btn.connect('clicked', lambda _b, i=slot_index: self._toggle_drawer_folder(i))
-
-        row = Gtk.ListBoxRow(selectable=False, activatable=False)
-        row.set_child(btn)
-        return row
+        return _drawer(self)._make_drawer_folder_row(slot, slot_index)
 
     def _make_drawer_member_row(self, slot_index: int, member_index: int, member: dict) -> Gtk.ListBoxRow:
-        label = member.get('label', '')
-        paused = self.focus_state.is_paused_app(str(member.get('app_id') or ''))
-        title = Gtk.Label(label=label + (' · paused' if paused else ''), xalign=0)
-        title.add_css_class('app-name')
-        title.set_hexpand(True)
-
-        btn = Gtk.Button()
-        btn.add_css_class('flat')
-        btn.add_css_class('app-entry')
-        btn.add_css_class('folder-member')
-        if paused:
-            btn.add_css_class('paused')
-        btn.set_child(title)
-
-        def _launch(_b: Gtk.Button) -> None:
-            self._drawer_open_folder = None
-            self._populate_apps(self.apps_search.get_text())
-            self._launch_slot({'type': 'app', **member})
-
-        btn.connect('clicked', _launch)
-        self._add_long_press(
-            btn, lambda w: self.item_actions.show_member_menu(w, slot_index, member_index))
-
-        row = Gtk.ListBoxRow(selectable=False, activatable=False)
-        row.set_child(btn)
-        return row
+        return _drawer(self)._make_drawer_member_row(
+            slot_index, member_index, member)
 
     def _toggle_drawer_folder(self, slot_index: int) -> None:
-        opening = self._drawer_open_folder != slot_index
-        self._drawer_open_folder = slot_index if opening else None
-        self._populate_apps(self.apps_search.get_text())
-        if opening:
-            GLib.idle_add(self._center_drawer_folder)
+        return _drawer(self)._toggle_drawer_folder(slot_index)
 
     def _center_drawer_folder(self) -> bool:
-        # Scroll so the folder row plus its drop-down sit vertically centered
-        header = self._drawer_folder_header
-        if header is None or self._drawer_open_folder is None:
-            return GLib.SOURCE_REMOVE
-        row_h = header.get_height()
-        if row_h <= 0:
-            return GLib.SOURCE_CONTINUE
-        # Size from rendered members only: uninstalled members are skipped
-        # at render, so counting the raw list would overshoot the block.
-        members = next((m for i, _s, m in self._drawer_folder_slots()
-                        if i == self._drawer_open_folder), [])
-        block_h = row_h * (1 + len(members))
-        view_h = self.apps_scroller.get_height()
-        alloc = header.get_allocation()
-        block_h = min(block_h, view_h)
-        target = alloc.y - max(0, (view_h - block_h) // 2)
-        adj = self.apps_scroller.get_vadjustment()
-        adj.set_value(max(0.0, float(target)))
-        return GLib.SOURCE_REMOVE
+        return _drawer(self)._center_drawer_folder()
 
     def _add_long_press(self, widget: Gtk.Widget, callback) -> None:
-        def _on_long_press(gesture: Gtk.GestureLongPress, _x: float, _y: float) -> None:
-            # Claim the sequence so releasing doesn't also fire the row's click
-            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-            callback(widget)
-
-        long_press = Gtk.GestureLongPress.new()
-        long_press.set_touch_only(False)
-        long_press.connect('pressed', _on_long_press)
-        widget.add_controller(long_press)
-        right_click = Gtk.GestureClick.new()
-        right_click.set_button(3)
-        right_click.connect('pressed', lambda _g, _n, _x, _y, w=widget: callback(w))
-        widget.add_controller(right_click)
+        return _drawer(self)._add_long_press(widget, callback)
 
     def _make_settings_row(self) -> Gtk.ListBoxRow:
-        title = Gtk.Label(label='Launcher Settings', xalign=0)
-        title.add_css_class('app-name')
-        title.set_hexpand(True)
-
-        btn = Gtk.Button()
-        btn.add_css_class('flat')
-        btn.add_css_class('app-entry')
-        btn.set_child(title)
-        btn.connect('clicked', lambda _b: self.stack.set_visible_child_name('settings'))
-
-        row = Gtk.ListBoxRow(selectable=False, activatable=False)
-        row.set_child(btn)
-        return row
+        return _drawer(self)._make_settings_row()
 
     def _replace_rows(
         self,
@@ -1820,31 +1399,48 @@ class ShellWindow(Adw.ApplicationWindow):
         empty_message: str,
         row_maker: object = None,
     ) -> None:
-        child = list_box.get_first_child()
-        while child is not None:
-            next_child = child.get_next_sibling()
-            list_box.remove(child)
-            child = next_child
-
-        if not entries:
-            label = Gtk.Label(label=empty_message, xalign=0)
-            label.add_css_class('dim-label')
-            row = Gtk.ListBoxRow(selectable=False, activatable=False)
-            row.set_child(label)
-            list_box.append(row)
-            return
-
-        maker = row_maker if callable(row_maker) else self._make_app_row
-        for entry in entries:
-            list_box.append(maker(entry))
+        return _drawer(self)._replace_rows(
+            list_box, entries, empty_message, row_maker)
 
     def _on_key_pressed(self, _ctrl: Gtk.EventControllerKey, keyval: int, *_) -> bool:
-        self._reset_idle_timer()
         # Power button → force redraw to wake display if HWComposer idled
         if keyval in (Gdk.KEY_PowerOff, 0x1008ff2a, 0x1008ff18):
             self.queue_draw()
             return True
         return False
+
+    def _setup_app_monitor(self) -> None:
+        """Live drawer: Gio.AppInfoMonitor fires when apps install, update
+        or vanish; debounced into a silent index rebuild (no manual
+        refresh, no toast). The monitor reference is held so the signal
+        stays connected for the window lifetime."""
+        self._app_monitor = None
+        self._app_refresh_timer: int | None = None
+        try:
+            from gi.repository import Gio
+            monitor_cls = getattr(Gio, 'AppInfoMonitor', None)
+            if monitor_cls is None:
+                return
+            monitor = monitor_cls.get()
+            monitor.connect('changed', self._on_app_info_changed)
+            self._app_monitor = monitor
+        except Exception:
+            self._app_monitor = None
+
+    def _on_app_info_changed(self, _monitor) -> None:
+        if self._app_refresh_timer is not None:
+            GLib.source_remove(self._app_refresh_timer)
+        self._app_refresh_timer = GLib.timeout_add(500, self._reload_app_index)
+
+    def _reload_app_index(self) -> bool:
+        self._app_refresh_timer = None
+        try:
+            self.app_index.refresh()
+            self._home_launcher.refresh(preserve_folder=True)
+            self._populate_apps(self.apps_search.get_text())
+        except Exception:
+            pass
+        return GLib.SOURCE_REMOVE
 
     def _setup_config_monitor(self) -> None:
         """Hot reload: editing ~/.config/xx-wm/* in a terminal is a
@@ -1904,7 +1500,7 @@ class ShellWindow(Adw.ApplicationWindow):
         self._home_launcher.refresh()
         self._populate_apps(self.apps_search.get_text())
         self._refresh_weather()
-        self._setup_idle_timer()
+        self._resync_blank_lock()
         self._retheme_surfaces()
 
     def _retheme_surfaces(self) -> None:
@@ -1913,344 +1509,152 @@ class ShellWindow(Adw.ApplicationWindow):
         providers, so a hot-reloaded theme edit must reach each one; fonts
         already propagate display-wide via font_theme's global provider."""
         preset = resolve_theme(self.config)
+        # The HUD lives on the application (main.py wires it into the shade
+        # from there); getattr-guarded so bare test namespaces still fan out.
+        get_app = getattr(self, 'get_application', None)
+        hud = getattr(get_app(), '_hud', None) if callable(get_app) else None
+        banner = getattr(get_app(), '_banner', None) if callable(get_app) else None
+        back = getattr(self, '_back_layer', None)
         for surface in (self._shade, self._dialer, self._call_ui,
-                        self._call_bar, self._power_menu):
+                        self._call_bar, self._power_menu, self._switcher,
+                        back, hud, banner):
             if surface is not None:
                 surface.apply_theme(preset)
 
-    def _setup_idle_timer(self) -> None:
-        if self._idle_timer_id is not None:
-            GLib.source_remove(self._idle_timer_id)
-            self._idle_timer_id = None
+    def on_blank_changed(self, blanked: bool) -> None:
+        """DisplayManager callback: the screen locks after
+        auto_lock_timeout seconds of being blanked (0 = on blank), and a
+        wake always cancels the pending lock."""
+        self._blanked = bool(blanked)
+        self._cancel_pending_lock()
+        if blanked:
+            self._schedule_blank_lock()
+
+    def _resync_blank_lock(self) -> None:
+        """Re-evaluate the blank-driven lock after a config change: a new
+        auto_lock_timeout applies to the current blank state."""
+        self.on_blank_changed(self._blanked)
+
+    def _cancel_pending_lock(self) -> None:
+        if self._lock_src is not None:
+            GLib.source_remove(self._lock_src)
+            self._lock_src = None
+
+    def _schedule_blank_lock(self) -> None:
+        if self._call_live():
+            return
         timeout = self.config.auto_lock_timeout
-        if timeout > 0:
-            self._idle_timer_id = GLib.timeout_add_seconds(timeout, self._on_idle_timeout)
+        if timeout <= 0:
+            self._show_lock_screen()
+            return
+        self._lock_src = GLib.timeout_add_seconds(
+            timeout, self._on_blank_lock_timeout)
 
-    def _reset_idle_timer(self) -> None:
-        self._setup_idle_timer()
-
-    def _on_idle_timeout(self) -> bool:
-        self._idle_timer_id = None
-        self._show_lock_screen()
+    def _on_blank_lock_timeout(self) -> bool:
+        self._lock_src = None
+        if self._blanked and not self._call_live():
+            self._show_lock_screen()
         return False
 
+    def _call_live(self) -> bool:
+        """True while any tracked call is non-terminated (ringing, dialing,
+        active, or held) — the phone must never auto-lock under it."""
+        return _calls(self)._call_live()
+
     def _on_apn_save(self, _btn: Gtk.Button) -> None:
-        apn = self.apn_entry.get_text().strip()
-        user = self.apn_user_entry.get_text().strip()
-        pwd = self.apn_pass_entry.get_text()
-        self.config.data['apn'] = apn
-        self.config.data['apn_user'] = user
-        self.config.data['apn_pass'] = pwd
-        self.config.save()
-        self._apply_apn(apn, user, pwd)
-        self._show_status('APN saved.')
+        return _settings(self)._on_apn_save(_btn)
 
     @staticmethod
     def _gsm_connection_name() -> str:
-        import subprocess
-        try:
-            result = subprocess.run(
-                ['nmcli', '-t', '-f', 'NAME,TYPE', 'connection', 'show'],
-                capture_output=True, text=True, timeout=5, check=True,
-            )
-            for line in result.stdout.splitlines():
-                # Terse mode escapes ':' inside names as '\:'; TYPE is last
-                name, _, ctype = line.rpartition(':')
-                if ctype.strip() == 'gsm' and name:
-                    return name.replace('\\:', ':')
-        except (OSError, subprocess.SubprocessError) as error:
-            from shell_log import get_logger
-            get_logger('window').warning(
-                'GSM connection lookup failed (%s); using default name', error)
-        return 'mobile'
+        from settings_page import SettingsPage
+        return SettingsPage._gsm_connection_name()
 
     def _apply_apn(self, apn: str, user: str, pwd: str) -> None:
-        if not apn:
-            return
-        try:
-            import subprocess
-            conn = self._gsm_connection_name()
-            subprocess.Popen(
-                ['nmcli', 'connection', 'modify', conn,
-                 'gsm.apn', apn, 'gsm.username', user, 'gsm.password', pwd],
-                close_fds=True,
-            )
-        except Exception as error:
-            from shell_log import get_logger
-            get_logger('window').warning('APN update failed: %s', error)
+        return _settings(self)._apply_apn(apn, user, pwd)
+
+    # -- call wiring (call_wiring.py) ------------------------------------------
+    def _ensure_call_surfaces(self) -> tuple:
+        return _calls(self)._ensure_call_surfaces()
+
+    def silence_ringer(self) -> None:
+        """Power-key press while ringing only silences the ringer: the call
+        stays live on the surface. Falls back to the sound loop when the
+        surface (or its ringer) is not up yet."""
+        return _calls(self).silence_ringer()
 
     def _on_call_incoming(self, caller: str, number: str) -> None:
-        from call_ui import CallUI, CallBar
-        import sound
-        if self._call_ui is None:
-            self._call_ui = CallUI(on_accept=sound.stop, on_decline=sound.stop,
-                                   config=self.config)
-            self._call_ui.set_application(self.get_application())
-            # Same current-preset rule as _open_dialer.
-            self._call_ui.apply_theme(resolve_theme(self.config))
-        if self._call_bar is None:
-            self._call_bar = CallBar(on_expand=self._expand_call_ui,
-                                     config=self.config)
-            self._call_bar.set_application(self.get_application())
-            self._call_bar.apply_theme(resolve_theme(self.config))
-        # DnD: only exceptions (starred, repeat caller) ring; everyone else
-        # shows silently in the call UI. Exception check runs before this
-        # call is recorded so the 15-minute repeat window looks at prior calls.
-        rings = not self.dnd_state.is_active() or self.dnd_state.is_exception(number)
-        self.dnd_state.note_call(number)
-        if rings and self.config.sound_ringtone:
-            sound.play('ringtone.mp3', loop=True)
-        self._call_ui.show_incoming(caller or 'Incoming call', number)
+        return _calls(self)._on_call_incoming(caller, number)
+
+    def _sync_call_inhibit(self, calls: list) -> None:
+        """Hold the display awake while any call is non-terminated; the
+        blank-driven auto-lock consults the same snapshot and stands down."""
+        return _calls(self)._sync_call_inhibit(calls)
+
+    def _on_calls_changed(self, calls: list) -> None:
+        return _calls(self)._on_calls_changed(calls)
 
     def _on_call_answered(self, caller: str, number: str) -> None:
-        import sound
-        sound.stop()
-        if self._call_ui is None:
-            return
-        self._call_ui.show_active(caller or 'Active call', number)
-        if self._call_bar is not None:
-            self._call_bar.show_bar(caller or number)
+        return _calls(self)._on_call_answered(caller, number)
 
     def _on_call_ended(self) -> None:
-        import sound
-        sound.stop()
-        if self._call_ui is not None:
-            self._call_ui.end_call()
-        if self._call_bar is not None:
-            self._call_bar.hide_bar()
+        return _calls(self)._on_call_ended()
+
+    def _on_sms_received(self, number: str, text: str) -> None:
+        return _calls(self)._on_sms_received(number, text)
 
     def _expand_call_ui(self) -> None:
         # CallBar's expand button: re-present the full call surface
-        if self._call_ui is not None:
-            self._call_ui.present()
+        return _calls(self)._expand_call_ui()
 
     def _make_app_row(self, entry: AppEntry) -> Gtk.ListBoxRow:
-        display_name = self.config.label_for(entry.app_id, entry.name)
-        paused = self.focus_state.is_paused_app(entry.app_id)
-        if paused:
-            display_name += ' · paused'
-        # Single-line centered rows, name only — matches the PiercingXX
-        # Android launcher's drawer; descriptions were noise at phone size
-        title = Gtk.Label(label=display_name, xalign=0.5)
-        title.add_css_class('app-name')
-        title.set_ellipsize(Pango.EllipsizeMode.END)
-
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content.append(title)
-        content.set_hexpand(True)
-
-        launch_btn = Gtk.Button()
-        launch_btn.add_css_class('flat')
-        launch_btn.add_css_class('app-entry')
-        if paused:
-            launch_btn.add_css_class('paused')
-        launch_btn.set_child(content)
-        launch_btn.connect('clicked', lambda _b, e=entry: self._launch_entry(e))
-        self._add_long_press(
-            launch_btn, lambda w, e=entry: self.item_actions.show_app_menu(w, e))
-
-        row = Gtk.ListBoxRow(selectable=False, activatable=False)
-        row.set_child(launch_btn)
-        return row
+        return _drawer(self)._make_app_row(entry)
 
     def _launch_entry(self, entry: AppEntry) -> None:
-        if self._pick_slot_mode:
-            self._pick_slot_mode = False
-            self._add_app_slot(entry)
-            return
-        if self._pick_gesture_key:
-            key = self._pick_gesture_key
-            self._pick_gesture_key = None
-            self.gesture_config.set(key, f'launch:{entry.app_id}')
-            self._refresh_gesture_labels()
-            self.stack.set_visible_child_name('settings')
-            name = self.config.label_for(entry.app_id, entry.name)
-            self._show_status(f'{name} bound to {_GESTURE_TITLES[key]}.')
-            return
-        if self.focus_state.is_paused_app(entry.app_id):
-            self._show_focus_notice(self.config.label_for(entry.app_id, entry.name))
-            return
-        ok, error = self.app_index.launch(entry)
-        if ok:
-            self.config.record_launch(entry.app_id)
-            self._show_status(f'Launching {entry.name}...')
-            self.drop_to_background()
-        else:
-            self._show_status(f'Failed to launch {entry.name}: {error}')
+        return _drawer(self)._launch_entry(entry)
 
     def _on_apps_search_changed(self, entry: Gtk.SearchEntry) -> None:
-        text = entry.get_text()
-        self._populate_apps(text)
-        # Auto-launch the single result while typing, when enabled
-        query = text.strip()
-        if (self.config.search_auto_launch and query and not query.startswith('!')
-                and len(self._last_search_results) == 1):
-            entry.set_text('')
-            self._launch_entry(self._last_search_results[0])
+        return _drawer(self)._on_apps_search_changed(entry)
 
     def _on_apps_search_activate(self, entry: Gtk.SearchEntry) -> None:
-        query = entry.get_text().strip()
-        if not query:
-            return
-        # `!query` → web search; a query with zero app matches falls back too
-        if query.startswith('!'):
-            self._open_web_search(query[1:].strip())
-            entry.set_text('')
-            return
-        results = self._last_search_results
-        if results:
-            entry.set_text('')
-            self._launch_entry(results[0])
-        else:
-            self._open_web_search(query)
-            entry.set_text('')
+        return _drawer(self)._on_apps_search_activate(entry)
 
     def _open_web_search(self, query: str) -> None:
-        if not query:
-            return
-        from gi.repository import Gio
-        from urllib.parse import quote_plus
-        try:
-            Gio.AppInfo.launch_default_for_uri(_WEB_SEARCH_URL + quote_plus(query), None)
-            self._show_status(f'Searching the web for {query}...')
-        except GLib.Error as error:
-            self._show_status(f'No browser available: {error.message}')
+        return _drawer(self)._open_web_search(query)
 
     def _on_update_clicked(self, _btn: Gtk.Button | None = None) -> None:
-        from update_checker import run_update_script
-        ok, detail = run_update_script(self.config.update_script)
-        if ok:
-            self._show_status('Update running in terminal.')
-        else:
-            self._show_status(detail)
+        return _settings(self)._on_update_clicked(_btn)
 
     def _on_check_updates_clicked(self, _btn: Gtk.Button) -> None:
-        self._show_status('Checking for updates...')
-        self._update_checker.check_now(self._on_manual_check_result)
+        return _settings(self)._on_check_updates_clicked(_btn)
 
-    def _on_manual_check_result(self, count: int) -> None:
-        if count > 0:
-            self._on_updates_available(count)
-        else:
-            self._show_status('System is up to date.')
+    def _on_manual_check_result(self, count: int | None) -> None:
+        return _settings(self)._on_manual_check_result(count)
 
     def _on_updates_available(self, count: int) -> None:
-        plural = 's' if count != 1 else ''
-        self._ensure_shade().add_notification(
-            _UPDATE_NOTIF_ID,
-            'System',
-            'Updates available',
-            f'{count} package{plural} can be updated.',
-            actions=[
-                ('Update now', self._on_update_clicked),
-                ('Snooze 1 week', self._snooze_updates),
-            ],
-        )
-        self._show_status(f'{count} update{plural} available — see notifications.')
+        return _settings(self)._on_updates_available(count)
 
     def _snooze_updates(self) -> None:
-        self._update_checker.snooze()
-        self._show_status('Update checks snoozed for 1 week.')
+        return _settings(self)._snooze_updates()
 
     def _show_status(self, message: str) -> None:
         self.status_label.set_text(message)
         self.toast_overlay.add_toast(Adw.Toast.new(message))
     def _on_export_backup(self) -> None:
-        from backup import export_backup
-        import json
-        from datetime import datetime
-        from pathlib import Path
+        return _settings(self)._on_export_backup()
 
-        backup = export_backup(self.config)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f'xx-wm-backup-{timestamp}.json'
-        filepath = Path.home() / filename
-        
-        filepath.write_text(json.dumps(backup, indent=2), encoding='utf-8')
-        self._show_status(f'Backup exported to {filepath}')
-    
-    def _build_restore_dialog(self) -> Gtk.FileChooserDialog:
-        from gi.repository import Gtk as gtk
+    def _on_restore_backup(self, anchor: Gtk.Widget | None = None) -> None:
+        # A file chooser is a normal toplevel: it would open UNDER this
+        # layer-shell TOP surface. Restore picks from an in-shell menu of
+        # the xx-wm-backup-*.json files in ~ and ~/Documents instead.
+        return _settings(self)._on_restore_backup(anchor)
 
-        # Create a file chooser dialog
-        dialog = gtk.FileChooserDialog(
-            title='Restore from backup',
-            parent=self,
-            action=gtk.FileChooserAction.OPEN,
-        )
-        dialog.add_buttons(
-            '_Cancel',
-            gtk.ResponseType.CANCEL,
-            '_Restore',
-            gtk.ResponseType.OK,
-        )
-
-        filter_json = gtk.FileFilter()
-        filter_json.set_name('JSON files')
-        filter_json.add_pattern('*.json')
-        dialog.add_filter(filter_json)
-        return dialog
-
-    def _on_restore_backup(self) -> None:
-        from gi.repository import Gtk as gtk
-
-        # dialog.run() is gone in GTK4; the response signal carries on
-        dialog = self._build_restore_dialog()
-
-        def _on_response(dlg: Gtk.FileChooserDialog, response: int) -> None:
-            filepath = dlg.get_filename()
-            dlg.destroy()
-            if response != gtk.ResponseType.OK:
-                return
-            self._restore_from_path(filepath)
-
-        dialog.connect('response', _on_response)
-        dialog.show()
+    def _confirm_restore_backup(self, anchor: Gtk.Widget | None,
+                                path: Path, label: str) -> None:
+        return _settings(self)._confirm_restore_backup(anchor, path, label)
 
     def _restore_from_path(self, filepath: str | None) -> None:
-        from backup import restore_backup, validate_backup
-        import json
+        return _settings(self)._restore_from_path(filepath)
 
-        if not filepath:
-            self._show_status('No backup file selected.')
-            return
-
-        try:
-            payload = json.loads(Path(filepath).read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError) as e:
-            self._show_status(f'Failed to read backup: {e}')
-            return
-
-        is_valid, error = validate_backup(payload)
-        if not is_valid:
-            self._show_status(f'Invalid backup: {error}')
-            return
-
-        success = restore_backup(self.config, payload)
-        if success:
-            self._show_status('Backup restored successfully')
-            self._apply_config_change()
-        else:
-            self._show_status('Failed to restore backup')
-    
     def _get_device_name(self) -> str:
-        import platform
-        try:
-            # Try to read device model from sysfs (common on Linux phones)
-            with open('/sys/devices/virtual/dmi/id/product_name', 'r') as f:
-                return f.read().strip()
-        except Exception:
-            pass
-        
-        try:
-            with open('/sys/devices/virtual/dmi/id/sys_vendor', 'r') as f:
-                vendor = f.read().strip()
-            with open('/sys/devices/virtual/dmi/id/product_version', 'r') as f:
-                version = f.read().strip()
-            return f'{vendor} {version}'
-        except Exception:
-            pass
-        
-        # Fallback to platform info
-        return f'{platform.system()} {platform.release()}'
+        return _settings(self)._get_device_name()
 

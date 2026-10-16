@@ -18,6 +18,8 @@ and a bare NotificationShade built with object.__new__.
 import sys
 import types
 
+import pytest
+
 
 def _install_fake_gi() -> None:
     """Make `from gi.repository import ...` resolve to stubs."""
@@ -162,12 +164,26 @@ class _FakeLabel:
 def _bare_shade() -> notification_shade.NotificationShade:
     shade = object.__new__(notification_shade.NotificationShade)
     shade._external_hint = _FakeLabel()
+    shade._notif_daemon = None
+    shade._is_own_daemon = None
+    shade._worker_threads = []
     return shade
+
+
+@pytest.fixture()
+def sync_probe(monkeypatch):
+    """Drive the W1 worker seam inline: the ownership probe runs off-thread
+    in production, so these tests run the worker and its idle callback
+    synchronously instead of asserting half-finished state."""
+    monkeypatch.setattr(notification_shade, '_spawn_shade_thread',
+                        lambda target: target())
+    monkeypatch.setattr(notification_shade.GLib, 'idle_add',
+                        lambda callback, *args: callback(*args))
 
 
 class TestOwnershipWiringAtBuild:
     def test_external_owner_shows_hint_and_logs_info_once(
-            self, monkeypatch, caplog):
+            self, monkeypatch, caplog, sync_probe):
         monkeypatch.setattr(
             notification_shade, '_external_daemon_owns_notifications',
             lambda: True)
@@ -182,7 +198,7 @@ class TestOwnershipWiringAtBuild:
         assert len(infos) == 1
 
     def test_no_external_owner_keeps_current_behavior(self, monkeypatch,
-                                                      caplog):
+                                                      caplog, sync_probe):
         monkeypatch.setattr(
             notification_shade, '_external_daemon_owns_notifications',
             lambda: False)
@@ -191,7 +207,7 @@ class TestOwnershipWiringAtBuild:
         with caplog.at_level('INFO', logger='piercing.notification_shade'):
             shade._check_external_notif_daemon()
 
-        assert shade._external_hint.visible is None
+        assert shade._external_hint.visible is False
         assert not [r for r in caplog.records
                     if r.name == 'piercing.notification_shade']
 

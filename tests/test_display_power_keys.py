@@ -6,6 +6,7 @@ appears and the screen immediately goes dark. These tests drive
 DisplayManager._on_event directly with fake GLib (PyGObject is absent here);
 idle_add invokes callbacks synchronously so on_* wiring is observable.
 """
+import struct
 import sys
 import types
 
@@ -67,14 +68,18 @@ import display_manager  # noqa: E402  (needs fake GLib installed first)
 
 @pytest.fixture
 def dm(monkeypatch):
-    """Build DisplayManager with no input threads and stubbed display
-    backends; _blank/_wake record invocations instead of touching
-    brightnessctl/wlopm. The fingerprint node is pinned to event9."""
+    """Build DisplayManager with one fake input node (so the idle timer is
+    enabled) but no reader threads, and stubbed display backends; _blank/
+    _wake record invocations instead of touching brightnessctl/wlopm. The
+    fingerprint node is pinned to event9."""
     # Which fake gi wins collection decides what display_manager bound as
     # GLib at import time, so pin the seam: idle_add synchronous, timers
     # inert — the tests drive _on_event/_on_power_long_press directly.
     monkeypatch.setattr(display_manager, 'GLib', _SyncGLib)
-    monkeypatch.setattr(display_manager, '_all_event_devices', lambda: [])
+    monkeypatch.setattr(display_manager, '_all_event_devices',
+                        lambda: ['/dev/input/eventX'])
+    monkeypatch.setattr(display_manager, '_watch_evdev',
+                        lambda *a, **k: None)
     monkeypatch.setattr(display_manager, '_detect_fp_node',
                         lambda: '/dev/input/event9')
     blanks: list[bool] = []
@@ -93,6 +98,68 @@ def dm(monkeypatch):
 def _power(value: int):
     return ('/dev/input/eventX', display_manager.EV_KEY,
             display_manager.KEY_POWER, value)
+
+
+def _voldown(value: int):
+    return ('/dev/input/eventX', display_manager.EV_KEY,
+            display_manager.KEY_VOLUMEDOWN, value)
+
+
+class TestScreenshotConsumesPowerPress:
+    def test_combo_volume_released_first_suppresses_blank(self, dm):
+        shots: list[bool] = []
+        mgr, blanks, wakes = dm(on_screenshot=lambda: shots.append(True))
+        mgr._on_event(*_power(1))
+        mgr._on_event(*_voldown(1))
+        assert shots == [True]
+        mgr._on_event(*_voldown(0))
+        mgr._on_event(*_power(0))
+        assert blanks == []
+        assert wakes == []
+
+    def test_combo_power_released_first_suppresses_blank(self, dm):
+        shots: list[bool] = []
+        mgr, blanks, wakes = dm(on_screenshot=lambda: shots.append(True))
+        mgr._on_event(*_power(1))
+        mgr._on_event(*_voldown(1))
+        mgr._on_event(*_power(0))
+        mgr._on_event(*_voldown(0))
+        assert shots == [True]
+        assert blanks == []
+        assert wakes == []
+
+    def test_next_press_after_combo_blanks_again(self, dm):
+        mgr, blanks, _wakes = dm(on_screenshot=lambda: None)
+        mgr._on_event(*_power(1))
+        mgr._on_event(*_voldown(1))
+        mgr._on_event(*_voldown(0))
+        mgr._on_event(*_power(0))
+        mgr._on_event(*_power(1))
+        mgr._on_event(*_power(0))
+        assert len(blanks) == 1
+
+    def test_long_press_sets_consumed_and_clears_on_next_down(self, dm):
+        mgr, blanks, _wakes = dm()
+        assert mgr._power_press_consumed is False
+        mgr._on_event(*_power(1))
+        mgr._on_power_long_press()
+        assert mgr._power_press_consumed is True
+        mgr._on_event(*_power(0))
+        assert blanks == []
+        mgr._on_event(*_power(1))
+        assert mgr._power_press_consumed is False
+
+    def test_combo_while_blanked_wakes_before_screenshot(self, dm):
+        shots: list[bool] = []
+        mgr, blanks, wakes = dm(on_screenshot=lambda: shots.append(True))
+        mgr._blanked = True
+        mgr._on_event(*_power(1))
+        mgr._on_event(*_voldown(1))
+        assert wakes == [True]
+        assert shots == [True]
+        mgr._on_event(*_voldown(0))
+        mgr._on_event(*_power(0))
+        assert blanks == []
 
 
 class TestLongPressContract:
@@ -148,3 +215,212 @@ class TestFingerprintNodeRouting:
         mgr._on_event('/dev/input/event9', display_manager.EV_KEY, 96, 1)
         assert wakes == [True]
         assert blanks == []
+
+
+def _ev_bytes(ev_type: int, code: int, value: int) -> bytes:
+    return struct.pack(display_manager._EV_FMT, 0, 0, ev_type, code, value)
+
+
+@pytest.fixture
+def idle_calls(monkeypatch, dm):
+    """Record GLib.timeout_add_seconds calls. Depends on dm so the pinned
+    GLib seam exists before this patches its scheduler."""
+    calls: list[int] = []
+    monkeypatch.setattr(
+        display_manager.GLib, 'timeout_add_seconds',
+        lambda secs, _cb: (calls.append(secs), 99)[1],
+    )
+    return calls
+
+
+class TestReaderThreadFilter:
+    """filter_evdev_data is the pure in-thread gate: only actionable events
+    may be posted to the GTK loop, so scroll/drag floods and streaming
+    sensors never queue callbacks there."""
+
+    def test_power_and_volume_keys_post(self):
+        data = b''.join([
+            _ev_bytes(display_manager.EV_KEY, display_manager.KEY_POWER, 1),
+            _ev_bytes(display_manager.EV_KEY, display_manager.KEY_POWER, 0),
+            _ev_bytes(display_manager.EV_KEY, display_manager.KEY_VOLUMEUP, 1),
+            _ev_bytes(display_manager.EV_KEY, display_manager.KEY_VOLUMEDOWN, 0),
+        ])
+        wanted, last = display_manager.filter_evdev_data(
+            data, '/dev/input/event0', '/dev/input/event9', 1000.0)
+        assert [w[1:] for w in wanted] == [
+            (display_manager.EV_KEY, display_manager.KEY_POWER, 1),
+            (display_manager.EV_KEY, display_manager.KEY_POWER, 0),
+            (display_manager.EV_KEY, display_manager.KEY_VOLUMEUP, 1),
+            (display_manager.EV_KEY, display_manager.KEY_VOLUMEDOWN, 0),
+        ]
+        assert all(w[0] == '/dev/input/event0' for w in wanted)
+        assert last is None
+
+    def test_flood_events_dropped(self):
+        data = b''.join([
+            _ev_bytes(0, 0, 0),    # EV_SYN
+            _ev_bytes(4, 4, 1),    # EV_MSC
+            _ev_bytes(2, 0, 5),    # EV_REL motion
+            _ev_bytes(display_manager.EV_ABS, 0, 120),   # ABS_X touch-move
+            _ev_bytes(display_manager.EV_ABS, 53, 200),  # ABS_MT_POSITION_X
+        ])
+        wanted, last = display_manager.filter_evdev_data(
+            data, '/dev/input/event1', '/dev/input/event9', 1000.0)
+        assert wanted == []
+        assert last is None
+
+    def test_fingerprint_node_posts_presses_only(self):
+        press = _ev_bytes(display_manager.EV_KEY, 96, 1)
+        release = _ev_bytes(display_manager.EV_KEY, 96, 0)
+        wanted, _ = display_manager.filter_evdev_data(
+            press, '/dev/input/event9', '/dev/input/event9', 1000.0)
+        assert len(wanted) == 1
+        wanted, _ = display_manager.filter_evdev_data(
+            release, '/dev/input/event9', '/dev/input/event9', 1000.0)
+        assert wanted == []
+        wanted, _ = display_manager.filter_evdev_data(
+            press, '/dev/input/event3', '/dev/input/event9', 1000.0)
+        assert wanted == []
+
+    def test_touch_down_throttled_to_one_per_window(self):
+        down = _ev_bytes(
+            display_manager.EV_ABS,
+            display_manager.ABS_MT_TRACKING_ID, 5)
+        wanted, last = display_manager.filter_evdev_data(
+            down, '/dev/input/event1', '/dev/input/event9', 1000.0)
+        assert len(wanted) == 1
+        assert last == 1000.0
+        wanted, last = display_manager.filter_evdev_data(
+            down, '/dev/input/event1', '/dev/input/event9', 1100.0, last)
+        assert wanted == []
+        assert last == 1000.0
+        wanted, last = display_manager.filter_evdev_data(
+            down, '/dev/input/event1', '/dev/input/event9', 1250.0, last)
+        assert len(wanted) == 1
+        assert last == 1250.0
+
+    def test_touch_lift_never_posts(self):
+        lift = _ev_bytes(
+            display_manager.EV_ABS,
+            display_manager.ABS_MT_TRACKING_ID, -1)
+        wanted, _ = display_manager.filter_evdev_data(
+            lift, '/dev/input/event1', '/dev/input/event9', 1000.0)
+        assert wanted == []
+
+    def test_trailing_partial_bytes_ignored(self):
+        data = (_ev_bytes(display_manager.EV_KEY,
+                          display_manager.KEY_POWER, 1) + b'\x00\x01')
+        wanted, _ = display_manager.filter_evdev_data(
+            data, '/dev/input/event0', '/dev/input/event9', 1000.0)
+        assert len(wanted) == 1
+
+    def test_each_device_throttles_independently(self):
+        down = _ev_bytes(
+            display_manager.EV_ABS,
+            display_manager.ABS_MT_TRACKING_ID, 5)
+        for dev in ('/dev/input/event1', '/dev/input/event2'):
+            wanted, _ = display_manager.filter_evdev_data(
+                down, dev, '/dev/input/event9', 1000.0, None)
+            assert len(wanted) == 1
+
+
+def _touch_down():
+    return ('/dev/input/event1', display_manager.EV_ABS,
+            display_manager.ABS_MT_TRACKING_ID, 7)
+
+
+class TestTouchNeverWakesBlanked:
+    """Pocket safety: only the power key and the fingerprint node wake a
+    blanked screen. Touch while lit only pushes the idle timer out."""
+
+    def test_touch_while_blanked_is_ignored(self, dm, idle_calls):
+        mgr, blanks, wakes = dm()
+        mgr._blanked = True
+        idle_calls.clear()
+        mgr._on_event(*_touch_down())
+        assert wakes == []
+        assert blanks == []
+        assert idle_calls == []
+
+    def test_touch_while_lit_resets_idle(self, dm, idle_calls):
+        mgr, blanks, wakes = dm()
+        idle_calls.clear()
+        mgr._on_event(*_touch_down())
+        assert wakes == []
+        assert blanks == []
+        assert idle_calls == [display_manager._IDLE_SECS]
+
+
+class TestBlankTimeout:
+    def test_default_is_sixty_seconds(self, dm, idle_calls):
+        dm()
+        assert idle_calls == [60]
+
+    def test_custom_timeout_applies(self, dm, idle_calls):
+        dm(get_blank_timeout=lambda: 30)
+        assert idle_calls == [30]
+
+    def test_zero_never_schedules(self, dm, idle_calls):
+        mgr, _blanks, _wakes = dm(get_blank_timeout=lambda: 0)
+        assert idle_calls == []
+        assert mgr._idle_src is None
+
+    def test_invalid_value_falls_back_to_default(self, dm, idle_calls):
+        dm(get_blank_timeout=lambda: 'junk')
+        assert idle_calls == [display_manager._IDLE_SECS]
+
+    def test_config_property_clamped_like_auto_lock(self):
+        from config import DEFAULT_CONFIG, ShellConfig
+        cfg = ShellConfig.__new__(ShellConfig)
+        cfg.data = dict(DEFAULT_CONFIG)
+        assert cfg.display_blank_timeout == 60
+        cfg.data = dict(DEFAULT_CONFIG, display_blank_timeout=30)
+        assert cfg.display_blank_timeout == 30
+        cfg.data = dict(DEFAULT_CONFIG, display_blank_timeout=0)
+        assert cfg.display_blank_timeout == 0
+        cfg.data = dict(DEFAULT_CONFIG, display_blank_timeout=-5)
+        assert cfg.display_blank_timeout == 0
+        cfg.data = dict(DEFAULT_CONFIG, display_blank_timeout='junk')
+        assert cfg.display_blank_timeout == 60
+
+
+class TestInhibitIdle:
+    def test_inhibited_idle_never_blanks(self, dm):
+        mgr, blanks, _wakes = dm()
+        mgr.inhibit_idle('call', True)
+        mgr._on_idle()
+        assert blanks == []
+
+    def test_released_inhibitor_blanks_again(self, dm):
+        mgr, blanks, _wakes = dm()
+        mgr.inhibit_idle('call', True)
+        mgr.inhibit_idle('call', False)
+        mgr._on_idle()
+        assert blanks == [True]
+
+    def test_all_reasons_must_release(self, dm):
+        mgr, blanks, _wakes = dm()
+        mgr.inhibit_idle('call', True)
+        mgr.inhibit_idle('nav', True)
+        mgr.inhibit_idle('call', False)
+        mgr._on_idle()
+        assert blanks == []
+        mgr.inhibit_idle('nav', False)
+        mgr._on_idle()
+        assert blanks == [True]
+
+
+class TestWakeApi:
+    def test_wake_while_blanked_wakes(self, dm):
+        mgr, blanks, wakes = dm()
+        mgr._blanked = True
+        mgr.wake()
+        assert wakes == [True]
+        assert blanks == []
+
+    def test_wake_while_lit_resets_idle(self, dm, idle_calls):
+        mgr, blanks, wakes = dm()
+        idle_calls.clear()
+        mgr.wake()
+        assert wakes == []
+        assert idle_calls == [display_manager._IDLE_SECS]
