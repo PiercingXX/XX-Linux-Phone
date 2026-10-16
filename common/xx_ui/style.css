@@ -1,0 +1,659 @@
+/* XX design system. One template, rendered by xx_ui.css.render() which
+   substitutes every placeholder with a theme value. Readable as CSS:
+   placeholders are theme colors, the font stack, and text-size-scale
+   derived px sizes. */
+
+/* Libadwaita named colors so any remaining Adw widget follows the theme
+   instead of going blue. */
+@define-color window_bg_color ${background};
+@define-color window_fg_color ${foreground};
+@define-color view_bg_color ${background};
+@define-color view_fg_color ${foreground};
+@define-color headerbar_bg_color ${background};
+@define-color headerbar_fg_color ${foreground};
+@define-color card_bg_color ${surface};
+@define-color card_fg_color ${foreground};
+@define-color popover_bg_color ${surface};
+@define-color popover_fg_color ${foreground};
+@define-color dialog_bg_color ${surface};
+@define-color dialog_fg_color ${foreground};
+@define-color sidebar_bg_color ${background};
+@define-color sidebar_fg_color ${foreground};
+@define-color accent_bg_color ${foreground};
+@define-color accent_fg_color ${background};
+@define-color accent_color ${accent};
+@define-color destructive_bg_color ${danger};
+@define-color destructive_fg_color ${on_danger};
+@define-color destructive_color ${danger};
+@define-color success_color ${accent};
+@define-color warning_color ${danger};
+@define-color error_color ${danger};
+@define-color borders ${border};
+@define-color theme_fg_color ${foreground};
+@define-color theme_bg_color ${background};
+@define-color theme_base_color ${background};
+@define-color theme_text_color ${foreground};
+@define-color theme_selected_bg_color ${foreground};
+@define-color theme_selected_fg_color ${background};
+@define-color insensitive_fg_color ${muted};
+@define-color insensitive_bg_color ${surface};
+
+window {
+  background-color: ${background};
+  color: ${foreground};
+  --window-bg-color: ${background};
+  --window-fg-color: ${foreground};
+  --view-bg-color: ${background};
+  --view-fg-color: ${foreground};
+  --headerbar-bg-color: ${background};
+  --card-bg-color: ${surface};
+  --popover-bg-color: ${surface};
+  --dialog-bg-color: ${surface};
+  --accent-bg-color: ${foreground};
+  --accent-fg-color: ${background};
+  --accent-color: ${accent};
+  --destructive-bg-color: ${danger};
+  --destructive-color: ${danger};
+  --borders: ${border};
+}
+
+* {
+  font-family: ${font_family};
+  outline-width: 0;
+  outline-style: none;
+}
+
+/* Kill button gradients/shadows and the default switch everywhere. */
+button {
+  background: transparent;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  color: ${foreground};
+}
+
+
+
+button.suggested-action {
+  background-color: ${foreground};
+  color: ${background};
+}
+
+button.destructive-action {
+  background-color: ${danger};
+  color: ${on_danger};
+}
+
+switch {
+  background-color: ${surface_alt};
+  border: none;
+  box-shadow: none;
+}
+
+switch:checked {
+  background-color: ${foreground};
+}
+
+switch slider {
+  background-color: ${muted};
+  border: none;
+  box-shadow: none;
+}
+
+switch:checked slider {
+  background-color: ${background};
+}
+
+check:checked,
+radio:checked {
+  background-color: ${foreground};
+  color: ${background};
+  border-color: ${foreground};
+}
+
+entry,
+textview {
+  background-color: ${background};
+  color: ${foreground};
+}
+
+entry selection,
+textview selection,
+label selection {
+  background-color: ${foreground};
+  color: ${background};
+}
+
+listview,
+list {
+  background-color: ${background};
+  color: ${foreground};
+}
+
+listview row,
+list row {
+  background-color: ${background};
+  color: ${foreground};
+}
+
+listview row:selected,
+list row:selected {
+  background-color: ${foreground};
+  color: ${background};
+}
+
+headerbar {
+  background: transparent;
+  background-color: ${background};
+  border: none;
+  box-shadow: none;
+  color: ${foreground};
+}
+
+popover {
+  background-color: ${surface};
+  color: ${foreground};
+  border: 1px solid ${border};
+  border-radius: 16px;
+}
+
+popover modelbutton {
+  min-height: 48px;
+  font-size: ${body_px}px;
+  color: ${foreground};
+}
+
+tooltip {
+  background-color: ${surface};
+  color: ${foreground};
+  border: 1px solid ${border};
+  border-radius: 12px;
+}
+
+separator {
+  background-color: ${border};
+  color: ${border};
+}
+
+progressbar trough {
+  background-color: ${surface_alt};
+  border: none;
+}
+
+progressbar progress {
+  background-color: ${foreground};
+  border: none;
+}
+
+scale trough {
+  background-color: ${surface_alt};
+}
+
+scale highlight {
+  background-color: ${foreground};
+}
+
+scale slider {
+  background-color: ${foreground};
+  border: none;
+}
+
+/* ---- Type roles ---- */
+
+.xx-display {
+  font-size: ${display_px}px;
+  font-weight: 400;
+  color: ${foreground};
+}
+
+.xx-display-large {
+  font-size: ${display_large_px}px;
+  font-weight: 400;
+  color: ${foreground};
+}
+
+.xx-hero {
+  font-size: ${hero_px}px;
+  font-weight: 300;
+  color: ${foreground};
+}
+
+.xx-title {
+  font-size: ${title_px}px;
+  font-weight: 400;
+  color: ${foreground};
+}
+
+.xx-body {
+  font-size: ${body_px}px;
+  font-weight: 400;
+  color: ${foreground};
+}
+
+.xx-secondary {
+  font-size: ${secondary_px}px;
+  font-weight: 400;
+  color: ${muted};
+}
+
+.xx-caption {
+  font-size: ${caption_px}px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: ${muted};
+}
+
+.xx-time {
+  font-size: ${time_px}px;
+  font-weight: 400;
+  color: ${muted};
+}
+
+.xx-tiny {
+  font-size: ${tiny_px}px;
+  font-weight: 400;
+  color: ${muted};
+}
+
+.xx-danger-text {
+  color: ${danger};
+}
+
+.xx-accent-text {
+  color: ${accent};
+}
+
+/* ---- Page chrome ---- */
+
+.xx-page {
+  background-color: ${background};
+}
+
+.xx-page-body {
+  padding-left: ${gutter_px}px;
+  padding-right: ${gutter_px}px;
+}
+
+/* Compact sub-page bar: 56 px total, 8 px top padding, content centered. */
+.xx-compact-header {
+  min-height: 48px;
+  padding-top: 8px;
+}
+
+/* ---- List rows: 64 px, hairline between rows, no hairline last ---- */
+
+.xx-row {
+  min-height: ${rowmin_px}px;
+  padding: 8px 0;
+  border-bottom: 1px solid ${border};
+  border-radius: 0;
+}
+
+.xx-row.last {
+  border-bottom: none;
+}
+
+.xx-row:active {
+  background-color: ${surface_alt};
+}
+
+/* ---- Avatar discs ---- */
+
+.xx-avatar {
+  background-color: ${surface_alt};
+  color: ${foreground};
+  border-radius: 9999px;
+  font-size: ${body_px}px;
+  font-weight: 400;
+}
+
+.xx-avatar.dashed {
+  background: transparent;
+  background-color: transparent;
+  border: 1px dashed ${border};
+  color: ${muted};
+}
+
+/* ---- Chips: nearly square, inverted when selected ---- */
+
+.xx-chip {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid ${border};
+  border-radius: 3px;
+  font-size: ${chip_px}px;
+  letter-spacing: 0.12em;
+  color: ${muted};
+}
+
+.xx-chip.selected {
+  background-color: ${foreground};
+  color: ${background};
+  border-color: ${foreground};
+}
+
+/* ---- Segmented: joined caps chips ---- */
+
+.xx-segmented {
+  border: 1px solid ${border};
+  border-radius: 3px;
+}
+
+.xx-segmented button {
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 0;
+  font-size: ${chip_px}px;
+  letter-spacing: 0.12em;
+  color: ${muted};
+}
+
+.xx-segmented button.seg-selected {
+  background-color: ${foreground};
+  color: ${background};
+}
+
+.xx-segmented button.seg-mid,
+.xx-segmented button.seg-last {
+  border-left: 1px solid ${border};
+}
+
+/* ---- Bottom tabs: no slab, indicator line on top of active ---- */
+
+.xx-tabs {
+  background-color: ${background};
+  border-top: 1px solid ${border};
+}
+
+.xx-tab {
+  min-height: 56px;
+  border-radius: 0;
+  font-size: ${tab_px}px;
+  letter-spacing: 0.12em;
+  color: ${muted};
+}
+
+.xx-tab.active {
+  color: ${foreground};
+  border-top: 2px solid ${foreground};
+}
+
+/* ---- Search: flat glyph + muted placeholder, no box ---- */
+
+.xx-searchbar {
+  padding: 8px 20px;
+}
+
+.xx-searchbar entry {
+  background: transparent;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  font-size: ${title_px}px;
+  color: ${foreground};
+  caret-color: ${foreground};
+}
+
+.xx-searchbar entry placeholder {
+  color: ${muted};
+}
+
+.xx-searchbar-boxed entry {
+  background-color: ${surface};
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: ${body_px}px;
+  color: ${foreground};
+}
+
+.xx-searchbar-boxed entry placeholder {
+  color: ${muted};
+}
+
+/* ---- Buttons ---- */
+
+.xx-btn {
+  min-height: 44px;
+  font-size: ${body_px}px;
+  font-weight: 400;
+}
+
+.xx-btn-outline {
+  border: 1px solid ${border};
+  border-radius: 12px;
+  color: ${foreground};
+}
+
+.xx-btn-outline:active {
+  background-color: ${surface_alt};
+}
+
+.xx-btn-primary {
+  background-color: ${foreground};
+  color: ${background};
+  border-radius: 12px;
+}
+
+.xx-btn-danger {
+  background-color: ${danger};
+  color: ${on_danger};
+  border-radius: 12px;
+}
+
+.xx-btn-text {
+  color: ${foreground};
+  font-size: ${title_px}px;
+}
+
+.xx-btn-caps {
+  border: 1px solid ${border};
+  border-radius: 3px;
+  font-size: ${chip_px}px;
+  letter-spacing: 0.12em;
+  padding: 8px 14px;
+  color: ${foreground};
+}
+
+.xx-btn-icon {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: ${title_px}px;
+  color: ${foreground};
+}
+
+/* ---- FAB: 56 px inverted rounded square ---- */
+
+.xx-fab {
+  min-width: 56px;
+  min-height: 56px;
+  padding: 0;
+  border-radius: 20px;
+  background-color: ${foreground};
+  color: ${background};
+  font-size: 24px;
+}
+
+/* ---- Fields and section labels ---- */
+
+.xx-field-label {
+  font-size: ${caption_px}px;
+  letter-spacing: 0.14em;
+  color: ${muted};
+  margin-top: 24px;
+}
+
+.xx-field-value {
+  font-size: ${title_px}px;
+  color: ${foreground};
+  margin-top: 6px;
+}
+
+.xx-field-value.placeholder {
+  color: ${muted};
+}
+
+.xx-section-label {
+  font-size: ${caption_px}px;
+  letter-spacing: 0.14em;
+  color: ${muted};
+  margin-top: 24px;
+  margin-bottom: 8px;
+}
+
+/* ---- Cards: surface fill, no border ---- */
+
+.xx-card {
+  background-color: ${surface};
+  border-radius: 16px;
+  padding: 16px;
+}
+
+/* ---- Setting rows ---- */
+
+.xx-setting {
+  min-height: ${rowmin_px}px;
+  padding: 8px 0;
+  border-bottom: 1px solid ${border};
+  border-radius: 0;
+}
+
+.xx-setting.last {
+  border-bottom: none;
+}
+
+/* ---- Keypad keys: surface rounded squares ---- */
+
+.xx-key {
+  min-width: 72px;
+  min-height: 64px;
+  background-color: ${surface};
+  border-radius: 16px;
+  color: ${foreground};
+}
+
+.xx-key:active {
+  background-color: ${surface_alt};
+}
+
+.xx-key-digit {
+  font-size: ${digit_px}px;
+  font-weight: 300;
+  color: ${foreground};
+}
+
+.xx-key-sub {
+  font-size: ${keysub_px}px;
+  letter-spacing: 0.12em;
+  color: ${muted};
+}
+
+/* ---- Call actions: outline squares, inverted when active ---- */
+
+.xx-callaction {
+  min-width: 72px;
+  min-height: 56px;
+  border: 1px solid ${border};
+  border-radius: 12px;
+  font-size: ${chip_px}px;
+  letter-spacing: 0.12em;
+  color: ${foreground};
+}
+
+.xx-callaction.active {
+  background-color: ${foreground};
+  color: ${background};
+  border-color: ${foreground};
+}
+
+.xx-endcall {
+  min-height: 56px;
+  border-radius: 12px;
+  background-color: ${danger};
+  color: ${on_danger};
+  font-size: ${title_px}px;
+}
+
+/* ---- Dialog / menu ---- */
+
+.xx-dialog {
+  background-color: ${surface};
+  border: 1px solid ${border};
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.xx-dialog-title {
+  font-size: ${dlg_title_px}px;
+  font-weight: 400;
+  color: ${foreground};
+}
+
+.xx-menu-row {
+  min-height: 48px;
+  font-size: ${body_px}px;
+  color: ${foreground};
+  border-radius: 0;
+}
+
+.xx-menu-row:active {
+  background-color: ${surface_alt};
+}
+
+.xx-entry {
+  background-color: ${surface};
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: ${body_px}px;
+  color: ${foreground};
+  caret-color: ${foreground};
+}
+
+.xx-entry:focus {
+  border-color: ${foreground};
+}
+
+.xx-entry placeholder {
+  color: ${muted};
+}
+
+/* ---- Message bubbles ---- */
+
+.xx-bubble-out {
+  background-color: ${foreground};
+  color: ${background};
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: ${body_px}px;
+}
+
+.xx-bubble-in {
+  background: transparent;
+  background-color: transparent;
+  color: ${foreground};
+  padding: 8px 0;
+  font-size: ${body_px}px;
+}
+
+.xx-day-sep {
+  font-size: ${caption_px}px;
+  letter-spacing: 0.14em;
+  color: ${muted};
+}
+
+.xx-day-sep-box {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.xx-day-sep-box separator {
+  min-height: 1px;
+}
+
+/* ---- Empty state: one muted sentence ---- */
+
+.xx-empty {
+  font-size: ${body_px}px;
+  color: ${muted};
+}
