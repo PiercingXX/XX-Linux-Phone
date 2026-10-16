@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""xx-find-agent launcher. The agent refuses to run until enabled AND paired."""
+from xx_find.agent import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

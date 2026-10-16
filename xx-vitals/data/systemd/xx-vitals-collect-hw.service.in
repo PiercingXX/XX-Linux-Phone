@@ -1,0 +1,6 @@
+[Unit]
+Description=XX-Vitals hardware step counter sample (one-shot)
+
+[Service]
+Type=oneshot
+ExecStart=@bindir@/xx-vitals-collect --one-shot

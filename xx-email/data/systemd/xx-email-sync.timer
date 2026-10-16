@@ -1,0 +1,17 @@
+# Fires xx-email-sync.service every 15 minutes (Persistent so a reboot
+# catches up missed ticks, including due snooze wakes). Longer
+# intervals come from the daemon itself: it reads sync_interval
+# (sync_minutes, 15-minute floor) plus the shell's battery_saver flag
+# and skips ticks until the effective interval has elapsed, so raising
+# the interval needs no unit edit — just enable the timer.
+[Unit]
+Description=XX Email background sync timer (15-minute poll)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

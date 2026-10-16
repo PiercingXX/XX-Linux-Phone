@@ -1,0 +1,82 @@
+project(
+  'txxt',
+  version: '0.1.0',
+  meson_version: '>=0.60.0',
+)
+
+python = import('python').find_installation('python3')
+
+prefix = get_option('prefix')
+datadir = join_paths(prefix, get_option('datadir'))
+bindir = join_paths(prefix, get_option('bindir'))
+pkgdir = join_paths(get_option('datadir'), 'txxt')
+
+install_data(
+  [
+    'src/txxt/__init__.py',
+    'src/txxt/__main__.py',
+    'src/txxt/main.py',
+    'src/txxt/theme.py',
+    'src/txxt/settings.py',
+    'src/txxt/backup.py',
+    'src/txxt/blocking.py',
+    'src/txxt/phone_numbers.py',
+    'src/txxt/conversations_core.py',
+    'src/txxt/store.py',
+    'src/txxt/mm_client.py',
+    'src/txxt/daemon.py',
+    'src/txxt/notify.py',
+    'src/txxt/contacts.py',
+    'src/txxt/contacts_eds.py',
+    'src/txxt/compose.py',
+    'src/txxt/conversations.py',
+    'src/txxt/known_senders.py',
+    'src/txxt/list_presenter.py',
+    'src/txxt/thread_page.py',
+    'src/txxt/txxt_client.py',
+    'src/txxt/media.py',
+    'src/txxt/receive_policy.py',
+    'src/txxt/settings_page.py',
+    'src/txxt/blocking_page.py',
+    'src/txxt/quarantine_page.py',
+  ],
+  install_dir: pkgdir,
+)
+
+launcher_conf = configuration_data()
+launcher_conf.set('pkgdir_parent', datadir)
+
+configure_file(
+  input: 'data/txxt.in',
+  output: 'txxt',
+  configuration: launcher_conf,
+  install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)
+
+install_data(
+  'data/io.piercingxx.TxxT.desktop',
+  install_dir: join_paths(get_option('datadir'), 'applications'),
+)
+
+install_data(
+  'data/io.piercingxx.TxxT.metainfo.xml',
+  install_dir: join_paths(get_option('datadir'), 'metainfo'),
+)
+
+install_data(
+  'data/txxt-daemon.service',
+  install_dir: join_paths(get_option('datadir'), 'txxt'),
+)
+
+install_data(
+  'data/io.piercingxx.TxxT.Daemon.service',
+  install_dir: join_paths(datadir, 'dbus-1', 'services'),
+)
+
+# Absolute: sessions only read /etc/xdg/autostart (plus ~/.config/autostart),
+# never a prefix-relative etc dir.
+install_data(
+  'data/io.piercingxx.TxxT.Daemon.desktop',
+  install_dir: '/etc/xdg/autostart',
+)

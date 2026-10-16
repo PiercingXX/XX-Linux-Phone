@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=XX Email
+Comment=Telemetry-free Gmail client
+Exec=@bindir@/xx-email
+Icon=mail-unread
+Terminal=false
+Categories=Network;Email;
+StartupNotify=true
+DBusActivatable=true
+MimeType=x-scheme-handler/io.piercingxx.XXEmail;

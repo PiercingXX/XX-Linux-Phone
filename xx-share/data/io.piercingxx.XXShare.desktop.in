@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=xx-share
+Comment=Nearby file sharing (LocalSend-compatible)
+Exec=@bindir@/xx-share --send %F
+MimeType=*/*;
+Categories=Utility;Network;
+StartupNotify=false
+Actions=Send;
+
+[Desktop Action Send]
+Name=Send with xx-share
+Exec=@bindir@/xx-share --send %F

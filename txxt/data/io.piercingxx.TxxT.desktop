@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TxxT
+Comment=Text-first SMS/MMS client
+DBusActivatable=true
+Exec=txxt %U
+Icon=io.piercingxx.TxxT
+Categories=Communication;Chat;
+StartupNotify=true

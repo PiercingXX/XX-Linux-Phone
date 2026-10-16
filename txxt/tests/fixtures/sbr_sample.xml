@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- Fixture in the SMS Backup & Restore schema (smses/sms, mms/parts/part):
+     two sms rows (inbox + sent) and one mms with a text part and one
+     embedded base64 photo part. Mirrors the SBR_XML builder in
+     tests/test_backup.py so the file and inline paths prove each other. -->
+<smses count="3">
+<sms protocol="0" address="+15551234567" date="1700000000000" type="1" subject="null" body="hello" toa="null" sc_toa="null" service_center="null" read="1" status="-1" locked="0" />
+<sms protocol="0" address="+15551234567" date="1700000001000" type="2" subject="null" body="on my way" toa="null" sc_toa="null" service_center="null" read="1" status="-1" locked="0" />
+<mms date="1700000002" msg_box="1" read="1">
+<parts>
+<part seq="0" ct="text/plain" text="a caption" />
+<part seq="1" ct="image/jpeg" data="AQIDBAU=" />
+</parts>
+<addrs>
+<addr address="insert-address-token" type="137" charset="106" />
+<addr address="+15551234567" type="137" charset="106" />
+</addrs>
+</mms>
+</smses>

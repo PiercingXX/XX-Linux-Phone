@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.piercingxx.XXShare</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>xx-share</name>
+  <summary>Nearby file sharing for Linux phones</summary>
+  <description>
+    <p>Send and receive files with nearby phones and computers over the
+    local network, interoperable with LocalSend on Android, iOS, Windows,
+    macOS and Linux.</p>
+  </description>
+  <launchable type="desktop-id">io.piercingxx.XXShare.desktop</launchable>
+</component>

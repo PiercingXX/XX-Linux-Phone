@@ -1,0 +1,6 @@
+import sys
+sys.path.insert(0, '@pkgdir_parent@')
+from txxt.main import main
+
+if __name__ == '__main__':
+    main()

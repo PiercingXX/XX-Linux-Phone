@@ -1,12 +1,6 @@
-devices/*/downloads/
-launcher/build/
-launcher/stage/
-*.img.xz
-__pycache__/
-.skippy/
 .venv/
-contracts/
-
-# Estate mill/audit scratch — never tracked
-.nagatha/
-.bilby/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+build/

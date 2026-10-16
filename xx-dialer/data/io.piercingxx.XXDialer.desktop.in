@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=XX Dialer
+Comment=The phone app that knows who is allowed to ring
+Exec=@bindir@/xx-dialer
+Icon=call-start
+DBusActivatable=true
+StartupNotify=true
+Categories=GTK;Phone;Dialer;
+MimeType=x-scheme-handler/tel;
+SingleMainWindow=true

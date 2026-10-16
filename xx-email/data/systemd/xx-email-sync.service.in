@@ -1,0 +1,11 @@
+[Unit]
+Description=XX Email background sync (poll, outbox drain, snooze wakes)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@bindir@/xx-email --daemon-tick
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.piercingxx.XXEmail</id>
+  <name>XX Email</name>
+  <summary>Telemetry-free Gmail client for Linux phones</summary>
+  <description>
+    <p>
+      XX Email is a text-first, monochrome Gmail client with no tracking, no
+      ads, and no Play Services dependency. It speaks the official Gmail REST
+      API directly from the device using your own OAuth client ID.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.piercingxx.XXEmail.desktop</launchable>
+  <categories>
+    <category>Network</category>
+    <category>Email</category>
+  </categories>
+</component>

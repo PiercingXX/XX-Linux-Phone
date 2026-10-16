@@ -1,0 +1,4 @@
+#!/bin/sh
+# Launcher for XX-Dialer: run the package installed to the datadir.
+export PYTHONPATH="@appdir@${PYTHONPATH:+:$PYTHONPATH}"
+exec "@python@" -m xx_dialer "$@"

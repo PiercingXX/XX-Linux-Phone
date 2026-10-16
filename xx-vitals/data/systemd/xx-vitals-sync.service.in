@@ -1,0 +1,8 @@
+[Unit]
+Description=XX-Vitals background sync (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@bindir@/xx-vitals --sync-once

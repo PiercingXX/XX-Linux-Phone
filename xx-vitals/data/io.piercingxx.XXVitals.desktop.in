@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=XX-Vitals
+Comment=Self-hosted health tracking (cleanroom Google Fit)
+Exec=@bindir@/xx-vitals
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+DBusActivatable=true
+X-Purism-FormFactor=Workstation;Mobile;

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.piercingxx.TxxT</id>
+  <name>TxxT</name>
+  <summary>Text-first SMS/MMS client for Linux phones</summary>
+  <description>
+    <p>
+      TxxT is a text-first SMS/MMS client for postmarketOS, Mobian, FuriOS
+      and PureOS phones. Monochrome per theme, no icon grids, large type.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.piercingxx.TxxT.desktop</launchable>
+  <provides>
+    <dbus type="session">io.piercingxx.TxxT</dbus>
+  </provides>
+</component>

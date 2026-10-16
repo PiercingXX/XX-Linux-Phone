@@ -1,0 +1,23 @@
+[Unit]
+Description=xx-find phone agent (self-hosted Find My Device)
+Documentation=https://github.com/xx-wm/xx-find/blob/main/PORT_SPEC.md
+After=network-online.target
+Wants=network-online.target
+
+# Shipped DISABLED on purpose: there is no [Install] section, so no
+# preset, enable or install script can activate this unit. The owner
+# starts it from XX-WM Settings, which also requires pairing first;
+# the agent process itself refuses to report or act until both hold.
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/xx-find-agent
+Restart=on-failure
+RestartSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+# Config/keys live outside ProtectHome's read-only view via explicit binds.
+ReadWritePaths=%h/.config/xx-find %h/.local/state/xx-find

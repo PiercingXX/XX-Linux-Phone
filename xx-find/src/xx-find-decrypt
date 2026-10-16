@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""xx-find-decrypt launcher: open a sealed location report owner-side."""
+from xx_find.decrypt import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

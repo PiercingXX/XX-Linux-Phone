@@ -1,0 +1,12 @@
+[Unit]
+Description=TxxT SMS background service (ModemManager reconcile and retry)
+After=ModemManager.service
+Wants=ModemManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/txxt --daemon
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

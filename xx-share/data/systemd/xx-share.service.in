@@ -1,0 +1,14 @@
+[Unit]
+Description=xx-share nearby file sharing service
+Documentation=https://github.com/piercingxx/linux-phone
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@bindir@/xx-share --service
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=default.target

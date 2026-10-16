@@ -1,0 +1,5 @@
+#!/bin/sh
+# Installed launcher: modules live in the datadir (like XX-WM), so point
+# Python at the package dir and run the module.
+export PYTHONPATH="@pkgdir@${PYTHONPATH:+:$PYTHONPATH}"
+exec @python@ -m xx_email "$@"

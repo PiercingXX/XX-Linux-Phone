@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.piercingxx.XXVitals</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-Proprietary</project_license>
+  <name>XX-Vitals</name>
+  <summary>Self-hosted health tracking for Linux phones</summary>
+  <description>
+    <p>Cleanroom Google Fit replacement: daily goals, manual weight and
+    activity logging, and sync to Postgres on your own NAS. Offline-first;
+    gap days render as gaps, never fake zeroes.</p>
+  </description>
+  <!-- Screenshot placeholders: capture Home (dual ring), Journal (gap
+       band), Browse (metric detail) and Profile (sync section) at 360x720
+       once hosted shot URLs exist, then replace this comment with a
+       <screenshots> block. Imageless <screenshot> entries and local
+       paths both fail `appstreamcli validate` (screenshot-no-media,
+       web-url-expected), so no block ships until the images are hosted. -->
+  <developer>
+    <name>PiercingXX</name>
+  </developer>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>health</keyword>
+    <keyword>fitness</keyword>
+    <keyword>steps</keyword>
+    <keyword>weight</keyword>
+  </keywords>
+  <launchable type="desktop-id">io.piercingxx.XXVitals.desktop</launchable>
+  <provides>
+    <binary>xx-vitals</binary>
+    <dbus type="session">io.piercingxx.XXVitals</dbus>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-10-16" urgency="medium">
+      <description>
+        <p>Phone port: offline-first tracking, NAS sync, Takeout import.</p>
+      </description>
+    </release>
+  </releases>
+</component>

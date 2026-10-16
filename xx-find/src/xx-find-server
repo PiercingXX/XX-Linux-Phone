@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""xx-find-server launcher (plain-Python fallback for the NAS)."""
+import sys
+from pathlib import Path
+
+from xx_find.server import Store, serve
+
+
+def main(argv):
+    store_path = Path(argv[1]) if len(argv) > 1 else None
+    serve(Store(store_path), "127.0.0.1", 8080)
+
+
+if __name__ == "__main__":
+    main(sys.argv)

@@ -1,73 +1,40 @@
-# XX-WM
+# XX-Linux-Phone
 
-**A minimalist Wayland shell for Linux phones — text-first, gesture-driven, and fully functional as a daily phone.**
+A complete, minimal phone experience for Linux phones: the **XX-WM** shell and the PiercingXX apps, built for postmarketOS, Mobian, FuriOS and other phoc-based systems. Python + GTK4/libadwaita, phone-first (360×720, works down to 320 px wide).
 
-> **"WM" is the name, not the architecture.** XX-WM is in fact a *shell*: the phoc compositor does the actual window management, and XX-WM provides every surface drawn over it (home, lock screen, shade, switcher, call UI, …) — the same relationship Phosh has to phoc.
+| Directory | What it is |
+|---|---|
+| [`xx-wm/`](xx-wm/) | The shell: home, app drawer, shade, lock screen, calls, notifications, settings, power, privacy, screen time, captions tile |
+| [`xx-contacts/`](xx-contacts/) | Contacts. Owns the phone's contact store and serves it over D-Bus |
+| [`xx-dialer/`](xx-dialer/) | Phone app with call screening and spam blocking (the shell asks it before ringing) |
+| [`txxt/`](txxt/) | SMS/MMS messaging (owns SMS on the phone) |
+| [`xx-calendar/`](xx-calendar/) | Calendar. Owns its events (lossless iCalendar) |
+| [`xx-email/`](xx-email/) | Gmail client with offline outbox, snooze and background sync |
+| [`xx-vitals/`](xx-vitals/) | Health and steps, synced to a self-hosted server |
+| [`xx-share/`](xx-share/) | Nearby Share, compatible with LocalSend |
+| [`xx-captions/`](xx-captions/) | On-device live captions and call transcription |
+| [`xx-find/`](xx-find/) | Self-hosted Find My Device (built, not enabled) |
 
-Most mobile Linux shells try to be a desktop squeezed onto a phone. XX-WM goes the other way: a quiet, monochrome, text-first home screen with no icon grids, no visual noise, and nothing between you and what you want to launch. Everything is driven by simple, natural gestures — swipe for the drawer, the shade, the switcher — and everything a phone must do (calls, SMS, notifications, quick settings, lock screen) is a first-class surface.
+Each directory is a self-contained project with its own `meson.build`, tests and README. How the pieces talk to each other is in [`docs/dbus.md`](docs/dbus.md).
 
-<p align="center">
-  <img src="docs/images/home-screen.jpg" alt="The default home screen: AMOLED black with a 21:41 clock, date, battery, and weather, and Notes, Audio, Comms, and Tools centered in a mono typeface" width="640">
-</p>
+## Install
 
-The default home screen: AMOLED black, centered, JetBrains Mono Nerd. A clock, the essentials, and your apps — nothing else.
+The shell: see [`xx-wm/README.md`](xx-wm/README.md) (`sh xx-wm/scripts/install.sh`). Each app installs with meson from its directory:
 
-<table>
-<tr><td><b>Product</b></td><td>XX-WM — compositor session + GTK4 layer-shell launcher</td></tr>
-<tr><td><b>Design spec</b></td><td><code>design.md</code> — the full UI contract for every surface, theme, and gesture</td></tr>
-<tr><td><b>Compositor</b></td><td>phoc today (all test phones ship it); Hyprland when Hyprgrass matures</td></tr>
-<tr><td><b>Stack</b></td><td>Python + GTK4/libadwaita + gtk4-layer-shell, lisgd gestures, in-shell HUD, squeekboard keyboard (PiercingXX Colemak layouts)</td></tr>
-<tr><td><b>Ecosystem</b></td><td><a href="https://github.com/PiercingXX/piercing-dots">piercing-dots</a> for the terminal/dotfile layer; <a href="https://github.com/PiercingXX/debian-mini-mod">debian-mini-mod</a> minimal-install patterns</td></tr>
-</table>
-
-![Six of the eight theme presets side by side: AMOLED, Graphite, Forest, Ocean, Paper, and Mist — the screenshot predates the Aura and Burgundy presets](docs/images/theme-presets.jpg)
-
-Eight built-in theme presets — AMOLED, Graphite, Forest, Ocean, Paper, Mist, Aura, and Burgundy — all solid colors, all text-first.
-
-## Design principles
-
-- **Minimal by default.** A clock, a handful of widgets (date, battery, weather), and your most-used apps as plain text. No icon grids anywhere.
-- **Gestures, not chrome.** Swipe up for the app drawer, down for the notification shade and quick settings, sideways for the app switcher. The screen belongs to content, not controls.
-- **A real phone.** Calls, dialer, SMS, notifications, lock screen, and quick settings are all first-class surfaces — this is a daily driver, not a demo.
-- **Fast search.** Search sits at the bottom of the drawer where your thumb is; type a few letters and go — results land right above your hand.
-- **Local-only customization.** Themes, fonts, layout, and gestures live in plain text files under `~/.config/xx-wm/` (see `docs/config.md`) and hot-reload while you edit. Nothing phones home.
-
-## What this is (and isn't)
-
-- **It is** a launcher + shell session: home screen, app drawer, lock screen, notification shade, app switcher, quick settings, call UI, dialer, SMS — every surface a GTK4 layer-shell window over a wlroots compositor.
-- **It is** device-agnostic. Phones are test targets, not the product.
-- **It isn't** a distro. It installs onto whatever mobile OS the phone runs (postmarketOS, PureOS, FuriOS). Base OS is a dependency.
-- **It isn't** GNOME/Phosh with a theme. No GNOME Shell, no libhandy app grid, no icon grids anywhere.
-
-## Test devices
-
-| Device | OS | Kernel | Role |
-|---|---|---|---|
-| **Fairphone 5** | postmarketOS (Alpine) | mainline 6.15 | Primary bring-up target — image downloaded, flash pending (`devices/fairphone-5/`) |
-| **Librem 5** | PureOS | mainline | Second target — already runs phoc/Phosh, ideal for replacing Phosh in place (`devices/librem-5/`) |
-| **Furi Phone FLX1** | FuriOS (Debian) | Halium-based | Third target — daily-driver-grade telephony incl. VoLTE (`devices/furiphone-flx1/`) |
-
-All three ship a phoc-based stack, so one launcher codebase covers the whole matrix. Device directories hold only flash/setup scripts and hardware notes.
-
-## Repo layout
-
-```
-launcher/          ← the product: GTK4 layer-shell launcher + session files
-  src/             ← all surfaces (window.py, lock_screen.py, notification_shade.py, …)
-  data/            ← phoc.ini, session files, systemd + OpenRC services, sounds, squeekboard layouts
-design.md          ← the UI spec — every surface, theme, and gesture
-docs/config.md     ← the config-file reference (the shell's public API)
-todo.md            ← the build plan
-scripts/           ← install.sh (whiptail TUI), deploy.sh (dev loop), apps.sh, check.sh gate, bootstrap-dots.sh (loud stub), reference/ (vendored)
-devices/           ← per-phone flash scripts and hardware notes (not the product)
+```sh
+cd xx-contacts && meson setup build --prefix=/usr && sudo meson install -C build
 ```
 
-## Read first
+## Develop
 
-1. `design.md` — what we're building (the UI spec)
-2. `todo.md` — how we get there
-3. `launcher/README.md` — code layout, local run, deploy
+```sh
+python3 -m venv --system-site-packages .venv && .venv/bin/pip install pytest ruff
+sh scripts/check-all.sh          # every project's tests + lint
+sh scripts/check-all.sh txxt     # just one
+```
+
+GTK widget tests run on a virtual display (`gtk4-broadwayd`) and skip cleanly when it isn't installed.
 
 ## License
 
-GPL-3.0.
+GPL-3.0. See [LICENSE](LICENSE). The Wayland protocol XML files under `xx-wm/launcher/data/` keep their own MIT notices.

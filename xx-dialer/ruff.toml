@@ -1,0 +1,6 @@
+# Ruff configuration for XX-Dialer (matches XX-WM's gate)
+# Ignore E402 (module level import not at top) for GTK gi.require_version() pattern
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+extend-ignore = ["E402"]

@@ -1,0 +1,12 @@
+[Unit]
+Description=XX-Vitals resident step sampler (no hardware counter)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@bindir@/xx-vitals-collect
+Restart=on-failure
+Nice=10
+
+[Install]
+WantedBy=default.target

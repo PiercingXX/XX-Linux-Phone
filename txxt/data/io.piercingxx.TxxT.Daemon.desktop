@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TxxT Daemon
+Comment=TxxT SMS background service (reconcile and retry)
+Exec=sh -c 'systemctl --user is-active --quiet txxt-daemon.service || exec txxt --daemon'
+Icon=io.piercingxx.TxxT
+Categories=Communication;Chat;
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

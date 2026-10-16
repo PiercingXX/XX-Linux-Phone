@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.piercingxx.XXDialer</id>
+  <name>XX Dialer</name>
+  <summary>The phone app that knows who is allowed to ring</summary>
+  <description>
+    <p>
+      A ring-policy dialer for Linux phones: spam never rings, starred
+      contacts always ring, everyone else rings only inside their window.
+      All screening is local and offline; the app makes no network
+      connections.
+    </p>
+    <p>
+      Recents with per-call verdicts, T9 keypad, People with tier
+      controls, a Rules screen with an Expecting-a-call bypass,
+      Android-compatible backup export/import, and a redacted
+      diagnostics log. Silenced calls leave one batched card with
+      Call back, Ring next time, and Block actions.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.piercingxx.XXDialer.desktop</launchable>
+  <categories>
+    <category>Phone</category>
+    <category>Contacts</category>
+  </categories>
+  <keywords>
+    <keyword>dialer</keyword>
+    <keyword>phone</keyword>
+    <keyword>spam blocking</keyword>
+    <keyword>call screening</keyword>
+  </keywords>
+  <releases>
+    <release version="0.1.0" date="2026-10-16">
+      <description>
+        <p>
+          Polish: lock-screen handoff contract tests, silenced-call
+          action targets that survive service restarts, atomic contact
+          tag updates, backup export/import, and a redacted logs view.
+        </p>
+      </description>
+    </release>
+  </releases>
+  <url type="homepage">https://piercingxx.example.invalid/xx-dialer</url>
+  <metadata_license>CC0-1.0</metadata_license>
+</component>

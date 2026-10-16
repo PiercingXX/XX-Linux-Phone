@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.piercingxx.XXCalendar</id>
+  <name>XX-Calendar</name>
+  <summary>Text-first calendar: it shows you your day</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-All-Rights-Reserved</project_license>
+  <description>
+    <p>
+      Linux phone port of the PiercingXX Android calendar app. A renderer
+      and editor over Evolution Data Server: Schedule, Day, Week, and
+      Month views with quiet-by-default reminders, following the XX-WM
+      shell theme.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.piercingxx.XXCalendar.desktop</launchable>
+</component>

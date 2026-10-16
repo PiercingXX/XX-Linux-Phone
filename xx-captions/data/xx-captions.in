@@ -1,0 +1,7 @@
+#!/usr/bin/env @python@
+"""Launcher: run the captions service module."""
+import runpy
+import sys
+
+sys.argv[0] = "xx-captions"
+runpy.run_module("xx_captions", run_name="__main__")

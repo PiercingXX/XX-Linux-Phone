@@ -1,0 +1,10 @@
+[Unit]
+Description=XX-Vitals hardware step counter (every 15 min)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=xx-vitals-collect-hw.service
+
+[Install]
+WantedBy=timers.target

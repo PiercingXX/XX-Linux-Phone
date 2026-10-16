@@ -1,0 +1,45 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:0r1-aaa111
+FN:Ada Lovelace
+N:Lovelace;Ada;;;
+TEL;TYPE=CELL:+1 555 0100
+TEL;TYPE=HOME,VOICE:+1 555 0200
+EMAIL;TYPE=WORK:ada@example.com
+ORG:Analytical Engines
+TITLE:Mathematician
+ADR:;;1 Charles St;London;;W1;UK
+BDAY:1815-12-10
+NICKNAME:Ada
+NOTE:First program\nmer\,with comma
+CATEGORIES:Friends
+X-STARRED:1
+PHOTO:data:image/jpeg;base64,/9j/AAA=
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+UID:0r1-bbb222
+FN:Grace Hopper
+N:Hopper;Grace;;;
+TEL;CELL:+1 555 0202
+EMAIL;TYPE=PREF,INTERNET:grace@example.org
+ADR;TYPE=HOME:;;1 Test Road;Springfield;;12345;USA
+BDAY:1906-12-09
+NICKNAME:Grace
+NOTE:Navy programmer
+END:VCARD
+BEGIN:VCARD
+VERSION:4.0
+UID:64eebae7-ddee-4b13-8ff5-515fded82237
+FN:Alan Turing
+N:Turing;Alan;;;
+TEL;TYPE=CELL:+44 7700 900123
+EMAIL;TYPE=HOME:alan@example.uk
+ORG:Bletchley Park
+NOTE:Computed things
+CATEGORIES:Family
+END:VCARD
+BEGIN:VCARD
+VERSION:4.0
+NOTE:nameless card with no identity
+END:VCARD

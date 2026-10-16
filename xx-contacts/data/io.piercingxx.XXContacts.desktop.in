@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Contacts
+Comment=System address book
+Exec=@bindir@/xx-contacts %F
+Terminal=false
+Categories=Utility;ContactManagement;
+MimeType=text/vcard;text/x-vcard;
+StartupNotify=true

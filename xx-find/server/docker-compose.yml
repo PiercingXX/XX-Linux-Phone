@@ -1,0 +1,23 @@
+# xx-find Compose recipe for Synology Container Manager (build recipe only).
+#
+# This file is a static recipe the owner applies BY HAND in Container
+# Manager (Project > Create). Nothing here runs, pushes, or copies
+# anything on its own: no automation, no public port.
+#
+# Reachability: the published port binds to the NAS Tailscale address
+# only (replace 100.64.0.10 below), so the UI is reachable over the
+# owner's tailnet and never from the public internet. TLS terminates at
+# the tailnet / reverse proxy layer; see docs/synology-container-manager.md.
+services:
+  xx-find:
+    build: .
+    container_name: xx-find
+    restart: unless-stopped
+    user: "927:927"
+    volumes:
+      - xx-find-data:/home/xxfind/data
+    ports:
+      - "100.64.0.10:8080:8080"
+
+volumes:
+  xx-find-data:

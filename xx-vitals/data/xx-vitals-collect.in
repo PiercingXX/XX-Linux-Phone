@@ -1,0 +1,10 @@
+#!/bin/sh
+# Installed launcher: step collection, dispatched on the probed source.
+# With a hardware step counter this takes one cumulative sample and
+# exits (run by xx-vitals-collect-hw.service on its 15-minute timer).
+# Without one it runs the motion-gated resident sampler (run by
+# xx-vitals-collect.service, Type=simple) until SIGTERM. The pedometer
+# is opt-in and off by default (collect_enabled in config.json): when
+# off, or when no accelerometer or step counter is present, this
+# writes nothing — gap days render as gaps, never zeroes.
+exec @python@ @app_dir@/xx_vitals/collect/service.py "$@"
