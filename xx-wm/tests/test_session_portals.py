@@ -177,10 +177,16 @@ class TestInstallPortals:
 def test_destdir_install_contains_session_and_portals(tmp_path):
     build_dir = tmp_path / 'build'
     destdir = tmp_path / 'destdir'
+    # launcher/meson.build requires importable xx_ui (the shell themes
+    # through the installed package); point setup at the repo copy.
+    common = str(REPO.parent / 'common')
+    setup_env = dict(os.environ)
+    setup_env['PYTHONPATH'] = common + (
+        os.pathsep + setup_env['PYTHONPATH'] if setup_env.get('PYTHONPATH') else '')
     subprocess.run(
         ['meson', 'setup', str(build_dir), str(REPO / 'launcher'),
          '--prefix=/usr'],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, env=setup_env,
     )
     subprocess.run(
         ['meson', 'install', '-C', str(build_dir)],

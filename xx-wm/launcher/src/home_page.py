@@ -43,10 +43,7 @@ class HomePage:
         # registration per construction and miss custom themes.
 
         # --- Top 1/3: widget block — config-driven, vertically centered ---
-        win.clock_label.set_xalign(0.5)
-        win.date_label.set_xalign(0.5)
-        win.weather_label.set_xalign(0.5)
-        win.status_strip.set_xalign(0.5)
+        self._apply_widget_alignment()
 
         win._clock_tap_timer = None
 
@@ -162,6 +159,21 @@ class HomePage:
                 _launch_cmd(cmd)
                 win.drop_to_background()
 
+    def _apply_widget_alignment(self) -> None:
+        """Widget lines follow the home alignment pref (centered like the
+        slots by default, left-aligned like theme-presets.jpg when set)."""
+        win = self._win
+        try:
+            xalign = {'left': 0.0, 'right': 1.0}[win.config.home_alignment]
+        except (AttributeError, KeyError, TypeError):
+            xalign = 0.5
+        for widget in (win.clock_label, win.date_label,
+                       win.weather_label, win.status_strip):
+            try:
+                widget.set_xalign(xalign)
+            except Exception:
+                pass
+
     def _build_widget_block(self) -> None:
         win = self._win
         block = win._widget_block
@@ -170,6 +182,7 @@ class HomePage:
             nxt = child.get_next_sibling()
             block.remove(child)
             child = nxt
+        self._apply_widget_alignment()
         widget_map = {
             'time': win.clock_label,
             'date': win.date_label,

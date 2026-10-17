@@ -60,11 +60,18 @@ def test_subpackages_excluded_from_comparison():
 def test_destdir_install_contains_crash_modules(tmp_path):
     build_dir = tmp_path / 'build'
     destdir = tmp_path / 'destdir'
+    # launcher/meson.build errors when xx_ui is not importable (the shell
+    # themes through the installed package); point setup at the repo copy.
+    common = str(REPO.parent / 'common')
+    setup_env = {**os.environ}
+    setup_env['PYTHONPATH'] = common + (
+        os.pathsep + setup_env['PYTHONPATH'] if setup_env.get('PYTHONPATH') else '')
     subprocess.run(
         ['meson', 'setup', str(build_dir), str(REPO / 'launcher'), '--prefix=/usr'],
         check=True,
         capture_output=True,
         text=True,
+        env=setup_env,
     )
     subprocess.run(
         ['meson', 'install', '-C', str(build_dir)],

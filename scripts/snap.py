@@ -113,12 +113,35 @@ def main() -> int:
         print('snap: gtk4-broadwayd not installed', file=sys.stderr)
         return 2
     w, h = (int(v) for v in a.size.split('x'))
+    # Hermetic Broadway runtime: every other lane's daemons share the
+    # machine's runtime dir, where stale sockets pile up and steal display
+    # numbers (Gtk then cannot initialize). Run this daemon under a
+    # private XDG_RUNTIME_DIR instead — no contention, nothing shared to
+    # clean, and the child inherits it so client and daemon agree.
+    import tempfile as _tempfile
+    run_dir = _tempfile.mkdtemp(prefix='snap-broadway-')
+    os.chmod(run_dir, 0o700)
     disp = 40 + os.getpid() % 50
-    daemon = subprocess.Popen([broadwayd, f':{disp}'], stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL)
-    time.sleep(0.4)
+    daemon = subprocess.Popen(
+        [broadwayd, f':{disp}'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env=dict(os.environ, XDG_RUNTIME_DIR=run_dir))
+    # Wait until the daemon owns its display: a fixed sleep loses under
+    # load (Gtk then fails to initialize). Poll for the socket.
+    deadline = time.time() + 20.0
+    while time.time() < deadline:
+        if daemon.poll() is not None:
+            break
+        try:
+            if any(name.startswith('broadway')
+                   for name in os.listdir(run_dir)):
+                break
+        except OSError:
+            pass
+        time.sleep(0.2)
     env = dict(os.environ, GDK_BACKEND='broadway', BROADWAY_DISPLAY=f':{disp}',
-               GSK_RENDERER='cairo', SNAP_OUT=os.path.abspath(a.out), SNAP_W=str(w),
+               GSK_RENDERER='cairo', XDG_RUNTIME_DIR=run_dir,
+               SNAP_OUT=os.path.abspath(a.out), SNAP_W=str(w),
                SNAP_H=str(h), SNAP_DELAY=str(a.delay),
                SNAP_SCRIPT=os.path.abspath(a.script) if a.script else '')
     if a.path:
@@ -129,6 +152,7 @@ def main() -> int:
     finally:
         daemon.terminate()
         daemon.wait()
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 if __name__ == '__main__':

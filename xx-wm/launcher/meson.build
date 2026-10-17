@@ -6,6 +6,17 @@ project(
 
 python = import('python').find_installation('python3')
 
+# The shell themes through the shared design system: launcher modules
+# import xx_ui (installed from common/ by scripts/install.sh). Fail setup
+# early when it is missing instead of shipping a shell that crashes.
+xx_ui_check = run_command(
+  python, '-c', 'import xx_ui',
+  check: false,
+)
+if xx_ui_check.returncode() != 0
+  error('xx_ui not importable — install common/ first (meson setup + meson install in common/)')
+endif
+
 # No gtk4-layer-shell build probe here: this package only installs Python
 # files, and a compile-time pkg-config probe would drag the whole GTK4
 # development stack onto the device. The installer checks for the

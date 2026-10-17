@@ -72,6 +72,7 @@ fi'
 if [ "$DRY_RUN" = 1 ]; then
     echo "[dry-run] ssh $TARGET mktemp -d for a private staging dir"
     echo "[dry-run] rsync $RSYNC_FLAGS $REPO_DIR/launcher/src/ ${TARGET}:<staging>/"
+    echo "[dry-run] rsync $RSYNC_FLAGS $REPO_DIR/../common/xx_ui/ ${TARGET}:<staging>/xx_ui/"
     echo "[dry-run] rsync -az $REPO_DIR/launcher/data/wayland.xml $REPO_DIR/launcher/data/wlr-foreign-toplevel-management-unstable-v1.xml $REPO_DIR/launcher/data/wlr-output-power-management-unstable-v1.xml $REPO_DIR/launcher/data/virtual-pointer-unstable-v1.xml $REPO_DIR/launcher/data/wlr-screencopy-unstable-v1.xml ${TARGET}:<staging>/"
     echo "[dry-run] ssh $TARGET sudo rsync -a --chown=root:root <staging>/ ${DEST}/"
     echo "[dry-run] restart: systemctl --user restart xx-wm if active, else SIGUSR1 unique python3 /usr/share/xx-wm/main.py (wrapper respawns)"
@@ -93,6 +94,10 @@ trap 'ssh "$TARGET" "rm -rf $STAGE"' EXIT INT TERM
 echo "Deploying launcher/src/ -> ${TARGET}:${STAGE}/ then ${DEST}/"
 # shellcheck disable=SC2086  # RSYNC_FLAGS is intentionally word-split
 rsync $RSYNC_FLAGS "$REPO_DIR/launcher/src/" "${TARGET}:${STAGE}/" || exit 1
+# The shared design system rides along into the datadir: the installed shell
+# runs with the datadir on sys.path, so xx_ui resolves next to main.py even
+# when common/ was never meson-installed on the device.
+rsync $RSYNC_FLAGS "$REPO_DIR/../common/xx_ui/" "${TARGET}:${STAGE}/xx_ui/" || exit 1
 # The protocol XMLs live next to the modules on the device; the shell
 # regenerates its bindings when they change, so ship them with the code.
 rsync -az "$REPO_DIR/launcher/data/wayland.xml" \

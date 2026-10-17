@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import gi
 import os
-import re
 from pathlib import Path
+from string import Template
 
 _LAYER_SHELL = False
 try:
@@ -19,15 +19,14 @@ if _LAYER_SHELL:
 
 from app_index import AppEntry, AppIndex
 from app_item_actions import AppItemActions
-# _derive_shades is imported despite the underscore: the custom-theme
-# resolution below must follow the exact same shade rule as the canonical
-# presets, and duplicating it here would let the two drift apart.
+# ThemePreset/THEME_PRESETS re-export xx_ui.theme (via config); resolve_theme
+# below delegates custom-color resolution to the same module, so the shell
+# never carries its own copy of the palette or the shade rule.
 from config import (
     DEFAULT_CONFIG,
     ShellConfig,
     ThemePreset,
     THEME_PRESETS,
-    _derive_shades,
 )
 from gesture_config import GestureConfig
 
@@ -206,35 +205,94 @@ def swipe_release_velocity(
         return (0.0, 0.0)
     return ((x1 - x0) / dt, (y1 - y0) / dt)
 
-_CUSTOM_HEX_RE = re.compile(r'#[0-9a-fA-F]{6}')
-
-
 def resolve_theme(config: ShellConfig) -> ThemePreset:
     """Active ThemePreset, with theme == 'custom' resolved from the stored
-    custom_background color (docs/config.md "Appearance"): the color becomes
-    the background, surface shades derive via config's shade rule, and text/
-    accent come from the canonical dark or light preset by background
-    luminance — everything still derives from one preset (WS22).
+    custom_background color (docs/config.md "Appearance").
 
-    A missing or garbage color silently falls back to the default preset
-    (config-compat invariant: old configs and junk never crash the shell).
+    Custom resolution lives in xx_ui.theme; a missing or garbage color
+    silently falls back to the default preset (config-compat invariant:
+    old configs and junk never crash the shell).
     """
     if str(config.data.get('theme') or '') != 'custom':
         return config.theme
-    color = config.custom_background or ''
-    # fullmatch, not ^...$: '$' also matches before a trailing newline, and
-    # a newline inside the color would leak into every themed CSS sheet.
-    if not _CUSTOM_HEX_RE.fullmatch(color):
-        return config.theme
-    surface, surface_alt, border = _derive_shades(color)
-    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
-    luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    text = THEME_PRESETS['amoled'] if luminance < 0.5 else THEME_PRESETS['paper']
-    return ThemePreset(
-        key='custom', name='Custom', background=color,
-        surface=surface, surface_alt=surface_alt, border=border,
-        foreground=text.foreground, muted=text.muted, accent=text.accent,
-    )
+    from xx_ui import theme as _xx_theme
+    try:
+        resolved = _xx_theme._resolve(dict(config.data))
+    except Exception:
+        resolved = None
+    return resolved if resolved is not None else config.theme
+
+
+def _xx_render(config: ShellConfig, preset: ThemePreset) -> str:
+    """Shared design-system sheet for a resolved preset (pure)."""
+    from xx_ui import css as _xx_css
+    from xx_ui import theme as _xx_theme
+    red, green, blue = (int(preset.background[i:i + 2], 16) for i in (1, 3, 5))
+    return _xx_css.render(_xx_theme.Theme(
+        key=preset.key,
+        background=preset.background,
+        surface=preset.surface,
+        surface_alt=preset.surface_alt,
+        border=preset.border,
+        foreground=preset.foreground,
+        muted=preset.muted,
+        accent=preset.accent,
+        font_family=config.font_family,
+        scale=config.text_size_scale,
+        dark=(0.299 * red + 0.587 * green + 0.114 * blue) / 255 < 0.5,
+    ))
+
+
+# Shell-only surfaces on top of the shared sheet, same ${token} variables.
+# Everything the shared stylesheet paints (entries, lists, popovers,
+# switches, buttons) is deliberately NOT repeated here.
+_SHELL_SHEET_TEMPLATE = Template("""
+.shell-root {
+    background: ${background};
+    color: ${foreground};
+}
+
+.shell-root scrolledwindow.home-scroll,
+.shell-root scrolledwindow.home-scroll > viewport {
+    background: transparent;
+    border: none;
+}
+
+.dim-label,
+.eyebrow {
+    color: ${muted};
+}
+
+.action-link {
+    color: ${accent};
+}
+
+/* Long-press menus render outside .shell-root, so the shared popover
+   surface rule needs its content padding here. */
+popover.action-menu > contents {
+    padding: 6px;
+}
+
+/* The drawer list sits on the plain background — no inset panel. */
+.shell-root .drawer-sheet {
+    background: transparent;
+}
+.shell-root .drawer-sheet scrolledwindow,
+.shell-root .drawer-sheet scrolledwindow > viewport {
+    background: transparent;
+}
+
+/* Stock error dialogs (power-menu failure path) follow the preset
+   instead of the default light theme. */
+message-dialog,
+message-dialog decoration {
+    background: ${surface};
+    color: ${foreground};
+}
+message-dialog label {
+    color: ${foreground};
+}
+""")
 
 
 def _back_env() -> dict[str, str]:
@@ -443,9 +501,11 @@ class ShellWindow(Adw.ApplicationWindow):
 
         self.date_label = Gtk.Label(xalign=0)
         self.date_label.add_css_class('display-date')
+        self.date_label.add_css_class('dim-label')
 
         self.weather_label = Gtk.Label(xalign=0)
         self.weather_label.add_css_class('display-date')
+        self.weather_label.add_css_class('dim-label')
         self.weather_label.set_ellipsize(Pango.EllipsizeMode.END)
 
         self.status_strip = Gtk.Label(xalign=0)
@@ -649,6 +709,11 @@ class ShellWindow(Adw.ApplicationWindow):
         folder = getattr(self, '_drawer_open_folder', None)
         if current == 'apps' and vel_x > 200 and folder is not None:
             self._drawer_open_folder = None
+            self._populate_apps(self.apps_search.get_text())
+            return
+        if (current == 'apps' and vel_x > 200
+                and getattr(self, '_drawer_open_hidden', False)):
+            self._drawer_open_hidden = False
             self._populate_apps(self.apps_search.get_text())
             return
         # Home swipes dispatch their configured apps (design.md "Gestures");
@@ -1501,7 +1566,10 @@ class ShellWindow(Adw.ApplicationWindow):
     def _build_settings_page(self) -> Gtk.Widget:
         page = _settings(self)._build_settings_page()
         try:
-            box = page.get_child()
+            # ScrolledWindow.get_child() is the viewport, not the content
+            # box — prepend/append on it silently built nothing at all.
+            inner = page.get_child()
+            box = inner.get_child() if isinstance(inner, Gtk.Viewport) else inner
             back_btn = Gtk.Button(label='Back')
             back_btn.add_css_class('flat')
             back_btn.add_css_class('action-link')
@@ -1519,30 +1587,120 @@ class ShellWindow(Adw.ApplicationWindow):
         return page
 
     def _build_appearance_card(self) -> Gtk.Widget:
-        """Dedicated theme-preset surface on Settings (glass: no keyboard to
-        edit config.json). Other shell prefs still live in the config file."""
+        """Theme picker: every preset plus custom as swatches — a 40 px
+        rounded square of the preset background with an "Aa" in its
+        foreground, the name captioned under it, the selected one ringed.
+        Tapping applies live; Custom opens a hex-entry dialog."""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.add_css_class('settings-card')
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+        grid.set_column_homogeneous(True)
         self._theme_buttons = {}
-        current = str(self.config.data.get('theme', DEFAULT_CONFIG['theme']))
-        for key, preset in THEME_PRESETS.items():
-            btn = Gtk.Button(label=preset.name)
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link' if key == current else 'dim-label')
-            btn.connect('clicked', lambda _b, k=key: self._on_theme_picked(k))
+        # Display-level, installed once: a widget-context provider never
+        # reached the swatch boxes (they rendered unpainted), and the
+        # settings page can be rebuilt — reuse, never accumulate.
+        provider = getattr(self, '_swatch_provider', None)
+        if provider is None:
+            provider = Gtk.CssProvider()
+            self._swatch_provider = provider
+            display = Gdk.Display.get_default()
+            if display is not None:
+                Gtk.StyleContext.add_provider_for_display(
+                    display, provider,
+                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2)
+        keys = list(THEME_PRESETS) + ['custom']
+        for index, key in enumerate(keys):
+            btn = Gtk.Button()
+            btn.add_css_class('theme-swatch')
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            inner.set_halign(Gtk.Align.CENTER)
+            swatch = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            swatch.set_size_request(40, 40)
+            swatch.set_halign(Gtk.Align.CENTER)
+            swatch.add_css_class('swatch')
+            swatch.add_css_class(f'swatch-{key}')
+            glyph = Gtk.Label(label='Aa')
+            glyph.set_halign(Gtk.Align.CENTER)
+            glyph.set_valign(Gtk.Align.CENTER)
+            glyph.set_hexpand(True)
+            glyph.set_vexpand(True)
+            swatch.append(glyph)
+            name = 'Custom' if key == 'custom' else THEME_PRESETS[key].name
+            caption = Gtk.Label(label=name)
+            caption.add_css_class('dim-label')
+            caption.add_css_class('swatch-cap')
+            caption.set_max_width_chars(10)
+            # Preset names are short: unconditional ellipsize misfires on
+            # fractional rounding and shows "Graphit…" for fitting text.
+            if len(name) > 10:
+                caption.set_ellipsize(Pango.EllipsizeMode.END)
+            else:
+                caption.set_ellipsize(Pango.EllipsizeMode.NONE)
+            inner.append(swatch)
+            inner.append(caption)
+            btn.set_child(inner)
+            if key == 'custom':
+                self._custom_swatch_btn = btn
+            btn.connect('clicked', lambda _b, k=key: self._on_swatch_picked(k))
             self._theme_buttons[key] = btn
-            card.append(btn)
+            grid.attach(btn, index % 3, index // 3, 1, 1)
+        card.append(grid)
+        self._refresh_theme_buttons()
         return card
 
     def _refresh_theme_buttons(self) -> None:
         current = str(self.config.data.get('theme', DEFAULT_CONFIG['theme']))
+        resolved = resolve_theme(self.config)
+        custom_bg = getattr(self.config, 'custom_background', None)
+        rules = [
+            '.theme-swatch { background: transparent; border: none; '
+            'box-shadow: none; padding: 4px; }',
+            '.swatch { border-radius: 12px; }',
+            '.swatch-cap { font-size: 11px; }',
+        ]
+        for key, preset in THEME_PRESETS.items():
+            rules.append(
+                f".swatch-{key} {{ background: {preset.background}; "
+                f"color: {preset.foreground}; }}")
+        rules.append(
+            f".swatch-custom {{ background: {custom_bg or resolved.background}; "
+            f"color: {resolved.foreground}; }}")
+        rules.append(
+            '.theme-swatch.sel .swatch { box-shadow: 0 0 0 2px '
+            f'{resolved.foreground}; }}')
+        provider = getattr(self, '_swatch_provider', None)
+        if provider is not None:
+            provider.load_from_data('\n'.join(rules).encode('utf-8'))
         for key, btn in self._theme_buttons.items():
             if key == current:
-                btn.add_css_class('action-link')
-                btn.remove_css_class('dim-label')
+                btn.add_css_class('sel')
             else:
-                btn.add_css_class('dim-label')
-                btn.remove_css_class('action-link')
+                btn.remove_css_class('sel')
+
+    def _on_swatch_picked(self, key: str) -> None:
+        if key == 'custom':
+            self._show_custom_theme_dialog()
+            return
+        self._on_theme_picked(key)
+
+    def _show_custom_theme_dialog(self) -> None:
+        anchor = getattr(self, '_custom_swatch_btn', None) or self.stack
+        current = getattr(self.config, 'custom_background', None) or ''
+
+        def _commit(text: str) -> None:
+            if not self.config.set_custom_background(text):
+                self._show_status('Use a hex color like #3a2a10.')
+                return
+            channel = text.lstrip('#')
+            red, green, blue = (int(channel[i:i + 2], 16) for i in (0, 2, 4))
+            self.config.set_prefer_dark(
+                (0.299 * red + 0.587 * green + 0.114 * blue) / 255 < 0.5)
+            self._refresh_theme_buttons()
+            self._apply_theme()
+            self._retheme_surfaces()
+
+        self.item_actions._show_entry_dialog(
+            anchor, 'Custom color', current, 'Apply', _commit)
 
     def _on_theme_picked(self, key: str) -> None:
         self.config.set_theme(key)
@@ -1646,118 +1804,23 @@ class ShellWindow(Adw.ApplicationWindow):
         from home_launcher import theme_css as home_theme_css
         apply_global_font(self.config.font_family)
         theme = preset if preset is not None else resolve_theme(self.config)
-        home_sheet = home_theme_css(theme)
         style_manager = Adw.StyleManager.get_default()
         if self.config.prefer_dark:
             style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         else:
             style_manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
 
-        scale = self.config.text_size_scale
-        css = f"""
-        .shell-root {{
-            background: {theme.background};
-            color: {theme.foreground};
-            font-family: '{self.config.font_family}';
-            font-size: {scale}rem;
-        }}
-
-        .shell-root entry,
-        .shell-root text,
-        .shell-root list,
-        .shell-root row,
-        .shell-root button,
-        .shell-root box,
-        .shell-root scrolledwindow,
-        .shell-root label {{
-            color: {theme.foreground};
-        }}
-
-        .shell-root entry,
-        .shell-root list,
-        .shell-root row,
-        .shell-root scrolledwindow,
-        .settings-card {{
-            background: {theme.surface};
-            border-color: {theme.border};
-        }}
-
-        /* The home slot list sits directly on the wallpaper-black root —
-           without this it picks up the generic scrolledwindow surface tint */
-        .shell-root scrolledwindow.home-scroll,
-        .shell-root scrolledwindow.home-scroll > viewport {{
-            background: transparent;
-        }}
-
-        /* Drawer search stays flat text — no entry box chrome */
-        .shell-root entry.drawer-search,
-        .shell-root searchentry.drawer-search {{
-            background: transparent;
-            border: none;
-            box-shadow: none;
-        }}
-
-        .shell-root button:hover,
-        .shell-root button:focus {{
-            background: {theme.surface_alt};
-        }}
-
-        .dim-label,
-        .eyebrow {{
-            color: {theme.muted};
-        }}
-
-        .action-link {{
-            color: {theme.accent};
-        }}
-
-        /* Long-press menus render outside .shell-root; theme them directly
-           so every dialog follows the launcher font and colors. */
-        popover.action-menu > contents {{
-            background: {theme.surface};
-            color: {theme.foreground};
-            font-family: '{self.config.font_family}';
-            font-size: {scale}rem;
-            border: 1px solid {theme.border};
-        }}
-
-        popover.action-menu button,
-        popover.action-menu label {{
-            color: {theme.foreground};
-        }}
-
-        popover.action-menu button:hover,
-        popover.action-menu button:focus {{
-            background: {theme.surface_alt};
-        }}
-
-        popover.action-menu entry {{
-            background: {theme.surface_alt};
-            color: {theme.foreground};
-        }}
-
-        /* The drawer is one uniform surface sheet: the whole page paints
-           the surface color, never a grey list floating on the root. */
-        .shell-root .drawer-sheet {{
-            background: {theme.surface};
-        }}
-        .shell-root .drawer-sheet scrolledwindow,
-        .shell-root .drawer-sheet scrolledwindow > viewport {{
-            background: transparent;
-        }}
-
-        /* StockToolkit error dialogs (power-menu failure path) follow the
-           preset instead of the default light theme. */
-        message-dialog,
-        message-dialog decoration {{
-            background: {theme.surface};
-            color: {theme.foreground};
-        }}
-        message-dialog label {{
-            color: {theme.foreground};
-        }}
-        """
-        css = css + '\n' + home_sheet
+        base = _xx_render(self.config, theme)
+        shell = _SHELL_SHEET_TEMPLATE.substitute(
+            background=theme.background,
+            surface=theme.surface,
+            surface_alt=theme.surface_alt,
+            border=theme.border,
+            foreground=theme.foreground,
+            muted=theme.muted,
+            accent=theme.accent,
+        )
+        css = base + '\n' + shell + '\n' + home_theme_css(theme)
         self.theme_provider.load_from_data(css.encode('utf-8'))
 
     def _refresh_clock(self) -> None:
@@ -1826,6 +1889,9 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _toggle_drawer_folder(self, slot_index: int) -> None:
         return _drawer(self)._toggle_drawer_folder(slot_index)
+
+    def _toggle_hidden(self) -> None:
+        return _drawer(self)._toggle_hidden()
 
     def _center_drawer_folder(self) -> bool:
         return _drawer(self)._center_drawer_folder()

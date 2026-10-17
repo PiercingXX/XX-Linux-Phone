@@ -4,61 +4,33 @@ import hashlib
 import hmac
 import json
 import os
-import re
 import stat
-from dataclasses import dataclass
 from pathlib import Path
 
 
-@dataclass(frozen=True)
-class ThemePreset:
-    key: str
-    name: str
-    background: str
-    surface: str
-    surface_alt: str
-    border: str
-    foreground: str
-    muted: str
-    accent: str
+# Theme truth lives in common/xx_ui (installed as the xx_ui package);
+# this module keeps owning config read/write and re-exports the names the
+# shell imports from here, so every surface renders from one preset table.
+def _xx_ui_theme():
+    try:
+        from xx_ui import theme as module
+        return module
+    except ImportError:
+        pass
+    import sys
+    fallback = Path(__file__).resolve().parents[3] / 'common'
+    if fallback.is_dir() and str(fallback) not in sys.path:
+        sys.path.insert(0, str(fallback))
+    from xx_ui import theme as module
+    return module
 
 
-# Canonical theme presets per design.md spec
-# Dark themes (background, surface, surface_alt, border) derived from background
-# Light themes use near-black text on light backgrounds
-def _derive_shades(bg: str) -> tuple[str, str, str]:
-    """Derive surface/surface_alt/border shades from background color."""
-    match = re.match(r'#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})', bg)
-    if not match:
-        return ('#111111', '#181818', '#2f2f2f')
-    rgb = tuple(int(match.group(i), 16) for i in (1, 2, 3))
-    # Near-black has no headroom to darken into; amoled's own trio is the
-    # canonical separation for that regime.
-    if max(rgb) <= 0x18:
-        return ('#111111', '#181818', '#2f2f2f')
-
-    def scale(factor: float) -> str:
-        return '#' + ''.join(f'{max(0, int(v * factor)):02x}' for v in rgb)
-
-    return (scale(0.82), scale(0.72), scale(0.55))
-
-THEME_PRESETS = {
-    'amoled': ThemePreset('amoled', 'AMOLED', '#000000', '#111111', '#181818', '#2f2f2f', '#f4f4f4', '#9a9a9a', '#d8d8d8'),
-    'graphite': ThemePreset('graphite', 'Graphite', '#111827', '#1f2937', '#2d3748', '#4a5568', '#f7fafc', '#a0aec0', '#718096'),
-    'forest': ThemePreset('forest', 'Forest', '#10261B', '#1a3a2a', '#244e3a', '#3d6b56', '#ecf4ee', '#a4b1a7', '#c9d8cc'),
-    'ocean': ThemePreset('ocean', 'Ocean', '#0F1C2E', '#182a42', '#203856', '#34506e', '#edf4f7', '#9fb0bb', '#cad8df'),
-    'paper': ThemePreset('paper', 'Paper', '#F3EEE2', '#e0d8cb', '#ccc4b4', '#b09c85', '#151515', '#585147', '#262626'),
-    'mist': ThemePreset('mist', 'Mist', '#E6EDF5', '#d0d8e2', '#bac4cf', '#9aa8ba', '#151a1f', '#55606c', '#2f3943'),
-    'aura': ThemePreset('aura', 'Aura', '#0d0b14', '#14112a', '#1e1a3a', '#3d3066', '#f0eeff', '#9080c0', '#a855f7'),
-    'burgundy': ThemePreset('burgundy', 'Burgundy', '#2A1018', '#3b1a24', '#4c2330', '#6e3a4c', '#f6edef', '#ab949c', '#d9b3bf'),
-}
-
-FONT_FAMILIES = {
-    'system-light': 'Sans Light',
-    'space-mono': 'Space Mono, Monospace',
-    'jetbrains-mono': 'JetBrains Mono, Monospace',
-    'jetbrains-mono-nerd': 'JetBrainsMono Nerd Font, JetBrains Mono, Monospace',
-}
+_theme = _xx_ui_theme()
+ThemePreset = _theme.ThemePreset
+THEME_PRESETS = _theme.THEME_PRESETS
+FONT_FAMILIES = _theme.FONT_FAMILIES
+_derive_shades = _theme._derive_shades
+del _theme, _xx_ui_theme
 
 # Semantic colors that must not track the theme (universal meanings).
 DANGER_RED = '#ff6b6b'

@@ -1,0 +1,198 @@
+"""Lane vx_shell_core: single-source themes, hidden drawer group, home alignment.
+
+Headless: config/home_page/drawer_page import without a display; widget
+construction is monkeypatched out, only the population seams run.
+"""
+import sys
+import types
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
+
+
+class TestConfigSingleSource:
+    def test_theme_names_are_xx_ui_objects(self):
+        import config
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'common'))
+        from xx_ui import theme
+        assert config.ThemePreset is theme.ThemePreset
+        assert config.THEME_PRESETS is theme.THEME_PRESETS
+        assert config.FONT_FAMILIES is theme.FONT_FAMILIES
+        assert config._derive_shades is theme._derive_shades
+        assert len(config.THEME_PRESETS) == 8
+
+    def test_custom_resolution_matches_xx_ui(self):
+        import config
+        from xx_ui import theme
+        assert (config._derive_shades('#3a2a10')
+                == theme._derive_shades('#3a2a10'))
+
+
+class _FakeIndex:
+    def __init__(self, app_ids):
+        class _E:
+            pass
+        self.entries = []
+        for app_id in app_ids:
+            entry = _E()
+            entry.app_id = app_id
+            entry.name = app_id
+            self.entries.append(entry)
+
+    def search(self, query):
+        return list(self.entries)
+
+
+class _RecordingList:
+    def __init__(self):
+        self.inserted = []
+        self.appended = []
+
+    def insert(self, row, _pos):
+        self.inserted.append(row)
+
+    def append(self, row):
+        self.appended.append(row)
+
+    def set_valign(self, _align):
+        pass
+
+
+def _drawer_page(hidden, installed, monkeypatch):
+    import drawer_page
+    page = drawer_page.DrawerPage.__new__(drawer_page.DrawerPage)
+    win = types.SimpleNamespace(
+        config=types.SimpleNamespace(
+            home_slots=[], app_labels={}, hidden_apps=list(hidden),
+            pinned=[]),
+        app_index=_FakeIndex(installed),
+        apps_list=_RecordingList(),
+        apps_search=types.SimpleNamespace(get_text=lambda: ''),
+        app_count_label=types.SimpleNamespace(set_text=lambda _t: None),
+        _sort_mode='az',
+        _drawer_open_folder=None,
+        _drawer_open_hidden=False,
+        _home_slot_app_ids=lambda: set(),
+    )
+    page._win = win
+    # ShellWindow delegators resolve on win at call time, so the
+    # monkeypatched page seams below take effect through them.
+    win._drawer_folder_slots = lambda: page._drawer_folder_slots()
+    win._make_drawer_folder_row = lambda s, i: page._make_drawer_folder_row(s, i)
+    win._make_drawer_member_row = (
+        lambda a, b, m: page._make_drawer_member_row(a, b, m))
+    win._make_app_row = lambda e: page._make_app_row(e)
+    win._make_hidden_header = lambda c: page._make_hidden_header(c)
+    win._make_settings_row = lambda: page._make_settings_row()
+    win._install_time = lambda e: page._install_time(e)
+    win._replace_rows = (
+        lambda lb, entries, msg, maker=None: page._replace_rows(
+            lb, entries, msg, maker))
+    monkeypatch.setattr(page, '_replace_rows', lambda *a, **k: None)
+    monkeypatch.setattr(page, '_make_settings_row',
+                        lambda: types.SimpleNamespace(kind='settings'))
+    return page, win
+
+
+class TestHiddenGroup:
+    def test_header_shows_count_when_hidden_installed(
+            self, monkeypatch):
+        page, win = _drawer_page(['h.desktop'], ['h.desktop', 'v.desktop'],
+                                 monkeypatch)
+        seen = []
+        monkeypatch.setattr(page, '_make_hidden_header',
+                            lambda count: seen.append(count) or 'header')
+        monkeypatch.setattr(page, '_make_app_row', lambda e: ('row', e.app_id))
+        page._populate_apps('')
+        assert seen == [1]
+        assert 'header' in win.apps_list.inserted
+
+    def test_no_header_without_hidden_apps(self, monkeypatch):
+        page, win = _drawer_page([], ['v.desktop'], monkeypatch)
+        called = []
+        monkeypatch.setattr(page, '_make_hidden_header',
+                            lambda count: called.append(count))
+        monkeypatch.setattr(page, '_make_app_row', lambda e: None)
+        page._populate_apps('')
+        assert called == []
+        assert win.apps_list.inserted == []
+
+    def test_uninstalled_hidden_is_ignored(self, monkeypatch):
+        page, win = _drawer_page(['ghost.desktop'], ['v.desktop'],
+                                 monkeypatch)
+        called = []
+        monkeypatch.setattr(page, '_make_hidden_header',
+                            lambda count: called.append(count))
+        monkeypatch.setattr(page, '_make_app_row', lambda e: None)
+        page._populate_apps('')
+        assert called == []
+
+    def test_members_expand_on_toggle(self, monkeypatch):
+        page, win = _drawer_page(['h.desktop'], ['h.desktop', 'v.desktop'],
+                                 monkeypatch)
+        monkeypatch.setattr(page, '_make_hidden_header', lambda count: 'header')
+        rows = []
+        monkeypatch.setattr(page, '_make_app_row',
+                            lambda e: rows.append(e.app_id) or ('row', e.app_id))
+        page._populate_apps('')
+        assert rows == []
+        win._drawer_open_hidden = True
+        page._populate_apps('')
+        assert rows == ['h.desktop']
+
+    def test_toggle_flips_and_repopulates(self, monkeypatch):
+        import drawer_page
+        page = drawer_page.DrawerPage.__new__(drawer_page.DrawerPage)
+        repopulated = []
+        win = types.SimpleNamespace(
+            _drawer_open_hidden=False,
+            apps_search=types.SimpleNamespace(get_text=lambda: 'ca'),
+            _populate_apps=lambda query: repopulated.append(query),
+        )
+        page._win = win
+        page._toggle_hidden()
+        assert win._drawer_open_hidden is True
+        assert repopulated == ['ca']
+        page._toggle_hidden()
+        assert win._drawer_open_hidden is False
+
+
+class _FakeAligned:
+    def __init__(self):
+        self.xalign = None
+
+    def set_xalign(self, value):
+        self.xalign = value
+
+
+class TestHomeAlignment:
+    def _page(self, alignment):
+        import home_page
+        page = home_page.HomePage.__new__(home_page.HomePage)
+        labels = {key: _FakeAligned()
+                  for key in ('clock', 'date', 'weather', 'status')}
+        win = types.SimpleNamespace(
+            config=types.SimpleNamespace(home_alignment=alignment),
+            clock_label=labels['clock'],
+            date_label=labels['date'],
+            weather_label=labels['weather'],
+            status_strip=labels['status'],
+        )
+        page._win = win
+        return page, labels
+
+    def test_left_pref_left_aligns_widgets(self):
+        page, labels = self._page('left')
+        page._apply_widget_alignment()
+        assert {label.xalign for label in labels.values()} == {0.0}
+
+    def test_right_pref_right_aligns_widgets(self):
+        page, labels = self._page('right')
+        page._apply_widget_alignment()
+        assert {label.xalign for label in labels.values()} == {1.0}
+
+    def test_center_and_unknown_stay_centered(self):
+        for alignment in ('center', 'diagonal'):
+            page, labels = self._page(alignment)
+            page._apply_widget_alignment()
+            assert {label.xalign for label in labels.values()} == {0.5}

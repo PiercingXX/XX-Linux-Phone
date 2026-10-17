@@ -158,9 +158,10 @@ class _FakeButton:
         self.label = label
         self.child = _FakeLabel(label)
         self.handlers = {}
+        self.calls = {}
 
-    def add_css_class(self, _name):
-        pass
+    def add_css_class(self, name):
+        self.calls.setdefault('css_classes', []).append(name)
 
     def get_child(self):
         return self.child
@@ -172,6 +173,10 @@ class _FakeButton:
 class _FakeBox:
     def __init__(self, orientation=None, spacing=0):
         self.children = []
+        self.calls = {}
+
+    def add_css_class(self, name):
+        self.calls.setdefault('css_classes', []).append(name)
 
     def append(self, widget):
         self.children.append(widget)
@@ -182,6 +187,9 @@ class _FakeEntry:
         self.text = ''
         self.calls = {}
         self.handlers = {}
+
+    def add_css_class(self, name):
+        self.calls.setdefault('css_classes', []).append(name)
 
     def set_text(self, value):
         self.text = value
@@ -304,3 +312,18 @@ class TestPopoverWidthCaps:
         assert heading.calls['ellipsize'] == pango.EllipsizeMode.END
         assert heading.calls['max_width_chars'] == 28
         assert entry.calls['max_width_chars'] == 28
+
+
+class TestSharedDialogStyles:
+    def test_menu_rows_carry_menu_row_class(self, actions, faked_toolkit):
+        box = actions._action_list([('Rename', lambda: None)], title='Camera')
+        btn = box.children[-1]
+        assert 'xx-menu-row' in btn.calls['css_classes']
+
+    def test_entry_dialog_uses_shared_entry_and_primary_classes(
+            self, actions, faked_toolkit):
+        box, entry, _popover, _committed = _show_dialog(actions, False, 'x')
+        assert 'xx-dialog' in box.calls['css_classes']
+        assert 'xx-entry' in entry.calls['css_classes']
+        commit = box.children[-1]
+        assert 'xx-btn-primary' in commit.calls['css_classes']

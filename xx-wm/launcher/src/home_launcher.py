@@ -27,19 +27,22 @@ def theme_css(preset: ThemePreset) -> str:
     background: transparent;
     border: none;
     border-radius: 0;
-    padding: 18px 0;
+    outline: none;
+    padding: 20px 0;
 }}
-.home-item-btn:hover, .home-item-btn:active {{
+/* Slots never hold a highlight: hover, press and keyboard focus all stay
+   on the plain background, so no grey band sticks to the focused slot. */
+.home-item-btn:hover, .home-item-btn:active, .home-item-btn:focus {{
     background: transparent;
-    color: {preset.muted};
 }}
 .home-item-label {{
     font-size: 27pt;
-    font-weight: 300;
+    font-weight: 400;
+    color: {preset.foreground};
 }}
 .home-folder-indicator {{
     font-size: 14pt;
-    font-weight: 300;
+    font-weight: 400;
     color: {preset.muted};
     margin-left: 6px;
 }}

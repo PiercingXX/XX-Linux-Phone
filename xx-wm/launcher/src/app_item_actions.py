@@ -47,6 +47,7 @@ class AppItemActions:
     def _show_popover(self, anchor: Gtk.Widget, content: Gtk.Widget) -> Gtk.Popover:
         popover = Gtk.Popover()
         popover.add_css_class('action-menu')
+        popover.set_has_arrow(False)
         popover.set_child(content)
         popover.set_parent(anchor)
         popover.set_position(Gtk.PositionType.BOTTOM)
@@ -76,9 +77,10 @@ class AppItemActions:
     def _action_list(self, actions: list[tuple[str, Callable[[], None]]],
                      title: str | None = None) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.add_css_class('xx-dialog')
         if title:
             heading = Gtk.Label(label=title, xalign=0)
-            heading.add_css_class('menu-title')
+            heading.add_css_class('xx-dialog-title')
             self._cap_title(heading)
             box.append(heading)
         self._popover_ref: Gtk.Popover | None = None
@@ -90,8 +92,7 @@ class AppItemActions:
 
         for label, callback in actions:
             btn = Gtk.Button(label=label)
-            btn.add_css_class('flat')
-            btn.add_css_class('menu-action')
+            btn.add_css_class('xx-menu-row')
             child = btn.get_child()
             child.set_xalign(0)
             self._cap_item_label(child)
@@ -104,14 +105,23 @@ class AppItemActions:
         content = self._action_list(actions, title)
         self._popover_ref = self._show_popover(anchor, content)
 
-    def _show_entry_dialog(self, anchor: Gtk.Widget, title: str, initial: str,
-                           commit_label: str, on_commit: Callable[[str], None],
-                           password: bool | None = None) -> None:
+    def _entry_dialog_content(self, title: str, initial: str,
+                                commit_label: str,
+                                on_commit: Callable[[str], None],
+                                password: bool | None = None,
+                                on_popover_commit=None):
+        """Rename/confirm/entry dialog body: title, entry, primary commit.
+
+        Returns (box, entry, commit). The popover wrapper commits first so
+        the same body renders inline (screenshots) and in a popover.
+        """
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.add_css_class('xx-dialog')
         heading = Gtk.Label(label=title, xalign=0)
-        heading.add_css_class('menu-title')
+        heading.add_css_class('xx-dialog-title')
         self._cap_title(heading)
         entry = Gtk.Entry()
+        entry.add_css_class('xx-entry')
         entry.set_text(initial)
         entry.set_max_width_chars(_MENU_TEXT_WIDTH)
         if password is None:
@@ -124,33 +134,51 @@ class AppItemActions:
         else:
             entry.select_region(0, -1)
         commit_btn = Gtk.Button(label=commit_label)
-        commit_btn.add_css_class('flat')
-        commit_btn.add_css_class('menu-action')
+        commit_btn.add_css_class('xx-btn')
+        commit_btn.add_css_class('xx-btn-primary')
         self._cap_item_label(commit_btn.get_child())
         box.append(heading)
         box.append(entry)
         box.append(commit_btn)
 
-        popover = self._show_popover(anchor, box)
-
         def _commit(*_args: object) -> None:
             raw = entry.get_text()
             text = raw if is_password else raw.strip()
-            popover.popdown()
+            if on_popover_commit is not None:
+                on_popover_commit()
             if text:
                 on_commit(text)
+
+        entry.connect('activate', _commit)
+        commit_btn.connect('clicked', _commit)
+        if callable(self._on_keyboard):
+            from osk import attach
+            attach(entry, on_show=lambda: self._on_keyboard(True))
+        return box, entry, _commit
+
+    def _show_entry_dialog(self, anchor: Gtk.Widget, title: str, initial: str,
+                           commit_label: str, on_commit: Callable[[str], None],
+                           password: bool | None = None) -> None:
+        shown: dict = {}
+
+        def _pop_shown() -> None:
+            popover = shown.get('popover')
+            if popover is not None:
+                shown['popover'] = None
+                popover.popdown()
+
+        box, entry, _commit = self._entry_dialog_content(
+            title, initial, commit_label, on_commit, password,
+            on_popover_commit=_pop_shown)
+        popover = self._show_popover(anchor, box)
+        shown['popover'] = popover
 
         def _closed(_p: Gtk.Popover) -> None:
             if callable(self._on_keyboard):
                 self._on_keyboard(False)
 
-        entry.connect('activate', _commit)
-        commit_btn.connect('clicked', _commit)
         if hasattr(popover, 'connect'):
             popover.connect('closed', _closed)
-        if callable(self._on_keyboard):
-            from osk import attach
-            attach(entry, on_show=lambda: self._on_keyboard(True))
         entry.grab_focus()
         if callable(self._on_keyboard):
             self._on_keyboard(True)
@@ -199,7 +227,7 @@ class AppItemActions:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         for idx, line in enumerate(lines):
             lbl = Gtk.Label(label=line, xalign=0, wrap=True)
-            lbl.add_css_class('menu-title' if idx == 0 else 'dim-label')
+            lbl.add_css_class('xx-dialog-title' if idx == 0 else 'xx-secondary')
             if idx == 0:
                 lbl.set_wrap(False)
                 self._cap_title(lbl)
@@ -349,7 +377,7 @@ class AppItemActions:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         for idx, line in enumerate(lines):
             lbl = Gtk.Label(label=line, xalign=0, wrap=True)
-            lbl.add_css_class('menu-title' if idx == 0 else 'dim-label')
+            lbl.add_css_class('xx-dialog-title' if idx == 0 else 'xx-secondary')
             if idx == 0:
                 lbl.set_wrap(False)
                 self._cap_title(lbl)

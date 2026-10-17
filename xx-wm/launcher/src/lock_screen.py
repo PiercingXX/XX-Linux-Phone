@@ -39,6 +39,7 @@ def theme_css(preset: ThemePreset) -> str:
 .lock-clock {{
     font-size: 64pt;
     font-weight: 300;
+    font-variant-numeric: tabular-nums;
     color: {preset.foreground};
 }}
 .lock-clock.compact {{
@@ -66,8 +67,10 @@ def theme_css(preset: ThemePreset) -> str:
 }}
 .lock-key {{
     font-size: 22pt;
-    font-weight: 300;
-    border-radius: 50%;
+    font-weight: 400;
+    min-width: 72px;
+    min-height: 64px;
+    border-radius: 16px;
     background: {preset.surface};
     color: {preset.foreground};
     border: none;

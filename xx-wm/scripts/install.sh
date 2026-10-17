@@ -265,6 +265,10 @@ link_squeekboard_layouts() {
 }
 
 build_install() {
+    echo "Building shared xx_ui design system..."
+    cd "$REPO_DIR/../common" || return 1
+    meson setup build --prefix=/usr --reconfigure || meson setup build --prefix=/usr || return 1
+    $SUDO meson install -C build || return 1
     echo "Building XX-WM..."
     cd "$REPO_DIR/launcher" || return 1
     meson setup build --prefix=/usr --reconfigure || meson setup build --prefix=/usr || return 1

@@ -39,16 +39,14 @@ class DrawerPage:
         from gi.repository import Gtk
 
         win = self._win
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         outer.set_vexpand(True)
-        # One uniform surface sheet (theme CSS paints .drawer-sheet): the
-        # list never floats as a grey panel on the root background.
+        # The list sits on the plain background, like the PiercingXX
+        # Android launcher — never an inset grey panel.
         outer.add_css_class('drawer-sheet')
-        outer.set_margin_bottom(24)
-        outer.set_margin_start(24)
-        outer.set_margin_end(0)
 
         win._sort_mode = 'az'
+        win._drawer_open_hidden = False
 
         # No 'All apps' header or count — the drawer is just the list, like
         # the PiercingXX Android launcher; the sort toggle rides alone, dim
@@ -59,11 +57,14 @@ class DrawerPage:
         win._sort_btn.connect('clicked', win._toggle_sort_mode)
 
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        header_row.set_margin_end(24)
+        header_row.set_margin_end(20)
+        header_row.set_margin_top(8)
         header_row.append(Gtk.Box(hexpand=True))
         header_row.append(win._sort_btn)
 
-        win.apps_search.set_margin_end(24)
+        win.apps_search.set_margin_start(20)
+        win.apps_search.set_margin_end(20)
+        win.apps_search.set_margin_bottom(12)
 
         win.apps_scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
         win.apps_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -80,6 +81,7 @@ class DrawerPage:
         for ch in '#ABCDEFGHIJKLMNOPQRSTUVWXYZ':
             btn = Gtk.Button(label=ch)
             btn.add_css_class('flat')
+            btn.add_css_class('dim-label')
             btn.add_css_class('alpha-jump')
             btn.connect('clicked', win._on_alpha_jump, ch)
             alpha_box.append(btn)
@@ -105,13 +107,12 @@ class DrawerPage:
         outer.append(list_row)
         outer.append(win.apps_search)
 
-        # The drawer leaves the top ~15% of the screen free so it reads as a
-        # sheet rather than a full-screen takeover (design.md "App drawer").
-        # A fixed spacer widget would bake that gap into the page's minimum
-        # height; this layout reserves it only from allocated space, so the
-        # page minimum stays the content's and search always fits.
+        # The drawer list starts at the top of the screen, like the
+        # PiercingXX Android launcher — no gap above it. The layout manager
+        # stays so the page minimum is the content's own (a fixed spacer
+        # widget would bake reserved space into it and push search off).
         class _SheetTopGapLayout(Gtk.LayoutManager):
-            _GAP_FRACTION = 0.15
+            _GAP_FRACTION = 0.0
 
             def do_measure(self, widget, orientation, for_size):
                 child = widget.get_first_child()
@@ -235,11 +236,23 @@ class DrawerPage:
                 and win._drawer_open_folder not in {i for i, _s, _m in folder_slots}):
             win._drawer_open_folder = None
 
+        # Hidden apps get their own expandable group in the browse list so
+        # they stay reachable without typing (search still surfaces them).
+        hidden_entries: list = []
+        if not trimmed:
+            hidden_ids = set(win.config.hidden_apps)
+            hidden_entries = [e for e in win.app_index.entries
+                              if e.app_id in hidden_ids]
+        hidden_open = bool(hidden_entries) and bool(
+            getattr(win, '_drawer_open_hidden', False))
+
         expanded_members = 0
         for i, _slot, members in folder_slots:
             if i == win._drawer_open_folder:
                 expanded_members = len(members)
-        row_offset = len(folder_slots) + expanded_members
+        row_offset = (len(folder_slots) + expanded_members
+                      + (1 if hidden_entries else 0)
+                      + (len(hidden_entries) if hidden_open else 0))
 
         # Build letter→first-row-index map for A-Z jump strip
         win._alpha_letter_rows = {}
@@ -265,6 +278,13 @@ class DrawerPage:
                 for m_idx, member in members:
                     win.apps_list.insert(
                         win._make_drawer_member_row(idx, m_idx, member), insert_at)
+                    insert_at += 1
+        if hidden_entries:
+            win.apps_list.insert(win._make_hidden_header(len(hidden_entries)), insert_at)
+            insert_at += 1
+            if hidden_open:
+                for entry in hidden_entries:
+                    win.apps_list.insert(win._make_app_row(entry), insert_at)
                     insert_at += 1
 
         # Synthetic "Launcher Settings" entry always sits at the very end
@@ -358,6 +378,37 @@ class DrawerPage:
         row.set_child(btn)
         return row
 
+    def _make_hidden_header(self, count: int):
+        from gi.repository import Gtk, Pango
+
+        win = self._win
+        open_now = bool(getattr(win, '_drawer_open_hidden', False))
+        inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        title = Gtk.Label(label=f'Hidden ({count})', xalign=0.5)
+        title.add_css_class('app-name')
+        title.set_ellipsize(Pango.EllipsizeMode.END)
+        title.set_hexpand(True)
+        indicator = Gtk.Label(label='⌄' if open_now else '›')
+        indicator.add_css_class('dim-label')
+        inner.append(title)
+        inner.append(indicator)
+        inner.set_hexpand(True)
+
+        btn = Gtk.Button()
+        btn.add_css_class('flat')
+        btn.add_css_class('app-entry')
+        btn.set_child(inner)
+        btn.connect('clicked', lambda _b: win._toggle_hidden())
+
+        row = Gtk.ListBoxRow(selectable=False, activatable=False)
+        row.set_child(btn)
+        return row
+
+    def _toggle_hidden(self) -> None:
+        win = self._win
+        win._drawer_open_hidden = not getattr(win, '_drawer_open_hidden', False)
+        win._populate_apps(win.apps_search.get_text())
+
     def _toggle_drawer_folder(self, slot_index: int) -> None:
         from gi.repository import GLib
 
@@ -445,7 +496,7 @@ class DrawerPage:
             child = next_child
 
         if not entries:
-            label = Gtk.Label(label=empty_message, xalign=0)
+            label = Gtk.Label(label=empty_message, xalign=0.5)
             label.add_css_class('dim-label')
             row = Gtk.ListBoxRow(selectable=False, activatable=False)
             row.set_child(label)

@@ -90,9 +90,15 @@ def test_openrc_build_output_distinct_and_renamed(meson_text):
 def test_staged_install_wrapper_and_openrc(tmp_path):
     build_dir = tmp_path / 'build'
     destdir = tmp_path / 'destdir'
+    # launcher/meson.build requires importable xx_ui (the shell themes
+    # through the installed package); point setup at the repo copy.
+    common = str(REPO.parent / 'common')
+    setup_env = dict(os.environ)
+    setup_env['PYTHONPATH'] = common + (
+        os.pathsep + setup_env['PYTHONPATH'] if setup_env.get('PYTHONPATH') else '')
     subprocess.run(
         ['meson', 'setup', str(build_dir), str(REPO / 'launcher'), '--prefix=/usr'],
-        check=True, capture_output=True, text=True)
+        check=True, capture_output=True, text=True, env=setup_env)
     env = dict(os.environ, DESTDIR=str(destdir))
     subprocess.run(
         ['meson', 'install', '-C', str(build_dir)],
@@ -391,6 +397,9 @@ def _unattended_harness(tmp_path, autologin=True):
     fakerepo = tmp_path / 'fakerepo'
     (fakerepo / 'launcher').mkdir(parents=True)
     (fakerepo / 'scripts').mkdir()
+    # build_install installs common/xx_ui before the launcher (monorepo
+    # siblings), so the fake tree mirrors the real layout.
+    (tmp_path / 'common').mkdir(exist_ok=True)
     (fakerepo / 'scripts' / 'bootstrap-dots.sh').write_text('#!/bin/sh\nexit 0\n')
     fragdir = fakerepo / 'launcher' / 'data' / 'phoc'
     fragdir.mkdir(parents=True)

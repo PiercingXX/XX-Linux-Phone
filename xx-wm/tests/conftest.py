@@ -5,6 +5,9 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
+# The shell themes through the shared design system: common/xx_ui must be
+# importable too (installed as xx_ui on the phone; repo path in tests).
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'common'))
 
 import pytest
 

@@ -30,8 +30,8 @@ def theme_css(preset: ThemePreset) -> str:
     color: {preset.foreground};
 }}
 .wizard-title {{
-    font-size: 18pt;
-    font-weight: 300;
+    font-size: 22pt;
+    font-weight: 400;
     color: {preset.foreground};
 }}
 .wizard-subtitle {{
@@ -54,10 +54,10 @@ def theme_css(preset: ThemePreset) -> str:
 }}
 .pin-key {{
     font-size: 17pt;
-    font-weight: 300;
-    min-width: 80px;
+    font-weight: 400;
+    min-width: 72px;
     min-height: 64px;
-    border-radius: 50%;
+    border-radius: 16px;
     background: {preset.surface};
     color: {preset.foreground};
     border: none;
@@ -78,23 +78,42 @@ def theme_css(preset: ThemePreset) -> str:
 .wizard-next {{
     font-size: 12pt;
     min-height: 48px;
-    border-radius: 14px;
-    background: {preset.accent};
+    border-radius: 12px;
+    background: {preset.foreground};
     color: {preset.background};
     border: none;
 }}
 .wizard-next:hover {{
-    background: mix({preset.accent}, {preset.background}, 0.85);
+    background: mix({preset.foreground}, {preset.background}, 0.85);
 }}
 .wizard-skip {{
     font-size: 11pt;
     color: {preset.muted};
 }}
-.theme-row {{
-    font-size: 12pt;
-    min-height: 44px;
+.theme-swatch-btn {{
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 4px;
+}}
+.theme-cap {{
+    font-size: 11px;
+    color: {preset.muted};
+}}
+.theme-row-custom {{
+    background: transparent;
+    color: {preset.muted};
+    border: 1px dashed {preset.border};
     border-radius: 12px;
-    padding: 0 16px;
+    min-width: 40px;
+    min-height: 40px;
+}}
+.theme-hex-entry {{
+    background: {preset.surface};
+    color: {preset.foreground};
+    border-radius: 12px;
+    min-height: 44px;
+    padding: 0 14px;
 }}
 .tz-list,
 .tz-list row {{
@@ -113,12 +132,13 @@ def theme_css(preset: ThemePreset) -> str:
 }}
 """
 
-# Per-preset swatch rows for the theme step, generated from the palette
+# Per-preset swatches for the theme step, generated from the palette:
+# a 40 px rounded square of the preset background, selected ringed.
 _THEME_ROWS_CSS = ''.join(
     f'.theme-row-{p.key} {{'
     f' background: {p.background}; color: {p.foreground};'
-    f' border: 2px solid {p.border}; }}'
-    f'.theme-row-{p.key}.selected {{ border-color: {p.accent}; }}'
+    f' border-radius: 12px; min-width: 40px; min-height: 40px; }}'
+    f'.theme-row-{p.key}.selected {{ box-shadow: 0 0 0 2px {p.foreground}; }}'
     for p in THEME_PRESETS.values()
 ).encode()
 
@@ -509,23 +529,73 @@ class FirstBootWizard(Gtk.Window):
     def _build_theme_step(self) -> Gtk.Widget:
         page = self._page()
 
-        # One tappable swatch row per preset — a dropdown popover does not
-        # open reliably inside a layer-shell overlay
+        # Swatch grid: every preset plus custom — a 40 px rounded square of
+        # the preset background with an "Aa" in its foreground, captioned.
+        # A popover dialog does not open reliably inside a layer-shell
+        # overlay, so Custom reveals an inline hex row instead.
         self._selected_theme = next(iter(THEME_PRESETS))
-        self._theme_rows: dict[str, Gtk.Button] = {}
-        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        for key, preset in THEME_PRESETS.items():
-            row = Gtk.Button(label=preset.name)
-            row.add_css_class('theme-row')
-            row.add_css_class(f'theme-row-{key}')
-            row.connect('clicked', self._on_theme_row, key)
-            self._theme_rows[key] = row
-            rows.append(row)
+        self._theme_rows: dict[str, Gtk.Widget] = {}
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+        grid.set_column_homogeneous(True)
+        grid.set_halign(Gtk.Align.CENTER)
+        for index, key in enumerate(list(THEME_PRESETS) + ['custom']):
+            btn = Gtk.Button()
+            btn.add_css_class('theme-swatch-btn')
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            swatch = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            swatch.set_size_request(40, 40)
+            swatch.set_halign(Gtk.Align.CENTER)
+            if key == 'custom':
+                swatch.add_css_class('theme-row-custom')
+            else:
+                swatch.add_css_class(f'theme-row-{key}')
+            glyph = Gtk.Label(label='Aa')
+            glyph.set_halign(Gtk.Align.CENTER)
+            glyph.set_valign(Gtk.Align.CENTER)
+            glyph.set_hexpand(True)
+            glyph.set_vexpand(True)
+            swatch.append(glyph)
+            name = 'Custom' if key == 'custom' else THEME_PRESETS[key].name
+            cap = Gtk.Label(label=name)
+            cap.add_css_class('theme-cap')
+            cap.set_max_width_chars(10)
+            # Preset names are short: unconditional ellipsize misfires on
+            # fractional rounding and shows "Graphit…" for fitting text.
+            if len(name) > 10:
+                cap.set_ellipsize(Pango.EllipsizeMode.END)
+            else:
+                cap.set_ellipsize(Pango.EllipsizeMode.NONE)
+            inner.append(swatch)
+            inner.append(cap)
+            btn.set_child(inner)
+            btn.connect('clicked', self._on_theme_row, key)
+            self._theme_rows[key] = swatch
+            grid.attach(btn, index % 3, index // 3, 1, 1)
 
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_vexpand(True)
-        scroller.set_child(rows)
+        self._custom_hex_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._custom_hex_row.set_halign(Gtk.Align.CENTER)
+        self._custom_hex_entry = Gtk.Entry()
+        self._custom_hex_entry.add_css_class('theme-hex-entry')
+        self._custom_hex_entry.set_placeholder_text('#3a2a10')
+        self._custom_hex_entry.set_max_width_chars(10)
+        self._custom_hex_entry.set_hexpand(True)
+        from osk import attach, set_layer_keyboard, set_visible
+
+        def _hex_show(*_a: object) -> None:
+            set_layer_keyboard(self, True)
+            set_visible(True)
+
+        def _hex_hide(*_a: object) -> None:
+            set_layer_keyboard(self, False)
+            set_visible(False)
+
+        attach(self._custom_hex_entry, on_show=_hex_show, on_hide=_hex_hide)
+        hex_apply = Gtk.Button(label='Apply')
+        hex_apply.add_css_class('wizard-next')
+        hex_apply.connect('clicked', self._on_custom_apply)
+        self._custom_hex_row.append(self._custom_hex_entry)
+        self._custom_hex_row.append(hex_apply)
+        self._custom_hex_row.set_visible(False)
 
         next_btn = Gtk.Button(label='Next')
         next_btn.add_css_class('wizard-next')
@@ -533,7 +603,7 @@ class FirstBootWizard(Gtk.Window):
         next_btn.connect('clicked', self._on_theme_next)
 
         page.append(self._title_block('Pick a theme'))
-        page.append(scroller)
+        page.append(self._centered(grid, self._custom_hex_row))
         page.append(next_btn)
         self._on_theme_row(None, self._selected_theme)
         return page
@@ -716,13 +786,32 @@ class FirstBootWizard(Gtk.Window):
         return page
 
     def _on_theme_row(self, _btn: Gtk.Button | None, theme_key: str) -> None:
+        if theme_key == 'custom':
+            self._custom_hex_row.set_visible(True)
+            return
+        self._custom_hex_row.set_visible(False)
         self._selected_theme = theme_key
-        for key, row in self._theme_rows.items():
+        for key, swatch in self._theme_rows.items():
             if key == theme_key:
-                row.add_css_class('selected')
+                swatch.add_css_class('selected')
             else:
-                row.remove_css_class('selected')
+                swatch.remove_css_class('selected')
         preset = THEME_PRESETS[theme_key]
+        self._theme_provider.load_from_data(theme_css(preset).encode('utf-8'))
+
+    def _on_custom_apply(self, _btn: Gtk.Button) -> None:
+        from xx_ui.theme import _resolve as _resolve_custom
+        text = self._custom_hex_entry.get_text().strip()
+        if not self._config.set_custom_background(text):
+            self._custom_hex_entry.set_text('')
+            return
+        self._selected_theme = 'custom'
+        for key, swatch in self._theme_rows.items():
+            if key == 'custom':
+                swatch.add_css_class('selected')
+            else:
+                swatch.remove_css_class('selected')
+        preset = _resolve_custom(dict(self._config.data)) or THEME_PRESETS['amoled']
         self._theme_provider.load_from_data(theme_css(preset).encode('utf-8'))
 
     def _on_pin_next(self, _btn: Gtk.Widget) -> None:
