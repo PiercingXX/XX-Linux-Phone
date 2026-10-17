@@ -300,6 +300,27 @@ def test_count_badge_css_exists(isolated_home):
     assert '.xx-count' in css.render(load())
 
 
+def test_popover_is_a_single_surface(isolated_home):
+    # Adwaita paints its own card on the popover's inner contents node;
+    # the outer popover rule is the one surface, so the inner stays flat.
+    out = css.render(load())
+    match = re.search(r'popover\s*>\s*contents\s*\{([^}]*)\}', out)
+    assert match, 'no popover-contents flattening rule'
+    body = match.group(1)
+    assert 'transparent' in body
+    assert 'border: none' in body
+    assert 'box-shadow: none' in body
+
+
+def test_page_header_title_row_keeps_action_height(isolated_home):
+    # Action buttons measure 54 px tall: the title row keeps that
+    # height with or without them so every PageHeader aligns.
+    out = css.render(load())
+    match = re.search(r'\.xx-page-top\s*\{([^}]*)\}', out)
+    assert match, 'no page-header title-row rule'
+    assert 'min-height: 54px' in match.group(1)
+
+
 def test_tile_inversion_beats_toggle_fill(isolated_home):
     # libadwaita repaints toggle :checked fills over a plain class rule,
     # so the inverted tile re-asserts the fill on a toggle-qualified

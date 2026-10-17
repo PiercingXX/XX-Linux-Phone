@@ -2,10 +2,11 @@
 
 Seeds a temp store with realistic data (Android-style millisecond ids,
 a blocked number, keyword/phrase terms, one quarantined thread), builds
-the real :class:`TxxtWindow`, opens the settings page, the blocking
-page and the quarantine page, flips a theme control, and pumps the main
-loop without exceptions or Gtk warnings. Skips only when
-``gtk4-broadwayd`` is missing.
+the real :class:`TxxtWindow`, opens the settings page (which carries no
+appearance controls — the shell theme is the single theme source), the
+blocking page and the quarantine page, routes ``sms:`` links onto the
+matching or a fresh thread, and pumps the main loop without exceptions
+or Gtk warnings. Skips only when ``gtk4-broadwayd`` is missing.
 """
 
 import os
@@ -65,7 +66,6 @@ def _child_main():
     from gi.repository import Adw, Gio, GLib, Gtk
 
     from txxt.main import TxxtWindow
-    from txxt.settings import load as load_settings
 
     errors: list = []
     gtk_logs: list = []
@@ -104,6 +104,16 @@ def _child_main():
             widget = widget.get_parent() if hasattr(widget, "get_parent") else None
         return False
 
+    def _label_texts(widget):
+        texts = []
+        child = widget.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Label):
+                texts.append(child.get_text())
+            texts.extend(_label_texts(child))
+            child = child.get_next_sibling()
+        return texts
+
     window = None
     app = None
     try:
@@ -124,14 +134,34 @@ def _child_main():
         page.refresh_subtitles()
         assert page.blocking_subtitle() == "1 numbers, 2 terms"
         assert page.quarantine_subtitle() == "1 held"
-        assert load_settings().theme_preset == "amoled"
-        page._auto_sync_row.set_active(False)
-        pump(0.3)
-        page.set_preset("forest")
-        pump(0.8)
-        assert load_settings().auto_sync_theme is False
-        assert load_settings().theme_preset == "forest"
+        assert not hasattr(page, "_auto_sync_row"), \
+            "appearance lives in the shell theme, not in TxxT settings"
+        assert "Follow the shell theme" not in _label_texts(page)
         window._navigation.pop()
+        pump(0.5)
+
+        from txxt.list_presenter import parse_sms_uri
+        from txxt.thread_page import ThreadPage
+
+        known = parse_sms_uri("sms:+15551230001?body=hello%20there")
+        assert known is not None
+        window.open_sms_target(known)
+        pump(0.8)
+        top = window._navigation.get_visible_page()
+        assert isinstance(top, ThreadPage)
+        assert top.conversation_id == CID_A, \
+            "sms: opens the existing thread on canonical match"
+        assert top._entry.get_text() == "hello there"
+        fresh = parse_sms_uri("sms:+15550009999?body=ping")
+        assert fresh is not None
+        window.open_sms_target(fresh)
+        pump(0.8)
+        top = window._navigation.get_visible_page()
+        assert isinstance(top, ThreadPage)
+        assert top.conversation_id != CID_A, \
+            "sms: to an unknown number starts a new conversation"
+        assert top._entry.get_text() == "ping"
+        window._navigation.pop_to_page(window._list_page)
         pump(0.5)
 
         import json as _json

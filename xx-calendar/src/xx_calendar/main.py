@@ -829,7 +829,10 @@ class CalendarWindow(Adw.ApplicationWindow):
                      empty_text: str) -> None:
         self._clear_rows(box)
         if not days:
-            box.append(widgets.empty_state(empty_text))
+            holder = widgets.empty_state(empty_text)
+            holder.set_vexpand(True)
+            holder.set_valign(Gtk.Align.CENTER)
+            box.append(holder)
             return
         names = self._calendar_names()
         total = sum(len(d.all_day) + len(d.timed) for d in days)
@@ -929,11 +932,14 @@ class CalendarWindow(Adw.ApplicationWindow):
                 trailing=switch, last=i == len(calendars) - 1)
             self._cal_rows.append(row)
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        actions.set_halign(Gtk.Align.CENTER)
-        actions.append(widgets.outline_button(
-            "Import", callback=self._open_import_picker))
-        actions.append(widgets.outline_button(
-            "Export", callback=self.open_export_dialog))
+        import_button = widgets.outline_button(
+            "Import", callback=self._open_import_picker)
+        import_button.set_hexpand(True)
+        actions.append(import_button)
+        export_button = widgets.outline_button(
+            "Export", callback=self.open_export_dialog)
+        export_button.set_hexpand(True)
+        actions.append(export_button)
         self._cal_rows.append(actions)
 
     def _toggle_calendar(self, cal, visible: bool) -> None:
@@ -1003,11 +1009,14 @@ class CalendarWindow(Adw.ApplicationWindow):
             last=True))
         self._settings_rows.append(widgets.section_label("DATA"))
         data_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        data_row.set_halign(Gtk.Align.CENTER)
-        data_row.append(widgets.outline_button(
-            "Import", callback=self._open_import_picker))
-        data_row.append(widgets.outline_button(
-            "Export", callback=self.open_export_dialog))
+        import_button = widgets.outline_button(
+            "Import", callback=self._open_import_picker)
+        import_button.set_hexpand(True)
+        data_row.append(import_button)
+        export_button = widgets.outline_button(
+            "Export", callback=self.open_export_dialog)
+        export_button.set_hexpand(True)
+        data_row.append(export_button)
         self._settings_rows.append(data_row)
 
     def _save_setting(self, key: str, value) -> None:
@@ -1189,13 +1198,16 @@ class CalendarWindow(Adw.ApplicationWindow):
                 "REMINDER", f"{reminders[0]:d} MIN BEFORE"))
         self._detail_uid = uid
         self._detail_rid = int(recurrence_id)
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        buttons.set_halign(Gtk.Align.CENTER)
-        buttons.append(widgets.outline_button(
-            "Edit", callback=lambda: self.open_editor(uid=uid)))
-        buttons.append(widgets.outline_button(
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        edit = widgets.outline_button(
+            "Edit", callback=lambda: self.open_editor(uid=uid))
+        edit.set_hexpand(True)
+        buttons.append(edit)
+        copy = widgets.outline_button(
             "Copy",
-            callback=lambda: self.open_editor(uid=uid, duplicate=True)))
+            callback=lambda: self.open_editor(uid=uid, duplicate=True))
+        copy.set_hexpand(True)
+        buttons.append(copy)
         box.append(buttons)
         box.append(widgets.section_label("DELETE"))
         scope = {"value": "this" if rule else "all"}
@@ -1586,15 +1598,18 @@ class CalendarWindow(Adw.ApplicationWindow):
         content.append(picker)
         error_label = widgets.label("", "xx-danger-text")
         content.append(error_label)
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        buttons.set_halign(Gtk.Align.CENTER)
-        buttons.append(widgets.text_button(
-            "Cancel", callback=lambda: self._go_back()))
-        buttons.append(widgets.primary_button(
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        cancel = widgets.text_button(
+            "Cancel", callback=lambda: self._go_back())
+        cancel.set_hexpand(True)
+        buttons.append(cancel)
+        go = widgets.primary_button(
             "Import",
             callback=lambda: self._start_import(
                 picker.get_selected(), calendars, path, content,
-                error_label)))
+                error_label))
+        go.set_hexpand(True)
+        buttons.append(go)
         content.append(buttons)
         self._last_dialog = content
         self.show_view("import")
@@ -1639,14 +1654,17 @@ class CalendarWindow(Adw.ApplicationWindow):
         content.append(picker)
         error_label = widgets.label("", "xx-danger-text")
         content.append(error_label)
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        buttons.set_halign(Gtk.Align.CENTER)
-        buttons.append(widgets.text_button(
-            "Cancel", callback=lambda: self._go_back()))
-        buttons.append(widgets.primary_button(
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        cancel = widgets.text_button(
+            "Cancel", callback=lambda: self._go_back())
+        cancel.set_hexpand(True)
+        buttons.append(cancel)
+        go = widgets.primary_button(
             "Export",
             callback=lambda: self._start_export(
-                picker.get_selected(), calendars, content, error_label)))
+                picker.get_selected(), calendars, content, error_label))
+        go.set_hexpand(True)
+        buttons.append(go)
         content.append(buttons)
         self._last_dialog = content
         self.show_view("export")

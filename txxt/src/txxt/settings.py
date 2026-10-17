@@ -13,9 +13,6 @@ ALERT_STYLES = ('silent', 'vibrate', 'sound')
 class Settings:
     lock_screen_privacy: str = 'sender-only'
     alert_style: str = 'sound'
-    auto_sync_theme: bool = True
-    theme_preset: str = 'amoled'
-    font_mode: str = 'space-mono'
     default_region: str = 'US'
     mms_auto_download: bool = False
     mms_auto_reply: bool = False
@@ -34,13 +31,9 @@ class Settings:
             base.lock_screen_privacy = data['lock_screen_privacy']
         if data.get('alert_style') in ALERT_STYLES:
             base.alert_style = data['alert_style']
-        if isinstance(data.get('auto_sync_theme'), bool):
-            base.auto_sync_theme = data['auto_sync_theme']
-        preset = data.get('theme_preset')
-        if isinstance(preset, str) and preset:
-            base.theme_preset = preset
-        if data.get('font_mode') in ('space-mono', 'jetbrains-mono', 'system'):
-            base.font_mode = data['font_mode']
+        # Retired appearance keys (auto_sync_theme, theme_preset,
+        # font_mode): the shell theme is the single theme source, so
+        # existing configs carrying them still load — they are ignored.
         region = data.get('default_region')
         if isinstance(region, str) and region.strip():
             base.default_region = region.strip().upper()

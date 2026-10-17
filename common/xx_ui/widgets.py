@@ -147,6 +147,7 @@ def page_header(title: str, caption_text: str | None = None,
     root = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
     root.add_css_class('xx-page-body')
     top = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 0)
+    top.add_css_class('xx-page-top')
     top.set_valign(Gtk.Align.CENTER)
     title_label = label(title, 'xx-display')
     _fit_single(title_label, _HEADER_TITLE_CHARS)
@@ -279,9 +280,9 @@ def list_row(primary: str, secondary: str = '', meta: str = '',
     return row
 
 
-def chip_bar(items: list) -> Gtk.ScrolledWindow:
+def chip_bar(items: list, spacing: int = 8) -> Gtk.ScrolledWindow:
     """Scrollable row of filter chips. ``items``: (label, selected, cb)."""
-    box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+    box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, spacing)
     for text, selected, callback in items:
         chip = Gtk.Button.new_with_label(text.upper())
         chip.add_css_class('xx-chip')

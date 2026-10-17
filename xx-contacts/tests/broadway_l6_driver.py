@@ -41,6 +41,35 @@ def _pump(seconds: float) -> None:
     loop.run()
 
 
+def _wait_until(predicate, timeout_s: float = 5.0) -> bool:
+    """Pump until ``predicate`` holds (bounded).
+
+    Fixed sleeps flake under load: the Broadway round trip can outlast
+    them, so a picker or reply read lands mid-transition. Poll in
+    small slices and settle briefly once the condition holds.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        _pump(0.05)
+        try:
+            if predicate():
+                break
+        except Exception:
+            pass
+    else:
+        try:
+            return bool(predicate())
+        except Exception:
+            return False
+    _pump(0.2)
+    try:
+        return bool(predicate())
+    except Exception:
+        return False
+
+
 def _focus_name(window: Gtk.Window) -> str:
     widget = window.get_focus()
     return type(widget).__name__ if widget is not None else "None"
@@ -120,7 +149,7 @@ def main(argv: list) -> None:
         window = ContactsWindow(app, store, config, config_path,
                                 db_path)
         window.present()
-        _pump(1.0)
+        _wait_until(window.get_mapped)
         markers["LIST_VISIBLE"] = str(window.is_visible())
 
         for kind in ("contact", "phone", "email"):
@@ -130,7 +159,7 @@ def main(argv: list) -> None:
             service = ContactsService(store, LookupIndex(), "US")
             invocation = _CaptureInvocation()
             service.request_pick(kind, invocation)
-            _pump(0.6)
+            _wait_until(lambda: _picker_window(TITLES[kind]) is not None)
             dialog = _picker_window(TITLES[kind])
             markers[f"PICK_{kind.upper()}_WINDOW"] = str(
                 dialog is not None and dialog.is_visible())
@@ -140,7 +169,7 @@ def main(argv: list) -> None:
             nav = dialog.get_child()
             page = nav.get_visible_page()
             page._list.emit("activate", 0)
-            _pump(0.5)
+            _wait_until(lambda: invocation.reply is not None)
             markers[f"PICK_{kind.upper()}_REPLY"] = repr(invocation.reply)
             assert invocation.error is None, (kind, invocation.error)
             assert invocation.reply == (rows[0].uid, rows[0].value), (
@@ -150,12 +179,12 @@ def main(argv: list) -> None:
         cancel_service = ContactsService(store, LookupIndex(), "US")
         cancel_invocation = _CaptureInvocation()
         cancel_service.request_pick("contact", cancel_invocation)
-        _pump(0.6)
+        _wait_until(lambda: _picker_window(TITLES["contact"]) is not None)
         dialog = _picker_window(TITLES["contact"])
         nav = dialog.get_child()
         page = nav.get_visible_page()
         page._cancel_button.emit("clicked")
-        _pump(0.5)
+        _wait_until(lambda: cancel_invocation.reply is not None)
         markers["PICK_CANCEL_REPLY"] = repr(cancel_invocation.reply)
         assert cancel_invocation.reply == ("", ""), cancel_invocation.reply
 
@@ -165,30 +194,36 @@ def main(argv: list) -> None:
             default_region=config.default_region,
             prefill_phone="+1 555 0100")
         window._navigation.push(editor)
-        _pump(0.6)
+        _wait_until(lambda: window._navigation.get_visible_page() is editor)
         markers["PREFILL_NUMBER"] = editor._phone_rows[0].entry.get_text()
         markers["PREFILL_FOCUS"] = _focus_name(window)
         assert editor._phone_rows[0].entry.get_text() == "+1 555 0100"
         window._navigation.pop()
-        _pump(0.4)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is not editor)
 
         vcf_path = os.path.join(base, "incoming.vcf")
         with open(vcf_path, "w", encoding="utf-8") as handle:
             handle.write("BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Zed Shaw\r\n"
                          "TEL;TYPE=CELL:+1 555 0303\r\nEND:VCARD\r\n")
         count_before = store.count()
+        before = window._navigation.get_visible_page()
         window.open_vcf_file(vcf_path)
-        _pump(1.5)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is not before)
         page = window._navigation.get_visible_page()
         markers["VCF_PAGE"] = type(page).__name__
         markers["VCF_PENDING"] = str(bool(page._pending_vcf))
         markers["VCF_UNCHANGED"] = str(store.count() == count_before)
         assert store.count() == count_before
         window._navigation.pop()
-        _pump(0.4)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is not page)
 
+        before = window._navigation.get_visible_page()
         window.open_new_editor(prefill_phone="+1 555 0404")
-        _pump(0.6)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is not before)
         page = window._navigation.get_visible_page()
         markers["LAUNCH_NEW_PAGE"] = type(page).__name__
         markers["LAUNCH_NEW_NUMBER"] = (

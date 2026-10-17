@@ -93,14 +93,16 @@ class ShareWindow:
         self.cancel_button.set_sensitive(False)
         send_row.append(self.send_button)
         send_row.append(self.cancel_button)
-        share_body.append(send_row)
         self.progress_bar = Gtk.ProgressBar()
         self.progress_bar.set_visible(False)
-        self.progress_bar.set_margin_top(12)
-        share_body.append(self.progress_bar)
         self.status_label = widgets.label("", "xx-secondary")
-        share_body.append(self.status_label)
-        share_page = widgets.page(self.share_header, share_body)
+        share_actions = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+        share_actions.add_css_class("xx-page-body")
+        share_actions.append(send_row)
+        share_actions.append(self.progress_bar)
+        share_actions.append(self.status_label)
+        share_page = widgets.page(self.share_header, share_body,
+                                  share_actions)
 
         self.history_header = widgets.page_header(
             "History", "Empty", actions=[("Clear", self._on_clear_history)])

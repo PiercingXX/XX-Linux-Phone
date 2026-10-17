@@ -40,6 +40,35 @@ def _pump(seconds: float) -> None:
     loop.run()
 
 
+def _wait_until(predicate, timeout_s: float = 8.0) -> bool:
+    """Pump until ``predicate`` holds (bounded).
+
+    List rows lay out over frame ticks: a fixed sleep can expire
+    before any row is allocated, so the sweep below waits for real
+    allocations first instead of measuring zeros.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        _pump(0.05)
+        try:
+            if predicate():
+                break
+        except Exception:
+            pass
+    else:
+        try:
+            return bool(predicate())
+        except Exception:
+            return False
+    _pump(0.2)
+    try:
+        return bool(predicate())
+    except Exception:
+        return False
+
+
 def _seed(base: str):
     from xx_contacts.app_config import AppConfig
     from xx_contacts.store import ContactData, ContactStore, PhoneEntry
@@ -65,6 +94,28 @@ def _seed(base: str):
     config = AppConfig()
     config.save(config_path)
     return store, config, config_path, db_path
+
+
+def _allocated_rows(view) -> int:
+    """Rows actually laid out on the display (mapped, visible)."""
+    count = 0
+    child = view.get_first_child()
+    while child is not None:
+        try:
+            page = child.get_first_child()
+            header = page.get_first_child() if page else None
+            row_box = (header.get_next_sibling()
+                       if header is not None else None)
+            if (row_box is not None and row_box.get_visible()
+                    and row_box.get_mapped()):
+                count += 1
+        except Exception:
+            pass
+        try:
+            child = child.get_next_sibling()
+        except Exception:
+            break
+    return count
 
 
 def _abs_x(widget, window) -> int:
@@ -95,8 +146,9 @@ def main(argv: list) -> None:
         window = ContactsWindow(app, store, config, config_path,
                                 db_path)
         window.present()
-        _pump(2.0)
+        _wait_until(window.get_mapped)
         view = window._list
+        _wait_until(lambda: _allocated_rows(view) >= 2)
         avatar_xs: list[int] = []
         title_xs: list[int] = []
         child = view.get_first_child()

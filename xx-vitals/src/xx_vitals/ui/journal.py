@@ -28,7 +28,9 @@ def _item_type():
 
     return Item
 
-FILTERS = ("All", "Walk", "Run", "Cycle", "Other")
+#: (chip label, activity-type value): short labels fit 360 px unscrolled.
+FILTERS = (("All", "all"), ("Walk", "walk"), ("Run", "run"),
+           ("Bike", "cycle"), ("Misc", "other"))
 
 MINI_PX = 30
 
@@ -146,7 +148,7 @@ def build_journal_page(db, config, nav, live: dict | None = None) -> object:
     from xx_vitals.ui import shell as shell_page
 
     live = live if live is not None else {}
-    state = {"filter": "All", "overflow": None, "store": None}
+    state = {"filter": "all", "overflow": None, "store": None}
     header_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
     chips_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
     list_holder = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
@@ -169,7 +171,7 @@ def build_journal_page(db, config, nav, live: dict | None = None) -> object:
     def rows_for_filter(groups):
         from xx_vitals.core.journal import DayGroup, ring_fraction
 
-        wanted = state["filter"].lower()
+        wanted = state["filter"]
         if wanted == "all":
             return groups
         kept = []
@@ -215,10 +217,10 @@ def build_journal_page(db, config, nav, live: dict | None = None) -> object:
                 break
             chips_box.remove(first)
         chips_box.append(widgets.chip_bar([
-            (name, name == state["filter"],
-             lambda name=name: (state.update(filter=name), refresh()))
-            for name in FILTERS
-        ]))
+            (label, value == state["filter"],
+             lambda value=value: (state.update(filter=value), refresh()))
+            for label, value in FILTERS
+        ], spacing=4))
         while True:
             first = list_holder.get_first_child()
             if first is None:

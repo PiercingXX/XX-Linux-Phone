@@ -40,12 +40,20 @@ class TestSettingsStore:
         path = tmp_path / 'config.json'
         original = Settings(
             lock_screen_privacy='content', alert_style='vibrate',
-            auto_sync_theme=False, theme_preset='forest',
-            font_mode='jetbrains-mono', default_region='DE',
+            default_region='DE',
             mms_auto_download=True, mms_auto_reply=True,
         )
         save(original, path)
         assert load(path) == original
+
+    def test_retired_appearance_keys_are_ignored(self, tmp_path):
+        path = tmp_path / 'config.json'
+        path.write_text(json.dumps({
+            'auto_sync_theme': False,
+            'theme_preset': 'forest',
+            'font_mode': 'jetbrains-mono',
+        }), encoding='utf-8')
+        assert load(path) == Settings.defaults()
 
     def test_missing_file_gives_defaults(self, tmp_path):
         assert load(tmp_path / 'absent.json') == Settings.defaults()

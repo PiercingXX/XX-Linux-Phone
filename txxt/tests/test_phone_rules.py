@@ -170,7 +170,10 @@ def test_no_local_theme_module():
 
 
 def test_shared_theme_applied_once_at_startup():
+    # The shell theme is the single theme source: one xx_ui.apply at
+    # startup (its config monitor live-reloads), no manual override.
     src = read("main.py")
     assert "xx_ui.apply(" in src
-    assert "xx_ui.on_change(" in src
-    assert "xx_ui.install(" in src
+    assert "xx_ui.on_change(" not in src
+    assert "xx_ui.install(" not in src
+    assert "manual_theme" not in src

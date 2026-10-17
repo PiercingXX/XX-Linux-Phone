@@ -40,6 +40,35 @@ def _pump(seconds: float) -> None:
     loop.run()
 
 
+def _wait_until(predicate, timeout_s: float = 5.0) -> bool:
+    """Pump until ``predicate`` holds (bounded).
+
+    Fixed sleeps flake under load: the Broadway round trip can outlast
+    them, so a popover or page read lands mid-transition. Poll in
+    small slices and settle briefly once the condition holds.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        _pump(0.05)
+        try:
+            if predicate():
+                break
+        except Exception:
+            pass
+    else:
+        try:
+            return bool(predicate())
+        except Exception:
+            return False
+    _pump(0.2)
+    try:
+        return bool(predicate())
+    except Exception:
+        return False
+
+
 def _seed(base: str):
     import gi
 
@@ -106,11 +135,11 @@ def main(argv: list) -> None:
         window = ContactsWindow(app, store, config, config_path,
                                 db_path)
         window.present()
-        _pump(1.2)
+        _wait_until(window.get_mapped)
         markers["LIST_VISIBLE"] = str(window.is_visible())
         window._show_overflow()
-        _pump(0.4)
         popover = window._overflow
+        _wait_until(popover.is_visible)
         labels: list[str] = []
         box = popover.get_child()
         child = box.get_first_child()
@@ -123,13 +152,13 @@ def main(argv: list) -> None:
         markers["LIST_HAS_IMPORT_EXPORT"] = str(
             popover.is_visible() and "Import/export" in labels)
         popover.popdown()
-        _pump(0.2)
+        _wait_until(lambda: not popover.is_visible())
 
         page = ImportExportPage(
             window._navigation, window, store, config, config_path,
             default_region=config.default_region)
         window._navigation.push(page)
-        _pump(0.8)
+        _wait_until(lambda: window._navigation.get_visible_page() is page)
         markers["IMPORT_TITLE"] = page.get_title()
         markers["IMPORT_VISIBLE"] = str(page.is_visible())
         markers["IMPORT_VCF"] = str(
@@ -147,7 +176,7 @@ def main(argv: list) -> None:
             page._publish_switch.get_active())
         markers["STATUS_EMPTY"] = str(page._status.get_text() == "")
         window._navigation.pop()
-        _pump(0.4)
+        _wait_until(lambda: window._navigation.get_visible_page() is not page)
         markers["PAGES_OK"] = "True"
         window.destroy()
     except Exception:

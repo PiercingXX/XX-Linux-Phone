@@ -12,14 +12,22 @@ def test_settings_defaults_match_android_posture():
     s = Settings.defaults()
     assert s.lock_screen_privacy == 'sender-only'
     assert s.alert_style == 'sound'
-    assert s.auto_sync_theme is True
 
 
 def test_settings_round_trip(tmp_path):
     path = tmp_path / 'config.json'
-    save(Settings(lock_screen_privacy='nothing', theme_preset='paper'), path)
+    save(Settings(lock_screen_privacy='nothing'), path)
     assert load(path).lock_screen_privacy == 'nothing'
-    assert load(path).theme_preset == 'paper'
+
+
+def test_settings_tolerate_retired_appearance_keys(tmp_path):
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({
+        'auto_sync_theme': False,
+        'theme_preset': 'forest',
+        'font_mode': 'system',
+    }), encoding='utf-8')
+    assert load(path) == Settings.defaults()
 
 
 def test_settings_missing_file_gives_defaults(tmp_path):

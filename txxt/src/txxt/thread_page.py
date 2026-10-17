@@ -295,6 +295,11 @@ class ThreadPage(Adw.NavigationPage):
     def conversation_id(self) -> int:
         return self._conversation_id
 
+    def prefill_draft(self, text: str) -> None:
+        """Stage an ``sms:`` body in compose (never clobbers typing)."""
+        if text and not self._entry.get_text().strip():
+            self._entry.set_text(text)
+
     @property
     def header_title(self) -> str:
         """Visible thread title (caps caption in the compact header)."""

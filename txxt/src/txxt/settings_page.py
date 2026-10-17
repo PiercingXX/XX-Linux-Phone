@@ -1,12 +1,13 @@
 """Settings as a navigation page over the txxt JSON config.
 
 Every Android setting with a real Linux effect (``ui/SettingsActivity``,
-``ui/SettingsStore``, ``ui/FontMode``): lock-screen privacy posture,
-alert style, default region, MMS auto-download/auto-reply, theme
-auto-sync + preset, font toggle — plus entry rows into Blocking and
-Quarantine. Deliberately absent (no Linux equivalent): the notification
-sound picker (a sound-theme name would not ring anything here) and the
-channel-generation hack.
+``ui/SettingsStore``): lock-screen privacy posture, alert style,
+default region, MMS auto-download/auto-reply — plus entry rows into
+Blocking and Quarantine. Appearance lives in the shell theme alone
+(``~/.config/xx-wm/config.json`` via ``xx_ui``), so this page carries
+no theme, preset or font controls. Deliberately absent (no Linux
+equivalent): the notification sound picker (a sound-theme name would
+not ring anything here) and the channel-generation hack.
 
 Phone rules: no entry autofocuses (region stays unfocusable until
 tapped); no header-bar chrome — the shared compact header carries the
@@ -22,7 +23,6 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Adw, Gtk  # noqa: E402
 
-import xx_ui  # noqa: E402
 from xx_ui import widgets  # noqa: E402
 import txxt  # noqa: E402
 from txxt import settings as settings_mod  # noqa: E402
@@ -38,12 +38,6 @@ ALERT_STYLE_OPTIONS = (
     ('silent', 'Silent'),
     ('vibrate', 'Vibrate'),
     ('sound', 'Sound'),
-)
-
-FONT_MODE_OPTIONS = (
-    ('space-mono', 'Space Mono'),
-    ('jetbrains-mono', 'JetBrains Mono'),
-    ('system', 'System'),
 )
 
 
@@ -65,9 +59,6 @@ class SettingsPage(Adw.NavigationPage):
         self._settings = settings_mod.load()
         self._ready = False
         self.set_title('Settings')
-        self._preset_options = [
-            (key, xx_ui.theme.PRESETS[key].name) for key in xx_ui.theme.preset_keys()
-        ]
 
         header = widgets.compact_header(
             self._on_back, 'Settings', 'On this device',
@@ -112,23 +103,6 @@ class SettingsPage(Adw.NavigationPage):
             self._auto_reply_row, last=True))
         body.append(messages)
 
-        appearance = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
-        appearance.append(widgets.section_label('Appearance'))
-        self._auto_sync_row = widgets.make_switch(
-            self._settings.auto_sync_theme, self._on_auto_sync_changed)
-        appearance.append(widgets.setting_row(
-            'Follow the shell theme', 'Off uses the preset below',
-            self._auto_sync_row))
-        appearance.append(widgets.caption('Theme preset'))
-        self._preset_wrap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
-        self._rebuild_preset_chips()
-        appearance.append(self._preset_wrap)
-        appearance.append(widgets.caption('Font'))
-        self._font_wrap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
-        self._rebuild_font_chips()
-        appearance.append(self._font_wrap)
-        body.append(appearance)
-
         filtering = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
         filtering.append(widgets.section_label('Filtering'))
         self._blocking_sub = ''
@@ -149,7 +123,6 @@ class SettingsPage(Adw.NavigationPage):
             self._on_licenses_activated))
 
         self.set_child(widgets.page(header, body, None))
-        self._sync_manual_sensitivity()
         self.refresh_subtitles()
         self._ready = True
 
@@ -160,25 +133,6 @@ class SettingsPage(Adw.NavigationPage):
             self._navigation.pop()
         except Exception:
             pass
-
-    def _rebuild_preset_chips(self) -> None:
-        kid = self._preset_wrap.get_first_child()
-        while kid is not None:
-            following = kid.get_next_sibling()
-            self._preset_wrap.remove(kid)
-            kid = following
-        current = str(self._settings.theme_preset or '').strip().lower()
-        self._preset_wrap.append(widgets.chip_bar([
-            (label, key == current, self._on_preset_picked(key))
-            for key, label in self._preset_options
-        ]))
-        self._preset_wrap.set_sensitive(not self._settings.auto_sync_theme)
-
-    def set_preset(self, key: str) -> None:
-        """Pick a theme preset programmatically (tests, snap scripts)."""
-        self._settings.theme_preset = key
-        self._rebuild_preset_chips()
-        self._save()
 
     def blocking_subtitle(self) -> str:
         return self._blocking_sub
@@ -221,24 +175,6 @@ class SettingsPage(Adw.NavigationPage):
             except Exception:
                 pass
 
-    def _rebuild_font_chips(self) -> None:
-        kid = self._font_wrap.get_first_child()
-        while kid is not None:
-            following = kid.get_next_sibling()
-            self._font_wrap.remove(kid)
-            kid = following
-        current = str(self._settings.font_mode or '').strip().lower()
-        self._font_wrap.append(widgets.chip_bar([
-            (label, value == current, self._on_font_picked(value))
-            for value, label in FONT_MODE_OPTIONS
-        ]))
-        self._font_wrap.set_sensitive(not self._settings.auto_sync_theme)
-
-    def _sync_manual_sensitivity(self) -> None:
-        manual = not self._settings.auto_sync_theme
-        self._preset_wrap.set_sensitive(manual)
-        self._font_wrap.set_sensitive(manual)
-
     def _on_privacy_picked(self, value: str):
         def _picked() -> None:
             if not self._ready:
@@ -276,31 +212,6 @@ class SettingsPage(Adw.NavigationPage):
             return
         self._settings.mms_auto_reply = bool(active)
         self._save()
-
-    def _on_auto_sync_changed(self, active: bool) -> None:
-        if not self._ready:
-            return
-        self._settings.auto_sync_theme = bool(active)
-        self._sync_manual_sensitivity()
-        self._save()
-
-    def _on_preset_picked(self, key: str):
-        def _picked() -> None:
-            if not self._ready:
-                return
-            self.set_preset(key)
-
-        return _picked
-
-    def _on_font_picked(self, value: str):
-        def _picked() -> None:
-            if not self._ready:
-                return
-            self._settings.font_mode = value
-            self._rebuild_font_chips()
-            self._save()
-
-        return _picked
 
     def _on_blocking_activated(self) -> None:
         if self._on_open_blocking is not None:

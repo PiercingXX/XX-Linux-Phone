@@ -272,9 +272,15 @@ class MailboxPage(Gtk.Box):
             return
         if not outcome.get("ok", False):
             self._toast(outcome.get("error") or "Sync failed", None)
-        self._sync_line.set_label(
-            _caption(mailbox_mod.sync_status_line(outcome)))
-        self.set_reauth(bool(outcome.get("reauth", False)))
+        reauth = bool(outcome.get("reauth", False))
+        self.set_reauth(reauth)
+        # The reauth banner card carries the sign-in message; the caption
+        # under it stays empty so it never reads twice.
+        if reauth:
+            self._sync_line.set_label("")
+        else:
+            self._sync_line.set_label(
+                _caption(mailbox_mod.sync_status_line(outcome)))
         self.load()
 
     def set_reauth(self, needed: bool) -> None:

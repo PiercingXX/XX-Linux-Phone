@@ -97,11 +97,79 @@ def main(db_path: str) -> int:
             if isinstance(item, EventItem) and item.props.uid:
                 first_uid = (item.props.uid, int(item.props.recurrence_id))
                 break
+        def _row_buttons(row):
+            found = []
+            kid = row.get_first_child()
+            while kid is not None:
+                found.append(kid)
+                kid = kid.get_next_sibling()
+            return found
+
         if first_uid is not None:
             window.open_detail(first_uid[0], first_uid[1])
             if not _pump_until(lambda: window._view == "detail"):
                 raise AssertionError("detail never opened")
+            pairs = []
+            kid = window._detail_rows.get_first_child()
+            while kid is not None:
+                if (isinstance(kid, Gtk.Box)
+                        and kid.get_orientation()
+                        == Gtk.Orientation.HORIZONTAL
+                        and len(_row_buttons(kid)) == 2
+                        and all(isinstance(item, Gtk.Button)
+                                for item in _row_buttons(kid))):
+                    pairs.append(kid)
+                kid = kid.get_next_sibling()
+            assert pairs, "detail keeps an Edit/Copy action row"
+            actions = pairs[0]
+            assert actions.get_spacing() == 12
+            assert actions.get_halign() != Gtk.Align.CENTER, \
+                "Edit/Copy fill the gutters, never center"
+            buttons = []
+            kid = actions.get_first_child()
+            while kid is not None:
+                buttons.append(kid)
+                kid = kid.get_next_sibling()
+            assert len(buttons) == 2
+            assert all(button.get_hexpand() for button in buttons), \
+                "Edit/Copy are a full-width equal pair"
             window.show_view("schedule")
+        probe = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        window._render_rows(probe, [], True, 0,
+                            empty_text="Nothing scheduled.")
+        holder = probe.get_first_child()
+        assert holder is not None
+        assert holder.get_next_sibling() is None
+        assert holder.get_vexpand(), "empty state fills the body height"
+        assert holder.get_valign() == Gtk.Align.CENTER, \
+            "empty state centers vertically in the body"
+        print("EMPTY_CENTER=ok", flush=True)
+        window.open_export_dialog()
+        if not _pump_until(lambda: window._view == "export"):
+            raise AssertionError("export never opened")
+
+        def _pair_rows(rows_box):
+            found = []
+            kid = rows_box.get_first_child()
+            while kid is not None:
+                if isinstance(kid, Gtk.Box) and kid.get_orientation() == \
+                        Gtk.Orientation.HORIZONTAL:
+                    items = _row_buttons(kid)
+                    if len(items) == 2 and all(
+                            isinstance(item, Gtk.Button) for item in items):
+                        found.append((kid, items))
+                kid = kid.get_next_sibling()
+            return found
+
+        export_pairs = _pair_rows(window._export_rows)
+        assert export_pairs, "export keeps a Cancel/Export action row"
+        export_row, export_items = export_pairs[-1]
+        assert export_row.get_spacing() == 12
+        assert export_row.get_halign() != Gtk.Align.CENTER
+        assert all(item.get_hexpand() for item in export_items), \
+            "Cancel/Export are a full-width equal pair"
+        print("EXPORT_PAIR=ok", flush=True)
+        window.show_view("schedule")
         window.open_create_sheet(dt.date.today())
         if not _pump_until(lambda: window._view == "editor"):
             raise AssertionError("create sheet never opened")

@@ -53,11 +53,12 @@ class SearchPage(Gtk.Box):
                               spacing=0)
         self._hints.add_css_class("xx-page-body")
         self._hints.append(widgets.section_label("Try"))
-        for hint in mailbox_mod.OPERATOR_HINTS:
-            button = widgets.menu_row(hint)
-            button.connect("clicked",
-                           lambda _b, h=hint: self._run(h))
-            self._hints.append(button)
+        hints = list(mailbox_mod.OPERATOR_HINTS)
+        for index, hint in enumerate(hints):
+            self._hints.append(widgets.list_row(
+                hint, "",
+                on_activate=lambda h=hint: self._run(h),
+                last=index == len(hints) - 1))
         self.append(self._hints)
 
         search = widgets.search_bar(

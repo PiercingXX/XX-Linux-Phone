@@ -163,6 +163,15 @@ popover modelbutton {
   color: ${foreground};
 }
 
+/* Adwaita paints its own card on the popover's inner contents node; the
+   outer popover rule above is the single surface, so this stays flat. */
+
+popover > contents {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}
+
 tooltip {
   background-color: ${surface};
   color: ${foreground};
@@ -196,6 +205,14 @@ scale highlight {
 scale slider {
   background-color: ${foreground};
   border: none;
+}
+
+/* Title row of PageHeader: trailing action buttons measure 54 px tall
+   (44 px target plus button chrome), so the row keeps that height with
+   or without them and every header aligns. */
+
+.xx-page-top {
+  min-height: 54px;
 }
 
 /* ---- Type roles ---- */

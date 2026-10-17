@@ -1,16 +1,19 @@
 """Theme behavior through the shared design system.
 
-TxxT owns no theme reader or CSS of its own: the window installs
-``xx_ui`` once at startup (config-driven, live-reloading) and
-re-installs only for the in-app manual pick. These tests pin the
-manual-pick mapping and the no-white guarantee over every preset.
+TxxT owns no theme reader, CSS, or appearance setting of its own: the
+window installs ``xx_ui`` once at startup and the shell theme
+(``~/.config/xx-wm/config.json``) is the single theme source. These
+tests pin that contract: no manual theme mapping survives, the retired
+appearance keys are gone from fresh configs, and existing configs
+carrying them still load.
 """
 
-import re
+import json
+from pathlib import Path
 
 import xx_ui
-from txxt.main import MANUAL_FONTS, manual_theme
-from txxt.settings import Settings
+from txxt import main as main_mod
+from txxt.settings import Settings, load
 
 
 def test_all_eight_shell_presets_known():
@@ -20,43 +23,40 @@ def test_all_eight_shell_presets_known():
     }
 
 
-def test_unknown_preset_falls_back_to_amoled():
-    assert manual_theme(Settings(theme_preset='nope')).key == 'amoled'
+def test_no_manual_theme_mapping_survives():
+    assert not hasattr(main_mod, "manual_theme")
+    assert not hasattr(main_mod, "MANUAL_FONTS")
 
 
-def test_manual_preset_maps_to_shared_preset():
-    active = manual_theme(Settings(theme_preset='forest'))
-    assert active.key == 'forest'
-    assert active.background == xx_ui.theme.PRESETS['forest'].background
+def test_settings_carry_no_appearance_keys():
+    fields = set(Settings.__dataclass_fields__)
+    assert "auto_sync_theme" not in fields
+    assert "theme_preset" not in fields
+    assert "font_mode" not in fields
+    assert Settings.defaults().to_dict() == Settings().to_dict()
 
 
-def test_manual_font_mapping():
-    assert manual_theme(Settings(font_mode='space-mono')).font_family.startswith('Space Mono')
-    assert manual_theme(Settings(font_mode='jetbrains-mono')).font_family.startswith('JetBrains Mono')
-    assert manual_theme(Settings(font_mode='system')).font_family == 'Sans Light'
-    assert manual_theme(Settings(font_mode='bogus')).font_family.startswith('Space Mono')
+def test_old_appearance_keys_still_load(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({
+        "lock_screen_privacy": "content",
+        "auto_sync_theme": False,
+        "theme_preset": "forest",
+        "font_mode": "jetbrains-mono",
+    }), encoding="utf-8")
+    loaded = load(path)
+    assert loaded.lock_screen_privacy == "content"
+    assert not hasattr(loaded, "auto_sync_theme")
+    assert not hasattr(loaded, "theme_preset")
+    assert not hasattr(loaded, "font_mode")
 
 
-def test_manual_font_keys_cover_settings_modes():
-    assert set(MANUAL_FONTS) == {'space-mono', 'jetbrains-mono', 'system'}
+def test_settings_page_has_no_appearance_section():
+    import txxt.settings_page as page_mod
 
-
-def test_every_preset_renders_without_white():
-    for key in xx_ui.theme.preset_keys():
-        active = manual_theme(Settings(theme_preset=key))
-        css = xx_ui.css.render(active).lower()
-        assert 'listview' in css, key
-        assert 'listview row' in css, key
-        assert 'row:selected' in css, key
-        assert 'entry' in css, key
-        assert 'textview' in css, key
-        # 3-digit white is never a surface; #ffffff survives only as the
-        # destructive-confirm text token the design names explicitly.
-        assert re.search(r'#fff(?![0-9a-f])', css) is None, key
-        assert 'white' not in css, key
-
-
-def test_every_preset_renders_without_placeholders():
-    for key in xx_ui.theme.preset_keys():
-        active = manual_theme(Settings(theme_preset=key))
-        assert '${' not in xx_ui.css.render(active), key
+    assert not hasattr(page_mod, "FONT_MODE_OPTIONS")
+    source = Path(page_mod.__file__).read_text(encoding="utf-8")
+    assert "Follow the shell theme" not in source
+    assert "auto_sync_theme" not in source
+    assert "theme_preset" not in source
+    assert "font_mode" not in source

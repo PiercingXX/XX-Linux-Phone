@@ -85,9 +85,11 @@ def broadway_env():
 
 
 def _run_scenario(env: dict, name: str) -> dict:
-    completed = subprocess.run(
+    from broadway_run import run_driver
+
+    completed = run_driver(
         [sys.executable, _DRIVER, name],
-        env=env, capture_output=True, text=True, timeout=90,
+        env=env, timeout=90,
     )
     assert completed.returncode == 0, (
         f"driver {name} failed: {completed.stderr[-2000:]}")

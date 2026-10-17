@@ -35,6 +35,7 @@ from xx_email import mailbox as mailbox_mod  # noqa: E402
 from xx_email import setup as setup_mod  # noqa: E402
 from xx_email.ui import compose_page as compose_page_mod  # noqa: E402
 from xx_email.ui import mailbox_page as mailbox_page_mod  # noqa: E402
+from xx_email.ui import search_page as search_page_mod  # noqa: E402
 from xx_email.ui import thread_page as thread_page_mod  # noqa: E402
 
 ERRORS: list[str] = []
@@ -300,6 +301,24 @@ def _scenario_smoke() -> None:
     thread_window = _show(thread, "Thread")
     mailbox.load()
     _pump(0.6)
+    mailbox._on_refreshed({"ok": True, "reauth": True, "new_ids": []})
+    _pump(0.3)
+    print("REAUTH_BANNER:", mailbox._reauth_banner.get_visible())
+    print("REAUTH_CAPTION_EMPTY:", mailbox._sync_line.get_text() == "")
+    mailbox._on_refreshed({"ok": True, "reauth": False, "new_ids": []})
+    _pump(0.3)
+    search = search_page_mod.SearchPage(ACCOUNT, hooks, _toast)
+    hint_buttons = []
+    kid = search._hints.get_first_child()
+    while kid is not None:
+        if isinstance(kid, Gtk.Button):
+            hint_buttons.append(kid)
+        kid = kid.get_next_sibling()
+    print("HINT_ROWS:", len(hint_buttons))
+    print("HINT_ROW_STYLE:", all(
+        "xx-row" in button.get_css_classes()
+        and "xx-menu-row" not in button.get_css_classes()
+        for button in hint_buttons))
     mailbox_window.destroy()
     thread_window.destroy()
     reply_page = _build_compose(reply_initial, False, "REPLY_TO")

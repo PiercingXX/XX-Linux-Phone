@@ -296,6 +296,60 @@ def parse_open_thread_argv(argv: list[str]) -> int | None:
     return None
 
 
+#: URI schemes that open a conversation for an address (RFC 5724).
+SMS_URI_SCHEMES = frozenset({"sms", "smsto", "mms", "mmsto"})
+
+
+@dataclass(frozen=True)
+class SmsTarget:
+    """One parsed ``sms:``-family URI: recipients plus optional body."""
+    recipients: tuple = ()
+    body: str = ""
+
+
+def parse_sms_uri(uri: str) -> SmsTarget | None:
+    """Recipients + body from an ``sms:``-family URI (RFC 5724).
+
+    ``sms:+1614…?body=…`` carries comma-separated recipients and an
+    optional ``body`` query field; ``smsto:``/``mms:``/``mmsto:`` parse
+    identically. Percent escapes decode (`+` stays literal in
+    recipients — it is part of the number — but means space in the
+    body). Returns None when no recipient survives.
+    """
+    from urllib.parse import unquote, unquote_plus
+
+    text = (uri or "").strip()
+    scheme, sep, rest = text.partition(":")
+    if not sep or scheme.strip().lower() not in SMS_URI_SCHEMES:
+        return None
+    path, _, query = rest.partition("?")
+    if path.startswith("//"):
+        path = path[2:]
+    recipients = tuple(
+        unquote(item.strip())
+        for item in path.split(",")
+        if item.strip()
+    )
+    if not recipients:
+        return None
+    body = ""
+    for field in query.split("&"):
+        name, eq, value = field.partition("=")
+        if eq and name.strip().lower() == "body":
+            body = unquote_plus(value)
+            break
+    return SmsTarget(recipients=recipients, body=body)
+
+
+def parse_sms_target_argv(argv: list[str]) -> SmsTarget | None:
+    """First ``sms:``-family URI in argv (desktop-file ``%U`` launches)."""
+    for token in list(argv or []):
+        found = parse_sms_uri(token)
+        if found is not None:
+            return found
+    return None
+
+
 _TLDS = (
     "com|net|org|edu|gov|mil|int|io|co|me|tv|app|dev|ai|gg|sh|ly|xyz|"
     "info|biz|online|site|tech|store|blog|cloud|page|link|shop|news|"

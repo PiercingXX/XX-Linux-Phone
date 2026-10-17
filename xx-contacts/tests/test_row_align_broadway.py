@@ -94,9 +94,11 @@ def test_row_avatars_and_titles_share_one_left_edge(broadway_env,
                                                     tmp_path):
     base = str(tmp_path / "rowalignseed")
     os.makedirs(base, exist_ok=True)
-    completed = subprocess.run(
+    from broadway_run import run_driver
+
+    completed = run_driver(
         [sys.executable, _DRIVER, base],
-        env=broadway_env, capture_output=True, text=True, timeout=120,
+        env=broadway_env, timeout=120,
     )
     assert "Traceback" not in (completed.stderr or ""), (
         completed.stderr[-3000:])

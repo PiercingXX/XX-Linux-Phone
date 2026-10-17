@@ -141,6 +141,30 @@ def _child_main():
         assert window.window.get_height() == 720
         for name in ("share", "history", "favorites", "settings"):
             assert window.stack.get_child_by_name(name) is not None, name
+
+        def _contains(root, target) -> bool:
+            if root is target:
+                return True
+            child = root.get_first_child()
+            while child is not None:
+                if _contains(child, target):
+                    return True
+                child = child.get_next_sibling()
+            return False
+
+        share_kids = rows(window.stack.get_child_by_name("share"))
+        assert len(share_kids) == 3, "share page keeps a fixed action bar"
+        assert _contains(share_kids[-1], window.send_button)
+        assert _contains(share_kids[-1], window.cancel_button)
+        assert _contains(share_kids[-1], window.progress_bar)
+        assert _contains(share_kids[-1], window.status_label)
+        assert not _contains(share_kids[1], window.send_button), \
+            "Send stays pinned above the tabs, out of the scroll body"
+        for header in (window.share_header, window.history_header,
+                       window.favorites_header):
+            top = header.get_first_child()
+            assert "xx-page-top" in top.get_css_classes(), \
+                "every PageHeader shares one title-row height"
         assert focus_inside_entry(window.window) is False
         assert len(rows(window.file_box)) == 2
         assert len(rows(window.history_box)) == 2

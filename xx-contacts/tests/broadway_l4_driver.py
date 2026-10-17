@@ -40,6 +40,35 @@ def _pump(seconds: float) -> None:
     loop.run()
 
 
+def _wait_until(predicate, timeout_s: float = 5.0) -> bool:
+    """Pump until ``predicate`` holds (bounded).
+
+    Fixed sleeps flake under load: the Broadway round trip can outlast
+    them, so a page read lands mid-transition. Poll in small slices
+    and settle briefly once the condition holds.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        _pump(0.05)
+        try:
+            if predicate():
+                break
+        except Exception:
+            pass
+    else:
+        try:
+            return bool(predicate())
+        except Exception:
+            return False
+    _pump(0.2)
+    try:
+        return bool(predicate())
+    except Exception:
+        return False
+
+
 def _focus_name(window: Gtk.Window) -> str:
     widget = window.get_focus()
     return type(widget).__name__ if widget is not None else "None"
@@ -142,7 +171,8 @@ def main(argv: list) -> None:
         window = ContactsWindow(app, store, config, config_path,
                                 db_path)
         window.present()
-        _pump(1.2)
+        _wait_until(window.get_mapped)
+        _wait_until(lambda: window._model.get_n_items() > 0)
         markers["LIST_VISIBLE"] = str(window.is_visible())
         markers["LIST_ROWS"] = str(
             window._model.get_n_items() > 0)
@@ -152,27 +182,31 @@ def main(argv: list) -> None:
             photos_dir, config=config, config_path=config_path,
             default_region=config.default_region)
         window._navigation.push(new_page)
-        _pump(0.8)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is new_page)
         markers["EDITOR_NEW_FOCUS"] = _focus_name(window)
         markers["EDITOR_NEW_ROWS"] = str(len(new_page._phone_rows))
         tapped = _tap_first_entry(new_page)
-        _pump(0.5)
+        _wait_until(lambda: _focus_name(window) == "Text")
         markers["EDITOR_TAP_WORKS"] = str(tapped)
         markers["EDITOR_TAP_FOCUS"] = _focus_name(window)
         window._navigation.pop()
-        _pump(0.4)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is not new_page)
 
         edit_page = ContactEditorPage(
             window._navigation, window, store, ada_uid, db_path,
             photos_dir, config=config, config_path=config_path,
             default_region=config.default_region)
         window._navigation.push(edit_page)
-        _pump(0.8)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is edit_page)
         markers["EDIT_LOADED"] = edit_page._entries["given"].get_text()
         markers["EDIT_PHONES"] = str(len(edit_page._phone_rows))
         markers["EDIT_DISPLAY"] = edit_page._birthday_display.get_text()
         window._navigation.pop()
-        _pump(0.4)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is not edit_page)
 
         detail_page = ContactDetailPage(
             window._navigation, window, store, ada_uid, db_path,
@@ -180,18 +214,21 @@ def main(argv: list) -> None:
             photos_dir=photos_dir,
             default_region=config.default_region)
         window._navigation.push(detail_page)
-        _pump(0.8)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is detail_page)
         markers["DETAIL_TITLE"] = detail_page._name.get_text()
         markers["DETAIL_ME"] = detail_page._me_button.get_label()
         window._navigation.pop()
-        _pump(0.4)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is not detail_page)
 
         me_page = MeCardPage(
             window._navigation, window, store, config, config_path,
             db_path, photos_dir,
             default_region=config.default_region)
         window._navigation.push(me_page)
-        _pump(0.8)
+        _wait_until(lambda: window._navigation.get_visible_page()
+                    is me_page)
         markers["ME_NAME"] = me_page._name.get_text()
         markers["PAGES_OK"] = "True"
         window.destroy()

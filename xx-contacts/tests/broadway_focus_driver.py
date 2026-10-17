@@ -31,6 +31,35 @@ def _pump(seconds: float) -> None:
     loop.run()
 
 
+def _wait_until(predicate, timeout_s: float = 5.0) -> bool:
+    """Pump until ``predicate`` holds (bounded).
+
+    Fixed sleeps flake under load: the Broadway round trip can outlast
+    them, so a focus read lands mid-transition. Poll in small slices
+    and settle briefly once the condition holds.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        _pump(0.05)
+        try:
+            if predicate():
+                break
+        except Exception:
+            pass
+    else:
+        try:
+            return bool(predicate())
+        except Exception:
+            return False
+    _pump(0.2)
+    try:
+        return bool(predicate())
+    except Exception:
+        return False
+
+
 def _subtree_has_focus(widget: Gtk.Widget) -> bool:
     if widget.has_focus():
         return True
@@ -70,7 +99,7 @@ def _scenario_startup() -> None:
     print("STARTUP_CAN_FOCUS:", entry.get_can_focus())
     window.set_child(entry)
     window.present()
-    _pump(1.2)
+    _wait_until(window.get_mapped)
     print("STARTUP_INSIDE:", _subtree_has_focus(entry))
     window.destroy()
 
@@ -81,10 +110,10 @@ def _scenario_tap() -> None:
     install_tap_to_focus(entry)
     window.set_child(entry)
     window.present()
-    _pump(1.2)
+    _wait_until(window.get_mapped)
     print("TAP_BEFORE:", _subtree_has_focus(entry))
     _tap(entry)
-    _pump(0.6)
+    _wait_until(lambda: _subtree_has_focus(entry))
     print("TAP_CAN_FOCUS:", entry.get_can_focus())
     print("TAP_INSIDE:", _subtree_has_focus(entry))
     print("TAP_CHAIN:", _focus_chain(window))
@@ -101,12 +130,12 @@ def _scenario_relock() -> None:
     box.append(other)
     window.set_child(box)
     window.present()
-    _pump(1.2)
+    _wait_until(window.get_mapped)
     _tap(entry)
-    _pump(0.6)
+    _wait_until(lambda: _subtree_has_focus(entry))
     print("RELOCK_TAPPED_INSIDE:", _subtree_has_focus(entry))
     other.grab_focus()
-    _pump(0.6)
+    _wait_until(lambda: not _subtree_has_focus(entry))
     print("RELOCK_INSIDE:", _subtree_has_focus(entry))
     print("RELOCK_CAN_FOCUS:", entry.get_can_focus())
     window.destroy()
@@ -121,20 +150,22 @@ def _scenario_navpop() -> None:
     install_tap_to_focus(entry)
     box.append(entry)
     toolbar.set_content(box)
-    navigation.push(Adw.NavigationPage(child=toolbar, title="List"))
+    list_page = Adw.NavigationPage(child=toolbar, title="List")
+    navigation.push(list_page)
     window.set_child(navigation)
     window.present()
-    _pump(1.2)
+    _wait_until(window.get_mapped)
     print("NAVPOP_STARTUP_INSIDE:", _subtree_has_focus(entry))
     _tap(entry)
-    _pump(0.6)
+    _wait_until(lambda: _subtree_has_focus(entry))
     print("NAVPOP_TAPPED_INSIDE:", _subtree_has_focus(entry))
     detail = Adw.NavigationPage(child=Gtk.Label(label="Detail"),
                                 title="Detail")
     navigation.push(detail)
-    _pump(0.6)
+    _wait_until(lambda: navigation.get_visible_page() is detail)
     navigation.pop()
-    _pump(0.6)
+    _wait_until(lambda: navigation.get_visible_page() is list_page)
+    _wait_until(lambda: not _subtree_has_focus(entry))
     print("NAVPOP_AFTER_POP_INSIDE:", _subtree_has_focus(entry))
     window.destroy()
 

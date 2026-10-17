@@ -74,6 +74,17 @@ def test_ui_never_blocks_the_main_loop():
             assert token not in src, (name, token)
 
 
+def test_journal_filter_chips_fit_phone_width():
+    from xx_vitals.ui import journal
+
+    pairs = list(journal.FILTERS)
+    assert [value for _, value in pairs] == [
+        "all", "walk", "run", "cycle", "other"]
+    assert all(len(label) <= 4 for label, _ in pairs)
+    src = (SRC / "ui" / "journal.py").read_text(encoding="utf-8")
+    assert "spacing=4" in src
+
+
 def test_visible_tabs_home_always_visible():
     from xx_vitals import prefs
     from xx_vitals.ui import shell

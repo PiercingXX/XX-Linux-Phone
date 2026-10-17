@@ -93,9 +93,11 @@ def broadway_env():
 def test_l5_import_export_page_builds_and_pumps(broadway_env, tmp_path):
     base = str(tmp_path / "l5seed")
     os.makedirs(base, exist_ok=True)
-    completed = subprocess.run(
+    from broadway_run import run_driver
+
+    completed = run_driver(
         [sys.executable, _DRIVER, base],
-        env=broadway_env, capture_output=True, text=True, timeout=120,
+        env=broadway_env, timeout=120,
     )
     assert "Traceback" not in (completed.stderr or ""), (
         completed.stderr[-3000:])
