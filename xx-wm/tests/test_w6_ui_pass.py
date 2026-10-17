@@ -70,38 +70,24 @@ class TestHomeWeatherHidden:
                 seen['visible'] = visible
 
         class FakeWeather:
-            def __init__(self, text, coords):
+            def __init__(self, text):
                 self._text = text
-                self._coords = coords
-
-            def coordinates(self):
-                return self._coords
 
             def refresh(self, on_done, force=False):
                 on_done(self._text)
 
         win = types.SimpleNamespace(
-            weather_label=FakeLabel(),
-            _weather=FakeWeather(seen.pop('feed'), seen.pop('coords', None)))
+            weather_label=FakeLabel(), _weather=FakeWeather(seen.pop('feed')))
         page = home_page.HomePage.__new__(home_page.HomePage)
         page._win = win
         return page
 
-    def test_no_location_keeps_the_line_with_a_hint(self):
+    def test_placeholder_hides_the_line(self):
         from weather import PLACEHOLDER
         seen = {'feed': PLACEHOLDER}
         self._page(seen)._refresh_weather()
-        assert seen.get('visible') is True
-        import home_page
-        assert seen.get('text') == home_page.WEATHER_NO_LOCATION
-
-    def test_offline_keeps_the_line_with_a_hint(self):
-        from weather import PLACEHOLDER
-        seen = {'feed': PLACEHOLDER, 'coords': (40.0, -83.0)}
-        self._page(seen)._refresh_weather()
-        assert seen.get('visible') is True
-        import home_page
-        assert seen.get('text') == home_page.WEATHER_OFFLINE
+        assert seen.get('visible') is False
+        assert 'text' not in seen
 
     def test_real_data_shows_the_line(self):
         seen = {'feed': '18° Clear'}
@@ -377,9 +363,7 @@ try:
             texts = [w.get_text() for w in _walk(home_page)
                      if isinstance(w, Gtk.Label)]
             assert not any('--\\u00b0' in t for t in texts), texts
-            # No location in the test HOME: the line keeps its spot with a hint
-            assert win.weather_label.get_visible() is True
-            assert win.weather_label.get_text() == 'Set weather location', (
+            assert win.weather_label.get_visible() is False, (
                 repr(win.weather_label.get_text()))
 
             alpha_box = win._alpha_scroller.get_child()

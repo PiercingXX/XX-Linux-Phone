@@ -7,13 +7,7 @@ if TYPE_CHECKING:
     from app_index import AppEntry
 
 
-# Shown in place of data so an enabled widget keeps its spot on home.
-WEATHER_NO_LOCATION = 'Set weather location'
-WEATHER_OFFLINE = 'Weather offline'
-NO_BATTERY = 'No battery'
-
-
-def _open_settings(win, section: str | None = None) -> None:
+def _open_settings(win) -> None:
     """Show settings with the TOP hop when the window offers it.
 
     Bare test doubles predate _open_settings and only switch the stack
@@ -22,7 +16,7 @@ def _open_settings(win, section: str | None = None) -> None:
     """
     opener = getattr(win, '_open_settings', None)
     if callable(opener):
-        opener(section) if section else opener()
+        opener()
     else:
         win.stack.set_visible_child_name('settings')
 
@@ -272,11 +266,6 @@ class HomePage:
             win._launch_app_id(str(tap['app']))
             return
         if key == 'weather':
-            if win._weather.coordinates() is None:
-                # The line reads "Set weather location": take the user there
-                win._refresh_weather(force=True)
-                _open_settings(win, 'launcher')
-                return
             if tap == 'refresh':
                 win._refresh_weather(force=True)
                 return
@@ -330,9 +319,8 @@ class HomePage:
 
         win = self._win
         win._weather = WeatherProvider(win.config)
-        # Cached conditions (or the hint) right away; the refresh may wait
-        # seconds on a location fix
-        self._show_weather(win._weather.current_text())
+        # No placeholder: the line stays hidden until real data arrives.
+        win.weather_label.set_visible(False)
         win._refresh_weather()
         GLib.timeout_add_seconds(900, win._tick_weather)
 
@@ -340,20 +328,19 @@ class HomePage:
         self._refresh_weather()
         return True
 
-    def _show_weather(self, text: str) -> None:
+    def _refresh_weather(self, force: bool = False) -> None:
         from weather import PLACEHOLDER
 
         win = self._win
-        # An enabled widget always holds its place: a hint stands in until
-        # there is data (no location set, or offline).
-        if text == PLACEHOLDER:
-            text = (WEATHER_OFFLINE if win._weather.coordinates()
-                    else WEATHER_NO_LOCATION)
-        win.weather_label.set_text(text)
-        win.weather_label.set_visible(True)
 
-    def _refresh_weather(self, force: bool = False) -> None:
-        self._win._weather.refresh(self._show_weather, force=force)
+        def _apply(text: str) -> None:
+            if text == PLACEHOLDER:
+                win.weather_label.set_visible(False)
+                return
+            win.weather_label.set_text(text)
+            win.weather_label.set_visible(True)
+
+        win._weather.refresh(_apply, force=force)
 
     def _refresh_clock(self) -> None:
         from clock_format import format_clock, resolve_24h
@@ -380,11 +367,8 @@ class HomePage:
                     getattr(win, '_privacy_snapshot', None) or {})
             except Exception:
                 indicator = ''
-            if not line:
-                line = NO_BATTERY
             if indicator:
-                line = f'{line}  ·  {indicator}'
-
+                line = f'{line}  ·  {indicator}' if line else indicator
             try:
                 win.status_strip.set_text(line)
             except Exception:
