@@ -176,15 +176,20 @@ install_xx_keyboard_deps() {
     if [ "$PKG" = apk ]; then
         pkg_install gtk+3.0-dev libhandy1-dev gmobile-dev feedbackd-dev \
             gnome-desktop-dev json-glib-dev libxkbcommon-dev dconf-dev \
-            hunspell-dev
+            hunspell-dev hunspell-en gsettings-desktop-schemas-dev \
+            wayland-dev wayland-protocols systemd-dev g++
     elif [ "$PKG" = pacman ]; then
         pkg_install gtk3 libhandy gmobile feedbackd gnome-desktop json-glib \
-            libxkbcommon dconf hunspell
+            libxkbcommon dconf hunspell hunspell-en_us \
+            gsettings-desktop-schemas wayland-protocols gcc
     else
         pkg_install libgtk-3-dev libhandy-1-dev libgmobile-dev \
             libfeedback-dev libgnome-desktop-3-dev libjson-glib-dev \
-            libxkbcommon-dev libdconf-dev libhunspell-dev
+            libxkbcommon-dev libdconf-dev libhunspell-dev hunspell-en-us \
+            gsettings-desktop-schemas-dev libsystemd-dev wayland-protocols g++
     fi
+    # g++ builds the glide (swipe) decoder; hunspell-en* is the word list
+    # the completion bar and its fallback language need.
     # hunspell above is not optional: meson errors with
     # 'No usable completer found' when neither hunspell nor presage is
     # present, and presage is not packaged on every target distro.
