@@ -88,6 +88,8 @@ _BOOL_KEYS = (
     'sound_notifications',
     'dnd_enabled',
     'focus_enabled',
+    'night_light',
+    'night_light_schedule',
 )
 
 _LIST_KEYS = (
@@ -128,6 +130,8 @@ def export_backup(config) -> dict:
         'weather_temp_unit': config.weather_temp_unit,
         'weather_auto_location': config.weather_auto_location,
         'clock_24h': config.clock_24h,
+        'keyboard_layout': config.data.get('keyboard_layout', 'us+colemak'),
+        'night_light_temp': config.data.get('night_light_temp', 2200),
     }
     for key in _BOOL_KEYS:
         backup[key] = bool(config.data.get(key, False))
@@ -232,6 +236,18 @@ def validate_backup(payload: dict) -> tuple[bool, str | None]:
         if not 50 <= number <= 100:
             return False, 'charge_limit must be between 50 and 100'
 
+    if 'keyboard_layout' in payload and not isinstance(
+            payload['keyboard_layout'], str):
+        return False, 'keyboard_layout must be a string'
+
+    if 'night_light_temp' in payload:
+        try:
+            temp = int(payload['night_light_temp'])
+        except (TypeError, ValueError):
+            return False, 'night_light_temp must be a number'
+        if not 2200 <= temp <= 6500:
+            return False, 'night_light_temp must be between 2200 and 6500'
+
     for key in ('app_time_limits', 'app_limit_ignored'):
         if key in payload and not isinstance(payload[key], dict):
             return False, f'{key} must be a dict'
@@ -319,6 +335,12 @@ def restore_backup(config, payload: dict) -> bool:
         data['charge_limit'] = None
     elif isinstance(payload.get('charge_limit'), int):
         data['charge_limit'] = max(50, min(100, payload['charge_limit']))
+    if 'night_light_temp' in payload:
+        try:
+            data['night_light_temp'] = max(
+                2200, min(6500, int(payload['night_light_temp'])))
+        except (TypeError, ValueError):
+            pass
     if isinstance(payload.get('app_time_limits'), dict):
         data['app_time_limits'] = {
             k: v for k, v in payload['app_time_limits'].items()
@@ -333,6 +355,7 @@ def restore_backup(config, payload: dict) -> bool:
         ('home_alignment', str), ('appearance_mode', str),
         ('lock_screen_notifications', str),
         ('drawer_sort', str), ('pinned', list),
+        ('keyboard_layout', str),
     )
     for key, expected in passthrough:
         if isinstance(payload.get(key), expected):

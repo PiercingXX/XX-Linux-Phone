@@ -33,6 +33,7 @@ ACTION_CHARGE = BUS_NAME + '.set-charge-limit'
 ACTION_NETWORK = BUS_NAME + '.app-network'
 ACTION_FREEZE = BUS_NAME + '.freeze'
 ACTION_CLEAN = BUS_NAME + '.clean-system'
+ACTION_READLOG = BUS_NAME + '.read-log'
 
 POLKIT_BUS = 'org.freedesktop.PolicyKit1'
 POLKIT_PATH = '/org/freedesktop/PolicyKit1/Authority'
@@ -78,6 +79,10 @@ INTROSPECT_XML = """\
       <arg name="categories" type="as" direction="in"/>
       <arg name="cleaned" type="as" direction="out"/>
     </method>
+    <method name="ReadLog">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="text" type="s" direction="out"/>
+    </method>
   </interface>
 </node>
 """
@@ -96,6 +101,18 @@ CLEAN_SYSTEM_ALLOWLIST = {
 
 APK_CACHE_DIR_DEFAULT = '/etc/apk/cache'
 SYSTEMD_DIR_DEFAULT = '/run/systemd/system'
+LOG_DIR_DEFAULT = '/var/log'
+
+# ReadLog allowlist: fixed names only, never free-form paths. 'dmesg'
+# runs the kernel log at err/warn level (for dmesg_restrict=1); the
+# rest are plain files under the log dir. Read-only, size-capped, so
+# the polkit action stays allow_active=yes like the other entries here.
+LOG_READ_ALLOWLIST = {
+    'messages': 'messages',
+    'xx-wm': 'xx-wm.log',
+    'dmesg': None,
+}
+MAX_LOG_BYTES = 128 * 1024
 
 
 class HelperError(Exception):
@@ -146,6 +163,7 @@ class HelperCore:
         mounts_file: str = MOUNTS_FILE_DEFAULT,
         state_file: str = os.path.join(STATE_DIR_DEFAULT, STATE_FILE_NAME),
         nft_bin: str = 'nft',
+        log_dir: str = LOG_DIR_DEFAULT,
         run=_default_run,
     ) -> None:
         self.sysfs = sysfs
@@ -153,6 +171,7 @@ class HelperCore:
         self.mounts_file = mounts_file
         self.state_file = state_file
         self.nft_bin = nft_bin
+        self.log_dir = log_dir
         self._run = run
 
     # ---------------------------------------------------------- capabilities
@@ -384,6 +403,54 @@ class HelperCore:
             cleaned.append(category)
         return {'cleaned': cleaned, 'skipped': skipped}
 
+    # -------------------------------------------------------------- read log
+
+    def read_log(self, name) -> str:
+        """Tail of an allowlisted system log, capped at MAX_LOG_BYTES.
+
+        ``name`` must be exactly one of LOG_READ_ALLOWLIST — anything
+        else raises InvalidArgs, so callers can never smuggle in a
+        free-form path. Read-only: no shell, no writes, no secrets
+        filtering here (the shell scrubs before display).
+        """
+        if not isinstance(name, str) or name not in LOG_READ_ALLOWLIST:
+            raise HelperError(ERROR_INVALID_ARGS,
+                              'unknown log name: %r' % (name,))
+        if name == 'dmesg':
+            try:
+                proc = self._run(['dmesg', '--level=err,warn'])
+            except OSError as err:
+                raise _failed('dmesg failed to start: %s' % err) from None
+            if getattr(proc, 'returncode', 1) != 0:
+                stderr = (getattr(proc, 'stderr', '') or '').strip()
+                raise _failed('dmesg: %s' % (
+                    stderr or 'exit %d' % getattr(proc, 'returncode', 1)))
+            return self._cap_log(getattr(proc, 'stdout', '') or '')
+        path = os.path.join(self.log_dir, LOG_READ_ALLOWLIST[name])
+        try:
+            with open(path, 'rb') as handle:
+                handle.seek(0, 2)
+                size = handle.tell()
+                handle.seek(max(0, size - MAX_LOG_BYTES))
+                data = handle.read(MAX_LOG_BYTES + 1)
+        except OSError as err:
+            raise _failed('%s: %s' % (path, err.strerror or err)) from None
+        text = data.decode('utf-8', errors='replace')
+        if size > MAX_LOG_BYTES:
+            cut = text.find('\n')
+            text = text[cut + 1:] if cut != -1 else text
+        return text
+
+    @staticmethod
+    def _cap_log(text: str) -> str:
+        data = text.encode('utf-8', errors='replace')
+        if len(data) > MAX_LOG_BYTES:
+            text = data[-MAX_LOG_BYTES:].decode('utf-8',
+                                                errors='replace')
+            cut = text.find('\n')
+            text = text[cut + 1:] if cut != -1 else text
+        return text
+
     # ---------------------------------------------------------------- freeze
 
     def freeze_cgroup(self, cgroup_path: str, frozen: bool, uid: int) -> bool:
@@ -539,6 +606,7 @@ _METHOD_ACTIONS = {
     'SetAppNetwork': ACTION_NETWORK,
     'FreezeCgroup': ACTION_FREEZE,
     'CleanSystem': ACTION_CLEAN,
+    'ReadLog': ACTION_READLOG,
 }
 
 
@@ -637,6 +705,12 @@ class HelperService:
                 Gio, GLib = _require_gio()
                 invocation.return_value(
                     GLib.Variant('(as)', (list(out.get('cleaned', [])),)))
+                return
+            elif method == 'ReadLog':
+                (log_name,) = args
+                text = self.core.read_log(str(log_name))
+                Gio, GLib = _require_gio()
+                invocation.return_value(GLib.Variant('(s)', (text,)))
                 return
             else:
                 invocation.return_dbus_error(

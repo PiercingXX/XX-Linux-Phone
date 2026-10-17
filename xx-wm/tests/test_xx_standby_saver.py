@@ -28,7 +28,7 @@ class TestSaverTile:
         keys = [t.key for t in quick_actions._TILES]
         assert keys.index('focus') < keys.index('saver') < \
             keys.index('auto_br')
-        assert keys[-3:] == ['auto_br', 'location', 'hotspot']
+        assert keys[-4:] == ['auto_br', 'location', 'hotspot', 'night']
 
     def test_no_settings_section(self):
         assert quick_actions.tile_settings_section('saver') is None

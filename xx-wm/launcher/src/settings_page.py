@@ -6,7 +6,8 @@ from gesture_config import IPC_VERBS, VALID_ACTIONS
 # Settings sections a quick-tile long-press can deep-link to (quick_actions
 # tile_settings_section emits these); anything else opens the top of the page.
 _SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'appearance',
-                          'launcher', 'standby', 'permissions', 'smart_lock',
+                          'display', 'keyboard', 'lock', 'launcher',
+                          'standby', 'permissions', 'smart_lock',
                           'charging', 'batteryuse', 'screentime', 'medical',
                           'recording', 'captions', 'nearby', 'findmy', 'about',
                           'storage', 'security')
@@ -229,9 +230,49 @@ class BatterySection(_Section):
     key = 'battery'
     title = 'Battery'
 
+    def __init__(self) -> None:
+        self._health_box = None
+
     def build(self, win) -> list:
+        from gi.repository import Gtk
         win._battery_label = _section_placeholder('Checking…')
-        return [_section_title(self.title), win._battery_label]
+        self._health_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                   spacing=0)
+        return [_section_title(self.title), win._battery_label,
+                self._health_box]
+
+    def refresh(self, win) -> None:
+        import system_settings
+
+        def _work():
+            import settings_device
+            return (system_settings.battery_status(),
+                    settings_device.format_battery_health(
+                        settings_device.battery_health_sync()))
+
+        _run_bg(_work, lambda res: self._render(win, res))
+
+    def _render(self, win, res) -> None:
+        from xx_ui import widgets
+        try:
+            status, health = res
+        except (TypeError, ValueError):
+            return
+        try:
+            win._battery_label.set_text(status or 'No battery detected.')
+        except Exception:
+            pass
+        if self._health_box is None:
+            return
+        rows = []
+        labels = (('Health', health.get('health', 'Unknown')),
+                  ('Charge cycles', health.get('cycles', 'Unknown')),
+                  ('Temperature', health.get('temperature', 'Unknown')),
+                  ('Voltage', health.get('voltage', 'Unknown')))
+        for index, (title, value) in enumerate(labels):
+            rows.append(widgets.setting_row(
+                title, value, last=index == len(labels) - 1))
+        _replace_box_children(self._health_box, rows)
 
 
 class BackupSection(_Section):
@@ -519,7 +560,15 @@ class AboutSection(_Section):
     key = 'about'
     title = 'About'
 
+    def __init__(self) -> None:
+        self._detail_box = None
+        self._storage_card = None
+        self._modem_props = None
+        self._imei_revealed = False
+        self._last_res = None
+
     def build(self, win) -> list:
+        from gi.repository import Gtk
         from xx_ui import widgets
         from importlib.metadata import version as get_version
 
@@ -532,13 +581,116 @@ class AboutSection(_Section):
         about_card.append(widgets.setting_row('Version', shell_version))
         about_card.append(widgets.setting_row(
             'Device', win._get_device_name()))
+        self._detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                   spacing=0)
+        _replace_box_children(self._detail_box, [
+            _section_placeholder('Loading device info…')])
+        self._storage_card = _section_card()
+        self._render_storage(win, 'Checking…')
         logs_row = widgets.list_row(
-            'Logs', 'Shell log tail', trailing=widgets.chevron(), last=True)
+            'Logs', 'Shell and system logs', trailing=widgets.chevron(),
+            last=True)
         logs_row.connect(
             'clicked', lambda _b: settings_launcher.open_logs(win))
         logs_card = _section_card()
         logs_card.append(logs_row)
-        return [_section_title(self.title), about_card, logs_card]
+        return [_section_title(self.title), about_card, self._detail_box,
+                self._storage_card, logs_card]
+
+    def _render_storage(self, win, summary: str) -> None:
+        from xx_ui import widgets
+        row = widgets.list_row(
+            'Storage', summary, trailing=widgets.chevron(), last=True)
+        row.connect('clicked', lambda _b: win.open_settings('storage'))
+        _replace_box_children(self._storage_card, [row])
+
+    def refresh(self, win) -> None:
+        def _work():
+            import settings_device
+            uptime = settings_device.read_uptime()
+            return {
+                'os': settings_device.os_summary(),
+                'kernel': __import__('platform').release(),
+                'uptime': settings_device.format_uptime(uptime)
+                if uptime is not None else '?',
+                'cpu': settings_device.cpu_summary(),
+                'mem': settings_device.mem_summary(),
+                'thermal': settings_device.group_thermal(
+                    settings_device.read_thermal_zones()),
+                'net': settings_device.net_summary(),
+                'modem': settings_device.modem_summary(),
+                'storage': settings_device.storage_summary_text(),
+            }
+
+        _run_bg(_work, lambda res: self._render(win, res))
+
+    def _render(self, win, res) -> None:
+        from xx_ui import widgets
+        if not isinstance(res, dict) or self._detail_box is None:
+            return
+        self._modem_props = res.get('modem')
+        ips, macs = res.get('net') or ({}, {})
+        net_lines = []
+        for iface in sorted(set(ips) | set(macs)):
+            detail = ', '.join(ips.get(iface, []))
+            if macs.get(iface):
+                detail = (detail + ' · ' + macs[iface]
+                          if detail else macs[iface])
+            net_lines.append('%s: %s' % (iface, detail or '—'))
+        thermal = res.get('thermal') or {}
+        rows = [
+            ('OS', res.get('os', '?')),
+            ('Kernel', res.get('kernel', '?')),
+            ('Uptime', res.get('uptime', '?')),
+            ('CPU', res.get('cpu', '?')),
+            ('Memory', res.get('mem', '?')),
+        ]
+        widgets_list = [widgets.setting_row(title, str(value))
+                        for title, value in rows]
+        if thermal:
+            widgets_list.append(widgets.setting_row(
+                'Temperatures',
+                ', '.join('%s %s' % (kind, temp)
+                          for kind, temp in sorted(thermal.items()))))
+        widgets_list.append(self._modem_row(win))
+        widgets_list.append(self._imei_row(win))
+        if net_lines:
+            widgets_list.append(widgets.setting_row(
+                'Network', '; '.join(net_lines), last=True))
+        else:
+            widgets_list.append(widgets.setting_row(
+                'Network', 'Unavailable', last=True))
+        _replace_box_children(self._detail_box, widgets_list)
+        self._last_res = res
+        self._render_storage(win, res.get('storage', '?'))
+
+    def _modem_row(self, win):
+        from xx_ui import widgets
+        props = self._modem_props or {}
+        parts = [str(props[key]) for key in (
+            'Manufacturer', 'Model', 'Revision') if props.get(key)]
+        return widgets.setting_row(
+            'Modem', ' · '.join(parts) if parts else (
+                'No modem detected.' if not props else 'Modem detected.'),
+            last=False)
+
+    def _imei_row(self, win):
+        from xx_ui import widgets
+        props = self._modem_props or {}
+        imei = props.get('EquipmentIdentifier')
+        if not imei:
+            return widgets.setting_row('IMEI', 'Unavailable', last=True)
+        if self._imei_revealed:
+            return widgets.setting_row('IMEI', str(imei), last=True)
+        row = widgets.list_row('IMEI', 'Tap to show',
+                               trailing=widgets.chevron(), last=True)
+        row.connect('clicked', lambda _b: self._reveal_imei(win))
+        return row
+
+    def _reveal_imei(self, win) -> None:
+        self._imei_revealed = True
+        if getattr(self, '_last_res', None) is not None:
+            self._render(win, self._last_res)
 
 
 class ShellSection(_Section):
@@ -684,7 +836,10 @@ class GesturesSection(_Section):
 # and the no-circular-imports test stays green).
 import settings_battery_use
 import settings_charging
+import settings_display
+import settings_keyboard
 import settings_launcher
+import settings_lock
 import settings_medical
 import settings_permissions
 import settings_screentime
@@ -705,8 +860,11 @@ SETTINGS_SECTIONS: list[tuple[str, type[_Section]]] = [
     ('backup', BackupSection),
     ('storage', settings_storage.StorageSection),
     ('security', settings_security.SecuritySection),
+    ('lock', settings_lock.LockSection),
     ('mobile', MobileSection),
     ('appearance', AppearanceSection),
+    ('display', settings_display.DisplaySection),
+    ('keyboard', settings_keyboard.KeyboardSection),
     ('launcher', settings_launcher.LauncherSection),
     ('standby', settings_standby.StandbySection),
     ('permissions', settings_permissions.PermissionsSection),
@@ -1103,11 +1261,10 @@ class SettingsPage:
         win = self._win
         win._refresh_xxdb_section()
         import system_settings
-        win._run_bg(system_settings.battery_status, win._show_battery)
         win._run_bg(system_settings.list_audio_sinks, win._show_sinks)
         win._run_bg(system_settings.list_bt_devices, win._show_bt_devices)
-        for key in ('launcher', 'standby', 'permissions', 'smart_lock',
-                    'recording'):
+        for key in ('battery', 'about', 'display', 'launcher', 'standby',
+                    'permissions', 'smart_lock', 'recording'):
             section = self._sections.get(key)
             if section is not None:
                 try:
@@ -1446,22 +1603,5 @@ class SettingsPage:
             win._show_status('Failed to restore backup')
 
     def _get_device_name(self) -> str:
-        import platform
-        try:
-            # Try to read device model from sysfs (common on Linux phones)
-            with open('/sys/devices/virtual/dmi/id/product_name', 'r') as f:
-                return f.read().strip()
-        except Exception:
-            pass
-
-        try:
-            with open('/sys/devices/virtual/dmi/id/sys_vendor', 'r') as f:
-                vendor = f.read().strip()
-            with open('/sys/devices/virtual/dmi/id/product_version', 'r') as f:
-                version = f.read().strip()
-            return f'{vendor} {version}'
-        except Exception:
-            pass
-
-        # Fallback to platform info
-        return f'{platform.system()} {platform.release()}'
+        import settings_device
+        return settings_device.read_device_name()

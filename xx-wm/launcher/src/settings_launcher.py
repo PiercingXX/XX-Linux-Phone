@@ -137,15 +137,47 @@ def tail_log_lines(path: str, max_lines: int = 400) -> str:
     return ''.join(lines[-max_lines:]) if len(lines) > max_lines else ''.join(lines)
 
 
+def _visible_text(view) -> str:
+    try:
+        buf = view.get_buffer()
+        return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+    except Exception:
+        return ''
+
+
+def share_log_text(text: str) -> tuple[bool, str]:
+    """Write `text` to a temp file and open it with `xx-share --send`."""
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    if shutil.which('xx-share') is None:
+        return False, 'Share is not installed on this device.'
+    try:
+        fd, path = tempfile.mkstemp(prefix='xxwm-log-', suffix='.txt')
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            handle.write(text or '')
+    except OSError as err:
+        return False, 'Could not stage the log: %s' % err
+    try:
+        subprocess.Popen(['xx-share', '--send', path], close_fds=True)
+        return True, 'Opening Share…'
+    except OSError as err:
+        return False, 'Could not open Share: %s' % err
+
+
 def open_logs(win) -> None:
-    """Settings → About → Logs: a page with the shell.log tail and Copy."""
+    """Settings → About → Logs: shell tail plus journal/kernel/system
+    tabs, with Copy and Share (via xx-share)."""
     from pathlib import Path
 
     from gi.repository import Gdk, Gtk
     from xx_ui import widgets
 
+    import settings_logs
+    from settings_page import _run_bg
+
     log_path = Path.home() / '.local' / 'share' / 'xx-wm' / 'shell.log'
-    text = tail_log_lines(str(log_path))
 
     dialog = Gtk.Window(title='Logs')
     try:
@@ -157,43 +189,115 @@ def open_logs(win) -> None:
     dialog.set_default_size(360, 720)
 
     root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    root.add_css_class('logs-root')
     root.set_margin_top(16)
     root.set_margin_bottom(24)
     root.set_margin_start(20)
     root.set_margin_end(20)
 
-    def _copy() -> None:
-        try:
-            buf = view.get_buffer()
-            copied = buf.get_text(buf.get_start_iter(), buf.get_end_iter(),
-                                  False)
-            display = Gdk.Display.get_default()
-            if display is not None:
-                display.get_clipboard().set(copied)
-        except Exception:
-            pass
-
-    header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    title = widgets.label('Logs', 'xx-title')
-    title.set_hexpand(True)
-    header.append(title)
-    header.append(widgets.text_button('Copy', _copy))
-    root.append(header)
-    root.append(widgets.wrap_label(
-        'Last 400 lines of shell.log. Nothing here leaves the phone.'))
+    state = {'tab': 'shell'}
 
     view = Gtk.TextView()
     view.set_editable(False)
     view.set_cursor_visible(False)
     view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
     view.set_monospace(True)
-    view.get_buffer().set_text(text or 'No log yet.')
+
+    status = widgets.wrap_label(
+        'Capped output. PINs and passwords are redacted.')
+
+    def _show(text: str) -> None:
+        try:
+            view.get_buffer().set_text(text or 'No log yet.')
+        except Exception:
+            pass
+
+    def _fetch(tab: str) -> None:
+        state['tab'] = tab
+        _show('Loading…')
+        if tab == 'shell':
+            _run_bg(
+                lambda: settings_logs.scrub_secrets(settings_logs.cap_text(
+                    tail_log_lines(str(log_path)))),
+                _show)
+            return
+        helper_name = settings_logs.helper_log_name(tab)
+        if helper_name is not None:
+            _fetch_helper_log(helper_name)
+            return
+
+        def _work():
+            return settings_logs.fetch_journal(tab)
+
+        def _done(text) -> None:
+            if (tab == 'kernel' and isinstance(text, str)
+                    and text.startswith('dmesg restricted')):
+                _show(text + '\nRetrying as a service…')
+                _fetch_helper_log('dmesg')
+                return
+            _show(text if isinstance(text, str) else 'Log unavailable.')
+
+        _run_bg(_work, _done)
+
+    def _fetch_helper_log(name: str) -> None:
+        try:
+            import helper_client
+        except ImportError:
+            _show('Helper client unavailable.')
+            return
+
+        def _done(ok: bool, result) -> None:
+            if not ok:
+                _show('System log unavailable (%s).' % result)
+                return
+            _show(settings_logs.scrub_secrets(
+                settings_logs.cap_text(str(result or 'No entries.'))))
+
+        helper_client.read_log(name, _done)
+
+    def _copy() -> None:
+        try:
+            copied = _visible_text(view)
+            display = Gdk.Display.get_default()
+            if display is not None:
+                display.get_clipboard().set(copied)
+                status.set_text('Copied.')
+        except Exception:
+            pass
+
+    def _share() -> None:
+        ok, message = share_log_text(_visible_text(view))
+        try:
+            status.set_text(message)
+        except Exception:
+            pass
+        _ = ok
+
+    header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    title = widgets.label('Logs', 'xx-title')
+    title.set_hexpand(True)
+    header.append(title)
+    header.append(widgets.text_button('Copy', _copy))
+    header.append(widgets.text_button('Share', _share))
+    root.append(header)
+    tabs = widgets.segmented([
+        (label, key == state['tab'],
+         lambda key=key: _fetch(key))
+        for key, label in settings_logs.TABS])
+    tab_scroll = Gtk.ScrolledWindow(hexpand=True)
+    tab_scroll.set_policy(Gtk.PolicyType.AUTOMATIC,
+                          Gtk.PolicyType.NEVER)
+    tab_scroll.set_child(tabs)
+    root.append(tab_scroll)
+    root.append(status)
+
     scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
     scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroll.set_child(view)
     root.append(scroll)
 
     dialog.set_child(root)
+    _fetch('shell')
     try:
         dialog.present()
     except Exception:

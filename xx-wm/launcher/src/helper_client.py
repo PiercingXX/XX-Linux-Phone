@@ -187,3 +187,19 @@ def clean_system(categories: list[str], on_done: ResultCallback) -> None:
         on_done(ok, list(result) if ok else result)
 
     _call_helper('CleanSystem', params, _done)
+
+
+def read_log(name: str, on_done: ResultCallback) -> None:
+    """Ask the helper for an allowlisted log tail ('messages', 'xx-wm',
+    'dmesg'). ``on_done(True, text)`` on success, ``(False, error)``
+    otherwise. Read-only: the helper caps the size and the shell
+    scrubs secrets before display.
+    """
+    try:
+        Gio, GLib = _gio()
+        params = GLib.Variant('(s)', (str(name),))
+    except ImportError as err:
+        on_done(False, 'D-Bus unavailable: %s' % err)
+        return
+    _call_helper('ReadLog', params, lambda ok, result: on_done(
+        ok, str(result or '') if ok else result))

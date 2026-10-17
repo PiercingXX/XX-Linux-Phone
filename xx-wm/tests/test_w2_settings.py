@@ -254,6 +254,13 @@ def window():
             self.props['adjustment_value'] = value
 
     class _FakeScale(_FakeWidget):
+        @classmethod
+        def new_with_range(cls, orientation, min_value, max_value, step):
+            scale = cls()
+            scale.props['range'] = (min_value, max_value, step)
+            scale.props['adjustment_value'] = min_value
+            return scale
+
         def set_digits(self, digits):
             self.props['digits'] = digits
 

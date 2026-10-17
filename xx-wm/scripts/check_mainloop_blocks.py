@@ -139,6 +139,12 @@ ALLOW = {
         'APN apply worker (_apply_apn _work).',
     ('settings_storage.py', '_run'):
         'sole subprocess chokepoint; invoked via _run_bg workers only.',
+    ('settings_device.py', '_run'):
+        'sole subprocess chokepoint; invoked via _run_bg workers only.',
+    ('settings_device.py', 'dbus_call_sync'):
+        'sole D-Bus sync chokepoint; invoked via _run_bg workers only.',
+    ('settings_logs.py', '_run'):
+        'sole subprocess chokepoint; invoked via _run_bg workers only.',
     ('settings_security.py', '_run'):
         'sole subprocess chokepoint; invoked via _run_bg workers only.',
     ('filebackup.py', '_run_capture'):

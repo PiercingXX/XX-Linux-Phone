@@ -32,29 +32,47 @@ _TERMINALS: list[tuple[str, Callable[[str, str], list[str]]]] = [
 ]
 
 
+def terminal_argv(cmd: str) -> tuple[str, list[str]] | None:
+    """(binary, argv) running `cmd` in the first available terminal
+    emulator, or None when no terminal is installed. Pure lookup apart
+    from the which() probes."""
+    if shutil.which('bash'):
+        # read -rsn1 exits on any single key — including the Escape the shell's
+        # back gesture synthesizes — so an edge swipe closes the terminal.
+        shell = 'bash'
+        full = (f'{cmd}; echo; echo "Done — swipe from the screen edge '
+                'to close."; read -rsn1 _')
+    else:
+        shell = 'sh'
+        full = f'{cmd}; echo; echo "Done — press Enter to close."; read _'
+    for binary, build in _TERMINALS:
+        if shutil.which(binary):
+            return binary, build(shell, full)
+    return None
+
+
+def run_terminal_command(cmd: str) -> tuple[bool, str]:
+    """Open `cmd` in the first available terminal emulator (fire-and-
+    forget, never waited on)."""
+    found = terminal_argv(cmd)
+    if found is None:
+        return False, 'No terminal emulator found (kitty, foot, alacritty, ...).'
+    binary, argv = found
+    try:
+        subprocess.Popen(argv, close_fds=True)
+        return True, binary
+    except OSError as e:
+        _log.warning('failed to launch %s: %s', binary, e)
+        return False, 'Could not open a terminal.'
+
+
 def run_update_script(script_path: str) -> tuple[bool, str]:
     """Open the update script in the first available terminal emulator."""
     path = Path(script_path).expanduser()
     if not path.exists():
         return False, f'Update script not found: {path}'
 
-    quoted = shlex.quote(str(path))
-    if shutil.which('bash'):
-        # read -rsn1 exits on any single key — including the Escape the shell's
-        # back gesture synthesizes — so an edge swipe closes the terminal.
-        shell = 'bash'
-        cmd = f'{quoted}; echo; echo "Done — swipe from the screen edge to close."; read -rsn1 _'
-    else:
-        shell = 'sh'
-        cmd = f'{quoted}; echo; echo "Done — press Enter to close."; read _'
-    for binary, argv in _TERMINALS:
-        if shutil.which(binary):
-            try:
-                subprocess.Popen(argv(shell, cmd), close_fds=True)
-                return True, binary
-            except OSError as e:
-                _log.warning('failed to launch %s: %s', binary, e)
-    return False, 'No terminal emulator found (kitty, foot, alacritty, ...).'
+    return run_terminal_command(shlex.quote(str(path)))
 
 
 # Package indexes `apt list --upgradable` / `apk list --upgradable` read go

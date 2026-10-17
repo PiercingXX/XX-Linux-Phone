@@ -163,9 +163,9 @@ def test_settings_registry_order_and_shape():
     keys = [key for key, _cls in settings_page.SETTINGS_SECTIONS]
     assert keys == ['system', 'wifi', 'bluetooth', 'sound', 'battery',
                     'charging', 'batteryuse', 'screentime',
-                    'backup', 'storage', 'security', 'mobile',
-                    'appearance', 'launcher', 'standby',
-                    'permissions', 'smart_lock', 'medical',
+                    'backup', 'storage', 'security', 'lock', 'mobile',
+                    'appearance', 'display', 'keyboard', 'launcher',
+                    'standby', 'permissions', 'smart_lock', 'medical',
                     'recording', 'captions', 'nearby', 'findmy',
                     'about', 'shell', 'developer', 'gestures']
     for key, cls in settings_page.SETTINGS_SECTIONS:

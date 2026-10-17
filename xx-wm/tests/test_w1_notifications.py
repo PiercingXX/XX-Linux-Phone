@@ -633,6 +633,10 @@ class TestAsyncTileRefresh:
                                                    active=True))
         monkeypatch.setattr(quick_actions, '_nm_get', lambda prop: False)
         monkeypatch.setattr(quick_actions, '_dbus_system', lambda: None)
+        monkeypatch.setattr(quick_actions, '_night_light_available',
+                            lambda: True)
+        monkeypatch.setattr(quick_actions, '_get_night_state',
+                            lambda: False)
         spawned: list = []
         monkeypatch.setattr(quick_actions, '_spawn_worker_thread',
                             lambda target: spawned.append(target))
@@ -645,7 +649,7 @@ class TestAsyncTileRefresh:
         glib.run_idle()
         assert panel._tile_state == {
             'wifi': False, 'data': False, 'saver': False,
-            'airplane': True, 'location': True}
+            'airplane': True, 'location': True, 'night': False}
 
     def test_refresh_states_survives_worker_probe_failure(self, monkeypatch):
         panel = _bare_panel()
@@ -664,10 +668,14 @@ class TestAsyncTileRefresh:
                                                    active=True))
         monkeypatch.setattr(quick_actions, '_nm_get', lambda prop: False)
         monkeypatch.setattr(quick_actions, '_dbus_system', lambda: None)
+        monkeypatch.setattr(quick_actions, '_night_light_available',
+                            lambda: True)
+        monkeypatch.setattr(quick_actions, '_get_night_state',
+                            lambda: False)
         assert panel._refresh_all_states() is False
         assert panel._tile_state == {
             'wifi': False, 'data': False, 'saver': False,
-            'airplane': True, 'location': True}
+            'airplane': True, 'location': True, 'night': False}
 
     def test_hardware_gates_cached_after_first_probe(self, monkeypatch):
         probes: list = []

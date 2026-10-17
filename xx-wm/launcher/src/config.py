@@ -107,6 +107,10 @@ DEFAULT_CONFIG = {
     'clock_24h': None,
     'xxdb_enabled': False,
     'xxdb_persistent': False,
+    'keyboard_layout': 'us+colemak',
+    'night_light': False,
+    'night_light_temp': 2200,
+    'night_light_schedule': False,
 }
 
 _WEATHER_TEMP_UNITS = ('fahrenheit', 'celsius')
@@ -127,7 +131,8 @@ def same_app_id(first: object, second: object) -> bool:
 
 # Free-form string keys (docs/config.md); a container value here would
 # crash set_text() consumers when the settings page is built.
-_STRING_KEYS = ('apn', 'apn_user', 'apn_pass', 'weather_location')
+_STRING_KEYS = ('apn', 'apn_user', 'apn_pass', 'weather_location',
+                'keyboard_layout')
 
 # Drawer sort modes (docs/config.md): 'default' pins first then A–Z,
 # 'az' is plain A–Z with no pin priority, 'install' is newest first.

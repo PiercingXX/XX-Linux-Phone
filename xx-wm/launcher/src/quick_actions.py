@@ -229,6 +229,7 @@ _TILE_SETTINGS_SECTIONS = {
     'bt': 'bluetooth',
     'data': 'mobile',
     'airplane': 'mobile',
+    'night': 'display',
 }
 
 
@@ -780,6 +781,36 @@ def _set_record_state(value: bool) -> None:
         pass
 
 
+def _night_light_available() -> bool:
+    """True when wlsunset or gammastep is installed; without either the
+    Night tile hides entirely instead of offering a dead toggle."""
+    import shutil
+    try:
+        return shutil.which('wlsunset') is not None or \
+            shutil.which('gammastep') is not None
+    except Exception:
+        return False
+
+
+def _display_module():
+    import settings_display
+    return settings_display
+
+
+def _get_night_state() -> bool | None:
+    try:
+        return _display_module().tile_get_night()
+    except Exception:
+        return None
+
+
+def _set_night_state(value: bool) -> None:
+    try:
+        _display_module().tile_set_night(bool(value))
+    except Exception:
+        pass
+
+
 def _captions_installed() -> bool:
     """True when xx-captions is installed; without it the Captions tile
     hides entirely instead of offering a dead toggle."""
@@ -863,6 +894,7 @@ _TILES: list[_TileDef] = [
     _TileDef('auto_br',  'Auto',     lambda: None,                        lambda _v: None,                         2),
     _TileDef('location', 'Location', lambda: None,                        lambda _v: None,                         2),
     _TileDef('hotspot',  'Hotspot',  _get_hotspot_state,                  _toggle_hotspot,                         2),
+    _TileDef('night',    'Night',    _get_night_state,                    _set_night_state,                        2),
 ]
 
 
@@ -1004,6 +1036,9 @@ class QuickActionsPanel(Gtk.Box):
                     continue
                 if not self._cached_gate('hotspot', _nm_has_wifi_device):
                     continue
+            if tile.key == 'night' and not self._cached_gate(
+                    'night', _night_light_available):
+                continue
             if tile.key == 'location':
                 if (not include_slow_gates and cache is not None
                         and 'location' not in cache):

@@ -44,4 +44,14 @@
       <allow_active>yes</allow_active>
     </defaults>
   </action>
+
+  <action id="io.piercingxx.XXWM.Helper1.read-log">
+    <description>Read a system log</description>
+    <message>Authentication is required to read system logs.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

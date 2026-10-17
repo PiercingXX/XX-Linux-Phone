@@ -125,10 +125,12 @@ install_deps() {
         pkg_install geoclue
         pkg_install networkmanager
         pkg_install brightnessctl
+        pkg_install wlsunset
     elif [ "$PKG" = pacman ]; then
         pkg_install python-gobject gtk4 libadwaita gtk4-layer-shell meson ninja \
             rsync git squeekboard phoc python-pywayland wl-clipboard geoclue \
             networkmanager brightnessctl python-phonenumbers openssl python-cairo
+        pkg_install wlsunset
         if command -v lisgd >/dev/null 2>&1; then
             echo "lisgd already present: $(command -v lisgd)"
         else
@@ -143,6 +145,7 @@ install_deps() {
         pkg_install geoclue-2.0
         pkg_install network-manager
         pkg_install brightnessctl
+        pkg_install wlsunset
     fi
     install_portals
 }

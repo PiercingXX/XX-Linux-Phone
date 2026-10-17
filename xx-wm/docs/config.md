@@ -254,6 +254,10 @@ surface, not the store.
 | `apn` / `apn_user` / `apn_pass` | string | — | Mobile-data APN pushed to NetworkManager (Settings page owns these). |
 | `update_script` | string | PiercingXX menu path | Script run by "Update system". |
 | `update_last_check` / `update_snooze_until` | float | `0.0` | Daily update-check bookkeeping. |
+| `keyboard_layout` | string | `"us+colemak"` | XKB `layout[+variant]` applied at session start and by Settings → Keyboard (presets: US Colemak, Colemak-DH, QWERTY, Dvorak, UK, DE, or custom). Included in backups. |
+| `night_light` | bool | `false` | Night-light master switch state (Settings → Display, "Night" tile). |
+| `night_light_temp` | int | `2200` | Night-light temperature in Kelvin, clamped 2200–6500. Included in backups. |
+| `night_light_schedule` | bool | `false` | When true the light follows sunset-to-sunrise from the weather coordinates instead of staying on. |
 
 ### Wireless debugging (xxdb)
 

@@ -523,7 +523,7 @@ class TestFormatTileState:
 
     def test_plain_on_off_tiles(self):
         for key in ('data', 'airplane', 'torch', 'dnd', 'focus', 'auto_br',
-                    'location', 'hotspot'):
+                    'location', 'hotspot', 'night'):
             assert quick_actions.format_tile_state(key, True) == 'On'
             assert quick_actions.format_tile_state(key, False) == 'Off'
 

@@ -372,6 +372,8 @@ class TestLocationGating:
 
     def test_expanded_tier_orders_both_after_auto_brightness(self, monkeypatch):
         monkeypatch.setattr(quick_actions, '_nm_has_wifi_device', lambda: True)
+        monkeypatch.setattr(quick_actions, '_night_light_available',
+                            lambda: True)
 
         class _ALS:
             def available(self):
@@ -384,7 +386,7 @@ class TestLocationGating:
         panel = _bare_panel()
         panel._als = _ALS()
         keys = [t.key for t in panel._tiles()]
-        assert keys[-3:] == ['auto_br', 'location', 'hotspot']
+        assert keys[-4:] == ['auto_br', 'location', 'hotspot', 'night']
 
     def test_panel_toggle_routes_to_location_state(self):
         loc = _FakeLocation()
