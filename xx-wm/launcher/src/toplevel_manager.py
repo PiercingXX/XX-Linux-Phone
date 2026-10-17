@@ -55,9 +55,11 @@ def decode_state_array(state: object) -> tuple[int, ...]:
     return ()
 
 # The shell's own surfaces must never appear in the switcher, nor the
-# on-screen keyboard (it is a regular toplevel while typing).
+# on-screen keyboard (it is a regular toplevel while typing). xx-keyboard
+# ships as io.piercingxx.XXKeyboard (casefolded: xxkeyboard, no hyphen),
+# so both spellings are filtered; squeekboard stays for the fallback.
 _OWN_APP_ID = 'io.piercingxx.XXWM'
-_FILTERED_SUBSTRINGS = ('squeekboard',)
+_FILTERED_SUBSTRINGS = ('squeekboard', 'xx-keyboard', 'xxkeyboard')
 
 # Bind v1 only. phoc 0.56 still sends handle event 7 (`parent`, protocol v2+);
 # bindings generated from older output only know events 0–6, and pywayland

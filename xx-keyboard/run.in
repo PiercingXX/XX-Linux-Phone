@@ -18,13 +18,13 @@ STATE=$(gsettings get org.gnome.desktop.a11y.applications screen-keyboard-enable
 gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true
 
 if [ "${POS_GDB}" = 1 ]; then
-    echo "Running phosh-osk-stevia under gdb"
+    echo "Running xx-keyboard under gdb"
     WRAPPER="gdb --args"
 fi
 
 set +e
 set -x
-${WRAPPER} "${ABS_BUILDDIR}/src/phosh-osk-stevia" "$@"
+${WRAPPER} "${ABS_BUILDDIR}/src/xx-keyboard" "$@"
 ret=$?
 set -e
 

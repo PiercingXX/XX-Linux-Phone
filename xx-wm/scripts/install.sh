@@ -119,7 +119,7 @@ install_deps() {
     echo "Installing build and runtime dependencies..."
     if [ "$PKG" = apk ]; then
         pkg_install py3-gobject3 gtk4.0 libadwaita gtk4-layer-shell \
-            meson ninja rsync git squeekboard phoc lisgd wl-clipboard
+            meson ninja rsync git phoc lisgd wl-clipboard
         pkg_install py3-wayland
         pkg_install py3-phonenumbers openssl py3-cairo
         pkg_install geoclue
@@ -128,7 +128,7 @@ install_deps() {
         pkg_install wlsunset
     elif [ "$PKG" = pacman ]; then
         pkg_install python-gobject gtk4 libadwaita gtk4-layer-shell meson ninja \
-            rsync git squeekboard phoc python-pywayland wl-clipboard geoclue \
+            rsync git phoc python-pywayland wl-clipboard geoclue \
             networkmanager brightnessctl python-phonenumbers openssl python-cairo
         pkg_install wlsunset
         if command -v lisgd >/dev/null 2>&1; then
@@ -138,7 +138,7 @@ install_deps() {
         fi
     else
         pkg_install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
-            libgtk4-layer-shell0 meson ninja-build rsync git squeekboard \
+            libgtk4-layer-shell0 meson ninja-build rsync git \
             phoc lisgd wl-clipboard
         pkg_install python3-pywayland
         pkg_install python3-phonenumbers openssl python3-gi-cairo
@@ -166,6 +166,39 @@ install_portals() {
     else
         pkg_install xdg-desktop-portal xdg-desktop-portal-gtk \
             xdg-desktop-portal-wlr
+    fi
+}
+
+install_xx_keyboard_deps() {
+    # Build deps for xx-keyboard (Stevia fork, C/GTK3). squeekboard is no
+    # longer installed; it stays only a runtime fallback in xx-wm.in.
+    echo "Installing xx-keyboard build dependencies..."
+    if [ "$PKG" = apk ]; then
+        pkg_install gtk+3.0-dev libhandy1-dev gmobile-dev feedbackd-dev \
+            gnome-desktop-dev json-glib-dev libxkbcommon-dev dconf-dev \
+            hunspell-dev
+    elif [ "$PKG" = pacman ]; then
+        pkg_install gtk3 libhandy gmobile feedbackd gnome-desktop json-glib \
+            libxkbcommon dconf hunspell
+    else
+        pkg_install libgtk-3-dev libhandy-1-dev libgmobile-dev \
+            libfeedback-dev libgnome-desktop-3-dev libjson-glib-dev \
+            libxkbcommon-dev libdconf-dev libhunspell-dev
+    fi
+    # hunspell above is not optional: meson errors with
+    # 'No usable completer found' when neither hunspell nor presage is
+    # present, and presage is not packaged on every target distro.
+}
+
+install_xx_keyboard() {
+    echo "Building xx-keyboard..."
+    if (cd "$REPO_DIR/../xx-keyboard" &&
+        { meson setup build --prefix=/usr --reconfigure ||
+          meson setup build --prefix=/usr; } &&
+        $SUDO meson install -C build); then
+        :
+    else
+        echo "warn: xx-keyboard did not install; the session falls back to squeekboard when present" >&2
     fi
 }
 
@@ -298,8 +331,11 @@ build_install() {
     meson setup build --prefix=/usr --reconfigure || meson setup build --prefix=/usr || return 1
     $SUDO meson install -C build || return 1
     install_apps
+    install_xx_keyboard_deps
+    install_xx_keyboard
     cd "$REPO_DIR" || return 1
 
+    # Kept for the squeekboard runtime fallback only (see xx-wm.in).
     link_squeekboard_layouts
     check_layer_shell || true
 

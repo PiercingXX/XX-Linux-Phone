@@ -43,6 +43,8 @@ layouts = [
   'nl.json',
   'no.json',
   'ph.json',
+  # xx-keyboard: the owner's Piercing letters (num variant digits)
+  'piercing-num.json',
   'pl.json',
   'pt.json',
   'ro.json',

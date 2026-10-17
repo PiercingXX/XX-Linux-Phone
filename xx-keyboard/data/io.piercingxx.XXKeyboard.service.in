@@ -1,7 +1,8 @@
 # This is a systemd user unit intended to be started with gnome-session.
 
 [Unit]
-Description=Stevia, a user friendly on screen keyboard
+# xx-keyboard: Stevia fork (same sm.puri.OSK0 name, xx-keyboard binary).
+Description=xx-keyboard, a user friendly on screen keyboard
 Documentation=https://gitlab.gnome.org/World/Phosh/stevia
 CollectMode=inactive-or-failed
 
@@ -11,7 +12,7 @@ After=gnome-session-initialized.target
 Slice=session.slice
 Type=dbus
 BusName=@busname@
-ExecStart=@bindir@/phosh-osk-stevia --allow-replacement
+ExecStart=@bindir@/xx-keyboard --allow-replacement
 Restart=on-failure
 RestartSec=1s
 TimeoutStopSec=5

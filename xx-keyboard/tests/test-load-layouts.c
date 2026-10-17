@@ -54,27 +54,44 @@ test_load_layouts (void)
     g_test_message ("Loading layout %s", layout_id);
 
     if (g_strcmp0 (names[i], "terminal.json")) {
-      g_assert_true (gnome_xkb_info_get_layout_info (xkbinfo,
-                                                     layout_id,
-                                                     NULL,
-                                                     NULL,
-                                                     &layout,
-                                                     &variant));
-      pos_osk_widget_set_layout (osk_widget,
-                                 "doesnotmatter",
-                                 layout_id,
-                                 "Test",
-                                 layout,
-                                 variant,
-                                 &err);
-      g_assert_nonnull (pos_osk_widget_get_lang (osk_widget));
-      g_assert_nonnull (pos_osk_widget_get_region (osk_widget));
-      g_assert_true (g_regex_match (lang_re, pos_osk_widget_get_lang (osk_widget),
-                                    G_REGEX_MATCH_DEFAULT,
-                                    NULL));
-      g_assert_true (g_regex_match (region_re, pos_osk_widget_get_region (osk_widget),
-                                    G_REGEX_MATCH_DEFAULT,
-                                    NULL));
+      /* xx-keyboard: bundled layouts without a system xkb entry (e.g.
+       * Piercing) still load from the resource by layout id. */
+      if (gnome_xkb_info_get_layout_info (xkbinfo,
+                                          layout_id,
+                                          NULL,
+                                          NULL,
+                                          &layout,
+                                          &variant)) {
+        pos_osk_widget_set_layout (osk_widget,
+                                   "doesnotmatter",
+                                   layout_id,
+                                   "Test",
+                                   layout,
+                                   variant,
+                                   &err);
+        g_assert_nonnull (pos_osk_widget_get_lang (osk_widget));
+        g_assert_nonnull (pos_osk_widget_get_region (osk_widget));
+        g_assert_true (g_regex_match (lang_re, pos_osk_widget_get_lang (osk_widget),
+                                      G_REGEX_MATCH_DEFAULT,
+                                      NULL));
+        g_assert_true (g_regex_match (region_re, pos_osk_widget_get_region (osk_widget),
+                                      G_REGEX_MATCH_DEFAULT,
+                                      NULL));
+      } else {
+        g_auto (GStrv) parts = g_strsplit (layout_id, "+", 2);
+        g_test_message ("No xkb info for %s, loading bundled resource", layout_id);
+        g_assert_true (pos_osk_widget_set_layout (osk_widget,
+                                                  layout_id,
+                                                  layout_id,
+                                                  "Test",
+                                                  parts[0],
+                                                  parts[1],
+                                                  &err));
+        g_assert_nonnull (pos_osk_widget_get_lang (osk_widget));
+        g_assert_true (g_regex_match (lang_re, pos_osk_widget_get_lang (osk_widget),
+                                      G_REGEX_MATCH_DEFAULT,
+                                      NULL));
+      }
     }
 
     g_assert_no_error (err);

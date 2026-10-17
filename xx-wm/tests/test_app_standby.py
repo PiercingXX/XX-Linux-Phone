@@ -359,6 +359,8 @@ class TestExemptMatching:
     def test_keyboard_ids(self):
         assert is_keyboard_app('sm.puri.squeekboard.desktop') is True
         assert is_keyboard_app('stevia.desktop') is True
+        assert is_keyboard_app('io.piercingxx.XXKeyboard') is True
+        assert is_keyboard_app('xx-keyboard') is True
         assert is_keyboard_app('org.gnome.Terminal.desktop') is False
 
 

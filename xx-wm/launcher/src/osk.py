@@ -1,8 +1,9 @@
 """On-screen keyboard helper for layer-shell surfaces.
 
 phoc layer-shell v3 has no ON_DEMAND. While an editable is focused the
-surface uses EXCLUSIVE and squeekboard SetVisible(True); otherwise NONE
-and hide. SetVisible is always async — never call_sync on the UI thread.
+surface uses EXCLUSIVE and the keyboard's SetVisible(True); otherwise
+NONE and hide. SetVisible is always async — never call_sync on the UI
+thread. Works with xx-keyboard or squeekboard (same sm.puri.OSK0 name).
 """
 from __future__ import annotations
 

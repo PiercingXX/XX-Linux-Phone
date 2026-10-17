@@ -224,6 +224,22 @@ def test_squeekboard_match_is_case_insensitive(
     assert manager.list() == []
 
 
+def test_xx_keyboard_surface_filtered(
+    backend: FakeBackend, manager: ToplevelManager,
+) -> None:
+    backend.add('h1', 'org.a.App', 'A')
+    backend.add('h2', 'io.piercingxx.XXKeyboard', 'Keyboard')
+    backend.add('h3', 'org.b.App', 'B')
+    assert [t.handle for t in manager.list()] == ['h1', 'h3']
+
+
+def test_xx_keyboard_match_is_case_insensitive(
+    backend: FakeBackend, manager: ToplevelManager,
+) -> None:
+    backend.add('h1', 'io.piercingxx.Xxkeyboard', 'Keyboard')
+    assert manager.list() == []
+
+
 class StubDeferredBackend:
     """Test double for DeferredWaylandBackend with a manual ready trigger."""
 

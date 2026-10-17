@@ -1,5 +1,6 @@
 project(
-  'phosh-osk-stevia',
+  # xx-keyboard: Stevia fork, see README.xx.md. Version tracks upstream.
+  'xx-keyboard',
   'c',
   version: '0.58.0',
   license: 'GPLv3+',
@@ -8,7 +9,7 @@ project(
 )
 
 
-app_id = 'mobi.phosh.Stevia'
+app_id = 'io.piercingxx.XXKeyboard'
 
 prefix = get_option('prefix')
 bindir = join_paths(prefix, get_option('bindir'))

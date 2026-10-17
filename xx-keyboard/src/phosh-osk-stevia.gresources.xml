@@ -56,6 +56,8 @@
     <file preprocess="json-stripblanks">layouts/nl.json</file>
     <file preprocess="json-stripblanks">layouts/no.json</file>
     <file preprocess="json-stripblanks">layouts/ph.json</file>
+    <!-- xx-keyboard: the owner's Piercing letters (num variant digits) -->
+    <file preprocess="json-stripblanks">layouts/piercing-num.json</file>
     <file preprocess="json-stripblanks">layouts/pl.json</file>
     <file preprocess="json-stripblanks">layouts/pt.json</file>
     <file preprocess="json-stripblanks">layouts/ro.json</file>

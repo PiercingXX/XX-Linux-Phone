@@ -245,9 +245,15 @@ def set_timezone_async(timezone: str,
 
 
 def keyboard_step_available() -> bool:
-    """True when squeekboard + the Colemak layouts are installed (18.3)."""
+    """True when an on-screen keyboard is installed (18.3).
+
+    xx-keyboard ships its layouts in the binary; squeekboard (the
+    fallback) still needs the Colemak layout files on disk.
+    """
     import shutil
     from pathlib import Path
+    if shutil.which('xx-keyboard'):
+        return True
     if not shutil.which('squeekboard'):
         return False
     return any(

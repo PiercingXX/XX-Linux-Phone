@@ -11,6 +11,7 @@
 #include "pos-config.h"
 
 #include "pos-style-manager.h"
+#include "pos-xx-theme.h"
 #include "util.h"
 
 #include <gtk/gtk.h>
@@ -52,10 +53,52 @@ struct _PosStyleManager {
   char           *theme_name;
   GtkCssProvider *css_provider;
   GtkCssProvider *accent_css_provider;
+  /* xx-keyboard: live xx-wm theme override (APPLICATION priority) */
+  GtkCssProvider *xx_provider;
+  GFileMonitor   *xx_monitor;
 
   GSettings      *interface_settings;
 };
 G_DEFINE_TYPE (PosStyleManager, pos_style_manager, G_TYPE_OBJECT)
+
+
+/* xx-keyboard: reload the xx-wm theme override from the shell config */
+static void
+xx_theme_reload (PosStyleManager *self)
+{
+  PosXxTheme theme = { 0 };
+  g_autofree char *css = NULL;
+
+  if (self->xx_provider == NULL)
+    return;
+
+  pos_xx_theme_load (&theme);
+  css = pos_xx_theme_render_css (&theme);
+  g_debug ("xx theme: applying '%s' override", theme.key);
+  pos_xx_theme_free (&theme);
+
+  if (gdk_screen_get_default () != NULL)
+    gtk_css_provider_load_from_data (self->xx_provider, css, -1, NULL);
+}
+
+
+static void
+on_xx_theme_file_changed (GFileMonitor *monitor,
+                          GFile *file,
+                          GFile *other_file,
+                          GFileMonitorEvent event_type,
+                          gpointer user_data)
+{
+  PosStyleManager *self = POS_STYLE_MANAGER (user_data);
+
+  /* CHANGES_DONE_HINT debounces the editor's write burst */
+  if (event_type != G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT &&
+      event_type != G_FILE_MONITOR_EVENT_CREATED &&
+      event_type != G_FILE_MONITOR_EVENT_DELETED)
+    return;
+
+  xx_theme_reload (self);
+}
 
 
 static void
@@ -177,6 +220,13 @@ pos_style_manager_dispose (GObject *object)
 {
   PosStyleManager *self = POS_STYLE_MANAGER (object);
 
+  if (self->xx_provider != NULL && gdk_screen_get_default () != NULL) {
+    gtk_style_context_remove_provider_for_screen (gdk_screen_get_default (),
+                                                  GTK_STYLE_PROVIDER (self->xx_provider));
+  }
+  g_clear_object (&self->xx_monitor);
+  g_clear_object (&self->xx_provider);
+
   g_clear_pointer (&self->theme_name, g_free);
   g_clear_object (&self->css_provider);
   g_clear_object (&self->accent_css_provider);
@@ -222,6 +272,16 @@ pos_style_manager_init (PosStyleManager *self)
                             G_CALLBACK (on_gtk_theme_name_changed),
                             self);
   on_gtk_theme_name_changed (self, NULL, gtk_settings);
+
+  /* xx-keyboard: follow the xx-wm theme live, on top of the base sheets */
+  self->xx_provider = gtk_css_provider_new ();
+  if (gdk_screen_get_default () != NULL) {
+    gtk_style_context_add_provider_for_screen (gdk_screen_get_default (),
+                                               GTK_STYLE_PROVIDER (self->xx_provider),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  }
+  xx_theme_reload (self);
+  self->xx_monitor = pos_xx_theme_watch (G_CALLBACK (on_xx_theme_file_changed), self);
 }
 
 

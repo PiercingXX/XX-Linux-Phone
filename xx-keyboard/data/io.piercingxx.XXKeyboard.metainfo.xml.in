@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="inputmethod">
-  <id>mobi.phosh.Stevia</id>
+  <id>io.piercingxx.XXKeyboard</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>Phosh OSK</name>
-  <summary>On Screen Keyboard for Phosh</summary>
+  <name>XX Keyboard</name>
+  <summary>On Screen Keyboard for the XX phone (Stevia fork)</summary>
   <replaces>
       <id>sm.puri.Phosh.OskStub</id>
   </replaces>
@@ -64,6 +64,13 @@
   </screenshots>
 
   <releases>
+    <release version="0.58.0" date="2026-10-17">
+      <description translate="no">
+        <ul>
+          <li>xx-keyboard: Stevia fork with the phone's own branding, xx-wm theme following, Piercing layout and us+colemak default</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.58.0" date="2026-10-03">
       <description translate="no">
         <ul>

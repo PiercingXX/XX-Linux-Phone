@@ -137,8 +137,10 @@ def test_apk_pywayland_name(install_script):
 
 def test_valid_apk_names_pinned(install_script):
     body = _function_body(install_script, 'install_deps')
+    # squeekboard is intentionally gone: xx-keyboard is installed instead
+    # (install_xx_keyboard) and squeekboard stays a fallback only.
     for pkg in ('gtk4.0', 'libadwaita', 'gtk4-layer-shell', 'lisgd',
-                'squeekboard', 'brightnessctl'):
+                'brightnessctl'):
         assert pkg in body, f'apk deps miss {pkg}'
 
 

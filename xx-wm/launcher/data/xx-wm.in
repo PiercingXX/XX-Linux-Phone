@@ -19,11 +19,14 @@ if _xx_probe_live "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
     echo "xx-wm: already running, not starting a second session" >&2
     exit 0
 fi
-# Runs inside the phoc session. Start the on-screen keyboard (squeekboard,
-# with the PiercingXX Colemak layouts) before the shell; squeekboard shows
-# and hides itself on input-method activation, and the shade/lock windows
-# sit on higher layers.
-if command -v squeekboard >/dev/null 2>&1; then
+# Runs inside the phoc session. Start the on-screen keyboard
+# (xx-keyboard, with the Piercing and Colemak layouts) before the shell;
+# it shows and hides itself on input-method activation, and the
+# shade/lock windows sit on higher layers. squeekboard stays a runtime
+# fallback for sessions without xx-keyboard installed.
+if command -v xx-keyboard >/dev/null 2>&1; then
+    xx-keyboard &
+elif command -v squeekboard >/dev/null 2>&1; then
     squeekboard &
 fi
 

@@ -12,18 +12,33 @@ desktopconf = configuration_data()
 desktopconf.set('bindir', bindir)
 desktopconf.set('busname', busname)
 
-i18n.merge_file(
-  input: configure_file(
-    input: desktop_file + '.in.in',
-    output: desktop_file + '.in',
-    configuration: desktopconf,
-  ),
-  output: desktop_target,
-  po_dir: '../po',
-  install: true,
-  install_dir: desktopdir,
-  type: 'desktop',
-)
+# xx-keyboard: the sm.puri.OSK0 desktop keeps phosh autoload working while
+# io.piercingxx.XXKeyboard.desktop is this fork's own identity. Both stay
+# NoDisplay; install both (deduped when default_osk=false).
+xx_desktops = [desktop_target]
+xx_own_desktop = '@0@.desktop'.format(app_id)
+if xx_own_desktop != desktop_target
+  xx_desktops += [xx_own_desktop]
+endif
+foreach xx_d : xx_desktops
+  if xx_d == desktop_target
+    xx_d_in = desktop_file
+  else
+    xx_d_in = '@0@.desktop'.format(app_id)
+  endif
+  i18n.merge_file(
+    input: configure_file(
+      input: xx_d_in + '.in.in',
+      output: xx_d + '.in',
+      configuration: desktopconf,
+    ),
+    output: xx_d,
+    po_dir: '../po',
+    install: true,
+    install_dir: desktopdir,
+    type: 'desktop',
+  )
+endforeach
 
 configure_file(
   input: f'@app_id@.service.in',

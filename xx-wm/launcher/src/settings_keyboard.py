@@ -2,7 +2,8 @@
 
 The session script owns the boot default from the `keyboard_layout`
 config key (default `us+colemak`); this picker applies the choice live
-with gsettings, which phoc and squeekboard both read. Unprivileged:
+with gsettings, which phoc and the on-screen keyboard both read.
+Unprivileged:
 fire-and-forget gsettings writes, never waited on.
 """
 from __future__ import annotations

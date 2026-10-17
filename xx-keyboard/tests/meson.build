@@ -36,6 +36,23 @@ foreach name : tests
   test('@0@'.format(name), test, depends: compile_schemas, env: test_env)
 endforeach
 
+# xx-keyboard: theme-reader unit test. Headless by design (no Gtk init),
+# so it passes in plain `meson test` with no display.
+test(
+  'test-xx-theme',
+  executable('test-xx-theme', 'test-xx-theme.c', pie: true, dependencies: libpos_dep),
+  depends: compile_schemas,
+  env: test_env,
+)
+
+# xx-keyboard: layout-file contract (valid JSON, Piercing letters exact).
+xx_layouts_tester = find_program('test-xx-layouts.py')
+test(
+  'test-xx-layouts',
+  xx_layouts_tester,
+  args: ['--layouts=' + meson.current_source_dir() / '..' / 'src' / 'layouts'],
+)
+
 if presage_dep.found()
   # Create a dummy db for testing
   presage_test_db = custom_target(

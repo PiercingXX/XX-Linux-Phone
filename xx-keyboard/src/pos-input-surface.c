@@ -29,6 +29,7 @@
 #include "pos-style-manager.h"
 #include "pos-vk-driver.h"
 #include "pos-vk-driver.h"
+#include "pos-xx-theme.h"
 #include "util.h"
 
 #include <gmobile.h>
@@ -1571,6 +1572,7 @@ on_im_active_changed (PosInputSurface *self, GParamSpec *pspec, PosInputMethod *
 
 static PosOskWidget *insert_xkb_layout (PosInputSurface *self, const char *type, const char *id);
 static void on_input_setting_changed (PosInputSurface *self, const char *key, GSettings *settings);
+static void ensure_piercing_layout (PosInputSurface *self);
 
 
 static void
@@ -2208,11 +2210,32 @@ on_input_setting_changed (PosInputSurface *self, const char *key, GSettings *set
     update_osk_key_height (self, osk_widget);
   }
 
-  /* If nothing is left add a default */
-  if (self->osks->len == 0)
-    insert_osk (self, "us", "us", "English (USA)", "us", NULL, NULL);
+  /* xx-keyboard: an empty source list falls back to the xx-wm
+   * keyboard_layout key (default us+colemak) instead of plain us, and
+   * Piercing is always offered alongside the configured layouts. */
+  if (self->osks->len == 0) {
+    g_autofree char *layout_id = pos_xx_theme_keyboard_layout_id ();
+    if (insert_xkb_layout (self, "xkb", layout_id) == NULL)
+      insert_osk (self, "us", "us", "English (USA)", "us", NULL, NULL);
+  }
+  ensure_piercing_layout (self);
 
   set_keymap (self);
+}
+
+
+/* xx-keyboard: the owner's Piercing letters ship in the binary (no system
+ * xkb entry needed), so insert them directly when not already present. */
+static void
+ensure_piercing_layout (PosInputSurface *self)
+{
+  for (guint i = 0; i < self->osks->len; i++) {
+    PosOskWidget *osk = g_ptr_array_index (self->osks, i);
+    if (g_strcmp0 (pos_osk_widget_get_layout_id (osk), "piercing-num") == 0)
+      return;
+  }
+  insert_osk (self, "xkb:piercing-num", "piercing-num",
+              "English (Piercing Num)", "piercing-num", NULL, NULL);
 }
 
 

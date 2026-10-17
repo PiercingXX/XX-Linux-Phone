@@ -91,8 +91,10 @@ def _pacman_install_deps(script):
 
 def test_install_deps_pacman_list(install_script):
     body = _function_body(install_script, 'install_deps')
+    # squeekboard is intentionally gone: xx-keyboard is installed instead
+    # (install_xx_keyboard) and squeekboard stays a fallback only.
     for pkg in ('python-gobject', 'gtk4-layer-shell', 'python-pywayland',
-                'geoclue', 'networkmanager', 'phoc', 'squeekboard',
+                'geoclue', 'networkmanager', 'phoc',
                 'brightnessctl'):
         assert pkg in body, f'pacman deps miss {pkg}'
 
@@ -100,7 +102,7 @@ def test_install_deps_pacman_list(install_script):
 def test_pacman_deps_include_runtime_stack(install_script):
     block = _pacman_install_deps(install_script)
     for name in ('python-gobject', 'gtk4-layer-shell', 'python-pywayland',
-                 'geoclue', 'networkmanager', 'phoc', 'squeekboard',
+                 'geoclue', 'networkmanager', 'phoc',
                  'brightnessctl'):
         assert name in block, f'pacman install_deps missing {name}'
 

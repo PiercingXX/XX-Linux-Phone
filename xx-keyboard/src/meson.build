@@ -1,6 +1,25 @@
 subdir('dbus')
 subdir('layouts')
 
+# xx-keyboard: preset colours are generated from common/xx_ui/theme.py at
+# build time so they never drift from the shell theme. The script prefers
+# the monorepo checkout and falls back to the installed xx_ui package.
+fs = import('fs')
+py3 = import('python').find_installation('python3')
+xx_ui_theme_py = meson.project_source_root() / '..' / 'common' / 'xx_ui' / 'theme.py'
+xx_theme_gen_cmd = [py3, meson.project_source_root() / 'tools' / 'gen-xx-theme.py', '--out=@OUTPUT@']
+xx_theme_depends = [meson.project_source_root() / 'tools' / 'gen-xx-theme.py']
+if fs.is_file(xx_ui_theme_py)
+  xx_theme_gen_cmd += ['--theme-py=' + xx_ui_theme_py]
+  xx_theme_depends += [xx_ui_theme_py]
+endif
+xx_theme_presets_h = custom_target(
+  'xx-theme-presets',
+  output: 'xx-theme-presets.h',
+  command: xx_theme_gen_cmd,
+  depend_files: xx_theme_depends,
+)
+
 libpos_enum_headers = files('phosh-osk-enums.h', 'pos-enums.h')
 libpos_enum_sources = gnome.mkenums_simple('pos-enum-types', sources: libpos_enum_headers)
 
@@ -88,6 +107,8 @@ libpos_sources = files(
   'pos-vk-driver.h',
   'pos-wayland.c',
   'pos-wayland.h',
+  'pos-xx-theme.c',
+  'pos-xx-theme.h',
   'pos.h',
 )
 
@@ -97,6 +118,7 @@ libpos_generated_sources = [
   pos_resources,
   wl_proto_headers,
   wl_proto_sources,
+  xx_theme_presets_h,
 ]
 
 # copied verbatim from phoh
@@ -108,7 +130,9 @@ phosh_contrib_sources = files(
 )
 
 pos_inc = include_directories(['.', 'contrib/'])
-pos_includes = [pos_inc, root_inc, dbus_inc, proto_inc]
+# Build dir for the generated xx-theme-presets.h
+pos_build_inc = include_directories(meson.current_build_dir())
+pos_includes = [pos_inc, pos_build_inc, root_inc, dbus_inc, proto_inc]
 
 subdir('completers')
 
@@ -129,8 +153,10 @@ libpos_dep = declare_dependency(
   dependencies: [libpos_deps, libpos_completers_dep],
 )
 
+# xx-keyboard: binary renamed from phosh-osk-stevia. The sm.puri.OSK0
+# D-Bus name and protocol behaviour are unchanged (see pos-osk-dbus.c).
 executable(
-  'phosh-osk-stevia',
+  'xx-keyboard',
   'dh-dconf-migration.c',
   'phosh-osk-stevia.c',
   'pos-osk-dbus.c',

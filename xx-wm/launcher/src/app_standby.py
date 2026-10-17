@@ -52,7 +52,9 @@ EXEMPT_REFRESH_SECONDS = 60
 TELEPHONY_APP_IDS = frozenset({
     'org.gnome.calls', 'calls', 'xx-dialer', 'xx-phone',
 })
-KEYBOARD_MARKERS = ('squeekboard', 'stevia')
+# xx-keyboard ships as io.piercingxx.XXKeyboard (normalized: xxkeyboard,
+# no hyphen); squeekboard/stevia stay for the fallback and the old name.
+KEYBOARD_MARKERS = ('squeekboard', 'stevia', 'xx-keyboard', 'xxkeyboard')
 
 # Messaging (TxxT/Chatty) and clock/alarm apps are never frozen: freezing
 # the SMS daemon would stall incoming texts, and freezing the clock would
