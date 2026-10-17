@@ -222,7 +222,7 @@ class ScreenTimeSection(settings_page._Section):
 
         summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self._today_label = widgets.label('—', 'xx-set-big')
-        self._counts_label = widgets.label('Today', 'xx-secondary')
+        self._counts_label = widgets.wrap_label('Today')
         summary.append(self._today_label)
         summary.append(self._counts_label)
         self._week_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

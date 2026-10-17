@@ -815,15 +815,14 @@ class RecordingSection(_Section):
     key = 'recording'
     title = 'Screen recording'
 
-    _SAVES_TO = 'Saves to ~/Videos/Screenrecordings'
-
     def __init__(self) -> None:
         self._row = None
 
     def build(self, win) -> list:
-        self._row = ui.row(self.title, 'Not recording · %s' % self._SAVES_TO)
+        self._row = ui.row(self.title, 'Not recording')
         return ui.group(self.title, [self._row],
-                        note='Start and stop it from the Record tile.')
+                        note='Start and stop it from the Record tile. '
+                             'Recordings save to ~/Videos/Screenrecordings.')
 
     def refresh(self, win) -> None:
         def _state():
@@ -839,8 +838,7 @@ class RecordingSection(_Section):
         _run_bg(_state, self._render)
 
     def _render(self, status) -> None:
-        ui.set_subtitle(self._row, '%s · %s' % (
-            (status or 'Not recording').rstrip('.'), self._SAVES_TO))
+        ui.set_subtitle(self._row, status or 'Not recording')
 
 
 class CaptionsSection(_Section):

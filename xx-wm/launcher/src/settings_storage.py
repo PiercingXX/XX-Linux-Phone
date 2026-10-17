@@ -501,9 +501,10 @@ class StorageSection(settings_page._Section):
             size = self._sizes.get(category)
             self._switches.setdefault(category, True)
             title, note = CATEGORY_LABELS.get(category, (category, ''))
-            detail = format_bytes(size) if size is not None else '—'
+            parts = [format_bytes(size)] if size is not None else []
+            parts += [note] if note else []
             rows.append(ui.switch_row(
-                title, '%s · %s' % (detail, note) if note else detail,
+                title, ' · '.join(parts) or 'Size unknown',
                 self._switches[category],
                 lambda active, c=category: self._on_pick(c, active)))
         reclaim = sum((self._sizes.get(c) or 0) for c in self._selected()
