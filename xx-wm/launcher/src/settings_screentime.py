@@ -222,13 +222,13 @@ class ScreenTimeSection(settings_page._Section):
 
         summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self._today_label = widgets.label('—', 'xx-set-big')
-        self._counts_label = widgets.wrap_label('Today')
+        self._counts_label = widgets.wrap_label('')
         summary.append(self._today_label)
         summary.append(self._counts_label)
         self._week_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         summary.append(self._week_box)
         self._week_box.set_margin_top(16)
-        top = ui.group(self.title, [ui.wide_row(summary)])
+        top = ui.group('Screen time today', [ui.wide_row(summary)])
         apps = ui.group('App time and limits',
                         note='Tap an app for its daily limit or its week.')
         self._apps_box = apps[1]
@@ -277,7 +277,7 @@ class ScreenTimeSection(settings_page._Section):
         self._render_week(week)
         if self._counts_label is not None:
             self._counts_label.set_text(
-                f'Today · {unlocks} unlocks · {notifs} notifications')
+                f'{unlocks} unlocks · {notifs} notifications')
         try:
             win._screen_time_cache = {'day': day, 'totals': dict(totals)}
         except Exception:

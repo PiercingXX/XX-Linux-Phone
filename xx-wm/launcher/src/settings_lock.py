@@ -102,6 +102,7 @@ class LockSection(settings_page._Section):
     def __init__(self) -> None:
         self._status = None
         self._pin_row = None
+        self._pin_entries: dict = {}
 
     def build(self, win) -> list:
         self._pin_row = ui.nav_row('Change PIN', '',
@@ -123,18 +124,25 @@ class LockSection(settings_page._Section):
                         else 'No PIN · swipe up unlocks')
 
     def _open_pin(self, win, anchor):
-        return ui.form_sheet(
+        box, self._pin_entries = ui.form_sheet(
             win, anchor, 'Change PIN',
             [('current', 'Current PIN', '', 'pin'),
              ('new', 'New PIN', '', 'pin'),
              ('confirm', 'New PIN again', '', 'pin')],
             'Change PIN', lambda values: self._on_change_pin(win, values))
+        return box, self._pin_entries
 
     def _on_change_pin(self, win, values: dict) -> str | None:
         """Sheet commit: an error string keeps the sheet open."""
         ok, message = change_pin(win.config, values.get('current', ''),
                                  values.get('new', ''),
                                  values.get('confirm', ''))
+        # Typed PINs never linger: every attempt clears the fields.
+        for entry in (getattr(self, '_pin_entries', None) or {}).values():
+            try:
+                entry.set_text('')
+            except Exception:
+                pass
         if not ok:
             return message
         self._say(message)

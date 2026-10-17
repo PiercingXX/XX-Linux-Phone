@@ -547,6 +547,7 @@ def fake_gtk():
         NONE=0, CAPTURE=1, BUBBLE=2, TARGET=3)
     gtk.Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
     gtk.PolicyType = SimpleNamespace(NEVER=0, AUTOMATIC=1)
+    gtk.InputPurpose = SimpleNamespace(PASSWORD=0, PIN=1, NUMBER=2)
     pango.WrapMode = SimpleNamespace(WORD=0, WORD_CHAR=1, CHAR=2)
     pango.EllipsizeMode = SimpleNamespace(NONE=0, START=1, MIDDLE=2, END=3)
     repo.Adw, repo.Gdk, repo.GLib, repo.Gtk, repo.Pango, repo.Gio = (
@@ -1256,3 +1257,148 @@ class TestW5RegistryStatic:
             for signal in re.findall(r"\.connect\(\s*['\"]([^'\"]+)", text):
                 found.add(signal.split('::')[0])
         assert found <= {'clicked', 'notify'}, found
+
+
+# ------------------------------------------------------------------
+# Row grammar sizes and the sheets that replaced inline entries
+# ------------------------------------------------------------------
+
+class TestSettingsCss:
+    def test_row_sizes_and_text_scale(self):
+        import settings_ui
+        from config import THEME_PRESETS
+        theme = THEME_PRESETS['amoled']
+        base = settings_ui.css(theme, 1.0)
+        assert '.xx-settings .xx-title { font-size: 18px; }' in base
+        assert '.xx-settings .xx-secondary { font-size: 14px; }' in base
+        assert '.xx-settings .xx-caption { font-size: 12px;' in base
+        big = settings_ui.css(theme, 1.5)
+        assert '.xx-settings .xx-title { font-size: 27px; }' in big
+        assert theme.surface in base and theme.border in base
+
+    def test_window_loads_settings_sheet(self):
+        text = (SRC / 'window.py').read_text(encoding='utf-8')
+        body = text.split('def _apply_theme')[1].split('\n    def ')[0]
+        assert 'settings_ui.css(theme, scale)' in body
+
+
+class _Popover:
+    def __init__(self):
+        self.down = False
+
+    def popdown(self):
+        self.down = True
+
+    def connect(self, *_args):
+        return 1
+
+
+def _sheet_win(**overrides):
+    win = _bare_win(**overrides)
+    win.popovers = []
+
+    def _show(anchor, content):
+        popover = _Popover()
+        win.popovers.append((content, popover))
+        return popover
+
+    win.item_actions._show_popover = _show
+    return win
+
+
+class TestSettingsSheets:
+    def test_sheet_error_stays_open_success_closes(self, fake_gtk):
+        import settings_ui
+        win = _sheet_win()
+        answers = ['Nope.', None]
+        box, entries = settings_ui.form_sheet(
+            win, object(), 'Title', [('a', 'A', 'x', 'text')], 'Go',
+            lambda values: answers.pop(0))
+        (content, popover), = win.popovers
+        assert content is box and list(entries) == ['a']
+        commit = box.children[-1]
+        callback, _args = commit.handlers['clicked']
+        callback(commit)
+        assert popover.down is False
+        assert 'Nope.' in _labels(box)
+        callback(commit)
+        assert popover.down is True
+
+    def test_pin_sheet_changes_and_clears(self, fake_gtk):
+        import settings_lock
+        stored = []
+        win = _sheet_win()
+        win.config.pin_hash = 'set'
+        win.config.verify_pin = lambda pin: pin == '1234'
+        win.config.set_pin = stored.append
+        win.config.get_lockout_state = lambda: (0, 0.0)
+        win.config.set_lockout_state = lambda fails, until: None
+        win.config.clear_lockout_state = lambda: None
+        section = settings_lock.LockSection()
+        section.build(win)
+        _box, entries = section._open_pin(win, object())
+        assert list(entries) == ['current', 'new', 'confirm']
+        for entry in entries.values():
+            entry.set_text('0000')
+        assert section._on_change_pin(win, {
+            'current': '0000', 'new': '5678', 'confirm': '5678'}) == (
+            'Current PIN is wrong.')
+        assert all(entry.get_text() == '' for entry in entries.values())
+        assert stored == []
+        assert section._on_change_pin(win, {
+            'current': '1234', 'new': '5678', 'confirm': '5678'}) is None
+        assert stored == ['5678']
+
+    def test_apn_sheet_saves_and_summarizes(self, fake_gtk):
+        applied = []
+        win = _sheet_win()
+        win.config.data = {}
+        win.config.save = lambda: None
+        win._apply_apn = lambda *args: applied.append(args)
+        page = settings_page.SettingsPage(win)
+        section = settings_page.MobileSection()
+        section.build(win)
+        assert _labels(section._row) == ['Access point (APN)', 'Not set']
+        _box, entries = section._open_sheet(win, object())
+        assert list(entries) == ['apn', 'user', 'password']
+        page._on_apn_save({'apn': ' internet ', 'user': '',
+                           'password': 'p w'})
+        assert win.config.data['apn'] == 'internet'
+        assert win.config.data['apn_pass'] == 'p w'
+        assert applied == [('internet', '', 'p w')]
+        assert _labels(section._row) == ['Access point (APN)', 'internet']
+
+    def test_location_sheet_validates(self, fake_gtk):
+        import settings_launcher
+        win = _sheet_win()
+        win.config.data = {}
+        win.config.set = lambda key, value: win.config.data.update(
+            {key: value})
+        win._refresh_weather = lambda force=False: None
+        section = settings_launcher.LauncherSection()
+        assert section._save_location(win, {'lat': '1.5', 'lon': ''}) == (
+            'Set both latitude and longitude.')
+        assert section._save_location(win, {'lat': '1.5',
+                                            'lon': '-2'}) is None
+        assert win.config.data == {'weather_lat': 1.5, 'weather_lon': -2.0}
+        assert settings_launcher.location_text(win) == '1.5, -2.0'
+
+    def test_keyboard_custom_validates(self, fake_gtk, monkeypatch):
+        import settings_keyboard
+        applied = []
+        monkeypatch.setattr(settings_keyboard, 'apply_keyboard_layout',
+                            lambda layout, variant: applied.append(
+                                (layout, variant)))
+        win = _sheet_win()
+        win.config.data = {}
+        win.config.set = lambda key, value: win.config.data.update(
+            {key: value})
+        section = settings_keyboard.KeyboardSection()
+        section.build(win)
+        assert section._pick_custom(win, {'layout': 'F R',
+                                          'variant': ''}) is not None
+        assert applied == []
+        assert section._pick_custom(win, {'layout': 'fr',
+                                          'variant': ''}) is None
+        assert applied == [('fr', '')]
+        assert win.config.data['keyboard_layout'] == 'fr'
