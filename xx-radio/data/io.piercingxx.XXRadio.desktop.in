@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=XX-Radio
+Comment=Unofficial YouTube Music player for Linux phones
+Exec=@bindir@/xx-radio
+Icon=io.piercingxx.XXRadio
+Terminal=false
+Categories=Audio;AudioVideo;Player;
+Keywords=music;youtube;radio;songs;playlist;
+StartupNotify=true
+DBusActivatable=true
+X-Purism-FormFactor=Workstation;Mobile;

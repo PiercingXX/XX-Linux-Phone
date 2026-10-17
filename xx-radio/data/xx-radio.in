@@ -1,0 +1,6 @@
+#!/bin/sh
+# Installed launcher: run the UI from the datadir packages (xx_radio and
+# the reusable xx_music core sit side by side there).
+# Run as a module with the datadir on the path: running the file by
+# path puts the package directory itself on sys.path, not its parent.
+PYTHONPATH="@app_dir@${PYTHONPATH:+:$PYTHONPATH}" exec @python@ -m xx_radio "$@"

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.piercingxx.XXRadio</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>XX-Radio</name>
+  <summary>Unofficial YouTube Music player for Linux phones</summary>
+  <description>
+    <p>Search, browse and play YouTube Music on a Linux phone: home, moods
+    and charts, artist, album and playlist pages, radio from any song, a
+    queue, background playback with media controls, offline downloads,
+    lyrics and a sleep timer. Your library and playlists appear when you
+    sign in.</p>
+    <p>XX-Radio is not affiliated with or endorsed by YouTube or Google.
+    It uses YouTube Music's private web interface, which YouTube's terms
+    do not permit. YouTube can break it at any time, and signing in puts
+    that account at risk.</p>
+  </description>
+  <!-- Screenshot placeholders: capture Home, Search, Now Playing, Queue
+       and Library at 360x720 once hosted shot URLs exist, then replace
+       this comment with a <screenshots> block. Imageless <screenshot>
+       entries and local paths both fail `appstreamcli validate`. -->
+  <developer id="io.piercingxx">
+    <name>PiercingXX</name>
+  </developer>
+  <url type="homepage">https://github.com/PiercingXX/XX-Linux-Phone</url>
+  <categories>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>youtube</keyword>
+    <keyword>radio</keyword>
+    <keyword>playlist</keyword>
+  </keywords>
+  <launchable type="desktop-id">io.piercingxx.XXRadio.desktop</launchable>
+  <provides>
+    <binary>xx-radio</binary>
+    <dbus type="session">io.piercingxx.XXRadio</dbus>
+    <id>org.mpris.MediaPlayer2.xx_radio</id>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-17" urgency="medium">
+      <description>
+        <p>Spec and scaffold: launcher, placeholder window, engine
+        interface and a demo engine.</p>
+      </description>
+    </release>
+  </releases>
+</component>
