@@ -91,6 +91,7 @@ install_data(
     'src/reorder_sheet.py',
     'src/settings_battery_use.py',
     'src/settings_charging.py',
+    'src/settings_launcher.py',
     'src/settings_medical.py',
     'src/settings_page.py',
     'src/settings_permissions.py',

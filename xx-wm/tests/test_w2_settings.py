@@ -237,6 +237,40 @@ def window():
         def load_from_data(self, data):
             self.data.append(bytes(data))
 
+    class _FakeGtkAdjustment(_FakeWidget):
+        def __init__(self, value=0.0, lower=0.0, upper=0.0,
+                     step_increment=0.0, page_increment=0.0,
+                     page_size=0.0):
+            super().__init__(value=value, lower=lower, upper=upper,
+                             step_increment=step_increment,
+                             page_increment=page_increment,
+                             page_size=page_size)
+            self.props['adjustment_value'] = value
+
+        def get_value(self):
+            return self.props['adjustment_value']
+
+        def set_value(self, value):
+            self.props['adjustment_value'] = value
+
+    class _FakeScale(_FakeWidget):
+        def set_digits(self, digits):
+            self.props['digits'] = digits
+
+        def set_draw_value(self, draw):
+            self.props['draw_value'] = draw
+
+        def get_value(self):
+            adjustment = self.kwargs.get('adjustment')
+            if adjustment is not None:
+                return adjustment.get_value()
+            return 0.0
+
+        def set_value(self, value):
+            adjustment = self.kwargs.get('adjustment')
+            if adjustment is not None:
+                adjustment.set_value(value)
+
     gtk.Box = _FakeWidget
     gtk.Label = _FakeWidget
     gtk.Button = _FakeWidget
@@ -246,6 +280,8 @@ def window():
     gtk.Switch = _FakeWidget
     gtk.Grid = _FakeGrid
     gtk.CssProvider = _FakeCssProvider
+    gtk.Adjustment = _FakeGtkAdjustment
+    gtk.Scale = _FakeScale
     gtk.GestureClick = _FakeGesture
     gtk.Align = SimpleNamespace(START=0, END=1, CENTER=2, FILL=3)
     gtk.PropagationPhase = SimpleNamespace(

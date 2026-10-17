@@ -3,10 +3,11 @@
 Every shell preference lives in `~/.config/xx-wm/`. The config file
 **is the public API**: edit it in a terminal and the running shell hot-reloads
 it (debounced; an invalid file is ignored and the last good config stays
-live). The in-shell Settings page covers system things only (network, sound
-devices, battery, updates, backup) — never these keys, except a dedicated
-Appearance surface that writes the `theme` (and `prefer_dark`) keys so a
-tablet without a keyboard can still pick a preset.
+live). The in-shell Settings page covers system things (network, sound
+devices, battery, updates, backup) plus one Launcher section mirroring the
+Android launcher's settings — home, widgets, weather, clock, drawer,
+gestures, appearance — so a tablet without a keyboard can still change them.
+Everything else is edited in the file directly.
 
 Files:
 
@@ -24,11 +25,12 @@ migration steps are ever required.
 |---|---|---|---|
 | `theme` | string | `"amoled"` | Preset key: `amoled`, `graphite`, `forest`, `ocean`, `paper`, `mist`, `aura` (Linux bonus), `burgundy`, or `custom`. |
 | `custom_background` | string | — | `#RRGGBB` used when `theme` is `custom`; shades and text color are derived. Burgundy `#2A1018` is the blessed extra. |
-| `prefer_dark` | bool | `true` | Light/dark surface mode. |
-| `font` | string | `"jetbrains-mono-nerd"` | `system-light`, `space-mono`, `jetbrains-mono`, `jetbrains-mono-nerd`, or `custom`. |
-| `custom_font_family` | string | — | Family used when `font` is `custom`. Install via `config.install_custom_font()` or drop a font in `~/.local/share/fonts` and set both keys. Font files are not part of backups. |
-| `text_size_scale` | float | `1.0` | Launcher-wide type scale, clamped 0.5–2.0. |
-| `home_alignment` | string | `"center"` | `left` / `center` / `right` for home rows. |
+| `prefer_dark` | bool | `true` | Light/dark surface mode (used when `appearance_mode` is `theme` or as the `system` fallback). |
+| `appearance_mode` | string | `"theme"` | `theme` (follow the preset), `light` (Paper), `dark` (your dark preset), or `system` (Paper vs your dark preset from `org.gnome.desktop.interface color-scheme`). |
+| `font` | string | `"jetbrains-mono-nerd"` | `system-light`, `monospace` (generic), `space-mono`, `jetbrains-mono`, `jetbrains-mono-nerd`, or `custom`. |
+| `custom_font_family` | string | — | Family used when `font` is `custom`. Settings → Launcher → Import font… installs a `.ttf`/`.otf`, or drop a font in `~/.local/share/fonts` and set both keys. Font files are not part of backups. |
+| `text_size_scale` | float | `1.0` | Launcher-wide type scale, clamped 0.5–2.0. Scales home slots, the clock and date, drawer and folder rows. |
+| `home_alignment` | string | `"center"` | `left` / `center` / `right` for home rows, widget lines, drawer rows, folder and member rows. |
 
 ### Home screen
 

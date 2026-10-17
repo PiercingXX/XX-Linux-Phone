@@ -176,6 +176,19 @@ def drawer_folder_title(label: str, member_count: int) -> str:
     return f'{label} ({member_count})'
 
 
+def drawer_xalign(win) -> float:
+    """Row text alignment from the home alignment pref (design.md
+    "Alignment"): drawer, folder and member rows follow home."""
+    try:
+        alignment = win.config.home_alignment
+    except AttributeError:
+        try:
+            alignment = win.config.data.get('home_alignment', 'center')
+        except AttributeError:
+            return 0.5
+    return {'left': 0.0, 'right': 1.0}.get(alignment, 0.5)
+
+
 def _open_settings(win) -> None:
     """Show settings with the TOP hop when the window offers it.
 
@@ -530,11 +543,11 @@ class DrawerPage:
         members = next((m for i, _s, m in win._drawer_folder_slots()
                         if i == slot_index), [])
         inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        # Same centered alignment as app rows; long folder names ellipsize
+        # Home-alignment rows; long folder names ellipsize
         # instead of forcing the page wider than the phone screen.
         title = Gtk.Label(
             label=drawer_folder_title(slot.get('label', ''), len(members)),
-            xalign=0.5)
+            xalign=drawer_xalign(win))
         title.add_css_class('app-name')
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.set_hexpand(True)
@@ -570,9 +583,9 @@ class DrawerPage:
             suffix = ' · time limit'
         else:
             suffix = ''
-        # Same centered alignment as folder and app rows; the indented
+        # Home-alignment rows like folder and app rows; the indented
         # button frame (folder-member margin) is what sets members apart.
-        title = Gtk.Label(label=label + suffix, xalign=0.5)
+        title = Gtk.Label(label=label + suffix, xalign=drawer_xalign(win))
         title.add_css_class('app-name')
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.set_hexpand(True)
@@ -604,7 +617,7 @@ class DrawerPage:
         win = self._win
         open_now = bool(getattr(win, '_drawer_open_hidden', False))
         inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        title = Gtk.Label(label=f'Hidden ({count})', xalign=0.5)
+        title = Gtk.Label(label=f'Hidden ({count})', xalign=drawer_xalign(win))
         title.add_css_class('app-name')
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.set_hexpand(True)
@@ -684,7 +697,7 @@ class DrawerPage:
         from gi.repository import Gtk, Pango
 
         win = self._win
-        title = Gtk.Label(label='Launcher Settings', xalign=0.5)
+        title = Gtk.Label(label='Launcher Settings', xalign=drawer_xalign(win))
         title.add_css_class('app-name')
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.set_hexpand(True)
@@ -716,7 +729,7 @@ class DrawerPage:
             child = next_child
 
         if not entries:
-            label = Gtk.Label(label=empty_message, xalign=0.5)
+            label = Gtk.Label(label=empty_message, xalign=drawer_xalign(win))
             label.add_css_class('dim-label')
             row = Gtk.ListBoxRow(selectable=False, activatable=False)
             row.set_child(label)
@@ -737,12 +750,12 @@ class DrawerPage:
         paused = win.focus_state.is_paused_app(entry.app_id)
         from settings_screentime import is_limited_today
         limited = is_limited_today(win, entry.app_id)
-        # Single-line centered rows, name only — matches the PiercingXX
+        # Single-line rows following the home alignment, name only — matches the PiercingXX
         # Android launcher's drawer; descriptions were noise at phone size
         title = Gtk.Label(
             label=row_title(base_name, pinned, new,
                             paused=paused, limited=limited),
-            xalign=0.5)
+            xalign=drawer_xalign(win))
         title.add_css_class('app-name')
         title.set_ellipsize(Pango.EllipsizeMode.END)
 
@@ -807,7 +820,16 @@ class DrawerPage:
             win._refresh_gesture_labels()
             _open_settings(win)
             name = win.config.label_for(entry.app_id, entry.name)
-            win._show_status(f'{name} bound to {_GESTURE_TITLES[key]}.')
+            title = _GESTURE_TITLES.get(key, key.replace('_', ' '))
+            win._show_status(f'{name} bound to {title}.')
+            return
+        if getattr(win, '_pick_widget_tap', None):
+            key = win._pick_widget_tap
+            win._pick_widget_tap = None
+            win.config.set_widget_tap(key, {'app': entry.app_id})
+            _open_settings(win)
+            name = win.config.label_for(entry.app_id, entry.name)
+            win._show_status(f'{name} opens on {key} tap.')
             return
         if getattr(win, '_pick_exempt_mode', False):
             win._pick_exempt_mode = False

@@ -29,7 +29,7 @@ Text-first. No icon grids, no app icons on home. Low visual noise, local-only cu
 - **Search results anchor at the bottom**, directly above the search field (and above the on-screen keyboard when open), within thumb reach: a short result set sits at the bottom of the list; a set that overflows the view reads from the top. The drawer rises above the keyboard, never behind it.
 - Drawer rows use a **smaller type size** than home slots.
 - Search can **auto-launch the single result**; `!query` falls back to web search.
-- Sort: a single toggle cycling **A–Z ↔ install date** (default A–Z). No size or usage sorts.
+- Sort: a single toggle cycling **A–Z ↔ install date**, plus a default sort setting (pinned-first, plain A–Z, or install date) in Settings → Launcher. No size or usage sorts.
 - A–Z character jump strip on the right edge.
 - Row order: folders first, then pinned apps (in pin order), then the rest per the active sort, then a synthetic **Launcher Settings** entry always last.
 - **Folder rows expand inline**: tapping a folder drops its members open directly under the row as an indented drop-down; tapping it again (or a swipe right) collapses it. On expand, the folder row plus its members scroll to sit vertically centered. The expansion survives list refreshes and collapses automatically if the folder disappears.
@@ -92,7 +92,7 @@ Light/dark/system mode switch. Text size scaling and per-surface alignment. **Th
 
 ## Fonts
 
-Bundled options: **JetBrains Mono Nerd (default)**, Space Mono, JetBrains Mono, System Light, plus user-imported custom font. Font applies launcher-wide. The base type scale is deliberately small (home slots ~27pt, clock ~42pt, drawer rows ~13pt) — 20% below the original sizes.
+Bundled options: **JetBrains Mono Nerd (default)**, Space Mono, JetBrains Mono, System Light, generic Monospace, plus user-imported custom font. Font applies launcher-wide. The base type scale is deliberately small (home slots ~27pt, clock ~42pt, drawer rows ~13pt) — 20% below the original sizes.
 
 ## Backup / restore
 
@@ -127,9 +127,9 @@ Modeled on the Pixel's Focus Mode. The user picks a list of distracting apps; wh
 
 ### Settings scope
 
-The in-shell Settings page is **system-only**: the things a config file can't own — WiFi networks, Bluetooth pairing, cellular/APN, sound devices, battery/power, system updates, backup/restore actions, about. It replaces both GNOME Settings and phosh-mobile-settings for everything that applies to this shell. Every *shell* preference — theme, fonts, text size, alignment, home slots, widgets, gestures, sounds, DnD/Focus rules — lives in `~/.config/xx-wm/` and is edited there (or through dedicated surfaces like home edit mode). The shell hot-reloads the config file, so editing it in a terminal is a first-class workflow.
+The in-shell Settings page holds system sections — the things a config file can't own: WiFi networks, Bluetooth pairing, cellular/APN, sound devices, battery/power, system updates, backup/restore actions, about — plus one **Launcher** section mirroring the Android launcher's settings: home alignment and layout reset, widgets, weather, clock, drawer, gestures, appearance. It replaces both GNOME Settings and phosh-mobile-settings for everything that applies to this shell. Every *shell* preference lives in `~/.config/xx-wm/` and is edited there, through home edit mode, or through the Launcher section. The shell hot-reloads the config file, so editing it in a terminal is a first-class workflow.
 
-Theme presets are also offered as a dedicated Appearance surface on the Settings page so they can be changed without a keyboard. Other shell prefs stay in the config file.
+Theme presets are also offered as a dedicated Appearance surface on the Settings page so they can be changed without a keyboard.
 
 ## Non-goals
 

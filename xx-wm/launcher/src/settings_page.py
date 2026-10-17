@@ -6,9 +6,9 @@ from gesture_config import IPC_VERBS, VALID_ACTIONS
 # Settings sections a quick-tile long-press can deep-link to (quick_actions
 # tile_settings_section emits these); anything else opens the top of the page.
 _SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'appearance',
-                          'standby', 'permissions', 'smart_lock', 'charging',
-                          'batteryuse', 'screentime', 'medical', 'recording',
-                          'captions', 'nearby', 'findmy', 'about',
+                          'launcher', 'standby', 'permissions', 'smart_lock',
+                          'charging', 'batteryuse', 'screentime', 'medical',
+                          'recording', 'captions', 'nearby', 'findmy', 'about',
                           'storage', 'security')
 
 # Home side-swipe gestures the user can bind to an app in Settings
@@ -531,8 +531,14 @@ class AboutSection(_Section):
         about_card = _section_card()
         about_card.append(widgets.setting_row('Version', shell_version))
         about_card.append(widgets.setting_row(
-            'Device', win._get_device_name(), last=True))
-        return [_section_title(self.title), about_card]
+            'Device', win._get_device_name()))
+        logs_row = widgets.list_row(
+            'Logs', 'Shell log tail', trailing=widgets.chevron(), last=True)
+        logs_row.connect(
+            'clicked', lambda _b: settings_launcher.open_logs(win))
+        logs_card = _section_card()
+        logs_card.append(logs_row)
+        return [_section_title(self.title), about_card, logs_card]
 
 
 class ShellSection(_Section):
@@ -678,6 +684,7 @@ class GesturesSection(_Section):
 # and the no-circular-imports test stays green).
 import settings_battery_use
 import settings_charging
+import settings_launcher
 import settings_medical
 import settings_permissions
 import settings_screentime
@@ -700,6 +707,7 @@ SETTINGS_SECTIONS: list[tuple[str, type[_Section]]] = [
     ('security', settings_security.SecuritySection),
     ('mobile', MobileSection),
     ('appearance', AppearanceSection),
+    ('launcher', settings_launcher.LauncherSection),
     ('standby', settings_standby.StandbySection),
     ('permissions', settings_permissions.PermissionsSection),
     ('smart_lock', settings_smart_lock.SmartLockSection),
@@ -898,6 +906,15 @@ class SettingsPage:
         note = _section_placeholder(
             'System-level gestures apply immediately. Home swipes stay in-shell.')
         card.append(note)
+        card.append(_section_placeholder(
+            'Every gesture: swipe left or right on home launches its bound '
+            'app; double-tap on home locks or runs its action; long-press '
+            'on home opens edit mode, settings, or nothing; the home key '
+            'while already home can open recents instead. Short swipe up '
+            'from the bottom goes home, long swipe up opens recents, edge '
+            'swipes go back, and swipe down from the top opens the shade — '
+            'those four work over any app. Swipe up on home itself opens '
+            'the drawer.'))
         return card
 
     def _pick_system_gesture(self, anchor, key: str, title: str) -> None:
@@ -1089,7 +1106,8 @@ class SettingsPage:
         win._run_bg(system_settings.battery_status, win._show_battery)
         win._run_bg(system_settings.list_audio_sinks, win._show_sinks)
         win._run_bg(system_settings.list_bt_devices, win._show_bt_devices)
-        for key in ('standby', 'permissions', 'smart_lock', 'recording'):
+        for key in ('launcher', 'standby', 'permissions', 'smart_lock',
+                    'recording'):
             section = self._sections.get(key)
             if section is not None:
                 try:

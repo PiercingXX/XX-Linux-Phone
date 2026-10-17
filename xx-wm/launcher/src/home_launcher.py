@@ -21,7 +21,13 @@ from gi.repository import GLib, Gtk
 from config import ThemePreset
 
 
-def theme_css(preset: ThemePreset) -> str:
+def _pt(base: float, scale: float) -> str:
+    return '%gpt' % round(base * scale, 1)
+
+
+def theme_css(preset: ThemePreset, scale: float = 1.0) -> str:
+    """Home sheet. Sizes scale with the launcher text size (hot-reloaded
+    through window._apply_theme like the shared sheet's ${...} tokens)."""
     return f"""
 .home-item-btn {{
     background: transparent;
@@ -36,22 +42,22 @@ def theme_css(preset: ThemePreset) -> str:
     background: transparent;
 }}
 .home-item-label {{
-    font-size: 27pt;
+    font-size: {_pt(27, scale)};
     font-weight: 400;
     color: {preset.foreground};
 }}
 .home-folder-indicator {{
-    font-size: 14pt;
+    font-size: {_pt(14, scale)};
     font-weight: 400;
     color: {preset.muted};
     margin-left: 6px;
 }}
 .home-edit-label {{
-    font-size: 18pt;
+    font-size: {_pt(18, scale)};
     font-weight: 300;
 }}
 .home-edit-ctl {{
-    font-size: 13pt;
+    font-size: {_pt(13, scale)};
     font-weight: 300;
     padding: 4px 12px;
     min-width: 44px;
@@ -61,7 +67,7 @@ def theme_css(preset: ThemePreset) -> str:
     color: {preset.muted};
 }}
 .home-edit-action {{
-    font-size: 13pt;
+    font-size: {_pt(13, scale)};
     font-weight: 300;
     padding: 10px 0;
     min-height: 44px;

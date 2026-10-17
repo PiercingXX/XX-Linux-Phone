@@ -164,7 +164,7 @@ def test_settings_registry_order_and_shape():
     assert keys == ['system', 'wifi', 'bluetooth', 'sound', 'battery',
                     'charging', 'batteryuse', 'screentime',
                     'backup', 'storage', 'security', 'mobile',
-                    'appearance', 'standby',
+                    'appearance', 'launcher', 'standby',
                     'permissions', 'smart_lock', 'medical',
                     'recording', 'captions', 'nearby', 'findmy',
                     'about', 'shell', 'developer', 'gestures']

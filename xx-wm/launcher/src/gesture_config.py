@@ -63,6 +63,7 @@ def _is_valid_value(key: str, value: str) -> bool:
 
 # Human-readable names for the settings UI
 ACTION_LABELS: dict[str, str] = {
+    'edit':                'Edit mode',
     'home':                'Home',
     'app_switcher':        'App Switcher',
     'notification_shade':  'Notification Shade',
@@ -74,7 +75,6 @@ ACTION_LABELS: dict[str, str] = {
     'dialer':              'Dialer',
     'assistant':           'Assistant',
     'none':                'Do Nothing',
-    'edit':                'Edit home slots',
 }
 
 GESTURE_LABELS: dict[str, str] = {

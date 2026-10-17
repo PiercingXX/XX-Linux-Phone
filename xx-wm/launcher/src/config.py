@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     'pinned': [],
     'hidden_apps': [],
     'prefer_dark': True,
+    'appearance_mode': 'theme',
     'auto_lock_timeout': 0,
     'display_blank_timeout': 60,
     'text_size_scale': 1.0,
@@ -131,6 +132,11 @@ _STRING_KEYS = ('apn', 'apn_user', 'apn_pass', 'weather_location')
 # Drawer sort modes (docs/config.md): 'default' pins first then A–Z,
 # 'az' is plain A–Z with no pin priority, 'install' is newest first.
 _DRAWER_SORTS = ('default', 'az', 'install')
+
+# Light/dark switch owned by the Launcher settings section (docs/config.md
+# "Appearance"): 'theme' keeps the preset-driven behavior, light/dark force
+# it, 'system' follows the desktop color-scheme.
+APPEARANCE_MODES = ('theme', 'light', 'dark', 'system')
 
 # Escalating-lockout resume point (fail count + wall-clock lockout-until).
 # Private device-local state: kept out of backups and restores.
@@ -244,6 +250,16 @@ class ShellConfig:
             tmp_path.unlink(missing_ok=True)
         os.chmod(self.config_path, 0o600)
 
+    def get(self, key: str, default=None):
+        """Read any key with a fallback, so settings rows for keys owned
+        by other lanes keep working before those lanes land."""
+        return self.data.get(key, default)
+
+    def set(self, key: str, value) -> None:
+        """Write any key (docs/config.md); sibling lanes add validation."""
+        self.data[key] = value
+        self.save()
+
     @property
     def theme(self) -> ThemePreset:
         key = str(self.data.get('theme', DEFAULT_CONFIG['theme']))
@@ -282,6 +298,16 @@ class ShellConfig:
     def set_prefer_dark(self, enabled: bool) -> None:
         self.data['prefer_dark'] = enabled
         self.save()
+
+    @property
+    def appearance_mode(self) -> str:
+        mode = self.data.get('appearance_mode', DEFAULT_CONFIG['appearance_mode'])
+        return mode if mode in APPEARANCE_MODES else DEFAULT_CONFIG['appearance_mode']
+
+    def set_appearance_mode(self, mode: str) -> None:
+        if mode in APPEARANCE_MODES:
+            self.data['appearance_mode'] = mode
+            self.save()
 
     def set_pinned(self, app_ids: list[str]) -> None:
         self.data['pinned'] = app_ids[:8]
@@ -536,6 +562,10 @@ class ShellConfig:
     def label_for(self, app_id: str, fallback: str) -> str:
         return self.app_labels.get(app_id, fallback)
 
+    def clear_app_labels(self) -> None:
+        self.data['app_labels'] = {}
+        self.save()
+
     @property
     def muted_apps(self) -> dict[str, float]:
         val = self.data.get('muted_apps', {})
@@ -587,11 +617,6 @@ class ShellConfig:
             if until > now and same_app_id(key, app_id):
                 return until
         return None
-
-    def get(self, key: str, default: object = None) -> object:
-        """Format-agnostic read for settings surfaces: the stored value or
-        `default` when the key is absent."""
-        return self.data.get(key, default)
 
     @property
     def weather_temp_unit(self) -> str:
@@ -857,6 +882,60 @@ class ShellConfig:
             ((k, v) for k, v in widgets.items() if v.get('enabled')),
             key=lambda item: item[1].get('order', 99),
         )
+
+    def _mutable_widgets(self) -> dict:
+        """Owned copy of the widget map. data starts as a shallow
+        DEFAULT_CONFIG copy, so writing into it directly would corrupt
+        the defaults for every later instance."""
+        widgets = self.data.get('widgets')
+        if not isinstance(widgets, dict):
+            widgets = {}
+        widgets = dict(widgets)
+        self.data['widgets'] = widgets
+        return widgets
+
+    def set_widget_enabled(self, key: str, enabled: bool) -> None:
+        if key not in DEFAULT_CONFIG['widgets']:
+            return
+        widgets = self._mutable_widgets()
+        entry = dict(widgets.get(key) or {})
+        entry['enabled'] = bool(enabled)
+        widgets[key] = entry
+        self.save()
+
+    def move_widget(self, key: str, delta: int) -> None:
+        """Swap a widget's order with its display neighbor. Edge moves and
+        unknown keys are no-ops."""
+        ordered = [name for name, _conf in self.ordered_widgets()]
+        if key not in ordered:
+            return
+        idx = ordered.index(key)
+        other = idx + (1 if delta > 0 else -1)
+        if not (0 <= other < len(ordered)):
+            return
+        orders = {name: conf.get('order', 99)
+                  for name, conf in self.widgets.items()}
+        orders[key], orders[ordered[other]] = (
+            orders[ordered[other]], orders[key])
+        widgets = self._mutable_widgets()
+        for name, order in orders.items():
+            entry = dict(widgets.get(name) or {})
+            entry['order'] = order
+            widgets[name] = entry
+        self.save()
+
+    def set_widget_tap(self, key: str, tap) -> None:
+        if key not in DEFAULT_CONFIG['widgets']:
+            return
+        valid = tap in ('default', 'none', 'refresh') or (
+            isinstance(tap, dict) and tap.get('app'))
+        if not valid:
+            return
+        widgets = self._mutable_widgets()
+        entry = dict(widgets.get(key) or {})
+        entry['tap'] = tap
+        widgets[key] = entry
+        self.save()
 
     @property
     def custom_font_family(self) -> str | None:

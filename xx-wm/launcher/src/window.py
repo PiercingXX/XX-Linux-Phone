@@ -348,6 +348,110 @@ def _xx_render(config: ShellConfig, preset: ThemePreset) -> str:
     ))
 
 
+def system_prefers_dark() -> bool | None:
+    """Desktop color-scheme preference, None when unreadable (schema
+    missing, settings daemon down). Local GSettings read, never blocks."""
+    try:
+        from gi.repository import Gio
+        settings = Gio.Settings.new('org.gnome.desktop.interface')
+        return settings.get_string('color-scheme') == 'prefer-dark'
+    except Exception:
+        return None
+
+
+def effective_dark(config: ShellConfig) -> bool:
+    """Light/dark decision for appearance_mode (docs/config.md
+    "Appearance"): theme follows prefer_dark, light/dark force it, system
+    follows the desktop with prefer_dark as the offline fallback."""
+    mode = getattr(config, 'appearance_mode', 'theme')
+    if mode not in ('theme', 'light', 'dark', 'system'):
+        mode = 'theme'
+    if mode == 'light':
+        return False
+    if mode == 'dark':
+        return True
+    if mode == 'system':
+        system = system_prefers_dark()
+        if system is not None:
+            return system
+    try:
+        return bool(config.prefer_dark)
+    except AttributeError:
+        return True
+
+
+def _dark_preset_for(config: ShellConfig) -> ThemePreset:
+    """The user's dark preset: the current theme when it is dark,
+    amoled otherwise (light themes cannot be forced dark)."""
+    current = resolve_theme(config)
+    try:
+        red, green, blue = (int(current.background[i:i + 2], 16)
+                            for i in (1, 3, 5))
+        dark = (0.299 * red + 0.587 * green + 0.114 * blue) / 255 < 0.5
+    except (TypeError, ValueError):
+        dark = True
+    return current if dark else THEME_PRESETS['amoled']
+
+
+def resolve_appearance_preset(config: ShellConfig) -> ThemePreset:
+    """Active preset for appearance_mode: theme keeps resolve_theme,
+    light is Paper, dark is the user's dark preset, system picks Paper
+    or the user's dark preset from the desktop color-scheme."""
+    mode = getattr(config, 'appearance_mode', 'theme')
+    if mode not in ('theme', 'light', 'dark', 'system'):
+        mode = 'theme'
+    if mode == 'light':
+        return THEME_PRESETS['paper']
+    if mode == 'dark':
+        return _dark_preset_for(config)
+    if mode == 'system':
+        if effective_dark(config):
+            return _dark_preset_for(config)
+        return THEME_PRESETS['paper']
+    return resolve_theme(config)
+
+
+def _scaled_pt(base: float, scale: float) -> str:
+    return '%gpt' % round(base * scale, 1)
+
+
+def launcher_text_css(scale: float) -> str:
+    """Launcher type sizes the static style.css leaves fixed (clock, date,
+    drawer rows): scaled overrides loaded through the window provider, so
+    text_size_scale hot-reloads them like the shared sheet's tokens."""
+    return """
+.display-clock {{
+    font-size: {_clock};
+}}
+.display-date {{
+    font-size: {_date};
+}}
+.dim-label {{
+    font-size: {_dim};
+}}
+.app-name {{
+    font-size: {_app};
+}}
+.app-subtitle {{
+    font-size: {_sub};
+}}
+entry.drawer-search, searchentry.drawer-search {{
+    font-size: {_search};
+}}
+.alpha-jump {{
+    font-size: {_alpha};
+}}
+""".format(
+        _clock=_scaled_pt(54, scale),
+        _date=_scaled_pt(12, scale),
+        _dim=_scaled_pt(11.5, scale),
+        _app=_scaled_pt(14, scale),
+        _sub=_scaled_pt(10.5, scale),
+        _search=_scaled_pt(13, scale),
+        _alpha=_scaled_pt(10, scale),
+    )
+
+
 # Shell-only surfaces on top of the shared sheet, same ${token} variables.
 # Everything the shared stylesheet paints (entries, lists, popovers,
 # switches, buttons) is deliberately NOT repeated here.
@@ -503,6 +607,9 @@ class ShellWindow(Adw.ApplicationWindow):
         # When set to a gesture key ('swipe_left_home'/'swipe_right_home'),
         # the next drawer tap binds that app to the gesture instead of launching
         self._pick_gesture_key: str | None = None
+        # When set to a widget key, the next drawer tap binds that app to
+        # the widget's tap action instead of launching
+        self._pick_widget_tap: str | None = None
         # When True, the next drawer tap adds that app to the standby
         # never-freeze list instead of launching (settings standby card)
         self._pick_exempt_mode = False
@@ -611,10 +718,14 @@ class ShellWindow(Adw.ApplicationWindow):
 
         self.clock_label = Gtk.Label(xalign=0)
         self.clock_label.add_css_class('display-clock')
+        # An 81 pt clock at large text scales is wider than the phone:
+        # ellipsize instead of forcing the home page wider.
+        self.clock_label.set_ellipsize(Pango.EllipsizeMode.END)
 
         self.date_label = Gtk.Label(xalign=0)
         self.date_label.add_css_class('display-date')
         self.date_label.add_css_class('dim-label')
+        self.date_label.set_ellipsize(Pango.EllipsizeMode.END)
 
         self.weather_label = Gtk.Label(xalign=0)
         self.weather_label.add_css_class('display-date')
@@ -1193,7 +1304,7 @@ class ShellWindow(Adw.ApplicationWindow):
         # Lazy mid-session construction must render the CURRENT preset, not
         # whatever the injected config resolved to at construction inside
         # the surface (apply_theme() there is only a standalone fallback).
-        d.apply_theme(resolve_theme(self.config))
+        d.apply_theme(resolve_appearance_preset(self.config))
         d.present()
         self._dialer = d
 
@@ -1361,7 +1472,7 @@ class ShellWindow(Adw.ApplicationWindow):
             self._shade.set_application(self.get_application())
             # Same current-preset rule as _open_dialer: the shade can be
             # built long after startup, under a hot-reloaded theme.
-            self._shade.apply_theme(resolve_theme(self.config))
+            self._shade.apply_theme(resolve_appearance_preset(self.config))
         return self._shade
 
     def _show_shade(self) -> None:
@@ -1396,7 +1507,7 @@ class ShellWindow(Adw.ApplicationWindow):
                 config=self.config, on_lock=self._show_lock_screen)
             self._power_menu.set_application(self.get_application())
             # Same current-preset rule as _open_dialer.
-            self._power_menu.apply_theme(resolve_theme(self.config))
+            self._power_menu.apply_theme(resolve_appearance_preset(self.config))
         self._power_menu.show_menu()
 
     def _show_keyboard(self) -> None:
@@ -1542,7 +1653,7 @@ class ShellWindow(Adw.ApplicationWindow):
                 on_activated=self.drop_to_background,
             )
             self._switcher.set_application(self.get_application())
-            self._switcher.apply_theme(resolve_theme(self.config))
+            self._switcher.apply_theme(resolve_appearance_preset(self.config))
         else:
             try:
                 self._switcher.attach_manager(manager)
@@ -1625,6 +1736,7 @@ class ShellWindow(Adw.ApplicationWindow):
             self._pick_slot_mode = False
             self._pick_slot_target = None
             self._pick_gesture_key = None
+            self._pick_widget_tap = None
             self._pick_exempt_mode = False
             try:
                 self._disarm_search_keyboard()
@@ -1791,7 +1903,7 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _refresh_theme_buttons(self) -> None:
         current = str(self.config.data.get('theme', DEFAULT_CONFIG['theme']))
-        resolved = resolve_theme(self.config)
+        resolved = resolve_appearance_preset(self.config)
         custom_bg = getattr(self.config, 'custom_background', None)
         rules = [
             '.theme-swatch { background: transparent; border: none; '
@@ -1944,9 +2056,16 @@ class ShellWindow(Adw.ApplicationWindow):
         from font_theme import apply_global_font
         from home_launcher import theme_css as home_theme_css
         apply_global_font(self.config.font_family)
-        theme = preset if preset is not None else resolve_theme(self.config)
+        theme = (preset if preset is not None
+                 else resolve_appearance_preset(self.config))
         style_manager = Adw.StyleManager.get_default()
-        if self.config.prefer_dark:
+        if preset is not None:
+            red, green, blue = (int(theme.background[i:i + 2], 16)
+                                for i in (1, 3, 5))
+            dark = (0.299 * red + 0.587 * green + 0.114 * blue) / 255 < 0.5
+        else:
+            dark = effective_dark(self.config)
+        if dark:
             style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         else:
             style_manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
@@ -1961,7 +2080,10 @@ class ShellWindow(Adw.ApplicationWindow):
             muted=theme.muted,
             accent=theme.accent,
         )
-        css = base + '\n' + shell + '\n' + home_theme_css(theme)
+        scale = self.config.text_size_scale
+        css = (base + '\n' + shell + '\n'
+               + home_theme_css(theme, scale) + '\n'
+               + launcher_text_css(scale))
         self.theme_provider.load_from_data(css.encode('utf-8'))
 
     def _refresh_clock(self) -> None:
@@ -2219,7 +2341,7 @@ class ShellWindow(Adw.ApplicationWindow):
         surface. They draw outside .shell-root with their own display-level
         providers, so a hot-reloaded theme edit must reach each one; fonts
         already propagate display-wide via font_theme's global provider."""
-        preset = resolve_theme(self.config)
+        preset = resolve_appearance_preset(self.config)
         try:
             surfaces = (self._shade, self._dialer, self._call_ui,
                         self._call_bar, self._power_menu, self._switcher)
