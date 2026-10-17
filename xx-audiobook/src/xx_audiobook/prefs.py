@@ -70,3 +70,39 @@ def save(prefs: Prefs) -> None:
 def debug_api_base() -> str | None:
     override = os.environ.get(DEBUG_API_BASE_ENV, "").strip()
     return override or None
+
+
+class PrefsStore:
+    """Mutable prefs view for SettingsSync (mirrors AppPrefs G12)."""
+
+    def current(self) -> Prefs:
+        return load()
+
+    def mark_settings_edited(self, at_s: float) -> None:
+        prefs = load()
+        prefs.settings_updated_at = at_s
+        prefs.settings_dirty = True
+        save(prefs)
+
+    def mark_settings_synced(self, at_s: float) -> None:
+        prefs = load()
+        if prefs.settings_updated_at == at_s:
+            prefs.settings_dirty = False
+            save(prefs)
+
+    def apply_remote_settings(self, skip_back: int, skip_forward: int,
+                              speed: float, auto_rewind: int,
+                              at_s: float) -> None:
+        prefs = load()
+        prefs.skip_back_seconds = skip_back
+        prefs.skip_seconds = skip_forward
+        prefs.default_speed = speed
+        prefs.auto_rewind_seconds = auto_rewind
+        prefs.settings_updated_at = at_s
+        prefs.settings_dirty = False
+        save(prefs)
+
+    def set_owner_user_id(self, user_id: str) -> None:
+        prefs = load()
+        prefs.owner_user_id = user_id
+        save(prefs)

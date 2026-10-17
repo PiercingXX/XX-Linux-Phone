@@ -11,10 +11,16 @@ import threading
 from collections import deque
 
 RING_SIZE = 300
+FILE_CAP_BYTES = 256 * 1024
+SHARE_CAP_BYTES = 200 * 1024
+LOG_NAME = "xx-audiobook.log"
+PREV_NAME = "xx-audiobook.log.1"
+CRASH_NAME = "last-crash.txt"
 
 _lock = threading.Lock()
 _ring: deque[str] = deque(maxlen=RING_SIZE)
 _logger = None
+_log_dir = None
 
 _BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._\-~+/=]+")
 _SECRET_RE = re.compile(
@@ -37,9 +43,30 @@ def redact(line: str) -> str:
     return _EMAIL_RE.sub("[REDACTED]", redacted)
 
 
+def _rotate_if_needed(path) -> bool:
+    try:
+        import os
+        if os.path.getsize(path) <= FILE_CAP_BYTES:
+            return False
+    except OSError:
+        return False
+    prev = path.parent / PREV_NAME
+    try:
+        if prev.exists():
+            prev.unlink()
+    except OSError:
+        pass
+    try:
+        path.rename(prev)
+    except OSError:
+        return False
+    return True
+
+
 class AppLog:
     def __init__(self) -> None:
         self._file = None
+        self._path = None
 
     def _log(self, level: str, message: str, *args) -> None:
         try:
@@ -49,8 +76,15 @@ class AppLog:
         line = f"{level} {redact(text)}"
         with _lock:
             _ring.append(line)
-        if self._file is not None:
+        if self._file is not None and self._path is not None:
             try:
+                if _rotate_if_needed(self._path) or self._file.closed:
+                    try:
+                        self._file.close()
+                    except OSError:
+                        pass
+                    self._file = open(str(self._path), "a",
+                                      encoding="utf-8")
                 self._file.write(line + "\n")
                 self._file.flush()
             except OSError:
@@ -67,17 +101,20 @@ class AppLog:
 
 
 def get_logger() -> AppLog:
-    global _logger
+    global _logger, _log_dir
     with _lock:
         if _logger is None:
             _logger = AppLog()
             try:
                 from xx_audiobook import paths as paths_module
                 paths_module.ensure_app_dirs()
-                _logger._file = open(str(paths_module.log_file()),
-                                     "a", encoding="utf-8")
+                path = paths_module.log_file()
+                _log_dir = path.parent
+                _logger._path = path
+                _logger._file = open(str(path), "a", encoding="utf-8")
             except OSError:
                 _logger._file = None
+                _logger._path = None
         return _logger
 
 
@@ -87,8 +124,63 @@ def read_recent(limit: int = 300) -> list[str]:
     return lines[-limit:]
 
 
+def dump() -> str:
+    return "\n".join(read_recent(limit=RING_SIZE))
+
+
+def last_crash() -> str | None:
+    directory = _log_dir
+    if directory is None:
+        try:
+            from xx_audiobook import paths as paths_module
+            directory = paths_module.state_dir()
+        except OSError:
+            return None
+    crash = directory / CRASH_NAME
+    try:
+        if not crash.is_file() or crash.stat().st_size == 0:
+            return None
+        return crash.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def persist_crash(error) -> None:
+    import traceback
+    try:
+        from xx_audiobook import paths as paths_module
+        paths_module.ensure_app_dirs()
+        crash = paths_module.state_dir() / CRASH_NAME
+    except OSError:
+        return
+    try:
+        header = redact(f"crash {type(error).__name__}: {error}")
+        detail = redact("".join(traceback.format_exception(error)))
+        crash.write_text(header + "\n" + detail + "\n--- recent ---\n"
+                         + dump() + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def share_text() -> str:
+    parts = []
+    crashed = last_crash()
+    if crashed:
+        parts.append("--- last crash ---")
+        parts.append(crashed)
+        parts.append("")
+    parts.append("--- live ---")
+    parts.append(dump())
+    text = "\n".join(parts)
+    encoded = text.encode("utf-8", "replace")
+    if len(encoded) > SHARE_CAP_BYTES:
+        encoded = encoded[-SHARE_CAP_BYTES:]
+        text = encoded.decode("utf-8", "replace")
+    return text
+
+
 def reset() -> None:
-    global _logger
+    global _logger, _log_dir
     with _lock:
         _ring.clear()
         if _logger is not None and _logger._file is not None:
@@ -97,3 +189,4 @@ def reset() -> None:
             except OSError:
                 pass
         _logger = None
+        _log_dir = None
