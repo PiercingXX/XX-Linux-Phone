@@ -124,7 +124,14 @@ ts_apt_repo() {
     for _ts_dist in ${ID:-} ${ID_LIKE:-}; do
         case "$_ts_dist" in debian|ubuntu) ;; *) continue ;; esac
         _ts_code=${VERSION_CODENAME:-}
-        [ "$_ts_dist" = debian ] && [ -n "${DEBIAN_CODENAME:-}" ] && _ts_code=$DEBIAN_CODENAME
+        if [ "$_ts_dist" = debian ]; then
+            # Derivatives (FuriOS) leave VERSION_CODENAME empty; Debian's
+            # own codename is in DEBIAN_CODENAME or /etc/debian_version
+            # ("forky/sid" on testing).
+            [ -n "${DEBIAN_CODENAME:-}" ] && _ts_code=$DEBIAN_CODENAME
+            [ -n "$_ts_code" ] || _ts_code=$(cut -d/ -f1 /etc/debian_version 2>/dev/null)
+            case "$_ts_code" in *[!a-z]*|'') _ts_code= ;; esac
+        fi
         [ -n "$_ts_code" ] || continue
         _ts_base="https://pkgs.tailscale.com/stable/$_ts_dist/$_ts_code"
         curl -fsSL "$_ts_base.noarmor.gpg" >"$_ts_key" 2>/dev/null || continue

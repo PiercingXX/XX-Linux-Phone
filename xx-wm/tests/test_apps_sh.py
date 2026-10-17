@@ -46,6 +46,7 @@ def test_tailscale_per_distro_then_static_fallback():
     assert 'pacman) pkg_install tailscale' in chunk
     # Debian does not package tailscale: Tailscale's own apt repo
     assert 'pkgs.tailscale.com/stable/$_ts_dist/$_ts_code' in chunk
+    assert '/etc/debian_version' in chunk      # FuriOS: no VERSION_CODENAME
     assert 'TarballsVersion' in chunk          # static build, newest version
     assert 'systemctl enable --now tailscaled' in chunk
     assert 'rc-service tailscale start' in chunk
