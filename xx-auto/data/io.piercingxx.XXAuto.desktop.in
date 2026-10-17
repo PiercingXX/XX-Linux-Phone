@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=xx-auto
+Comment=Driving screen for a phone in a car mount
+Exec=@bindir@/xx-auto
+DBusActivatable=false
+Terminal=false
+Categories=Utility;
+StartupNotify=true

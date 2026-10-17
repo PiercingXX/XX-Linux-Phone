@@ -14,6 +14,7 @@ A complete, minimal phone experience for Linux phones: the **XX-WM** shell and t
 | [`xx-share/`](xx-share/) | Nearby Share, compatible with LocalSend |
 | [`xx-captions/`](xx-captions/) | On-device live captions and call transcription |
 | [`xx-find/`](xx-find/) | Self-hosted Find My Device (built, not enabled) |
+| [`xx-auto/`](xx-auto/) | Driving screen for a phone in a car mount (MPRIS media, maps, starred-contact calls) |
 
 Each directory is a self-contained project with its own `meson.build`, tests and README. How the pieces talk to each other is in [`docs/dbus.md`](docs/dbus.md).
 

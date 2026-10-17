@@ -1,0 +1,11 @@
+[Unit]
+Description=xx-auto car watcher (opens the drive screen on car Bluetooth)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@bindir@/xx-auto --watch
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

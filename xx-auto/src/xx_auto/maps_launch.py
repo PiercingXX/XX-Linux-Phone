@@ -1,0 +1,70 @@
+"""Maps-tile resolution against installed desktop entries (AU7)."""
+
+from __future__ import annotations
+
+from .maps_resolve import Target
+
+XX_MAPS_DESKTOP_ID = "io.piercingxx.XXMaps.desktop"
+GNOME_MAPS_DESKTOP_ID = "org.gnome.Maps.desktop"
+GEO_TYPE = "x-scheme-handler/geo"
+
+
+def resolve_maps_app(desktop=None) -> tuple[Target, str | None]:
+    """(target, desktop_id) for the Maps tile; None id when missing."""
+    try:
+        import gi
+
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio
+
+        desktop = desktop or Gio.DesktopAppInfo
+        explicit = desktop.new(XX_MAPS_DESKTOP_ID)
+        if explicit is not None:
+            return Target.DRIVE, explicit.get_id()
+        geo = Gio.AppInfo.get_default_for_type(GEO_TYPE, False)
+        if geo is not None and geo.get_id():
+            return Target.LAUNCHER, geo.get_id()
+        gnome = desktop.new(GNOME_MAPS_DESKTOP_ID)
+        if gnome is not None:
+            return Target.LAUNCHER, gnome.get_id()
+        for info in Gio.AppInfo.get_all():
+            for handled in (info.get_supported_types() or []):
+                if handled == GEO_TYPE:
+                    return Target.LAUNCHER, info.get_id()
+    except Exception:
+        pass
+    return Target.NOT_INSTALLED, None
+
+
+def launch_target(target: Target, desktop_id: str | None) -> bool:
+    """Open the resolved maps entry; False when nothing is installed."""
+    if target is Target.NOT_INSTALLED or not desktop_id:
+        return False
+    try:
+        import gi
+
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio
+
+        info = Gio.DesktopAppInfo.new(desktop_id)
+        if info is None:
+            return False
+        return bool(info.launch([], None))
+    except Exception:
+        return False
+
+
+def open_store_listing() -> bool:
+    """Open the app store listing for xx-maps; False when no store."""
+    try:
+        import gi
+
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio
+
+        store = Gio.DesktopAppInfo.new("io.piercingxx.Apps.desktop")
+        if store is not None:
+            return bool(store.launch([], None))
+    except Exception:
+        pass
+    return False
