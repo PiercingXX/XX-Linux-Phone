@@ -14,6 +14,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gtk
 
 from xx_email.ui import common as common_mod
+from xx_ui import widgets
 
 EMPTY_TEXT = "(no lines yet)"
 
@@ -27,23 +28,19 @@ class LogsPage(Gtk.Box):
         self._toast = toast
         self._text = ""
 
-        header = common_mod.phone_header("Logs")
-        back = common_mod.text_button("Back")
-        back.connect("clicked", lambda _b: hooks.go_back())
-        header.pack_start(back)
-        copy = common_mod.text_button("Copy")
-        copy.connect("clicked", lambda _b: self._copy())
-        header.pack_end(copy)
-        self.append(header)
+        self.append(widgets.compact_header(
+            lambda: hooks.go_back(), "Logs", "",
+            "edit-copy-symbolic", lambda: self._copy()))
 
+        note_pad = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        note_pad.add_css_class("xx-page-body")
         note = common_mod.wrapped(Gtk.Label(
             label="On-device log. Tokens, auth headers and addresses "
                   "are scrubbed before display — nothing leaves the "
                   "phone unless you paste it."))
-        note.add_css_class("email-muted")
-        note.set_margin_start(24)
-        note.set_margin_end(24)
-        self.append(note)
+        note.add_css_class("xx-secondary")
+        note_pad.append(note)
+        self.append(note_pad)
 
         self._buffer = Gtk.TextBuffer()
         view = Gtk.TextView(buffer=self._buffer)
@@ -53,12 +50,14 @@ class LogsPage(Gtk.Box):
         view.set_hexpand(True)
         view.set_vexpand(True)
         scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER,
+                            Gtk.PolicyType.AUTOMATIC)
         scrolled.set_vexpand(True)
         scrolled.set_hexpand(True)
         scrolled.set_child(view)
-        scrolled.set_margin_start(12)
-        scrolled.set_margin_end(12)
-        scrolled.set_margin_bottom(12)
+        scrolled.set_margin_start(20)
+        scrolled.set_margin_end(20)
+        scrolled.set_margin_bottom(20)
         self.append(scrolled)
         hooks.load_logs(self._on_loaded)
 

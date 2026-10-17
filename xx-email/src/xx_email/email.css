@@ -1,0 +1,30 @@
+/* xx-email app CSS. Colors come only from xx_ui theme tokens. */
+
+.email-unread-title {
+  font-weight: 500;
+}
+
+.email-dot {
+  background-color: @theme_fg_color;
+  border-radius: 9999px;
+  min-width: 8px;
+  min-height: 8px;
+}
+
+.email-dim {
+  opacity: 0.35;
+}
+
+.xx-row.selected {
+  background-color: @theme_selected_bg_color;
+}
+
+.xx-row.selected .xx-title,
+.xx-row.selected .xx-secondary,
+.xx-row.selected .xx-time {
+  color: @theme_selected_fg_color;
+}
+
+.xx-row.selected .email-dot {
+  background-color: @theme_selected_fg_color;
+}

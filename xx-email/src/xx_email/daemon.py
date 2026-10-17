@@ -39,6 +39,30 @@ from xx_email import __app_id__ as GUI_APP_ID
 
 DAEMON_BUS_NAME = "io.piercingxx.XXEmail.Daemon"
 
+SHELL_CONFIG_ENV = "XX_WM_CONFIG"
+
+
+def shell_config_path() -> Path:
+    override = os.environ.get(SHELL_CONFIG_ENV)
+    if override:
+        return Path(override)
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "xx-wm" / "config.json"
+
+
+def load_shell_config(path: Path | None = None) -> dict:
+    """Shell config as a dict; missing/invalid files yield {}."""
+    target = path if path is not None else shell_config_path()
+    try:
+        raw = target.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
 DEFAULT_INTERVAL_MINUTES = 15
 BATTERY_SAVER_FACTOR = 2
 STATE_FILE_NAME = "daemon_state.json"
@@ -62,10 +86,8 @@ def effective_interval_minutes(config_minutes: int,
 def read_battery_saver(shell_config: dict | None = None) -> bool:
     """Shell battery_saver flag; missing/invalid config means off."""
     if shell_config is None:
-        from xx_email import theme as theme_mod
-
         try:
-            shell_config = theme_mod.load_shell_config()
+            shell_config = load_shell_config()
         except Exception:
             return False
     try:
@@ -218,10 +240,8 @@ def run_tick(conn, make_engine, connection, client_for_account, *,
         except Exception:
             app_config = None
     if shell_config is None:
-        from xx_email import theme as theme_mod
-
         try:
-            shell_config = theme_mod.load_shell_config()
+            shell_config = load_shell_config()
         except Exception:
             shell_config = {}
     posture = notify_mod.lock_posture(shell_config or {})

@@ -28,6 +28,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from xx_email import compose as compose_mod
 from xx_email import contacts as contacts_mod
 from xx_email.ui import common as common_mod
+from xx_ui import widgets
 
 SUGGEST_LIMIT = 8
 AUTOSAVE_MS = 1200
@@ -38,16 +39,6 @@ def _token(text: str) -> str:
     """Address fragment being typed (after the last comma/semicolon)."""
     fragment = (text or "").replace(";", ",").rsplit(",", 1)[-1]
     return fragment.strip()
-
-
-def _tap_to_focus(widget) -> None:
-    """Focus only on tap: unfocusable until a CAPTURE-phase click."""
-    widget.set_can_focus(False)
-    tap = Gtk.GestureClick()
-    tap.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-    tap.connect("pressed", lambda *_a: (
-        widget.set_can_focus(True), widget.grab_focus()))
-    widget.add_controller(tap)
 
 
 class ComposePage(Gtk.Box):
@@ -66,23 +57,15 @@ class ComposePage(Gtk.Box):
         self._suggest_timer: int | None = None
         self._suggest_for = None
 
-        header = common_mod.phone_header("Compose")
-        discard = common_mod.text_button("Discard")
-        discard.connect("clicked", lambda _b: self._on_discard())
-        header.pack_start(discard)
-        self._spinner = Adw.Spinner()
-        self._spinner.set_visible(False)
-        header.pack_end(self._spinner)
-        self._send_button = common_mod.text_button("Send")
-        self._send_button.connect("clicked",
-                                  lambda _b: self._send(None))
-        header.pack_end(self._send_button)
-        self.append(header)
+        mode = initial.get("mode", "new")
+        title = {"reply": "Reply", "reply_all": "Reply all",
+                 "forward": "Forward"}.get(mode, "Compose")
+        self.append(widgets.compact_header(
+            lambda: self._on_discard(), title, account))
 
-        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        form.set_margin_start(12)
-        form.set_margin_end(12)
-        form.set_margin_top(8)
+        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        form.add_css_class("xx-page-body")
+        form.set_margin_top(12)
         form.set_margin_bottom(12)
 
         self._to = self._recipient_entry(form, "To", initial.get("to",
@@ -96,7 +79,7 @@ class ComposePage(Gtk.Box):
         self._cc_box.set_visible(show_cc)
         self._bcc_box.set_visible(show_cc)
         if not show_cc:
-            toggle = common_mod.text_button("Add Cc/Bcc")
+            toggle = widgets.text_button("Add Cc/Bcc")
             toggle.connect("clicked", lambda _b: (
                 self._cc_box.set_visible(True),
                 self._bcc_box.set_visible(True),
@@ -108,28 +91,23 @@ class ComposePage(Gtk.Box):
         self._suggest.set_visible(False)
         form.append(self._suggest)
 
-        self._subject = Gtk.Entry()
-        self._subject.set_placeholder_text("Subject")
+        form.append(widgets.caption("Subject"))
+        self._subject = widgets.text_entry("Subject")
         self._subject.set_hexpand(True)
         self._subject.set_text(initial.get("subject", ""))
         self._subject.connect("changed",
                               lambda _e: self._schedule_autosave())
-        _tap_to_focus(self._subject)
+        common_mod.tap_to_focus(self._subject)
         form.append(self._subject)
 
-        schedule = common_mod.text_button("Schedule send")
-        schedule.connect("clicked", lambda _b: self._open_schedule())
-        form.append(schedule)
-
         attach_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                             spacing=8)
-        attach = common_mod.text_button("Attach file")
+                             spacing=12)
+        attach = widgets.outline_button("Attach")
         attach.connect("clicked", lambda _b: self._pick_files())
         attach_row.append(attach)
-        self._attach_note = Gtk.Label(label="")
-        self._attach_note.add_css_class("email-muted")
-        self._attach_note.set_xalign(0.0)
+        self._attach_note = widgets.label("", "xx-secondary")
         self._attach_note.set_hexpand(True)
+        self._attach_note.set_valign(Gtk.Align.CENTER)
         attach_row.append(self._attach_note)
         form.append(attach_row)
 
@@ -139,13 +117,13 @@ class ComposePage(Gtk.Box):
         form.append(self._chips)
 
         self._offer_row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        offer = common_mod.text_button(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        offer = widgets.outline_button(
             f"Include original attachments ({self._offer_count:d})")
         offer.connect("clicked",
                       lambda _b: self._fetch_offered())
         self._offer_row.append(offer)
-        decline = common_mod.text_button("Skip")
+        decline = widgets.text_button("Skip")
         decline.connect("clicked", lambda _b: (
             self._hooks.decline_offer(),
             self._offer_row.set_visible(False)))
@@ -153,7 +131,9 @@ class ComposePage(Gtk.Box):
         self._offer_row.set_visible(not self._offer_done)
         form.append(self._offer_row)
 
+        form.append(widgets.caption("Message"))
         self._body = Gtk.TextView()
+        self._body.add_css_class("xx-entry")
         self._body.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self._body.set_hexpand(True)
         self._body.set_vexpand(True)
@@ -161,27 +141,47 @@ class ComposePage(Gtk.Box):
         self._body.get_buffer().connect("changed",
                                         lambda _b:
                                         self._schedule_autosave())
-        _tap_to_focus(self._body)
-        body_scrolled = Gtk.ScrolledWindow()
-        body_scrolled.add_css_class("email-listview")
-        body_scrolled.set_min_content_height(220)
-        body_scrolled.set_vexpand(True)
-        body_scrolled.set_child(self._body)
-        form.append(body_scrolled)
+        common_mod.tap_to_focus(self._body)
+        body_frame = Gtk.ScrolledWindow()
+        body_frame.set_policy(Gtk.PolicyType.NEVER,
+                              Gtk.PolicyType.AUTOMATIC)
+        body_frame.set_min_content_height(180)
+        body_frame.set_vexpand(True)
+        body_frame.set_child(self._body)
+        form.append(body_frame)
 
-        self._error = common_mod.wrapped(Gtk.Label(label=""))
-        self._error.add_css_class("email-muted")
+        self._error = widgets.label("", "xx-secondary")
         form.append(self._error)
 
         scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER,
+                            Gtk.PolicyType.AUTOMATIC)
         scrolled.set_vexpand(True)
         scrolled.set_child(form)
         self.append(scrolled)
 
+        send_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                           spacing=12)
+        send_row.add_css_class("xx-page-body")
+        send_row.set_margin_top(12)
+        send_row.set_margin_bottom(20)
+        schedule = widgets.outline_button("Schedule")
+        schedule.connect("clicked", lambda _b: self._open_schedule())
+        send_row.append(schedule)
+        self._spinner = Adw.Spinner()
+        self._spinner.set_visible(False)
+        self._spinner.set_valign(Gtk.Align.CENTER)
+        send_row.append(self._spinner)
+        send = widgets.primary_button("Send")
+        send.set_hexpand(True)
+        send.connect("clicked", lambda _b: self._send(None))
+        send_row.append(send)
+        self.append(send_row)
+
         self._paint_chips()
         # Explicit-open exception: the first empty recipient field is
         # why the user came here, so it alone takes focus on show.
-        # Everything else waits for a tap (see _tap_to_focus).
+        # Everything else waits for a tap (see common.tap_to_focus).
         if autofocus_to and not self._to.get_text().strip():
             self._to.set_can_focus(True)
             GLib.idle_add(self._to.grab_focus)
@@ -190,25 +190,25 @@ class ComposePage(Gtk.Box):
 
     def _recipient_entry(self, form, label_text: str,
                          value: str) -> Gtk.Entry:
-        entry = Gtk.Entry()
-        entry.set_placeholder_text(label_text)
+        form.append(widgets.caption(label_text))
+        entry = widgets.text_entry(label_text)
         entry.set_hexpand(True)
         entry.set_text(value or "")
         entry.connect("changed", lambda e: self._on_recipient(e))
-        _tap_to_focus(entry)
+        common_mod.tap_to_focus(entry)
         form.append(entry)
         return entry
 
     def _boxed_recipient(self, form, label_text: str,
                          value: str) -> tuple:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.set_hexpand(True)
-        entry = Gtk.Entry()
-        entry.set_placeholder_text(label_text)
+        box.append(widgets.caption(label_text))
+        entry = widgets.text_entry(label_text)
         entry.set_hexpand(True)
         entry.set_text(value or "")
         entry.connect("changed", lambda e: self._on_recipient(e))
-        _tap_to_focus(entry)
+        common_mod.tap_to_focus(entry)
         box.append(entry)
         form.append(box)
         return (box, entry)
@@ -266,7 +266,7 @@ class ComposePage(Gtk.Box):
             _ = uid
             label = f"{display} <{primary}>" if "@" in (
                 primary or "") else display
-            button = common_mod.text_button(label)
+            button = widgets.menu_row(label)
             button.connect("clicked",
                            lambda _b, e=entry, d=display,
                            p=primary: self._apply_suggest(e, d, p))
@@ -322,7 +322,7 @@ class ComposePage(Gtk.Box):
                 shown = f"{size // 1024:d} KB"
             else:
                 shown = f"{size:d} B"
-            chip = common_mod.text_button(
+            chip = widgets.outline_button(
                 f"{item.get('name', 'file')} ({shown})")
             chip.connect("clicked",
                          lambda _b, p=item.get("path"):
@@ -408,23 +408,18 @@ class ComposePage(Gtk.Box):
     def _open_schedule(self) -> None:
         dialog = Adw.Dialog()
         dialog.set_title("Schedule send")
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                          spacing=4)
-        content.set_margin_start(16)
-        content.set_margin_end(16)
-        content.set_margin_top(16)
-        content.set_margin_bottom(16)
-        dialog.set_child(content)
+        content = widgets.dialog_box("Schedule send")
         now = datetime.now().astimezone()
         for label_text, at_ms in compose_mod.schedule_presets(now):
-            button = common_mod.text_button(label_text)
+            button = widgets.menu_row(label_text)
             button.connect("clicked",
                            lambda _b, at=at_ms: (
                                dialog.close(), self._send(at)))
             content.append(button)
-        cancel = common_mod.text_button("Cancel")
+        cancel = widgets.menu_row("Cancel")
         cancel.connect("clicked", lambda _b: dialog.close())
         content.append(cancel)
+        dialog.set_child(content)
         dialog.present(self.get_root())
 
     def _send(self, scheduled_at) -> None:

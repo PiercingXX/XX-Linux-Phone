@@ -1,11 +1,11 @@
 """Broadway driver for the milestone 9 audit (not collected by pytest).
 
-Opens every page at 320x640 against a seeded realistic store
-(including Android-style millisecond ids and long unbroken strings)
-and prints MIN/ALLOC markers per surface. Any unexpected exception
-exits nonzero so the parent test fails instead of passing on empty
-output. Minimum widths above 320 px mean horizontal overflow on the
-smallest supported phone.
+Opens every page against a seeded realistic store (including
+Android-style millisecond ids and long unbroken strings) and prints
+MIN/ALLOC markers per surface. Any unexpected exception exits
+nonzero so the parent test fails instead of passing on empty
+output. Minimum widths above 360 px mean horizontal overflow on the
+phone canvas.
 """
 
 import os
@@ -14,6 +14,8 @@ import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "common"))
 
 import gi  # noqa: E402
 
@@ -22,10 +24,15 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
+import xx_ui  # noqa: E402
+
 Gtk.init()
 opened = Gdk.Display.open(os.environ.get("BROADWAY_DISPLAY", ""))
 assert opened is not None, "could not open the Broadway display"
 Adw.init()
+# Measure under the production stylesheet: the app always runs with
+# xx_ui applied, and default Adwaita minima do not reflect it.
+xx_ui.apply()
 
 from xx_email import bodies as bodies_mod  # noqa: E402
 from xx_email import config as config_mod  # noqa: E402
@@ -408,28 +415,12 @@ def _scenario_audit() -> None:
     _pump(0.5)
     _measure("logs", nav.get_visible_page())
 
-    dialog = settings_page_mod.SettingsDialog(_SettingsHooks(),
-                                              _toast)
-    dialog.present(window)
+    settings_page = settings_page_mod.SettingsPage(
+        _SettingsHooks(), _toast)
+    nav.push(settings_page_mod.settings_navigation_page(
+        settings_page))
     _pump(0.6)
-    _measure("settings", dialog)
-    dialog.close()
-    _pump(0.2)
-
-    trivial = Adw.PreferencesDialog()
-    trivial_page = Adw.PreferencesPage()
-    trivial_page.set_title("T")
-    trivial_group = Adw.PreferencesGroup()
-    trivial_page.add(trivial_group)
-    trivial_row = Adw.ActionRow()
-    trivial_row.set_title("Hi")
-    trivial_group.add(trivial_row)
-    trivial.add(trivial_page)
-    trivial.present(window)
-    _pump(0.4)
-    _measure("dialog-floor", trivial)
-    trivial.close()
-    _pump(0.2)
+    _measure("settings", nav.get_visible_page())
 
     bodies_text = bodies_mod.render_body(
         "<p>Hello</p>", "Hello fallback")

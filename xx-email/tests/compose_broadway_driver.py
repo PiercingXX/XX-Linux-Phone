@@ -13,6 +13,8 @@ import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "common"))
 
 import gi  # noqa: E402
 
@@ -292,7 +294,7 @@ def _scenario_smoke() -> None:
     mailbox = mailbox_page_mod.MailboxPage(ACCOUNT, hooks, _toast)
     thread = thread_page_mod.ThreadPage(ACCOUNT, "t-seed-1",
                                         hooks, _toast)
-    print("MAILBOX_TABS:", len(mailbox._tab_stores))
+    print("MAILBOX_TABS:", len(mailbox._tabs))
     print("REPLY_REFS:", "yes" if reply.references else "no")
     mailbox_window = _show(mailbox, "Mailbox")
     thread_window = _show(thread, "Thread")

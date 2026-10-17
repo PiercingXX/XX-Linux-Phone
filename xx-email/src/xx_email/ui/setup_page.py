@@ -2,11 +2,11 @@
 
 Ports SetupScreen over xx_email.auth (loopback flow) and
 xx_email.setup (completion): paste a Desktop-type OAuth client ID,
-read the short how-to (full guide in docs/oauth-setup.md), then
-"Sign in with Google" opens the consent page in the browser. The
-loopback listener, the exchange, and the keyring writes all run on
-the app's worker threads through hooks — this page only shows state.
-A locked keyring shows "Unlock your keyring to continue" with Retry.
+then "Sign in with Google" opens the consent page in the browser.
+The loopback listener, the exchange, and the keyring writes all run
+on the app's worker threads through hooks — this page only shows
+state. A locked keyring shows "Unlock your keyring to continue" with
+Retry. The full guide lives behind "View setup guide".
 """
 
 import gi
@@ -19,20 +19,18 @@ from gi.repository import Adw, Gtk
 from xx_email import auth as auth_mod
 from xx_email import setup as setup_mod
 from xx_email.ui import common as common_mod
+from xx_ui import widgets
 
 TITLES = {"first-run": "Welcome", "add": "Add account",
           "reauth": "Sign in again"}
 
-INTRO = ("A private Gmail client. No tracking, no ads: mail goes "
-         "straight between this phone and Google.")
+INTRO = ("A private Gmail client. No tracking, no ads.")
 
-HOWTO = ("One-time setup:\n"
-         "1. In Google Cloud Console, enable the Gmail API and create\n"
-         "an OAuth client of type Desktop app (loopback-capable).\n"
-         "2. Paste its client ID below.\n"
-         "3. Sign in with Google: approve the consent page that opens\n"
-         "in your browser.\n"
-         "Full guide: docs/oauth-setup.md")
+STEPS = (
+    ("Step 1", "Create a Desktop OAuth client with the Gmail API."),
+    ("Step 2", "Paste its client ID below."),
+    ("Step 3", "Sign in with Google in your browser."),
+)
 
 
 class SetupPage(Gtk.Box):
@@ -48,42 +46,41 @@ class SetupPage(Gtk.Box):
         self._busy = False
         self._locked = False
 
-        header = common_mod.phone_header(TITLES[self._mode])
-        if self._mode != "first-run":
-            back = common_mod.text_button("Back")
-            back.connect("clicked", lambda _b: self._on_back())
-            header.pack_start(back)
-        self.append(header)
+        if self._mode == "first-run":
+            self.append(widgets.page_header(
+                TITLES[self._mode], "PRIVATE GMAIL FOR YOUR PHONE"))
+        else:
+            self.append(widgets.compact_header(
+                lambda: self._on_back(), TITLES[self._mode],
+                account or ""))
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                           spacing=12)
-        content.set_margin_start(24)
-        content.set_margin_end(24)
-        content.set_margin_top(16)
-        content.set_margin_bottom(16)
+        content.add_css_class("xx-page-body")
+        content.set_margin_top(12)
+        content.set_margin_bottom(20)
 
         intro = common_mod.wrapped(Gtk.Label(label=INTRO))
+        intro.add_css_class("xx-body")
         content.append(intro)
         if self._mode == "reauth" and account:
             who = common_mod.wrapped(Gtk.Label(
                 label=f"Signing in again as {account} — your cached "
                       "mail stays on this phone."))
+            who.add_css_class("xx-secondary")
             content.append(who)
 
-        howto = common_mod.wrapped(Gtk.Label(label=HOWTO))
-        howto.set_selectable(True)
-        content.append(howto)
+        for step, detail in STEPS:
+            step_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                               spacing=0)
+            step_box.append(widgets.caption(step))
+            value = common_mod.wrapped(Gtk.Label(label=detail))
+            value.add_css_class("xx-field-value")
+            step_box.append(value)
+            content.append(step_box)
 
-        guide = common_mod.text_button("View setup guide")
-        guide.set_tooltip_text("Open docs/oauth-setup.md")
-        guide.connect("clicked", lambda _b: hooks.open_setup_guide())
-        content.append(guide)
-
-        id_label = Gtk.Label(label="OAuth client ID")
-        id_label.set_xalign(0.0)
-        content.append(id_label)
-        self._entry = Gtk.Entry()
-        self._entry.set_placeholder_text(
+        content.append(widgets.caption("OAuth client ID"))
+        self._entry = widgets.text_entry(
             "1234567890-abc.apps.googleusercontent.com")
         self._entry.set_hexpand(True)
         self._entry.set_text(client_id or "")
@@ -91,46 +88,52 @@ class SetupPage(Gtk.Box):
         self._entry.connect("activate", lambda _e: self._submit())
         content.append(self._entry)
 
-        self._lock_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._lock_box.add_css_class("email-banner")
+        self._lock_box = widgets.card()
         self._lock_box.set_visible(False)
+        lock_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                           spacing=12)
         lock_label = common_mod.wrapped(Gtk.Label(
             label=setup_mod.KEYRING_LOCKED_MESSAGE))
         lock_label.set_hexpand(True)
-        self._lock_box.append(lock_label)
-        retry = common_mod.text_button("Retry")
+        lock_row.append(lock_label)
+        retry = widgets.outline_button("Retry")
         retry.connect("clicked", lambda _b: self._recheck_keyring())
-        self._lock_box.append(retry)
+        lock_row.append(retry)
+        self._lock_box.append(lock_row)
         content.append(self._lock_box)
 
-        self._status = common_mod.wrapped(Gtk.Label(label=""))
-        self._status.add_css_class("email-muted")
+        self._status = widgets.label("", "xx-secondary")
         content.append(self._status)
 
-        action_row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._signin = widgets.primary_button("Sign in with Google")
+        self._signin.connect("clicked", lambda _b: self._submit())
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                      spacing=12)
         self._spinner = Adw.Spinner()
         self._spinner.set_visible(False)
-        action_row.append(self._spinner)
-        self._signin = common_mod.text_button("Sign in with Google")
+        self._spinner.set_valign(Gtk.Align.CENTER)
+        row.append(self._spinner)
+        row.append(self._signin)
         self._signin.set_hexpand(True)
-        self._signin.connect("clicked", lambda _b: self._submit())
-        action_row.append(self._signin)
-        content.append(action_row)
+        content.append(row)
 
-        revoke = common_mod.text_button("Revoke Google access")
+        guide = widgets.text_button("View setup guide")
+        guide.set_tooltip_text("Open docs/oauth-setup.md")
+        guide.connect("clicked", lambda _b: hooks.open_setup_guide())
+        content.append(guide)
+
+        revoke = widgets.text_button("Revoke Google access")
         revoke.set_tooltip_text(
             "Open your Google permissions page in the browser")
         revoke.connect("clicked",
                        lambda _b: hooks.open_permissions())
         content.append(revoke)
 
-        clamp = Adw.Clamp(maximum_size=480)
-        clamp.set_child(content)
         scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER,
+                            Gtk.PolicyType.AUTOMATIC)
         scrolled.set_vexpand(True)
-        scrolled.set_child(clamp)
+        scrolled.set_child(content)
         self.append(scrolled)
 
         self._paint()

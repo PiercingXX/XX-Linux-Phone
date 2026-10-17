@@ -1,110 +1,89 @@
-"""Headless smoke tests for theme loading (no display, no GI imports)."""
+"""xx_ui adoption contract for xx-email (headless, no display).
 
-import json
+The app owns no theme reader and no theme CSS: one xx_ui.apply() at
+startup paints every preset, live shell-config switches restyle the
+open window, and the only app stylesheet (email.css) uses theme
+tokens — never hardcoded colors.
+"""
+
 import re
-import sys
+from pathlib import Path
 
-from xx_email import theme
-
-
-def test_pure_module_imports_no_gi():
-    assert "gi" not in sys.modules
+SRC = Path(__file__).resolve().parent.parent / "src" / "xx_email"
+COMMON = Path(__file__).resolve().parent.parent.parent / "common"
 
 
-def test_preset_table_matches_shell():
-    assert set(theme.THEME_PRESETS) == {
-        "amoled", "graphite", "forest", "ocean",
-        "paper", "mist", "aura", "burgundy",
-    }
-    amoled = theme.THEME_PRESETS["amoled"]
-    assert amoled.background == "#000000"
-    assert theme.THEME_PRESETS["burgundy"].background == "#2A1018"
-    for preset in theme.THEME_PRESETS.values():
-        for field in ("background", "surface", "surface_alt", "border",
-                      "foreground", "muted", "accent"):
-            assert re.match(r"#[0-9a-fA-F]{6}\Z", getattr(preset, field)), field
+def _xx_ui_mods():
+    """Load xx_ui.theme/css without the Gtk-dependent package init.
+
+    The suite stays gi-free in-process (other tests assert that), so
+    bypass xx_ui/__init__ (which pulls Gtk widgets) with a stub
+    package pointing at the real files. Drivers import the full
+    package in subprocesses with a display.
+    """
+    import sys
+    import types
+
+    before = set(sys.modules)
+    if "xx_ui" not in sys.modules:
+        pkg = types.ModuleType("xx_ui")
+        pkg.__path__ = [str(COMMON / "xx_ui")]
+        sys.modules["xx_ui"] = pkg
+    try:
+        from xx_ui import css as css_mod
+        from xx_ui import theme as theme_mod
+        return (theme_mod, css_mod)
+    finally:
+        for name in [mod for mod in sys.modules
+                     if mod not in before and mod != "xx_ui"]:
+            del sys.modules[name]
 
 
-def test_font_families_match_shell():
-    assert set(theme.FONT_FAMILIES) == {
-        "system-light", "space-mono", "jetbrains-mono", "jetbrains-mono-nerd",
-    }
+def test_no_local_theme_reader_or_css():
+    assert not (SRC / "theme.py").exists(), \
+        "app theme reader must stay deleted (use xx_ui.theme)"
+    for path in SRC.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "from xx_email import theme" not in text, path
+        assert "theme_mod." not in text, path
 
 
-def test_missing_shell_config_resolves_defaults(tmp_path, monkeypatch):
-    monkeypatch.setenv(theme.SHELL_CONFIG_ENV, str(tmp_path / "absent.json"))
-    assert theme.load_shell_config() == {}
-    assert theme.resolve_theme({}).key == theme.DEFAULT_THEME
-    assert theme.resolve_font({}) == theme.FONT_FAMILIES[theme.DEFAULT_FONT]
-    assert theme.text_scale({}) == 1.0
-    assert theme.prefer_dark({}) is True
+def test_startup_applies_xx_ui_once():
+    text = (SRC / "main.py").read_text(encoding="utf-8")
+    assert text.count("xx_ui.apply(") == 1
+    assert "_apply_theme" not in text
+    assert "_watch_shell_config" not in text
+    assert "set_decorated(False)" in text
 
 
-def test_resolve_named_theme_and_font(tmp_path, monkeypatch):
-    path = tmp_path / "config.json"
-    path.write_text(json.dumps({"theme": "forest", "font": "space-mono",
-                                "text_size_scale": 1.5, "prefer_dark": False}),
-                    encoding="utf-8")
-    monkeypatch.setenv(theme.SHELL_CONFIG_ENV, str(path))
-    assert theme.shell_config_path() == path
-    shell = theme.load_shell_config()
-    assert theme.resolve_theme(shell).key == "forest"
-    assert theme.resolve_font(shell) == "Space Mono, Monospace"
-    assert theme.text_scale(shell) == 1.5
-    assert theme.prefer_dark(shell) is False
+def test_app_css_uses_tokens_only():
+    css = (SRC / "email.css").read_text(encoding="utf-8")
+    assert css.strip(), "email.css must exist and not be empty"
+    found = set(re.findall(r"#[0-9a-fA-F]{3,8}", css))
+    assert not found, f"hardcoded colors in email.css: {found}"
+    assert "email-unread-title" in css
+    assert "email-dot" in css
 
 
-def test_unknown_theme_and_font_fall_back():
-    assert theme.resolve_theme({"theme": "neon"}).key == theme.DEFAULT_THEME
-    assert theme.resolve_font({"font": "comic-sans"}) == theme.FONT_FAMILIES[theme.DEFAULT_FONT]
+def test_design_system_covers_every_required_theme():
+    theme_mod, _css_mod = _xx_ui_mods()
+
+    for key in ("amoled", "paper", "forest", "aura"):
+        assert key in theme_mod.preset_keys(), key
+    active = theme_mod.load()
+    assert active.key == "amoled"
 
 
-def test_custom_theme_needs_valid_background():
-    good = theme.resolve_theme({"theme": "custom", "custom_background": "#123ABC"})
-    assert good.key == "custom"
-    assert good.background == "#123ABC"
-    for bad in ("#123ABZ", "red", "#1234", "", None, 123):
-        assert theme.resolve_theme({"theme": "custom",
-                                    "custom_background": bad}).key == theme.DEFAULT_THEME
+def test_design_css_paints_lists_without_white():
+    theme_mod, css_mod = _xx_ui_mods()
 
-
-def test_custom_font_needs_family():
-    assert theme.resolve_font({"font": "custom",
-                               "custom_font_family": "My Font"}) == "My Font"
-    assert theme.resolve_font({"font": "custom"}) == theme.FONT_FAMILIES[theme.DEFAULT_FONT]
-
-
-def test_scale_clamped_and_defensive():
-    assert theme.text_scale({"text_size_scale": 9.0}) == 2.0
-    assert theme.text_scale({"text_size_scale": 0.1}) == 0.5
-    assert theme.text_scale({"text_size_scale": "huge"}) == 1.0
-
-
-def test_invalid_shell_config_file_ignored(tmp_path, monkeypatch):
-    path = tmp_path / "config.json"
-    path.write_text("{not json", encoding="utf-8")
-    monkeypatch.setenv(theme.SHELL_CONFIG_ENV, str(path))
-    assert theme.load_shell_config() == {}
-    path.write_text("[1, 2]", encoding="utf-8")
-    assert theme.load_shell_config() == {}
-
-
-def test_android_preset_map_covers_android_set():
-    assert set(theme.ANDROID_PRESET_MAP) == {
-        "AMOLED Night", "Graphite", "Forest Night", "Ocean Drift",
-        "Burgundy", "Paper", "Mist", "Custom",
-    }
-    for key in theme.ANDROID_PRESET_MAP.values():
-        assert key == "custom" or key in theme.THEME_PRESETS
-
-
-def test_css_uses_only_preset_colors():
-    preset = theme.THEME_PRESETS["paper"]
-    css = theme.theme_css(preset, theme.FONT_FAMILIES["space-mono"], 1.0)
-    found = set(re.findall(r"#[0-9a-fA-F]{6}", css))
-    allowed = {preset.background, preset.surface, preset.surface_alt,
-               preset.border, preset.foreground, preset.muted, preset.accent}
-    assert found and found <= allowed
-    assert "Space Mono" in css
-    big = theme.theme_css(preset, "Sans", 2.0)
-    assert "34.0pt" in big
+    active = theme_mod.load()
+    rendered = css_mod.render(active)
+    assert "listview" in rendered
+    assert "xx-row" in rendered
+    found = set(re.findall(r"#[0-9a-fA-F]{6}", rendered))
+    allowed = {active.background, active.surface, active.surface_alt,
+               active.border, active.foreground, active.muted,
+               active.accent, theme_mod.DANGER_RED,
+               theme_mod.ON_DANGER_FG}
+    assert found and found <= allowed, found - allowed

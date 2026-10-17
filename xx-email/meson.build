@@ -6,6 +6,16 @@ project(
 
 python = import('python').find_installation('python3')
 
+# The shared design system ships from common/meson.build — install
+# common/ first so the xx_ui package is importable here and staged.
+xx_ui_check = run_command(
+  python, '-c', 'import xx_ui',
+  check: false,
+)
+if xx_ui_check.returncode() != 0
+  error('xx_ui python package is required (install common/ first)')
+endif
+
 prefix = get_option('prefix')
 bindir = join_paths(prefix, get_option('bindir'))
 

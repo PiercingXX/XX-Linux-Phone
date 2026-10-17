@@ -2,9 +2,9 @@
 
 Ports ThreadScreen/ThreadViewModel over xx_email.bodies: marks the
 thread read on open, renders decoded text/plain (else converted HTML)
-in wrapping labels, shows attachment chips, and exposes reply /
-reply-all / forward entry points plus archive/delete/unread/snooze.
-Failures banner in place — the user stays put.
+in wrapping 15 px labels, shows attachment chips, and exposes reply /
+reply-all / forward plus a ⋯ menu for star/archive/delete/unread/
+snooze. Failures banner in place — the user stays put.
 """
 
 import gi
@@ -18,6 +18,7 @@ from xx_email import bodies as bodies_mod
 from xx_email import contacts as contacts_mod
 from xx_email import mailbox as mailbox_mod
 from xx_email.ui import common as common_mod
+from xx_ui import widgets
 
 
 class ThreadPage(Gtk.Box):
@@ -31,19 +32,34 @@ class ThreadPage(Gtk.Box):
         self._toast = toast
         self._starred = False
 
-        header = common_mod.phone_header("Thread")
-        back = common_mod.text_button("Back")
-        back.connect("clicked", lambda _b: hooks.go_back())
-        header.pack_start(back)
-        self._star_button = common_mod.text_button("Star")
-        self._star_button.connect("clicked", lambda _b: self._toggle_star())
-        header.pack_end(self._star_button)
-        self.append(header)
-
-        self._subject = common_mod.ellipsized(Gtk.Label(label=""))
-        self._subject.set_margin_start(12)
-        self._subject.set_margin_end(12)
-        self.append(self._subject)
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        bar.add_css_class("xx-page-body")
+        bar.add_css_class("xx-compact-header")
+        back = widgets.icon_button("go-previous-symbolic",
+                                   lambda: hooks.go_back())
+        back.set_valign(Gtk.Align.CENTER)
+        bar.append(back)
+        middle = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        middle.set_hexpand(True)
+        middle.set_valign(Gtk.Align.CENTER)
+        self._subject = widgets.caption("")
+        middle.append(self._subject)
+        self._thread_sub = widgets.label("", "xx-secondary")
+        middle.append(self._thread_sub)
+        bar.append(middle)
+        self._star_button = widgets.icon_button(
+            "starred-symbolic", lambda: self._toggle_star())
+        self._star_button.set_valign(Gtk.Align.CENTER)
+        bar.append(self._star_button)
+        overflow = common_mod.overflow_menu([
+            ("Archive", lambda: self._on_action("ARCHIVE")),
+            ("Delete", lambda: self._on_action("DELETE")),
+            ("Mark unread", lambda: self._on_action("MARK_UNREAD")),
+            ("Snooze", lambda: self._on_action("SNOOZE")),
+        ])
+        overflow.set_valign(Gtk.Align.CENTER)
+        bar.append(overflow)
+        self.append(bar)
 
         self._store = Gio.ListStore.new(common_mod.MessageItem)
         factory = Gtk.SignalListItemFactory()
@@ -51,41 +67,28 @@ class ThreadPage(Gtk.Box):
         factory.connect("bind", self._on_bind)
         view = Gtk.ListView(model=Gtk.NoSelection.new(self._store),
                             factory=factory)
-        view.add_css_class("email-listview")
+        view.set_single_click_activate(True)
         scrolled = Gtk.ScrolledWindow()
-        scrolled.add_css_class("email-listview")
+        scrolled.set_policy(Gtk.PolicyType.NEVER,
+                            Gtk.PolicyType.AUTOMATIC)
         scrolled.set_vexpand(True)
         scrolled.set_child(view)
         self.append(scrolled)
 
         reply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                             spacing=8)
-        reply_row.set_margin_start(12)
-        reply_row.set_margin_end(12)
-        reply_row.set_margin_top(4)
-        for label, mode in (("Reply", "reply"), ("Reply all", "reply_all"),
-                            ("Forward", "forward")):
-            button = common_mod.text_button(label)
+        reply_row.add_css_class("xx-page-body")
+        reply_row.set_margin_top(12)
+        reply_row.set_margin_bottom(20)
+        for label, mode, greedy in (("Reply", "reply", False),
+                                    ("Reply all", "reply_all", True),
+                                    ("Forward", "forward", False)):
+            button = widgets.outline_button(label)
+            button.set_hexpand(greedy)
             button.connect("clicked",
                            lambda _b, m=mode: self._on_reply(m))
             reply_row.append(button)
         self.append(reply_row)
-
-        actions = Gtk.FlowBox()
-        actions.set_selection_mode(Gtk.SelectionMode.NONE)
-        actions.set_max_children_per_line(4)
-        actions.set_margin_start(8)
-        actions.set_margin_end(8)
-        actions.set_margin_bottom(8)
-        for label, action in (("Archive", "ARCHIVE"),
-                              ("Delete", "DELETE"),
-                              ("Unread", "MARK_UNREAD"),
-                              ("Snooze", "SNOOZE")):
-            button = common_mod.text_button(label)
-            button.connect("clicked",
-                           lambda _b, a=action: self._on_action(a))
-            actions.append(button)
-        self.append(actions)
 
         self._messages: list = []
         self._expanded: set[str] = set()
@@ -97,26 +100,31 @@ class ThreadPage(Gtk.Box):
 
     def _on_setup(self, _factory, list_item) -> None:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        card.add_css_class("email-row")
-        card.set_margin_start(12)
-        card.set_margin_end(12)
-        card.set_margin_top(8)
-        card.set_margin_bottom(8)
-        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        sender = common_mod.ellipsized(Gtk.Label())
-        date = Gtk.Label()
-        date.add_css_class("email-muted")
-        head.append(sender)
-        head.append(date)
+        card.set_margin_start(20)
+        card.set_margin_end(20)
+        card.set_margin_top(12)
+        card.set_margin_bottom(12)
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        head.set_valign(Gtk.Align.CENTER)
+        avatar = widgets.avatar("", 40, dashed=True)
+        head.append(avatar)
+        names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        names.set_hexpand(True)
+        names.set_valign(Gtk.Align.CENTER)
+        sender = widgets.label("", "xx-title")
+        names.append(sender)
+        date = widgets.label("", "xx-time")
+        names.append(date)
+        head.append(names)
         tap = Gtk.GestureClick()
         tap.connect("pressed", lambda _g, _n, _x, _y:
                     self._toggle_expand(list_item))
         head.add_controller(tap)
-        to_line = common_mod.ellipsized(Gtk.Label())
-        to_line.add_css_class("email-muted")
+        to_line = widgets.label("", "xx-secondary")
         body = common_mod.wrapped(Gtk.Label())
+        body.add_css_class("xx-body")
         body.set_selectable(True)
-        chips = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        chips = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.append(head)
         card.append(to_line)
         card.append(body)
@@ -127,7 +135,9 @@ class ThreadPage(Gtk.Box):
         item = list_item.get_item()
         card = list_item.get_child()
         head = card.get_first_child()
-        sender = head.get_first_child()
+        avatar = head.get_first_child()
+        names = avatar.get_next_sibling()
+        sender = names.get_first_child()
         date = sender.get_next_sibling()
         to_line = head.get_next_sibling()
         body = to_line.get_next_sibling()
@@ -136,6 +146,12 @@ class ThreadPage(Gtk.Box):
         date.set_label(item.date)
         to_line.set_label(item.to_line)
         body.set_label(item.body)
+        initials, dashed = common_mod.initials_for(item.sender)
+        avatar.set_label(initials)
+        if dashed:
+            avatar.add_css_class("dashed")
+        else:
+            avatar.remove_css_class("dashed")
         while True:
             chip = chips.get_first_child()
             if chip is None:
@@ -145,12 +161,12 @@ class ThreadPage(Gtk.Box):
                 bodies_mod.has_remote_images(
                     self._html_for(item.message_id)) and \
                 item.message_id not in self._images_allowed:
-            load = common_mod.text_button("Load images")
+            load = widgets.outline_button("Load images")
             load.connect("clicked", lambda _b, mid=item.message_id:
                          self._allow_images(mid))
             chips.append(load)
         for attachment in self._attachments_for(item.message_id):
-            chip = common_mod.text_button(
+            chip = widgets.outline_button(
                 f"{attachment.filename} ({attachment.size // 1024:d} KB)")
             chip.connect("clicked", lambda _b, a=attachment:
                          self._hooks.open_attachment(a))
@@ -200,7 +216,11 @@ class ThreadPage(Gtk.Box):
             self._toast("Couldn't open thread", None)
             return
         thread, messages, full = result
-        self._subject.set_label(thread.subject or "(no subject)")
+        self._subject.set_label(
+            (thread.subject or "(no subject)").upper())
+        count = len(list(messages))
+        self._thread_sub.set_label(
+            f"{count:d} MESSAGE" + ("" if count == 1 else "S"))
         self._starred = bool(thread.starred)
         self._paint_star()
         self._messages = list(messages)
@@ -257,8 +277,9 @@ class ThreadPage(Gtk.Box):
         return list(entry.get("attachments", []))
 
     def _paint_star(self) -> None:
-        self._star_button.set_label(
-            "Unstar" if self._starred else "Star")
+        self._star_button.set_child(widgets.icon_image(
+            "starred-symbolic" if self._starred
+            else "non-starred-symbolic"))
 
     def _toggle_star(self) -> None:
         self._hooks.perform("STAR", [self.thread_id], self._on_done,

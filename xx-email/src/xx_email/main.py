@@ -1,8 +1,8 @@
 """GTK entry point: Adw.Application with the mailbox NavigationView stack.
 
 Milestone 6: setup → mailbox → thread / search routes over the L1/L2
-store + sync engine. The mailbox is a tabbed Gtk.ListView stack with a
-folder bottom sheet, swipe actions and multi-select; threads render
+store + sync engine. The mailbox is a chip-filtered Gtk.ListView with
+a folders page, swipe actions and multi-select; threads render
 plain-text bodies; search fans out to the server or the offline FTS
 index. Thin views only — formatting and mutations live in the pure
 mailbox/bodies modules.
@@ -29,12 +29,13 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
+import xx_ui
+
 from xx_email import __app_id__
 from xx_email import auth as auth_mod
 from xx_email import bodies as bodies_mod
 from xx_email import compose as compose_mod
 from xx_email import config as config_mod
-from xx_email import theme as theme_mod
 from xx_email import db as db_mod
 from xx_email import gmail_client as gmail_mod
 from xx_email import mailbox as mailbox_mod
@@ -46,6 +47,7 @@ from xx_email import token_store as token_mod
 from xx_email.domain import MessageParts, SafePaths
 from xx_email.ui import common as common_mod
 from xx_email.ui import compose_page as compose_page_mod
+from xx_email.ui import folders_page as folders_page_mod
 from xx_email.ui import logs_page as logs_page_mod
 from xx_email.ui import mailbox_page as mailbox_page_mod
 from xx_email.ui import search_page as search_page_mod
@@ -148,8 +150,7 @@ class EmailApplication(Adw.Application):
             application_id=__app_id__,
             flags=Gio.ApplicationFlags.HANDLES_OPEN |
             Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
-        self._css_provider = Gtk.CssProvider()
-        self._shell_monitor = None
+        self._email_css = Gtk.CssProvider()
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="xxemail-ui")
         self._nav: Adw.NavigationView | None = None
@@ -175,12 +176,13 @@ class EmailApplication(Adw.Application):
             window = Adw.ApplicationWindow(application=self)
             window.set_title("XX Email")
             window.set_default_size(360, 720)
+            window.set_decorated(False)
             self._overlay = Adw.ToastOverlay()
             self._nav = Adw.NavigationView()
             self._overlay.set_child(self._nav)
             window.set_content(self._overlay)
-            self._apply_theme()
-            self._watch_shell_config(window)
+            xx_ui.apply(self)
+            self._apply_app_css()
             self._nav.push(self._loading_page())
             tap, self._pending_tap = self._pending_tap, None
             self._decide_start(tap=tap)
@@ -430,12 +432,16 @@ class EmailApplication(Adw.Application):
             self._mailbox_page.load()
 
     def _push_settings(self) -> None:
-        window = self.props.active_window
         hooks = _SettingsHooks(self)
-        dialog = settings_page_mod.SettingsDialog(hooks,
-                                                  self.toast)
-        hooks.attach(dialog)
-        dialog.present(window)
+        navigation = settings_page_mod.settings_navigation_page(
+            settings_page_mod.SettingsPage(hooks, self.toast))
+        self._nav.push(navigation)
+
+    def _push_folders(self, account: str) -> None:
+        hooks = _FoldersHooks(self, account)
+        self._nav.push(folders_page_mod.folders_navigation_page(
+            folders_page_mod.FoldersPage(account, hooks,
+                                         self.toast)))
 
     def _push_logs(self) -> None:
         hooks = _LogsHooks(self)
@@ -533,48 +539,23 @@ class EmailApplication(Adw.Application):
             self._push_mailbox(account)
             self._push_thread(account, thread_id)
 
-    # ----------------------------------------------------------------- theme
+    # ------------------------------------------------------------- app css
 
-    def _apply_theme(self) -> None:
-        shell = theme_mod.load_shell_config()
-        preset = theme_mod.resolve_theme(shell)
-        css = theme_mod.theme_css(preset, theme_mod.resolve_font(shell),
-                                  theme_mod.text_scale(shell))
-        self._css_provider.load_from_string(css)
+    def _apply_app_css(self) -> None:
+        """Install the small app stylesheet over the xx_ui design CSS."""
+        try:
+            css_path = Path(__file__).with_name("email.css")
+            self._email_css.load_from_data(
+                css_path.read_bytes())
+        except OSError:
+            return
         display = Gdk.Display.get_default()
         if display is not None:
             Gtk.StyleContext.add_provider_for_display(
                 display,
-                self._css_provider,
+                self._email_css,
                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
             )
-        manager = Adw.StyleManager.get_default()
-        if shell:
-            manager.set_color_scheme(
-                Adw.ColorScheme.PREFER_DARK if theme_mod.prefer_dark(shell)
-                else Adw.ColorScheme.PREFER_LIGHT)
-        elif config_mod.load().theme_mode == "dark":
-            manager.set_color_scheme(Adw.ColorScheme.PREFER_DARK)
-        elif config_mod.load().theme_mode == "light":
-            manager.set_color_scheme(Adw.ColorScheme.PREFER_LIGHT)
-        else:
-            manager.set_color_scheme(Adw.ColorScheme.DEFAULT)
-
-    def _watch_shell_config(self, window: Gtk.Widget) -> None:
-        path = theme_mod.shell_config_path()
-        try:
-            watch_file = Gio.File.new_for_path(str(path))
-            self._shell_monitor = watch_file.monitor_file(
-                Gio.FileMonitorFlags.NONE, None)
-        except Exception:
-            return
-        self._shell_monitor.connect("changed",
-                                    self._on_shell_config_changed, window)
-
-    def _on_shell_config_changed(self, _monitor, _file, _other, _event,
-                                 window: Gtk.Widget) -> None:
-        self._apply_theme()
-        _ = window
 
 
 class _MailboxHooks:
@@ -761,6 +742,9 @@ class _MailboxHooks:
     def open_settings(self) -> None:
         self._app._push_settings()
 
+    def open_folders(self) -> None:
+        self._app._push_folders(self._account)
+
     def open_signin(self) -> None:
         self._app._push_setup(mode="reauth", account=self._account)
 
@@ -917,22 +901,10 @@ class _SettingsHooks:
 
     def __init__(self, app: EmailApplication) -> None:
         self._app = app
-        self._dialog = None
-
-    def attach(self, dialog) -> None:
-        self._dialog = dialog
 
     def _run(self, blocking, done) -> None:
         common_mod.run_in_background(self._app._executor, blocking,
                                      done)
-
-    def _close(self) -> None:
-        dialog, self._dialog = self._dialog, None
-        if dialog is not None:
-            try:
-                dialog.close()
-            except Exception:
-                pass
 
     def load_state(self, done) -> None:
         def _blocking():
@@ -955,11 +927,10 @@ class _SettingsHooks:
         self._run(_blocking, done)
 
     def add_account(self) -> None:
-        self._close()
         self._app._push_setup(mode="add")
 
     def remove_account(self, email: str) -> None:
-        self._close()
+        self._app._nav.pop()
         self._app.request_sign_out(email, revoke=False)
 
     def revoke_account(self, email: str, done) -> None:
@@ -992,7 +963,6 @@ class _SettingsHooks:
         self._app._open_permissions()
 
     def open_logs(self) -> None:
-        self._close()
         self._app._push_logs()
 
     def export_backup(self, path: str, done) -> None:
@@ -1023,6 +993,67 @@ class _SettingsHooks:
                 conn.close()
 
         self._run(_blocking, done)
+
+
+class _FoldersHooks:
+    """Worker-backed folders callbacks (main loop never blocks)."""
+
+    def __init__(self, app: EmailApplication, account: str) -> None:
+        self._app = app
+        self._account = account
+
+    def _run(self, blocking, done) -> None:
+        common_mod.run_in_background(self._app._executor, blocking,
+                                     done)
+
+    def load_state(self, done) -> None:
+        def _blocking():
+            conn = _open_db()
+            try:
+                from xx_email import snooze as snooze_mod
+
+                entries = []
+                for item in db_mod.all_accounts(conn):
+                    entries.append({
+                        "email": item.email,
+                        "snoozed": snooze_mod.pending_wake_count(
+                            conn, item.email),
+                        "queued": len(db_mod.open_outbox_for_account(
+                            conn, item.email))})
+                return (config_mod.load(), entries)
+            finally:
+                conn.close()
+
+        self._run(_blocking, done)
+
+    def show_folder(self, folder) -> None:
+        app = self._app
+        app._nav.pop()
+        page = app._mailbox_page
+        if page is None or page.account != self._account:
+            app._push_mailbox(self._account)
+            page = app._mailbox_page
+        if page is not None:
+            page.select_folder(folder)
+
+    def switch_account(self, email: str) -> None:
+        app = self._app
+        app._nav.pop()
+        app._nav.pop()
+        app._push_mailbox(email)
+
+    def add_account(self) -> None:
+        self._app._push_setup(mode="add")
+
+    def sign_out(self, email: str, revoke: bool) -> None:
+        self._app._nav.pop()
+        self._app.request_sign_out(email, revoke)
+
+    def open_permissions(self) -> None:
+        self._app._open_permissions()
+
+    def go_back(self) -> None:
+        self._app._nav.pop()
 
 
 class _LogsHooks:
@@ -1069,13 +1100,21 @@ class _ThreadHooks:
                     raise LookupError(f"No thread {thread_id}")
                 messages = db_mod.messages_for_thread(conn, account,
                                                       thread_id)
-                client, worker = _gmail_client(account)
                 try:
-                    entries = [_full_entry(conn, account, client,
-                                           message)
-                               for message in messages]
+                    client, worker = _gmail_client(account)
+                except Exception:
+                    client, worker = None, None
+                try:
+                    if client is None:
+                        entries = [_cached_entry(message)
+                                   for message in messages]
+                    else:
+                        entries = [_full_entry(conn, account, client,
+                                               message)
+                                   for message in messages]
                 finally:
-                    worker.close()
+                    if worker is not None:
+                        worker.close()
                 return (thread, messages, entries)
             finally:
                 conn.close()
@@ -1498,6 +1537,14 @@ def _server_search(conn, account: str, query: str) -> list:
                 if row is not None]
     finally:
         worker.close()
+
+
+def _cached_entry(message: db_mod.Message) -> dict:
+    """Thread entry from the downloaded cache (offline, no grant)."""
+    return {"message_id": message.id, "html": message.body_html,
+            "plain": message.body_plain,
+            "attachments": bodies_mod.decode_attachments(
+                message.attachments_json)}
 
 
 def _full_entry(conn, account: str, client, message: db_mod.Message

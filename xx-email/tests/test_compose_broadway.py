@@ -147,8 +147,11 @@ def _run_driver(broadway: tuple) -> dict:
     env["GDK_BACKEND"] = "broadway"
     env["BROADWAY_DISPLAY"] = display
     env["XDG_RUNTIME_DIR"] = daemon_runtime
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent /
-                            "src")
+    env["PYTHONPATH"] = os.pathsep.join((
+        str(Path(__file__).resolve().parent.parent / "src"),
+        str(Path(__file__).resolve().parent.parent.parent /
+            "common"),
+    ))
     completed = subprocess.run(
         [sys.executable, _DRIVER, "smoke"],
         env=env, capture_output=True, text=True, timeout=120,

@@ -481,14 +481,12 @@ def test_effective_interval_stretches_under_saver():
 
 
 def test_battery_saver_read_from_shell_config(tmp_path, monkeypatch):
-    from xx_email import theme as theme_mod
-
     assert daemon_mod.read_battery_saver({}) is False
     assert daemon_mod.read_battery_saver(
         {"battery_saver": True}) is True
     shell_config = tmp_path / "shell-config.json"
     shell_config.write_text(json.dumps({}), encoding="utf-8")
-    monkeypatch.setenv(theme_mod.SHELL_CONFIG_ENV,
+    monkeypatch.setenv(daemon_mod.SHELL_CONFIG_ENV,
                        str(shell_config))
     assert daemon_mod.read_battery_saver() is False
     shell_config.write_text(json.dumps({"battery_saver": True}),
@@ -725,8 +723,11 @@ def test_open_thread_uri_while_service_runs(broadway_env):
     env["GDK_BACKEND"] = "broadway"
     env["BROADWAY_DISPLAY"] = display
     env["XDG_RUNTIME_DIR"] = daemon_runtime
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent /
-                            "src")
+    env["PYTHONPATH"] = os.pathsep.join((
+        str(Path(__file__).resolve().parent.parent / "src"),
+        str(Path(__file__).resolve().parent.parent.parent /
+            "common"),
+    ))
     completed = subprocess.run(
         [sys.executable, _DRIVER, "smoke"],
         env=env, capture_output=True, text=True, timeout=120,

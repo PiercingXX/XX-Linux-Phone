@@ -230,7 +230,7 @@ def test_search_entry_unfocused_until_tapped_at_bottom():
     assert "set_can_focus(False)" in text
     assert "PropagationPhase.CAPTURE" in text
     assert text.index("self.append(scrolled)") < \
-        text.index("self.append(entry_row)")
+        text.index("self.append(search)")
     assert "search_status" in text
     assert "Offline results" in (SRC / "mailbox.py").read_text(
         encoding="utf-8")

@@ -1,9 +1,10 @@
 """Shared GTK helpers for the mailbox stack (thin over mailbox.py).
 
-Every widget here stays a thin view: formatting and mutations live in
-xx_email.mailbox / xx_email.bodies (stdlib, pytest-covered). Blocking
-store/network work always runs on the worker executor with results
-posted back via GLib.idle_add — never on the GTK main loop.
+Every widget here stays a thin view built from xx_ui.widgets:
+formatting and mutations live in xx_email.mailbox / xx_email.bodies
+(stdlib, pytest-covered). Blocking store/network work always runs on
+the worker executor with results posted back via GLib.idle_add —
+never on the GTK main loop.
 """
 
 import gi
@@ -12,9 +13,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
 
-from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango
+from gi.repository import Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from xx_email import mailbox as mailbox_mod
+from xx_email import mailbox as mailbox_mod  # noqa: E402
+from xx_ui import widgets  # noqa: E402
 
 
 class ThreadItem(GObject.Object):
@@ -61,44 +63,21 @@ class MessageItem(GObject.Object):
     unread = GObject.Property(type=bool, default=False)
 
 
-def phone_header(title: str) -> Adw.HeaderBar:
-    """Header without minimize/maximize buttons (phone has none).
-
-    Only the close affordance stays: start/end title buttons off, so
-    page actions are explicit text buttons packed by each page.
-    """
-    header = Adw.HeaderBar()
-    header.set_title_widget(Gtk.Label(label=title))
-    header.set_show_start_title_buttons(False)
-    header.set_show_end_title_buttons(False)
-    return header
+def initials_for(sender: str) -> tuple[str, bool]:
+    """Avatar initials + dashed flag. Numbers/addresses get an empty disc."""
+    words = [word for word in (sender or "").split() if word[:1].isalpha()]
+    if not words:
+        return ("", True)
+    if len(words) == 1:
+        return (words[0][:2].upper(), False)
+    return ((words[0][:1] + words[1][:1]).upper(), False)
 
 
-def text_button(label: str, tooltip: str | None = None) -> Gtk.Button:
-    """Text-first button (no icon grids on this UI)."""
-    button = Gtk.Button(label=label)
-    if tooltip is not None:
-        button.set_tooltip_text(tooltip)
-    return button
-
-
-def ellipsized(label: Gtk.Label) -> Gtk.Label:
-    """Single-line label that shrinks instead of overflowing 320 px."""
-    label.set_ellipsize(Pango.EllipsizeMode.END)
-    label.set_wrap(False)
-    label.set_lines(1)
-    label.set_xalign(0.0)
-    label.set_hexpand(True)
-    return label
-
-
-def wrapped(label: Gtk.Label) -> Gtk.Label:
-    """Body label that wraps inside 360/320 px instead of overflowing."""
-    label.set_wrap(True)
-    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-    label.set_xalign(0.0)
-    label.set_hexpand(True)
-    return label
+def secondary_for(item: ThreadItem) -> str:
+    """One-line subject + snippet for the row's secondary label."""
+    if item.snippet:
+        return f"{item.subject} — {item.snippet}"
+    return item.subject
 
 
 def run_in_background(executor, blocking, done) -> None:
@@ -126,9 +105,13 @@ def new_thread_store(items: list | None = None) -> Gio.ListStore:
 
 
 def replace_store(store: Gio.ListStore, threads: list) -> None:
-    store.remove_all()
-    for thread in threads:
-        store.append(ThreadItem.from_thread(thread))
+    # One splice, not remove_all + appends: the ListView binds
+    # eagerly on every emission, so incremental fills make every
+    # mid-fill row look final (each keeps ``last``, killing every
+    # hairline). A single emission binds once at final positions.
+    store.splice(0, store.get_n_items(),
+                 [ThreadItem.from_thread(thread)
+                  for thread in threads])
 
 
 def find_item(store: Gio.ListStore, thread_id: str):
@@ -139,86 +122,143 @@ def find_item(store: Gio.ListStore, thread_id: str):
     return None
 
 
+def overflow_menu(items: list[tuple[str, object]]) -> Gtk.MenuButton:
+    """Header ⋯ button opening a surface popover (48 px rows, themed)."""
+    menu = Gio.Menu()
+    group = Gio.SimpleActionGroup()
+    for index, (label_text, callback) in enumerate(items):
+        name = f"item{index:d}"
+        action = Gio.SimpleAction.new(name, None)
+        action.connect("activate",
+                       lambda _a, _p, cb=callback: cb())
+        group.add_action(action)
+        menu.append(label_text, f"overflow.{name}")
+    button = Gtk.MenuButton()
+    button.set_icon_name("view-more-symbolic")
+    button.set_menu_model(menu)
+    button.insert_action_group("overflow", group)
+    button.add_css_class("xx-btn")
+    button.add_css_class("xx-btn-icon")
+    return button
+
+
+def header_with_menu(title: str, caption_text: str,
+                     items: list[tuple[str, object]]) -> Gtk.Box:
+    """PageHeader with a trailing ⋯ popover (list screens stay clean)."""
+    header = widgets.page_header(title, caption_text)
+    top = header.get_first_child()
+    top.append(overflow_menu(items))
+    return header
+
+
+def tap_to_focus(widget) -> None:
+    """Focus only on tap: unfocusable until a CAPTURE-phase click."""
+    widget.set_can_focus(False)
+    tap = Gtk.GestureClick()
+    tap.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+    tap.connect("pressed", lambda *_a: (
+        widget.set_can_focus(True), widget.grab_focus()))
+    widget.add_controller(tap)
+
+
 def make_thread_row() -> tuple:
     """Build one mailbox row's widgets (factory setup, once per row)."""
-    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-    row.add_css_class("email-row")
-    row.set_margin_start(12)
-    row.set_margin_end(12)
-    row.set_margin_top(10)
-    row.set_margin_bottom(10)
-
-    texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-    texts.set_hexpand(True)
-    top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    sender = ellipsized(Gtk.Label())
-    sender.add_css_class("email-sender")
-    age = Gtk.Label()
-    age.add_css_class("email-muted")
-    top.append(sender)
-    top.append(age)
-    subject = ellipsized(Gtk.Label())
-    snippet = ellipsized(Gtk.Label())
-    snippet.add_css_class("email-muted")
-    texts.append(top)
-    texts.append(subject)
-    texts.append(snippet)
-    row.append(texts)
-
-    clip = Gtk.Label(label="[file]")
-    clip.set_visible(False)
-    row.append(clip)
-
-    star = text_button("*", "Star toggle")
-    star.add_css_class("flat")
-    row.append(star)
-    return (row, sender, age, subject, snippet, clip, star)
+    leading = widgets.avatar("", 40, dashed=True)
+    trail = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    trail.set_valign(Gtk.Align.CENTER)
+    attach = widgets.icon_image("mail-attachment-symbolic")
+    attach.add_css_class("email-dim")
+    attach.set_visible(False)
+    trail.append(attach)
+    star = widgets.icon_image("starred-symbolic")
+    star.set_visible(False)
+    trail.append(star)
+    dot_box = Gtk.Box()
+    dot_box.add_css_class("email-dot")
+    dot_box.set_size_request(8, 8)
+    dot_box.set_valign(Gtk.Align.CENTER)
+    dot_box.set_visible(False)
+    trail.append(dot_box)
+    row = widgets.list_row("x", "x", meta="x", leading=leading,
+                           trailing=trail)
+    middle = leading.get_next_sibling()
+    title = middle.get_first_child()
+    sub = title.get_next_sibling()
+    meta = middle.get_next_sibling()
+    row._email_refs = (leading, title, sub, meta, attach, star,
+                       dot_box)
+    return (row,) + row._email_refs
 
 
-def bind_thread_row(widgets: tuple, item: ThreadItem,
-                    show_star: bool) -> None:
-    _, sender, age, subject, snippet, clip, star = widgets
-    sender.set_label(item.sender)
-    sender.add_css_class("email-unread" if item.unread else "email-read")
-    sender.remove_css_class("email-read" if item.unread else "email-unread")
-    age.set_label(item.age)
-    subject.set_label(item.subject)
-    snippet.set_label(item.snippet)
-    clip.set_visible(item.attached)
-    star.set_visible(show_star)
-    star.set_label("Unstar" if item.starred else "Star")
+def bind_thread_row(row_widgets: tuple, item: ThreadItem) -> None:
+    row, avatar, title, sub, meta, attach, star, dot = row_widgets
+    initials, dashed = initials_for(item.sender)
+    avatar.set_label(initials)
+    if dashed:
+        avatar.add_css_class("dashed")
+    else:
+        avatar.remove_css_class("dashed")
+    title.set_label(item.sender)
+    if item.unread:
+        title.add_css_class("email-unread-title")
+    else:
+        title.remove_css_class("email-unread-title")
+    sub.set_label(secondary_for(item))
+    meta.set_label(item.age)
+    attach.set_visible(item.attached)
+    star.set_visible(item.starred)
+    dot.set_visible(item.unread)
+    if item.selected:
+        row.add_css_class("selected")
+    else:
+        row.remove_css_class("selected")
+
+
+def ellipsized(label: Gtk.Label) -> Gtk.Label:
+    """Single-line label that shrinks instead of overflowing 320 px."""
+    label.set_ellipsize(Pango.EllipsizeMode.END)
+    label.set_wrap(False)
+    label.set_lines(1)
+    label.set_xalign(0.0)
+    label.set_hexpand(True)
+    return label
+
+
+def wrapped(label: Gtk.Label) -> Gtk.Label:
+    """Body label that wraps inside 360/320 px instead of overflowing."""
+    label.set_wrap(True)
+    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    label.set_xalign(0.0)
+    label.set_hexpand(True)
+    return label
 
 
 def thread_list_view(store: Gio.ListStore, on_open, on_toggle_select,
-                     on_swipe, on_star, swipe_left: str,
+                     on_swipe, swipe_left: str,
                      swipe_right: str) -> Gtk.ListView:
     """Gtk.ListView for a thread list (long lists stay list-backed)."""
     factory = Gtk.SignalListItemFactory()
 
     def _setup(_factory, list_item) -> None:
-        widgets = make_thread_row()
-        row = widgets[0]
-        list_item.set_child(row)
+        row_widgets = make_thread_row()
+        list_item.set_child(row_widgets[0])
 
         click = Gtk.GestureClick()
         click.connect("pressed", lambda g, n, x, y:
                       _on_row_click(list_item, n))
-        row.add_controller(click)
+        row_widgets[0].add_controller(click)
 
         if on_toggle_select is not None:
             hold = Gtk.GestureLongPress()
             hold.connect("pressed", lambda g, x, y:
                          _on_row_hold(list_item))
-            row.add_controller(hold)
+            row_widgets[0].add_controller(hold)
 
         if on_swipe is not None:
             swipe = Gtk.GestureSwipe()
             swipe.connect("swipe", lambda g, vx, vy:
                           _on_row_swipe(list_item, vx))
-            row.add_controller(swipe)
-
-        _, _, _, _, _, _, star = widgets
-        star.connect("clicked", lambda _b: _on_star(list_item))
+            row_widgets[0].add_controller(swipe)
 
     def _on_row_click(list_item, n_press: int) -> None:
         item = list_item.get_item()
@@ -237,31 +277,18 @@ def thread_list_view(store: Gio.ListStore, on_open, on_toggle_select,
         action = swipe_right if velocity_x > 0 else swipe_left
         on_swipe(action, item.thread_id)
 
-    def _on_star(list_item) -> None:
-        item = list_item.get_item()
-        if item is not None and on_star is not None:
-            on_star(item.thread_id)
-
     def _bind(_factory, list_item) -> None:
         item = list_item.get_item()
-        bind_thread_row(_row_widgets(list_item.get_child()), item,
-                        on_star is not None)
+        child = list_item.get_child()
+        bind_thread_row((child,) + child._email_refs, item)
+        if list_item.get_position() == store.get_n_items() - 1:
+            child.add_css_class("last")
+        else:
+            child.remove_css_class("last")
 
     factory.connect("setup", _setup)
     factory.connect("bind", _bind)
     view = Gtk.ListView(model=Gtk.NoSelection.new(store), factory=factory)
     view.set_single_click_activate(True)
-    view.add_css_class("email-listview")
     return view
 
-
-def _row_widgets(row):
-    texts = row.get_first_child()
-    top = texts.get_first_child()
-    sender = top.get_first_child()
-    age = sender.get_next_sibling()
-    subject = top.get_next_sibling()
-    snippet = subject.get_next_sibling()
-    clip = texts.get_next_sibling()
-    star = clip.get_next_sibling()
-    return (row, sender, age, subject, snippet, clip, star)

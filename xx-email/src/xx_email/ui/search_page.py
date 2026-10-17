@@ -3,8 +3,8 @@
 Ports SearchScreen: operator queries (anything with a colon) go to
 the server as Gmail ``q``; plain terms hit the local FTS index first
 and fall back to the server when empty. Results render without swipe
-or star chrome. The entry sits at the bottom in thumb reach and never
-takes focus on its own — the keyboard opens only on tap.
+chrome. The entry sits at the bottom in thumb reach and never takes
+focus on its own — the keyboard opens only on tap.
 """
 
 import gi
@@ -16,6 +16,7 @@ from gi.repository import Adw, Gtk
 
 from xx_email import mailbox as mailbox_mod
 from xx_email.ui import common as common_mod
+from xx_ui import widgets
 
 
 class SearchPage(Gtk.Box):
@@ -28,66 +29,48 @@ class SearchPage(Gtk.Box):
         self._toast = toast
         self._searched = False
 
-        header = common_mod.phone_header("Search")
-        back = common_mod.text_button("Back")
-        back.connect("clicked", lambda _b: hooks.go_back())
-        header.pack_start(back)
-        self.append(header)
+        self.append(widgets.compact_header(
+            lambda: hooks.go_back(), "Search", account))
 
         self._store = common_mod.new_thread_store()
         view = common_mod.thread_list_view(
             self._store, lambda tid, _n: hooks.open_thread(tid),
-            None, None, None, "", "")
+            None, None, "", "")
         scrolled = Gtk.ScrolledWindow()
-        scrolled.add_css_class("email-listview")
+        scrolled.set_policy(Gtk.PolicyType.NEVER,
+                            Gtk.PolicyType.AUTOMATIC)
         scrolled.set_vexpand(True)
         scrolled.set_child(view)
         self.append(scrolled)
 
-        self._status = Gtk.Label(label="")
-        self._status.add_css_class("email-muted")
-        self._status.set_xalign(0.0)
-        self._status.set_margin_start(12)
-        self._status.set_margin_end(12)
-        self.append(self._status)
+        self._status = widgets.caption("")
+        status_pad = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        status_pad.add_css_class("xx-page-body")
+        status_pad.append(self._status)
+        self.append(status_pad)
 
         self._hints = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                              spacing=4)
-        self._hints.set_margin_start(16)
-        self._hints.set_margin_end(16)
-        hint_title = Gtk.Label(label="Try:")
-        hint_title.set_xalign(0.0)
-        self._hints.append(hint_title)
+                              spacing=0)
+        self._hints.add_css_class("xx-page-body")
+        self._hints.append(widgets.section_label("Try"))
         for hint in mailbox_mod.OPERATOR_HINTS:
-            button = common_mod.text_button("")
-            button.set_child(common_mod.ellipsized(
-                Gtk.Label(label=hint)))
+            button = widgets.menu_row(hint)
             button.connect("clicked",
                            lambda _b, h=hint: self._run(h))
             self._hints.append(button)
         self.append(self._hints)
 
-        entry_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                            spacing=8)
-        entry_row.set_margin_start(12)
-        entry_row.set_margin_end(12)
-        entry_row.set_margin_top(8)
-        entry_row.set_margin_bottom(12)
-        self._entry = Gtk.Entry()
-        self._entry.set_placeholder_text(
-            "Search mail (from:, has:attachment …)")
-        self._entry.set_hexpand(True)
+        search = widgets.search_bar(
+            "Search mail (from:, has:…)")
+        self._entry = search.get_first_child().get_next_sibling()
         self._entry.set_can_focus(False)
         focus_tap = Gtk.GestureClick()
         focus_tap.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        focus_tap.connect("pressed", lambda *_a: self._entry.set_can_focus(True))
+        focus_tap.connect("pressed",
+                          lambda *_a: self._entry.set_can_focus(True))
         self._entry.add_controller(focus_tap)
         self._entry.connect("activate", lambda _e: self._run(None))
-        entry_row.append(self._entry)
-        go = common_mod.text_button("Search")
-        go.connect("clicked", lambda _b: self._run(None))
-        entry_row.append(go)
-        self.append(entry_row)
+        self.append(search)
 
     def _run(self, preset: str | None) -> None:
         query = preset if preset is not None else \
@@ -96,7 +79,7 @@ class SearchPage(Gtk.Box):
             return
         if preset is not None:
             self._entry.set_text(preset)
-        self._status.set_label("Searching…")
+        self._status.set_label("SEARCHING…")
 
         def _done(result) -> None:
             if isinstance(result, Exception):
@@ -109,7 +92,7 @@ class SearchPage(Gtk.Box):
             common_mod.replace_store(self._store, threads)
             self._status.set_label(
                 mailbox_mod.search_status(bool(server), bool(offline),
-                                          len(threads)))
+                                          len(threads)).upper())
 
         self._hooks.search(query, _done)
 

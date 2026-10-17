@@ -800,11 +800,19 @@ def test_compose_uses_portal_picker_not_legacy_dialog():
 
 def test_compose_fields_wait_for_tap_with_one_documented_exception():
     text = _compose_source()
-    assert "set_can_focus(False)" in text
-    assert "PropagationPhase.CAPTURE" in text
-    assert "explicit intent to type" in text
+    assert "tap_to_focus" in text
+    assert "Explicit-open exception" in text
     assert "Adw.Dialog" in text
     assert "set_ellipsize" in text or "set_wrap" in text
+
+
+def test_tap_to_focus_waits_for_capture_tap():
+    from pathlib import Path
+    common = (Path(__file__).resolve().parent.parent / "src" /
+              "xx_email" / "ui" / "common.py").read_text(
+                  encoding="utf-8")
+    assert "set_can_focus(False)" in common
+    assert "PropagationPhase.CAPTURE" in common
 
 
 def test_compose_sends_off_the_main_loop():

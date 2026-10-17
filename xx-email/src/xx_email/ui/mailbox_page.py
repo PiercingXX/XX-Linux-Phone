@@ -1,11 +1,11 @@
-"""Mailbox page: tabs, folder sheet, swipe, multi-select (thin view).
+"""Mailbox page: chip-filtered inbox over the L1/L2 store (thin view).
 
 Ports MailboxScreen/MailboxViewModel over xx_email.mailbox (pure) and
-the L1/L2 store: five inbox tabs in an Adw.ViewStack with a bottom
-switcher, other folders in one bottom-sheet dialog, Gtk.ListView rows
-with swipe + long-press multi-select, per-folder load-more, and undo
-toasts. Store/network work enters through hooks and always runs off
-the main loop; results land here for display only.
+the L1/L2 store: the five inbox tabs are a ChipBar filter over one
+Gtk.ListView, folders/accounts live on the Folders page and the
+header ⋯ menu, rows swipe and long-press into multi-select, and undo
+toasts confirm every action. Store/network work enters through hooks
+and always runs off the main loop; results land here for display.
 """
 
 import gi
@@ -21,10 +21,11 @@ from gi.repository import Adw, Gtk
 from xx_email import mailbox as mailbox_mod
 from xx_email.domain import MailboxFolder, SnoozePresets
 from xx_email.ui import common as common_mod
+from xx_ui import widgets
 
 
 class MailboxPage(Gtk.Box):
-    """Tabbed inbox + folder lists for one account."""
+    """Chip-filtered inbox for one account."""
 
     def __init__(self, account: str, hooks, toast, swipe_left: str = "ARCHIVE",
                  swipe_right: str = "DELETE") -> None:
@@ -34,117 +35,131 @@ class MailboxPage(Gtk.Box):
         self._toast = toast
         self._swipe_left = swipe_left
         self._swipe_right = swipe_right
+        self._tab = mailbox_mod.tabs()[0]
+        self._tabs = list(mailbox_mod.tabs())
         self._folder: MailboxFolder | None = None
         self._selection = mailbox_mod.Selection()
-        self._tab_stores: dict = {}
 
-        header = common_mod.phone_header("Inbox")
-        folders_button = common_mod.text_button("Folders")
-        folders_button.connect("clicked", lambda _b: self._open_sheets())
-        header.pack_start(folders_button)
-        compose_button = common_mod.text_button("Compose")
-        compose_button.connect("clicked",
-                               lambda _b: hooks.open_compose())
-        header.pack_end(compose_button)
-        self.append(header)
+        self.append(common_mod.header_with_menu(
+            "Inbox", account, [
+                ("Refresh", lambda: self.refresh()),
+                ("Folders", lambda: hooks.open_folders()),
+                ("Switch account",
+                 lambda: hooks.open_folders()),
+                ("Add account", lambda: hooks.add_account()),
+                ("Sign out", lambda: self._confirm_sign_out()),
+                ("Revoke Google access",
+                 lambda: hooks.open_permissions()),
+                ("Settings", lambda: hooks.open_settings()),
+            ]))
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.set_vexpand(True)
+        chips_pad = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        chips_pad.add_css_class("xx-page-body")
+        body.append(chips_pad)
+        self._chip_wrap = chips_pad
+        self._paint_chips()
 
         banners = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._reauth_banner = self._banner(
-            banners, "Sign in again", lambda _b: hooks.open_signin())
+            banners, "Sign in again to keep syncing",
+            "Sign in", lambda _b: hooks.open_signin())
         self._failed_banner = self._banner(
-            banners, "Retry", lambda _b: hooks.retry_failed())
-        self.append(banners)
+            banners, "", "Retry", lambda _b: hooks.retry_failed())
+        body.append(banners)
 
-        self._sync_line = Gtk.Label(label="")
-        self._sync_line.add_css_class("email-muted")
-        self._sync_line.set_xalign(0.0)
-        self._sync_line.set_margin_start(12)
-        self._sync_line.set_margin_end(12)
-        self.append(self._sync_line)
+        self._sync_line = widgets.caption("")
+        sync_pad = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sync_pad.add_css_class("xx-page-body")
+        sync_pad.append(self._sync_line)
+        body.append(sync_pad)
 
-        self._stack = Adw.ViewStack()
-        for tab in mailbox_mod.tabs():
-            scrolled, store, _view = self._thread_list(
-                lambda tid, n, _t=tab: self._row_activated(tid))
-            self._tab_stores[tab] = (store, scrolled)
-            self._stack.add_titled(scrolled, tab.name.lower(), tab.title)
-        stack_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        stack_wrap.set_vexpand(True)
-        self._tabs_box = stack_wrap
-        stack_wrap.append(self._stack)
-        self._switcher = Adw.ViewSwitcherBar()
-        self._switcher.set_stack(self._stack)
-        self._switcher.set_reveal(True)
-        stack_wrap.append(self._switcher)
-        self.append(stack_wrap)
-
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                          spacing=8)
-        actions.set_margin_start(12)
-        actions.set_margin_end(12)
-        actions.set_margin_top(4)
-        actions.set_margin_bottom(4)
-        refresh_button = common_mod.text_button("Refresh")
-        refresh_button.set_hexpand(True)
-        refresh_button.connect("clicked", lambda _b: self.refresh())
-        actions.append(refresh_button)
-        search_button = common_mod.text_button("Search")
-        search_button.set_hexpand(True)
-        search_button.connect("clicked",
-                              lambda _b: hooks.open_search())
-        actions.append(search_button)
-        self.append(actions)
-
-        self._folder_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self._folder_box.set_vexpand(True)
-        self._folder_box.set_visible(False)
-        self._folder_scrolled, self._folder_store, _view = \
-            self._thread_list(self._row_activated)
-        self._load_more_button = common_mod.text_button("Load more")
-        self._load_more_button.connect("clicked",
-                                       lambda _b: self._on_load_more())
-        self._folder_box.append(self._folder_scrolled)
-        self._folder_box.append(self._load_more_button)
-        self.append(self._folder_box)
+        self._store = common_mod.new_thread_store()
+        view = common_mod.thread_list_view(
+            self._store, self._row_activated, self._toggle_select,
+            self._on_swipe, self._swipe_left, self._swipe_right)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER,
+                            Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+        scrolled.set_child(view)
+        area = Gtk.Overlay()
+        area.set_vexpand(True)
+        area.set_child(scrolled)
+        fab = widgets.fab(callback=lambda: hooks.open_compose(),
+                          icon_name="list-add-symbolic")
+        fab.set_margin_bottom(20)
+        area.add_overlay(fab)
+        body.append(area)
 
         self._selection_bar = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._selection_bar.add_css_class("xx-page-body")
         self._selection_bar.set_visible(False)
-        self._selection_bar.set_margin_start(8)
-        self._selection_bar.set_margin_end(8)
-        self._selection_label = Gtk.Label(label="")
-        self._selection_label.set_xalign(0.0)
+        self._selection_label = widgets.caption("0 selected")
         self._selection_bar.append(self._selection_label)
         flow = Gtk.FlowBox()
         flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_max_children_per_line(4)
+        flow.set_max_children_per_line(3)
         for label, action in (("Archive", "ARCHIVE"),
                               ("Delete", "DELETE"),
                               ("Unread", "MARK_UNREAD"),
                               ("Star", "STAR"),
-                              ("Snooze", "SNOOZE")):
-            button = common_mod.text_button(label)
-            button.connect("clicked",
-                           lambda _b, a=action: self._on_bulk(a))
+                              ("Snooze", "SNOOZE"),
+                              ("Clear", None)):
+            button = widgets.outline_button(label)
+            if action is None:
+                button.connect("clicked",
+                               lambda _b: self._clear_selection())
+            else:
+                button.connect(
+                    "clicked",
+                    lambda _b, a=action: self._on_bulk(a))
             flow.append(button)
-        clear = common_mod.text_button("Clear")
-        clear.connect("clicked", lambda _b: self._clear_selection())
-        flow.append(clear)
         self._selection_bar.append(flow)
-        self.append(self._selection_bar)
+        body.append(self._selection_bar)
+
+        more_pad = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        more_pad.add_css_class("xx-page-body")
+        self._load_more_button = widgets.outline_button("Load more")
+        self._load_more_button.connect(
+            "clicked", lambda _b: self._on_load_more())
+        self._load_more_button.set_visible(False)
+        more_pad.append(self._load_more_button)
+        body.append(more_pad)
+
+        bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        bottom.append(widgets.bottom_tabs([
+            ("", "Inbox", True, None),
+            ("", "Folders", False, lambda: hooks.open_folders()),
+            ("", "Search", False, lambda: hooks.open_search()),
+            ("", "Options", False,
+             lambda: hooks.open_settings()),
+        ]))
+        self.append(body)
+        self.append(bottom)
 
     # ------------------------------------------------------------------ lists
 
-    def _thread_list(self, row_activated):
-        store = common_mod.new_thread_store()
-        view = common_mod.thread_list_view(
-            store, row_activated, self._toggle_select, self._on_swipe,
-            self._on_star, self._swipe_left, self._swipe_right)
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.add_css_class("email-listview")
-        scrolled.set_vexpand(True)
-        scrolled.set_child(view)
-        return (scrolled, store, view)
+    def _paint_chips(self) -> None:
+        child = self._chip_wrap.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            self._chip_wrap.remove(child)
+            child = next_child
+        self._chip_wrap.append(widgets.chip_bar([
+            (tab.title, tab == self._tab,
+             lambda t=tab: self._select_tab(t))
+            for tab in self._tabs
+        ]))
+
+    def _select_tab(self, tab) -> None:
+        self._tab = tab
+        self._selection.clear()
+        self._paint_chips()
+        self._paint_selection()
+        self._reload_tab(tab)
 
     def _row_activated(self, thread_id: str, _n_press: int = 1) -> None:
         if len(self._selection):
@@ -163,22 +178,20 @@ class MailboxPage(Gtk.Box):
     def _paint_selection(self) -> None:
         count = len(self._selection)
         self._selection_bar.set_visible(count > 0)
-        self._selection_label.set_label(f"{count:d} selected")
-        for store, _ in list(self._tab_stores.values()) + \
-                [(self._folder_store, None)]:
-            for position in range(store.get_n_items()):
-                item = store.get_item(position)
-                item.selected = item.thread_id in self._selection
+        self._selection_label.set_label(
+            _caption(f"{count:d} selected"))
+        for position in range(self._store.get_n_items()):
+            item = self._store.get_item(position)
+            item.selected = item.thread_id in self._selection
 
     # ------------------------------------------------------------------ data
 
     def load(self) -> None:
-        for tab in mailbox_mod.tabs():
-            self._reload_tab(tab)
+        self._reload_tab(self._tab)
         self._hooks.failed_count(self.set_failed)
 
     def _reload_tab(self, tab: MailboxFolder) -> None:
-        store, _ = self._tab_stores[tab]
+        store = self._store
 
         def _done(result) -> None:
             if isinstance(result, Exception):
@@ -192,10 +205,8 @@ class MailboxPage(Gtk.Box):
     def select_folder(self, folder: MailboxFolder | None) -> None:
         self._folder = folder
         self._selection.clear()
-        showing_tabs = folder is None
-        self._tabs_box.set_visible(showing_tabs)
-        self._switcher.set_visible(showing_tabs)
-        self._folder_box.set_visible(not showing_tabs)
+        self._paint_selection()
+        self._load_more_button.set_visible(False)
         if folder is None:
             self.load()
             return
@@ -204,8 +215,11 @@ class MailboxPage(Gtk.Box):
             if isinstance(result, Exception):
                 self._toast(f"Couldn't load {folder.title}", None)
                 return
+            if folder == MailboxFolder.OUTBOX:
+                self._done_outbox(result)
+                return
             threads, more = result
-            common_mod.replace_store(self._folder_store, threads)
+            common_mod.replace_store(self._store, threads)
             self._load_more_button.set_visible(bool(more))
             self._load_more_button.set_label("Load more")
 
@@ -213,36 +227,53 @@ class MailboxPage(Gtk.Box):
             self._hooks.load_outbox(self._done_outbox)
         else:
             self._hooks.load_folder(folder, _done)
-        self._paint_selection()
 
     def _done_outbox(self, result) -> None:
         if isinstance(result, Exception):
             self._toast("Couldn't load Outbox", None)
             return
         entries, _more = result
-        store = self._folder_store
-        store.remove_all()
-        for entry in entries:
-            store.append(common_mod.ThreadItem.from_thread(
-                _outbox_row(entry)))
+        store = self._store
+        store.splice(0, store.get_n_items(),
+                     [common_mod.ThreadItem.from_thread(
+                         _outbox_row(entry)) for entry in entries])
         self._load_more_button.set_visible(False)
+
+    def _on_load_more(self) -> None:
+        if self._folder is None:
+            return
+        self._load_more_button.set_label("Loading…")
+
+        def _done(result) -> None:
+            if isinstance(result, Exception):
+                self._load_more_button.set_label("Load more")
+                self._toast("Couldn't load more", None)
+                return
+            threads, more = result
+            fresh = [common_mod.ThreadItem.from_thread(thread)
+                     for thread in threads]
+            self._store.splice(self._store.get_n_items(), 0, fresh)
+            self._load_more_button.set_visible(bool(more))
+            self._load_more_button.set_label("Load more")
+
+        self._hooks.load_more(self._folder, _done)
 
     def refresh(self) -> None:
         self._sync_line.set_label(
-            mailbox_mod.sync_status_line(syncing=True))
+            _caption(mailbox_mod.sync_status_line(syncing=True)))
         self._hooks.refresh(self._on_refreshed)
 
     def _on_refreshed(self, outcome) -> None:
         if isinstance(outcome, Exception):
             self._sync_line.set_label(
                 mailbox_mod.sync_status_line(
-                    {"ok": False, "error": "couldn't reach it"}))
+                    {"ok": False, "error": "couldn't reach it"}).upper())
             self._toast("Sync failed", None)
             return
         if not outcome.get("ok", False):
             self._toast(outcome.get("error") or "Sync failed", None)
         self._sync_line.set_label(
-            mailbox_mod.sync_status_line(outcome))
+            _caption(mailbox_mod.sync_status_line(outcome)))
         self.set_reauth(bool(outcome.get("reauth", False)))
         self.load()
 
@@ -263,9 +294,6 @@ class MailboxPage(Gtk.Box):
             self._open_snooze([thread_id])
         else:
             self._perform(action, [thread_id])
-
-    def _on_star(self, thread_id: str) -> None:
-        self._perform("STAR", [thread_id])
 
     def _on_bulk(self, action: str) -> None:
         ids = self._selection.ids()
@@ -302,118 +330,53 @@ class MailboxPage(Gtk.Box):
 
     def _reload_current(self) -> None:
         if self._folder is None:
-            for tab in mailbox_mod.tabs():
-                self._reload_tab(tab)
+            self._reload_tab(self._tab)
         else:
             folder = self._folder
             self.select_folder(None)
             self.select_folder(folder)
 
-    def _on_load_more(self) -> None:
-        if self._folder is None:
-            return
-        self._load_more_button.set_label("Loading…")
-
-        def _done(result) -> None:
-            if isinstance(result, Exception):
-                self._load_more_button.set_label("Load more")
-                self._toast("Couldn't load more", None)
-                return
-            threads, more = result
-            for thread in threads:
-                self._folder_store.append(
-                    common_mod.ThreadItem.from_thread(thread))
-            self._load_more_button.set_visible(bool(more))
-            self._load_more_button.set_label("Load more")
-
-        self._hooks.load_more(self._folder, _done)
-
     # ---------------------------------------------------------------- sheets
 
-    def _banner(self, parent, action_label: str, on_action):
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        box.add_css_class("email-banner")
-        box.set_visible(False)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
-        box.set_margin_top(4)
-        label = common_mod.wrapped(Gtk.Label(label=""))
-        box.append(label)
-        action = common_mod.text_button(action_label)
+    def _banner(self, parent, label_text: str, action_label: str,
+                on_action):
+        box = widgets.card()
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_valign(Gtk.Align.CENTER)
+        label = common_mod.wrapped(Gtk.Label(label=label_text))
+        label.add_css_class("xx-title")
+        label.set_hexpand(True)
+        row.append(label)
+        action = widgets.outline_button(action_label)
         action.connect("clicked", on_action)
-        box.append(action)
-        parent.append(box)
+        row.append(action)
+        box.append(row)
+        pad = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        pad.add_css_class("xx-page-body")
+        pad.append(box)
+        pad.set_visible(False)
+        parent.append(pad)
         if action_label == "Retry":
             self._failed_label = label
-        return box
-
-    def _open_sheets(self) -> None:
-        def _done(result) -> None:
-            accounts = [] if isinstance(result, Exception) else result
-            self._folder_dialog(accounts)
-
-        self._hooks.load_accounts(_done)
-
-    def _folder_dialog(self, accounts: list[str]) -> None:
-        dialog = Adw.Dialog()
-        dialog.set_title("Folders")
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                          spacing=4)
-        content.set_margin_start(16)
-        content.set_margin_end(16)
-        content.set_margin_top(16)
-        content.set_margin_bottom(16)
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_child(content)
-        dialog.set_child(scrolled)
-
-        def _row(label_text, callback) -> None:
-            button = common_mod.text_button(label_text)
-            button.connect("clicked",
-                           lambda _b: (dialog.close(), callback()))
-            content.append(button)
-
-        for email in accounts:
-            marker = " (current)" if email == self.account else ""
-            _row(email + marker,
-                 lambda e=email: self._hooks.switch_account(e)
-                 if e != self.account else None)
-        _row("Add account", lambda: self._hooks.add_account())
-        _row("Sign out " + self.account,
-             lambda: self._confirm_sign_out())
-        _row("Revoke Google access",
-             lambda: self._hooks.open_permissions())
-        _row("Inbox (tabs)", lambda: self.select_folder(None))
-        for folder in mailbox_mod.OTHER_FOLDERS:
-            _row(folder.title,
-                 lambda f=folder: self.select_folder(f))
-        _row("Settings", lambda: self._hooks.open_settings())
-        dialog.present(self.get_root())
+        return pad
 
     def _confirm_sign_out(self) -> None:
         email = self.account
         dialog = Adw.Dialog()
         dialog.set_title("Sign out")
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                          spacing=8)
-        content.set_margin_start(16)
-        content.set_margin_end(16)
-        content.set_margin_top(16)
-        content.set_margin_bottom(16)
-        text = common_mod.wrapped(Gtk.Label(
-            label=f"Remove {email} from this phone? Mail stays on "
-                  "Google's servers. Sends still waiting in the "
-                  "Outbox are discarded."))
-        content.append(text)
-        cancel = common_mod.text_button("Cancel")
+        content = widgets.dialog_box("Sign out")
+        content.append(widgets.label(
+            f"Remove {email} from this phone? Mail stays on "
+            "Google's servers. Sends still waiting in the "
+            "Outbox are discarded.", "xx-body"))
+        cancel = widgets.outline_button("Cancel")
         cancel.connect("clicked", lambda _b: dialog.close())
         content.append(cancel)
-        out = common_mod.text_button("Sign out")
+        out = widgets.outline_button("Sign out")
         out.connect("clicked", lambda _b: (
             dialog.close(), self._hooks.sign_out(email, False)))
         content.append(out)
-        revoke = common_mod.text_button("Sign out and revoke")
+        revoke = widgets.danger_button("Sign out and revoke")
         revoke.connect("clicked", lambda _b: (
             dialog.close(), self._hooks.sign_out(email, True)))
         content.append(revoke)
@@ -430,15 +393,10 @@ class MailboxPage(Gtk.Box):
         )
         dialog = Adw.Dialog()
         dialog.set_title("Snooze until…")
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                          spacing=4)
-        content.set_margin_start(16)
-        content.set_margin_end(16)
-        content.set_margin_top(16)
-        content.set_margin_bottom(16)
+        content = widgets.dialog_box("Snooze until…")
         dialog.set_child(content)
         for label_text, moment in presets:
-            button = common_mod.text_button(label_text)
+            button = widgets.menu_row(label_text)
             wake_at = int(moment.timestamp() * 1000)
 
             def _pick(_b, undo_ids=list(ids), at=wake_at) -> None:
@@ -447,7 +405,15 @@ class MailboxPage(Gtk.Box):
 
             button.connect("clicked", _pick)
             content.append(button)
+        cancel = widgets.menu_row("Cancel")
+        cancel.connect("clicked", lambda _b: dialog.close())
+        content.append(cancel)
         dialog.present(self.get_root())
+
+
+def _caption(text: str) -> str:
+    """Caption labels are uppercased in code (no CSS text-transform)."""
+    return text.upper()
 
 
 def _outbox_row(entry):

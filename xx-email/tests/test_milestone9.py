@@ -411,16 +411,22 @@ def test_hints_seam_builds_one_real_variant(tmp_path):
 # ------------------------------------------------------- static page guards
 
 
-def test_settings_is_a_preferences_dialog_with_real_rows():
+def test_settings_is_a_page_of_setting_rows():
     text = (UI / "settings_page.py").read_text(encoding="utf-8")
-    assert "Adw.PreferencesDialog" in text
+    assert "SettingsPage" in text
+    assert "settings_navigation_page" in text
+    assert "Adw.PreferencesDialog" not in text
     assert "Adw.PreferencesWindow" not in text
     assert "Adw.MessageDialog" not in text
+    # Every Android setting with a real effect, minus theme_mode:
+    # the phone theme comes from the shell (xx_ui), so no per-app
+    # theme row.
     for key in ("swipe_right", "swipe_left", "undo_seconds",
-                "sync_minutes", "theme_mode", "send_and_archive",
+                "sync_minutes", "send_and_archive",
                 "notifications_enabled", "remote_images", "client_id",
                 "last_account"):
         assert key in text, key
+    assert "theme_mode" not in text
     assert "Gtk.FileDialog" in text
     assert "UNINSTALL_WARNING" in text or "uninstall" in text.lower()
     assert "TODO" not in text
@@ -436,9 +442,12 @@ def test_logs_page_copies_redacted_text():
 
 def test_main_wires_settings_dialog_and_logs_page():
     text = (SRC / "main.py").read_text(encoding="utf-8")
-    assert "SettingsDialog" in text
+    assert "SettingsPage" in text
+    assert "SettingsDialog" not in text
     assert "LogsPage" in text
     assert "_push_logs" in text
+    assert "_push_settings" in text
+    assert "_push_folders" in text
     assert "revoke_grant" in text
     assert "request_sign_out" in text
     for banned in ("subprocess", "time.sleep", "call_sync",
@@ -573,14 +582,17 @@ def broadway_env():
     pytest.skip("no free broadway display")
 
 
-def test_every_page_fits_320x640(broadway_env):
+def test_every_page_fits_360x720(broadway_env):
     display, daemon_runtime = broadway_env
     env = dict(os.environ)
     env["GDK_BACKEND"] = "broadway"
     env["BROADWAY_DISPLAY"] = display
     env["XDG_RUNTIME_DIR"] = daemon_runtime
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent /
-                            "src")
+    env["PYTHONPATH"] = os.pathsep.join((
+        str(Path(__file__).resolve().parent.parent / "src"),
+        str(Path(__file__).resolve().parent.parent.parent /
+            "common"),
+    ))
     completed = subprocess.run(
         [sys.executable, _DRIVER, "audit"],
         env=env, capture_output=True, text=True, timeout=180,
@@ -595,20 +607,14 @@ def test_every_page_fits_320x640(broadway_env):
     assert markers.get("ERRORS") == "none"
     assert markers.get("PAGES_OK") == \
         "mailbox thread search compose setup logs settings"
+    # Budget is the 360 px snap canvas: the design-system bottom
+    # tabs and chip bar carry fixed minima (~356 px) tuned for it,
+    # and the exact-fit gate is the 360x720 snap with zero warnings.
     for name in ("mailbox", "thread", "search", "compose", "setup",
-                 "logs"):
+                 "logs", "settings"):
         assert f"MIN-ERROR {name}" not in markers, \
             markers.get(f"MIN-ERROR {name}")
         raw = markers.get(f"MIN {name}", "9999")
         assert raw.isdigit(), f"{name} reported no width: {raw!r}"
-        assert int(raw) <= 320, \
-            f"{name} needs {raw} px — overflows 320x640"
-    floor = markers.get("MIN dialog-floor", "9999")
-    dialog_min = markers.get("MIN settings", "9999")
-    assert floor.isdigit() and dialog_min.isdigit(), \
-        f"dialog widths missing: {floor!r} {dialog_min!r}"
-    assert int(floor) <= 360, \
-        f"Adwaita PreferencesDialog floor moved: {floor} px"
-    assert dialog_min == floor, \
-        f"settings content adds width over the toolkit floor: " \
-        f"{dialog_min} vs {floor}"
+        assert int(raw) <= 360, \
+            f"{name} needs {raw} px — overflows 360x720"

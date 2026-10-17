@@ -18,12 +18,18 @@ No pip dependencies: stdlib + GI system libraries only.
 
 ## Run from the checkout
 
+Visual style comes from the shared design system in `common/xx_ui`
+(themes, stylesheet, widget builders). Install `common/` first so the
+`xx_ui` python package is available, then:
+
 ```sh
-PYTHONPATH=src python3 -m xx_email
+PYTHONPATH=src:../common python3 -m xx_email
 ```
 
 Needs GTK4, libadwaita, and PyGObject on the system (no display is needed
-for the test gate below).
+for the test gate below). Switching `theme` in
+`~/.config/xx-wm/config.json` restyles the open window without a
+restart.
 
 ## Tests and lint (lane gate)
 
@@ -32,12 +38,21 @@ for the test gate below).
 ../xx-wm/.venv/bin/ruff check src tests
 ```
 
-Tests cover the headless-pure modules (`theme`, `config`); GTK code is
-compile-checked but needs a phone/compositor to run.
+Tests cover the headless-pure modules (`config`, mailbox models);
+GTK pages render headlessly through `tools/demo_seed.py` (realistic
+store data) and `tools/snap_all.sh` (every screen in every theme):
+
+```sh
+xx-email/tools/snap_all.sh lane_shots/
+```
 
 ## Install
 
+`common/meson.build` installs the `xx_ui` package; this app's
+`meson.build` requires it and fails early when it is missing:
+
 ```sh
+meson setup ../common/build --prefix=/usr && meson install -C ../common/build
 meson setup build --prefix=/usr
 meson install -C build
 ```
