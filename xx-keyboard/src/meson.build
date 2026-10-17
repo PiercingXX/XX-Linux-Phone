@@ -135,10 +135,9 @@ phosh_contrib_sources = files(
   'contrib/util.h',
 )
 
+# '.' covers the build dir too: the generated xx-theme-presets.h lands there
 pos_inc = include_directories(['.', 'contrib/'])
-# Build dir for the generated xx-theme-presets.h
-pos_build_inc = include_directories(meson.current_build_dir())
-pos_includes = [pos_inc, pos_build_inc, root_inc, dbus_inc, proto_inc]
+pos_includes = [pos_inc, root_inc, dbus_inc, proto_inc]
 
 subdir('completers')
 
