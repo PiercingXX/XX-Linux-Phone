@@ -5,3 +5,8 @@
 [lint]
 select = ["E4", "E7", "E9", "F"]
 extend-ignore = ["E402"]
+
+# Navigation scripts run inside scripts/snap.py, which execs them with
+# `win`/`app` already in scope; they are never imported.
+[lint.per-file-ignores]
+"tools/nav_*.py" = ["F821"]

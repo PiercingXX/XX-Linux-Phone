@@ -2,11 +2,12 @@
 
 Runs under GDK_BACKEND=broadway with HOME pointed at a temp dir:
 first with no model (first-run download screen), then with a seeded
-fake model (caption lines, partial->final, theme reload, drag
+fake model (caption lines, partial->final, live theme reload, drag
 margin). Any exception fails the run; success prints SMOKE_OK.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import traceback
@@ -15,7 +16,11 @@ SRC_DIR = sys.argv[1]
 HOME = sys.argv[2]
 
 sys.path.insert(0, SRC_DIR)
+for candidate in ("COMMON_DIR",):
+    if candidate in os.environ:
+        sys.path.insert(0, os.environ[candidate])
 os.environ["HOME"] = HOME
+os.environ["XDG_CONFIG_HOME"] = os.path.join(HOME, ".config")
 
 errors: list[str] = []
 
@@ -26,11 +31,16 @@ def _hook(exc_type, exc, tb):
 
 sys.excepthook = _hook
 
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "4.0")  # noqa: E402
+
 from gi.repository import GLib  # noqa: E402
 
+import xx_ui  # noqa: E402
 from xx_captions import config  # noqa: E402
 from xx_captions.overlay import CaptionWindow, layer_available  # noqa: E402
-from xx_captions.theme import preset_for_key  # noqa: E402
+from xx_captions.overlay import load_ui_theme  # noqa: E402
 
 
 def check(cond: bool, message: str) -> None:
@@ -79,13 +89,23 @@ def main() -> int:
 
     window.set_active(True, "playback")
     check("on" in window._status.get_text().lower(), "privacy row shows on")
-    check(window._toggle.get_label() == "Stop", "toggle offers Stop")
+    check("CAPTIONS" in window._status.get_text(), "status is a caps label")
+    check(window._toggle.get_label() == "STOP", "toggle offers Stop")
+    check(window._menu is not None, "overflow menu exists")
     window.set_active(False, "")
-    check(window._toggle.get_label() == "Start", "toggle offers Start")
+    check(window._toggle.get_label() == "START", "toggle offers Start")
     window.set_error("boom")
     check("boom" in window._status.get_text(), "error is user-facing")
 
-    window.apply_theme(preset_for_key("ocean"))
+    shell_conf = home / ".config" / "xx-wm" / "config.json"
+    shell_conf.parent.mkdir(parents=True, exist_ok=True)
+    shell_conf.write_text(json.dumps({"theme": "ocean"}), encoding="utf-8")
+    reloaded = xx_ui.reload()
+    check(reloaded.key == "ocean", f"live switch to ocean, got {reloaded.key}")
+    check(load_ui_theme(home).key == "ocean", "overlay resolves ocean")
+    window.apply_theme()
+    shell_conf.write_text(json.dumps({"theme": "paper"}), encoding="utf-8")
+    xx_ui.reload()
     window.apply_margin(120)
     window._on_drag_begin(None, 0.0, 0.0)
 
@@ -109,10 +129,15 @@ def main() -> int:
     bare.close()
     window.close()
     if errors:
-        raise AssertionError("excepthook caught:\n" + "\n".join(errors))
+        sys.stderr.write("".join(errors))
+        return 1
     print("SMOKE_OK")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:
+        traceback.print_exc()
+        sys.exit(1)

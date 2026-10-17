@@ -23,6 +23,7 @@ pytest.importorskip("gi")
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = ROOT / "src"
+COMMON_DIR = ROOT.parent / "common"
 DRIVER = Path(__file__).resolve().parent / "overlay_broadway_driver.py"
 
 pytestmark = pytest.mark.skipif(
@@ -54,6 +55,7 @@ def test_real_overlay_window_under_broadway(tmp_path: Path) -> None:
         env["BROADWAY_DISPLAY"] = f":{display}"
         env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + env.get(
             "PYTHONPATH", "")
+        env["COMMON_DIR"] = str(COMMON_DIR)
         for _ in range(100):
             with socket.socket(socket.AF_INET,
                                socket.SOCK_STREAM) as sock:

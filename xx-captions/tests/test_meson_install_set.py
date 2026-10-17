@@ -13,5 +13,7 @@ def test_meson_installs_all_sources() -> None:
     assert modules, "package must not be empty"
     for module in modules:
         assert f"src/xx_captions/{module}" in build, module
+    assert "src/xx_captions/captions.css" in build
+    assert "import xx_ui" in build or "xx_ui" in build
     assert "data/xx-captions.in" in build
     assert "data/io.piercingxx.Captions1.service.in" in build

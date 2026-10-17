@@ -20,6 +20,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--overlay", action="store_true",
                         help="run the caption overlay window"
                         " (application id io.piercingxx.Captions)")
+    parser.add_argument("--settings", action="store_true",
+                        help="run the settings and transcript history"
+                        " window (application id"
+                        " io.piercingxx.CaptionsSettings)")
     return parser
 
 
@@ -81,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
         from xx_captions.overlay import run_overlay
 
         return run_overlay()
+    if args.settings:
+        from xx_captions.settings import run_settings
+
+        return run_settings()
     if args.serve or not argv:
         from xx_captions.service import serve_forever
 

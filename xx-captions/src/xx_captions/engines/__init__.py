@@ -31,11 +31,12 @@ def _have_package(module: str) -> bool:
 
 
 def sherpa_status(home: Path | None = None) -> tuple[bool, str]:
-    if not _have_package("sherpa_onnx"):
-        return False, "sherpa_onnx package not installed"
     model_id = config.load(home).get("model", config.SHERPA_ID)
     if model_id not in config.MODEL_CATALOG:
         model_id = config.SHERPA_ID
+    if not _have_package("sherpa_onnx"):
+        return False, ("sherpa_onnx package not installed "
+                       f"(model {model_id!r} unavailable)")
     if not models.is_installed(model_id, home):
         return False, f"sherpa model {model_id!r} not installed"
     return True, f"sherpa model {model_id!r} ready"

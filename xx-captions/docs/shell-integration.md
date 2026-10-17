@@ -67,9 +67,13 @@ the payloads with a fake bus).
   (above the gesture area), draggable vertically on the status row;
   position persists in `~/.config/xx-captions/config.json`
   (`overlay_margin_bottom`). Input passes through everywhere except
-  the drag handle and the Close button. Colors follow
-  `~/.config/xx-wm/config.json` with hot-reload; the `● Captions on`
-  dot is the shell danger red `#ff6b6b`.
+  the drag handle and the overflow button. The handle holds
+  Start/Stop plus a `⋯` menu (Settings, Transcripts, Close overlay);
+  engine, language, model download and history live in
+  `xx-captions --settings`. Colors come from the shared `xx_ui`
+  design system, which follows `~/.config/xx-wm/config.json` with
+  hot-reload; the `● Captions on` dot is the shell danger red
+  `#ff6b6b`.
 
 ## Tile states
 

@@ -542,6 +542,7 @@ def page(header, body, bottom=None, fab_widget=None) -> Gtk.Box:
     scrolled.set_hexpand(True)
     scrolled.set_vexpand(True)
     body.set_hexpand(True)
+    body.add_css_class('xx-page-body')  # the 20 px gutter is the page's job
     scrolled.set_child(body)
     if fab_widget is not None:
         fab_widget.set_margin_bottom(20)

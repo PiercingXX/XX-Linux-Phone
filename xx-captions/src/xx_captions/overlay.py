@@ -2,11 +2,11 @@
 
 Layer OVERLAY, keyboard NONE, anchored bottom with the persisted
 margin above the gesture area, exclusive zone 0. Taps pass through
-everywhere except the drag handle and the close button (empty input
-region plus those two rects). Partials replace the last line in
+everywhere except the drag handle and the overflow button (empty input
+region plus those rects). Partials replace the last line in
 place; the matching final commits it (CaptionBuffer), so labels only
-ever change text, never rebuild. Colors come from the XX-WM preset
-with hot-reload; the recording dot is the shell's danger red, the one
+ever change text, never rebuild. Colors come from the xx_ui design
+system with live reload; the recording dot is the danger red, the one
 fixed color allowed. Engine and download work stays on worker threads
 and posts back with GLib.idle_add, so the main loop never blocks.
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
+from string import Template
 
 from xx_captions import config, models
 from xx_captions.client import CaptionsClient
@@ -32,7 +33,6 @@ from xx_captions.overlay_state import (
     progress_fraction,
     save_margin,
 )
-from xx_captions.theme import CaptionPalette, caption_css, resolve_palette
 
 _log = logging.getLogger("captions-overlay")
 
@@ -42,24 +42,43 @@ RECORD_RED = "#ff6b6b"
 
 _HANDLE_HEIGHT = 48
 
-_OVERLAY_CSS_EXTRA = """
-.caption-status {
-    font-size: 9pt;
-    letter-spacing: 0.08em;
-}
-.caption-rec-on {
-    color: #ff6b6b;
-}
-.caption-toggle, .caption-close {
-    font-size: 10pt;
-}
-.caption-model-size {
-    font-size: 11pt;
-}
-.caption-error {
-    font-size: 10pt;
-}
-"""
+
+def _app_css_path() -> Path:
+    return Path(__file__).with_name("captions.css")
+
+
+def render_app_css(theme) -> str:
+    """Overlay chrome for an xx_ui theme. Tokens only, never literals."""
+    mapping = {
+        "surface": theme.surface,
+        "border": theme.border,
+        "muted": theme.muted,
+        "danger": RECORD_RED,
+    }
+    return Template(_app_css_path().read_text(encoding="utf-8")).substitute(
+        mapping)
+
+
+def _shell_config_path(home) -> Path | None:
+    base = home if home is not None else Path.home()
+    try:
+        return Path(base) / ".config" / "xx-wm" / "config.json"
+    except Exception:
+        return None
+
+
+def load_ui_theme(home):
+    """Active xx_ui theme for this HOME (falls back, never raises)."""
+    import xx_ui
+
+    path = _shell_config_path(home)
+    if path is not None:
+        try:
+            return xx_ui.theme.load(path)
+        except Exception:
+            pass
+    return xx_ui.theme.load()
+
 
 _HAS_GTK = True
 try:
@@ -79,10 +98,31 @@ if _HAS_GTK:
         gi.require_version("Pango", "1.0")
     except (ValueError, ImportError):
         pass
-    from gi.repository import Gio, GLib, Gtk, Pango
+    from gi.repository import GLib, Gtk, Pango
 
     if _HAS_LAYER:
         from gi.repository import Gtk4LayerShell as LayerShell
+
+    try:
+        import xx_ui
+        from xx_ui import widgets
+        _HAS_XX_UI = True
+    except ImportError:
+        _HAS_XX_UI = False
+
+_UI_APPLIED = False
+
+
+def ensure_ui(target=None):
+    """Install the xx_ui design system once per process."""
+    global _UI_APPLIED
+    if not _HAS_GTK or not _HAS_XX_UI or _UI_APPLIED:
+        return
+    try:
+        xx_ui.apply(target)
+    except Exception:
+        return
+    _UI_APPLIED = True
 
 
 def layer_available() -> bool:
@@ -114,7 +154,7 @@ if _HAS_GTK:
             self._downloading = False
             self._cancel_download = threading.Event()
             self._drag_start_margin = self._margin
-            self._theme_file_monitor = None
+            self._unsubscribe_ui = None
 
             self.set_decorated(False)
             self.set_resizable(False)
@@ -132,31 +172,45 @@ if _HAS_GTK:
                 LayerShell.set_margin(
                     self, LayerShell.Edge.BOTTOM, self._margin)
 
+            ensure_ui(self)
             self._theme_provider = Gtk.CssProvider()
-            self._theme_provider.load_from_data(
-                self._sheet(resolve_palette(home)).encode("utf-8"))
-            Gtk.StyleContext.add_provider_for_display(
-                self.get_display(), self._theme_provider,
-                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            self.apply_theme()
+            try:
+                display = self.get_display()
+                if display is not None:
+                    Gtk.StyleContext.add_provider_for_display(
+                        display, self._theme_provider,
+                        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            except Exception:
+                pass
+            if _HAS_XX_UI:
+                try:
+                    self._unsubscribe_ui = xx_ui.on_change(
+                        self._on_ui_theme)
+                except Exception:
+                    self._unsubscribe_ui = None
+            self.connect("close-request", self._on_close_request)
 
             handle = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                             spacing=8)
-            handle.add_css_class("caption-rec")
-            self._status = Gtk.Label(label="Captions off")
-            self._status.add_css_class("caption-status")
+                             spacing=4)
+            handle.set_size_request(-1, _HANDLE_HEIGHT)
+            handle.set_valign(Gtk.Align.CENTER)
+            self._status = widgets.caption("Captions off")
             self._status.set_halign(Gtk.Align.START)
             self._status.set_hexpand(True)
-            self._status.set_ellipsize(Pango.EllipsizeMode.END)
+            self._status.set_valign(Gtk.Align.CENTER)
+            self.set_status("Captions off")
             handle.append(self._status)
-            self._toggle = Gtk.Button(label="Start")
-            self._toggle.add_css_class("caption-toggle")
+            self._toggle = widgets.caps_button("Start")
+            self._toggle.set_valign(Gtk.Align.CENTER)
             self._toggle.connect("clicked", self._on_toggle_clicked)
             handle.append(self._toggle)
-            self._close = Gtk.Button(label="Close")
-            self._close.add_css_class("caption-close")
-            self._close.connect("clicked", self._on_close_clicked)
-            handle.append(self._close)
+            self._more = widgets.icon_button("view-more-symbolic")
+            self._more.set_valign(Gtk.Align.CENTER)
+            self._more.connect("clicked", self._on_more_clicked)
+            handle.append(self._more)
             self._handle = handle
+            self._menu = self._build_menu(self._more)
 
             drag = Gtk.GestureDrag.new()
             drag.connect("drag-begin", self._on_drag_begin)
@@ -168,38 +222,33 @@ if _HAS_GTK:
             caption_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                   spacing=2)
             for _ in range(3):
-                line = Gtk.Label(label="")
-                line.add_css_class("caption-line")
+                line = widgets.label("", "xx-body")
                 line.set_halign(Gtk.Align.START)
                 line.set_xalign(0.0)
                 line.set_wrap(True)
                 line.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                line.set_ellipsize(Pango.EllipsizeMode.END)
-                line.set_max_width_chars(38)
+                line.set_ellipsize(Pango.EllipsizeMode.NONE)
+                line.set_max_width_chars(32)
                 line.set_visible(False)
                 caption_box.append(line)
                 self._lines.append(line)
             self._caption_box = caption_box
 
-            self._model_title = Gtk.Label(label="Captions need a model")
-            self._model_title.add_css_class("caption-line")
-            self._model_title.set_wrap(True)
+            self._model_title = widgets.label("Captions need a model",
+                                             "xx-dialog-title")
             self._model_title.set_xalign(0.0)
-            self._model_size = Gtk.Label(label="")
-            self._model_size.add_css_class("caption-model-size")
-            self._model_size.set_wrap(True)
+            self._model_size = widgets.label("", "xx-secondary")
             self._model_size.set_xalign(0.0)
             self._progress = Gtk.ProgressBar()
             self._progress.set_show_text(False)
             self._progress.set_visible(False)
-            self._download = Gtk.Button(label="Download")
+            self._download = widgets.primary_button("Download")
             self._download.connect("clicked", self._on_download_clicked)
-            self._cancel = Gtk.Button(label="Cancel")
+            self._cancel = widgets.outline_button("Cancel")
             self._cancel.connect("clicked", self._on_cancel_clicked)
             self._cancel.set_visible(False)
-            self._model_error = Gtk.Label(label="")
-            self._model_error.add_css_class("caption-error")
-            self._model_error.set_wrap(True)
+            self._model_error = widgets.label("", "xx-secondary")
+            self._model_error.add_css_class("xx-danger-text")
             self._model_error.set_xalign(0.0)
             self._model_error.set_visible(False)
             model_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
@@ -216,42 +265,82 @@ if _HAS_GTK:
             root.add_css_class("caption-root")
             root.set_size_request(336, -1)
             root.set_halign(Gtk.Align.CENTER)
+            root.set_vexpand(True)
+            root.set_valign(Gtk.Align.END)
             root.append(handle)
             root.append(caption_box)
             root.append(model_box)
             self.set_child(root)
 
             self.connect("realize", self._on_realize)
-            self._watch_shell_theme()
             if model_missing(home):
                 self.show_model_view()
             else:
                 self.show_caption_view()
 
-        def _sheet(self, palette: CaptionPalette) -> str:
-            return caption_css(palette) + _OVERLAY_CSS_EXTRA
+        def _build_menu(self, parent) -> Gtk.Popover:
+            menu = Gtk.Popover()
+            menu.set_parent(parent)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            box.set_size_request(240, -1)
+            box.append(widgets.menu_row("Settings", self._open_settings))
+            box.append(widgets.menu_row("Transcripts", self._open_history))
+            box.append(widgets.menu_row("Close overlay", self._close_menu))
+            menu.set_child(box)
+            return menu
 
-        def apply_theme(self, palette: CaptionPalette | None = None) -> None:
-            """Reload the display sheet from the current shell preset."""
-            data = self._sheet(palette or resolve_palette(self._home))
-            self._theme_provider.load_from_data(data.encode("utf-8"))
-
-        def _watch_shell_theme(self) -> None:
-            home = self._home or Path.home()
-            watched = home / ".config" / "xx-wm" / "config.json"
+        def _close_menu(self) -> None:
             try:
-                watched.parent.mkdir(parents=True, exist_ok=True)
-                monitor = Gio.File.new_for_path(str(watched)).monitor_file(
-                    Gio.FileMonitorFlags.NONE, None)
-                monitor.connect("changed", self._on_shell_theme_changed)
-                self._theme_file_monitor = monitor
+                self._menu.popdown()
             except Exception:
-                self._theme_file_monitor = None
+                pass
+            self._on_close_clicked()
 
-        def _on_shell_theme_changed(self, _monitor, _file, _other,
-                                    _event) -> None:
+        def _open_settings(self) -> None:
+            from xx_captions.settings import SettingsWindow
+
             try:
-                self.apply_theme()
+                self._menu.popdown()
+            except Exception:
+                pass
+            window = SettingsWindow(home=self._home)
+            window.present()
+
+        def _open_history(self) -> None:
+            from xx_captions.settings import SettingsWindow
+
+            try:
+                self._menu.popdown()
+            except Exception:
+                pass
+            window = SettingsWindow(home=self._home)
+            window.present()
+            window.show_history()
+
+        def _on_ui_theme(self, theme) -> None:
+            try:
+                self.apply_theme(theme)
+            except Exception:
+                pass
+
+        def _on_close_request(self, _window) -> bool:
+            if self._unsubscribe_ui is not None:
+                try:
+                    self._unsubscribe_ui()
+                except Exception:
+                    pass
+                self._unsubscribe_ui = None
+            return False
+
+        def apply_theme(self, theme=None) -> None:
+            """Reload the overlay sheet from the current shell preset."""
+            if not _HAS_XX_UI:
+                return
+            try:
+                active = theme if theme is not None else load_ui_theme(
+                    self._home)
+                self._theme_provider.load_from_data(
+                    render_app_css(active).encode("utf-8"))
             except Exception:
                 pass
 
@@ -291,24 +380,36 @@ if _HAS_GTK:
                     label.remove_css_class("caption-line-partial")
             GLib.idle_add(self._refresh_input_region, priority=GLib.PRIORITY_LOW)
 
+        def set_status(self, text: str, recording: bool = False) -> None:
+            shown = text.upper()
+            self._status.set_text(shown)
+            # Short labels never ellipsize: at exactly the natural width
+            # fractional rounding swaps a fitting character for an
+            # ellipsis. Only longer text (errors) may truncate.
+            self._status.set_max_width_chars(18)
+            if len(shown) > 18:
+                self._status.set_ellipsize(Pango.EllipsizeMode.END)
+            else:
+                self._status.set_ellipsize(Pango.EllipsizeMode.NONE)
+            if recording:
+                self._status.add_css_class("caption-rec-on")
+            else:
+                self._status.remove_css_class("caption-rec-on")
+
         def set_active(self, active: bool, _source: str = "") -> None:
             if active:
-                self._status.set_text("\u25cf Captions on")
-                self._status.add_css_class("caption-rec-on")
-                self._toggle.set_label("Stop")
+                self.set_status("\u25cf Captions on", recording=True)
+                self._toggle.set_label("STOP")
             else:
-                self._status.set_text("Captions off")
-                self._status.remove_css_class("caption-rec-on")
-                self._toggle.set_label("Start")
+                self.set_status("Captions off")
+                self._toggle.set_label("START")
 
         def set_starting(self) -> None:
-            self._status.set_text("Starting captions\u2026")
-            self._status.remove_css_class("caption-rec-on")
+            self.set_status("Starting captions\u2026")
 
         def set_error(self, message: str) -> None:
-            self._status.set_text(f"Captions error: {message}")
+            self._status.set_text(f"CAPTIONS ERROR: {message}")
             self._status.remove_css_class("caption-rec-on")
-            self._status.set_ellipsize(Pango.EllipsizeMode.END)
 
         def _on_toggle_clicked(self, _button) -> None:
             client = self._client
@@ -335,7 +436,13 @@ if _HAS_GTK:
                 pass
             return False
 
-        def _on_close_clicked(self, _button) -> None:
+        def _on_more_clicked(self, _button) -> None:
+            try:
+                self._menu.popup()
+            except Exception:
+                pass
+
+        def _on_close_clicked(self, _button=None) -> None:
             try:
                 if self._client is not None and self._client.active:
                     self._client.stop()
@@ -421,7 +528,7 @@ if _HAS_GTK:
             self._refresh_input_region()
 
         def _refresh_input_region(self) -> bool:
-            """Pass taps through except on the handle and close button."""
+            """Pass taps through except on the handle and overflow button."""
             try:
                 import cairo
             except ImportError:
@@ -431,7 +538,7 @@ if _HAS_GTK:
                 if surface is None:
                     return False
                 region = cairo.Region()
-                for widget in (self._handle, self._close):
+                for widget in (self._handle, self._more):
                     alloc = widget.get_allocation()
                     rect = cairo.RectangleInt(alloc.x, alloc.y,
                                              alloc.width, alloc.height)
@@ -487,6 +594,9 @@ __all__ = [
     "CaptionApp",
     "CaptionWindow",
     "DownloadCancelled",
+    "ensure_ui",
     "layer_available",
+    "load_ui_theme",
+    "render_app_css",
     "run_overlay",
 ]

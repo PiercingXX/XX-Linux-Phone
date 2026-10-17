@@ -6,6 +6,13 @@ project(
 
 python = import('python').find_installation('python3')
 
+# The overlay and settings windows run on the shared design system:
+# configure and install common/ first so `import xx_ui` resolves.
+xx_ui_check = run_command(python, '-c', 'import xx_ui', check: false)
+if xx_ui_check.returncode() != 0
+  error('xx_ui is not installed; configure and install common/ first')
+endif
+
 prefix = get_option('prefix')
 bindir = join_paths(prefix, get_option('bindir'))
 
@@ -23,9 +30,14 @@ python.install_sources(
   'src/xx_captions/overlay_state.py',
   'src/xx_captions/resample.py',
   'src/xx_captions/service.py',
+  'src/xx_captions/settings.py',
   'src/xx_captions/store.py',
-  'src/xx_captions/theme.py',
   subdir: 'xx_captions',
+)
+
+install_data(
+  'src/xx_captions/captions.css',
+  install_dir: join_paths(python.get_install_dir(), 'xx_captions'),
 )
 
 python.install_sources(
