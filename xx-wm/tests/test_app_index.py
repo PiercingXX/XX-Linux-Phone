@@ -144,3 +144,19 @@ class TestSupersededStockApps:
             'org.gnome.Contacts.desktop', 'io.piercingxx.XXContacts.desktop'])
         assert [e.app_id for e in index.search('contacts')] == [
             'io.piercingxx.XXContacts.desktop']
+
+    def test_replacement_for_names_the_xx_successor(
+            self, monkeypatch) -> None:
+        index = _refresh_with(monkeypatch, [
+            'org.gnome.Contacts.desktop', 'io.piercingxx.XXContacts.desktop'])
+        assert index.replacement_for(
+            'org.gnome.Contacts.desktop') == 'io.piercingxx.XXContacts.desktop'
+        assert index.replacement_for(
+            'org.gnome.Contacts') == 'io.piercingxx.XXContacts.desktop'
+        assert index.replacement_for('io.piercingxx.XXContacts.desktop') is None
+
+    def test_replacement_for_empty_without_successor(
+            self, monkeypatch) -> None:
+        index = _refresh_with(monkeypatch, ['org.gnome.Contacts.desktop'])
+        assert index.replacement_for('org.gnome.Contacts.desktop') is None
+        assert index.replacement_for('org.gnome.Calculator.desktop') is None

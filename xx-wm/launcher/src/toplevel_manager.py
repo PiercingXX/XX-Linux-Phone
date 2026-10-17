@@ -160,7 +160,7 @@ class WaylandToplevelBackend:
     for a compositor event. FakeDisplay tests stay on the GLib pump, which
     also delivers the initial registry burst. The backend only mutates the
     manager's registry via the ``_upsert``/``_remove`` hooks and reports
-    focus via the state/focus callbacks; it never reads state back.
+    focus via the single state callback; it never reads state back.
 
     ``seat_cls``/``manager_cls`` default to the import-time bindings; passing
     them explicitly (runtime-generated bindings, or fakes in tests) selects
@@ -193,7 +193,6 @@ class WaylandToplevelBackend:
         self._info: dict[object, list[str]] = {}
         self._manager_cb = None
         self._state_cb = None
-        self._focus_cb = None
         self._fd_source = None
         self._thread: threading.Thread | None = None
         self._closing = False
@@ -396,9 +395,6 @@ class WaylandToplevelBackend:
             activated = False
         if self._state_cb is not None:
             self._state_cb(id(toplevel), activated)
-        focus_cb = getattr(self, '_focus_cb', None)
-        if focus_cb is not None:
-            focus_cb(id(toplevel), activated)
 
     def _on_parent(self, toplevel, _parent) -> None:
         pass
@@ -460,7 +456,8 @@ class WaylandToplevelBackend:
             self._thread.start()
 
     def connect_focus(self, callback) -> None:
-        self._focus_cb = callback
+        """Legacy alias for connect_state: a single activation feed."""
+        self._state_cb = callback
 
     def _replay_handles(self) -> None:
         for handle in list(self._handles):
@@ -589,6 +586,10 @@ class DeferredWaylandBackend:
         if real is not None:
             real.connect_state(callback)
 
+    def connect_focus(self, callback) -> None:
+        """Legacy alias for connect_state: a single activation feed."""
+        self.connect_state(callback)
+
     def on_ready(self, callback) -> None:
         """Invoke ``callback`` on the main loop once the real backend is up."""
         with self._lock:
@@ -662,7 +663,8 @@ class ToplevelManager:
 
     Backends that report window state additionally expose
     ``connect_state(callback)`` with ``callback(handle, activated)``; the
-    manager tolerates backends without it (no activation tracking).
+    legacy ``connect_focus`` name wires the same single feed. The manager
+    tolerates backends with neither (no activation tracking).
 
     A backend that is still preparing (DeferredWaylandBackend) additionally
     exposes ``on_ready(callback)``; the manager connects immediately and is
@@ -688,21 +690,21 @@ class ToplevelManager:
             # Bind before the first globals arrive: the backend is
             # non-blocking, so available() may still be False at construct.
             backend.connect(self._on_backend_event)
-            self._connect_state(backend)
-            self._connect_focus(backend)
+            self._connect_tracking(backend)
             on_ready = getattr(backend, 'on_ready', None)
             if callable(on_ready):
                 on_ready(self._on_bindings_ready)
 
-    def _connect_state(self, backend: object) -> None:
+    def _connect_tracking(self, backend: object) -> None:
+        """Wire the single activation feed: ``connect_state`` where the
+        backend offers it, else the legacy ``connect_focus`` name."""
         connect_state = getattr(backend, 'connect_state', None)
         if callable(connect_state):
             connect_state(self._on_backend_state)
-
-    def _connect_focus(self, backend: object) -> None:
+            return
         connect_focus = getattr(backend, 'connect_focus', None)
         if callable(connect_focus):
-            connect_focus(self._on_focus)
+            connect_focus(self._on_backend_state)
 
     def _on_bindings_ready(self) -> None:
         self._notify()
@@ -750,8 +752,7 @@ class ToplevelManager:
         self._backend = backend
         if backend is not None:
             backend.connect(self._on_backend_event)
-            self._connect_state(backend)
-            self._connect_focus(backend)
+            self._connect_tracking(backend)
         closer = getattr(old, 'shutdown', None)
         if callable(closer) and old is not backend:
             closer()
@@ -858,9 +859,6 @@ class ToplevelManager:
                         handle=topo.handle, activated=want,
                     )
         self._recompute_active()
-
-    def _on_focus(self, handle: object, activated: bool) -> None:
-        self._note_focus(handle, activated)
 
     def _on_backend_state(self, handle: object, activated: object) -> None:
         self._note_focus(handle, activated)

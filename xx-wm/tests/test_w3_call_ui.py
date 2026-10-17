@@ -1031,9 +1031,54 @@ class TestDialerZeroLongpress:
         dialer.Dialer._on_zero_longpress(d, None, 0.0, 0.0)
         assert d._digits == '011+'
 
-    def test_plus_survives_display_format(self):
+    def test_plus_survives_display_format(self, monkeypatch):
+        import xx_phone
+        monkeypatch.setattr(xx_phone, 'user_country', lambda *a: 'US')
         d = _make_dialer()
-        assert dialer.Dialer._format_number(d, '+15550001111') == '+15550001111'
+        shown = dialer.Dialer._format_number(d, '+15550001111')
+        assert shown == xx_phone.as_you_type('+15550001111', 'US')
+        assert shown.startswith('+')
+
+
+class TestDialerNumberDisplay:
+    """Shell keypad entry reads through xx_phone; saved names win."""
+
+    def test_keypad_groups_through_xx_phone(self, monkeypatch):
+        import xx_phone
+        monkeypatch.setattr(xx_phone, 'user_country', lambda *a: 'US')
+        d = _make_dialer()
+        assert (dialer.Dialer._format_number(d, '6145550142')
+                == xx_phone.as_you_type('6145550142', 'US') == '(614) 555-0142')
+        assert (dialer.Dialer._format_number(d, '5550142')
+                == xx_phone.as_you_type('5550142', 'US') == '555-0142')
+        assert dialer.Dialer._format_number(d, '911') == '911'
+        assert dialer.Dialer._format_number(d, '') == ''
+
+    def test_country_lookup_stays_off_dbus(self, monkeypatch):
+        import xx_phone
+        seen: list = []
+
+        def _capture(*args):
+            seen.append(args)
+            return 'US'
+
+        monkeypatch.setattr(xx_phone, 'user_country', _capture)
+        monkeypatch.setattr(xx_phone, '_auto_sources',
+                            lambda: (_ for _ in ()).throw(
+                                AssertionError('must not hit D-Bus')))
+        d = _make_dialer()
+        dialer.Dialer._format_number(d, '6145550142')
+        assert seen == [("", "")]
+
+    def test_format_falls_back_to_raw(self, monkeypatch):
+        import xx_phone
+
+        def _boom(digits, country=None):
+            raise RuntimeError('no engine')
+
+        monkeypatch.setattr(xx_phone, 'as_you_type', _boom)
+        d = _make_dialer()
+        assert dialer.Dialer._format_number(d, '6145550142') == '6145550142'
 
     def test_swipe_to_close_lives_on_header_only(self):
         src = inspect.getsource(dialer.Dialer._build)

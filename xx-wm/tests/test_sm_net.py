@@ -616,6 +616,11 @@ class TestServiceCatalog:
         assert 'sshd.service' in ssh.systemd_units
         assert 'ssh.service' in ssh.systemd_units
 
+    def test_tailscale_matches_openrc_service_name(self):
+        tailscale = next(s for s in services.SERVICES if s.key == 'tailscale')
+        assert 'tailscale' in tailscale.openrc_names
+        assert 'tailscaled.service' in tailscale.systemd_units
+
     def test_state_text(self):
         assert services.state_text(
             ('active', 'enabled')) == 'On, starts at boot'

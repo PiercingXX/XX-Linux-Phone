@@ -60,7 +60,7 @@ SERVICES: tuple = (
     ServiceEntry('ssh', 'SSH server', 'Remote shell access',
                  ('sshd.service', 'ssh.service'), ('sshd',)),
     ServiceEntry('tailscale', 'Tailscale', 'Private mesh VPN',
-                 ('tailscaled.service',), ('tailscaled',)),
+                 ('tailscaled.service',), ('tailscale', 'tailscaled')),
     ServiceEntry('waydroid', 'Waydroid container', 'Android compatibility',
                  ('waydroid-container.service',), ('waydroid',)),
 )

@@ -10,7 +10,7 @@ gi.require_version('Gtk', '4.0')
 
 from gi.repository import Gdk, GLib, Gtk
 from config import ShellConfig, ThemePreset
-from contacts import ContactBook, load_sms_history
+from contacts import ContactBook, display_number, load_sms_history
 
 
 def theme_css(preset: ThemePreset) -> str:
@@ -235,8 +235,10 @@ class SMSConversation(Gtk.Window):
 
     def open_conversation(self, number: str, display_name: str = '') -> None:
         self._number = number
-        # Prefer caller-supplied name, then contact book lookup, then raw number
-        resolved = display_name or self._contact_book.lookup_number(number) or number
+        # Prefer caller-supplied name, then contact book lookup, then the
+        # shared xx_phone number display (never the raw digits).
+        resolved = (display_name or self._contact_book.lookup_number(number)
+                    or display_number(number))
         self._header_label.set_text(resolved)
         self._messages.clear()
         self._rebuild_messages()

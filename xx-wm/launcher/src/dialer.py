@@ -429,15 +429,17 @@ class Dialer(Gtk.Window):
         self._display.set_text(self._format_number(self._digits))
 
     def _format_number(self, digits: str) -> str:
+        """Keypad entry grouped by the shared xx_phone rule (the formatter
+        the xx-dialer app uses). Explicit empty operator strings keep the
+        country lookup off D-Bus, so this never blocks the GTK main loop."""
         if not digits:
             return ''
-        if len(digits) <= 10 and digits.isdigit():
-            # Format as (XXX) XXX-XXXX for 10-digit US numbers
-            if len(digits) == 10:
-                return f'({digits[:3]}) {digits[3:6]}-{digits[6:]}'
-            if len(digits) == 7:
-                return f'{digits[:3]}-{digits[3:]}'
-        return digits
+        try:
+            import xx_phone
+            return xx_phone.as_you_type(
+                digits, xx_phone.user_country("", ""))
+        except Exception:
+            return digits
 
     def _refresh_suggestions(self) -> None:
         child = self._suggestions.get_first_child()

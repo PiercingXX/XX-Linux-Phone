@@ -137,7 +137,7 @@ SERVICE_UNITS = {
     'ssh': {'systemd': ('sshd.service', 'ssh.service'),
             'openrc': ('sshd',)},
     'tailscale': {'systemd': ('tailscaled.service',),
-                  'openrc': ('tailscaled',)},
+                  'openrc': ('tailscale', 'tailscaled')},
     'waydroid': {'systemd': ('waydroid-container.service',),
                  'openrc': ('waydroid',)},
 }

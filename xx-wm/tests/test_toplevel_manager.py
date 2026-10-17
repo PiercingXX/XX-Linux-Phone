@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
+import toplevel_manager
 from toplevel_manager import Toplevel, ToplevelManager, decode_state_array
 
 
@@ -185,6 +186,59 @@ def test_activated_app_id_tracks_focus(backend: FakeBackend, manager: ToplevelMa
     backend.focus('h1', True)
     backend.remove('h1')
     assert manager.activated_app_id() is None
+
+
+class BothNamesBackend(FakeBackend):
+    """Backend exposing state and legacy focus names for one feed."""
+
+    def __init__(self, available: bool = True) -> None:
+        super().__init__(available)
+        self.wired: list[str] = []
+        self._state_cb = None
+
+    def connect_state(self, callback) -> None:
+        self.wired.append('state')
+        self._state_cb = callback
+
+    def connect_focus(self, callback) -> None:
+        self.wired.append('focus')
+        self._focus_cb = callback
+
+    def state(self, handle: object, activated: bool = True) -> None:
+        if self._state_cb is not None:
+            self._state_cb(handle, activated)
+
+
+class TestSingleActivationFeed:
+    """One state event notes focus exactly once, whichever name wired it."""
+
+    def test_state_name_preferred_and_wired_once(self) -> None:
+        backend = BothNamesBackend()
+        manager = ToplevelManager(backend=backend)
+        assert backend.wired == ['state']
+        backend.add('h1', 'org.a.App', 'A')
+        seen: list = []
+        manager.on_activated_changed(seen.append)
+        backend.state('h1', True)
+        assert seen == ['org.a.App']
+        backend.state('h1', False)
+        assert seen == ['org.a.App', None]
+
+    def test_backend_aliases_share_one_slot(self) -> None:
+        backend = toplevel_manager.WaylandToplevelBackend.__new__(
+            toplevel_manager.WaylandToplevelBackend)
+        calls: list = []
+        backend.connect_state(lambda h, a: calls.append(('state', h, a)))
+        backend.connect_focus(lambda h, a: calls.append(('focus', h, a)))
+        handle = object()
+        backend._on_state(handle, (2).to_bytes(4, 'little'))
+        assert calls == [('focus', id(handle), True)]
+
+    def test_on_state_without_subscriber_is_noop(self) -> None:
+        backend = toplevel_manager.WaylandToplevelBackend.__new__(
+            toplevel_manager.WaylandToplevelBackend)
+        backend._state_cb = None
+        backend._on_state(object(), (2).to_bytes(4, 'little'))
 
 
 def test_resync_clears_registry_and_accepts_new_backend() -> None:
