@@ -122,7 +122,7 @@ class ContactDetailPage(Adw.NavigationPage):
         body.append(actions)
 
         self._fields = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                               spacing=0)
+                               spacing=20)
         body.append(self._fields)
 
         body.append(widgets.section_label("Tags"))
@@ -142,8 +142,12 @@ class ContactDetailPage(Adw.NavigationPage):
         body.append(me_row)
 
         bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        bottom.add_css_class("xx-page-body")
+        bottom.set_margin_bottom(12)
         share_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                             spacing=12)
+        share_row.set_hexpand(True)
+        share_row.set_homogeneous(True)
         self._share_button = widgets.outline_button(
             "Share vCard", self._on_share_clicked)
         self._share_button.set_hexpand(True)
@@ -345,23 +349,67 @@ class ContactDetailPage(Adw.NavigationPage):
                                                           self._region):
             for item in section.fields:
                 caption = item.label or section.title
-                self._fields.append(
-                    widgets.field(caption, item.display))
                 # Call/Message stay on the big action buttons above; only
-                # the actions with no button of their own get text links.
+                # the actions with no button of their own get trailing
+                # icon buttons on the field's own row.
                 rest = [action for action in item.actions
                         if action.kind not in ("call", "message")]
-                if rest:
+                icons = [a for a in rest if a.kind in ("email", "map")]
+                if icons:
+                    box = Gtk.Box(
+                        orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                    box.append(widgets.caption(caption))
                     row = Gtk.Box(
-                        orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-                    for action in rest:
-                        label = ACTION_LABELS.get(action.kind, action.kind)
-                        button = widgets.text_button(
-                            label,
-                            lambda _a=action: self._on_field_action(_a.uri)
-                            if _a.uri else None)
+                        orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+                    value = widgets.label(item.display, "xx-field-value")
+                    value.set_hexpand(True)
+                    value.set_valign(Gtk.Align.CENTER)
+                    row.append(value)
+                    for action in icons:
+                        name = ("mail-send-symbolic"
+                                if action.kind == "email"
+                                else "mark-location-symbolic")
+                        button = widgets.icon_button(
+                            name,
+                            lambda _a=action: self._on_field_action(
+                                _a.uri) if _a.uri else None)
+                        button.set_valign(Gtk.Align.CENTER)
                         row.append(button)
-                    self._fields.append(row)
+                    box.append(row)
+                    self._fields.append(box)
+                    leftover = [a for a in rest if a not in icons]
+                    if leftover:
+                        links = Gtk.Box(
+                            orientation=Gtk.Orientation.HORIZONTAL,
+                            spacing=0)
+                        for action in leftover:
+                            text = ACTION_LABELS.get(action.kind,
+                                                    action.kind)
+                            button = widgets.text_button(
+                                text,
+                                lambda _a=action:
+                                self._on_field_action(_a.uri)
+                                if _a.uri else None)
+                            links.append(button)
+                        self._fields.append(links)
+                else:
+                    field_box = widgets.field(caption, item.display)
+                    field_box.set_spacing(6)
+                    self._fields.append(field_box)
+                    if rest:
+                        row = Gtk.Box(
+                            orientation=Gtk.Orientation.HORIZONTAL,
+                            spacing=0)
+                        for action in rest:
+                            text = ACTION_LABELS.get(action.kind,
+                                                    action.kind)
+                            button = widgets.text_button(
+                                text,
+                                lambda _a=action:
+                                self._on_field_action(_a.uri)
+                                if _a.uri else None)
+                            row.append(button)
+                        self._fields.append(row)
         if detail_model.CALL_HISTORY_AVAILABLE:
             history = detail_model.get_call_history(self._uid)
             if history:
