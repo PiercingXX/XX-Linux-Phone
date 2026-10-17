@@ -1,0 +1,401 @@
+.. _phosh-osk-stevia(1):
+
+================
+phosh-osk-stevia
+================
+
+-------------------------------
+An on-screen keyboard for Phosh
+-------------------------------
+
+SYNOPSIS
+--------
+|   **phosh-osk-stevia** [OPTIONS...]
+
+
+DESCRIPTION
+-----------
+
+``phosh-osk-stevia`` is an on-screen keyboard (OSK) for Phosh.
+
+``phosh-osk-stevia`` has two modes of operation. If the application
+supports and uses ``text-input-unstable-v3``, the Wayland compositor
+will use the ``input-method-unstable-v2`` protocol to interact with
+the OSK. This allows it to:
+
+- automatically unfold the keyboard
+- handle text prediction and correction via preedit and surrounding text
+- automatically switch to special layouts like, such as the terminal
+  layout, based on input hints sent by the application
+
+This is the preferred mode of operation. For legacy applications, such
+as older Electron applications the OSK falls back to a virtual
+keyboard mode (basically emulating key presses). This means that it
+e.g. can't unfold automatically or support completion. It will hence
+hide the completion bar in that mode of operation.
+
+
+OPTIONS
+-------
+
+``-h``, ``--help``
+   Print help and exit.
+
+``--replace``
+   Try to grab the `sm.puri.OSK0` DBus interface, even if it is
+   already in use by another keyboard.
+
+``--allow-replacement``
+   (Temporarily) Give up the `sm.puri.OSK0` DBus name if another OSK
+   requests it. This also unregisters the Wayland input-method-v1
+   interface so that another OSK can act as the input method.
+   If the name becomes available again, it is grabbed again and
+   phosh-osk-stevia registers itself as input method again.
+
+``-v``, ``--version``
+   Show version information.
+
+
+SETUP
+-----
+
+In order to be used by Phosh as the on-screen keyboard,
+phosh-osk-stevia needs to be started from the
+`/usr/share/applications/sm.puri.OSK0.desktop` desktop file. On Debian
+systems this can be achieved by running:
+
+::
+
+   update-alternatives --config Phosh-OSK
+
+as root and selecting the entry ending in ``mobi.phosh.Stevia.desktop``.
+
+
+CONFIGURATION
+-------------
+
+``phosh-osk-stevia`` is configured via GSettings. This includes
+configuration of the loaded layouts from
+``org.gnome.desktop.input-sources`` via the ``sources`` and
+``xkb-options`` keys, whether the OSK is enabled at all via the
+``screen-keyboard-enabled`` key from the
+``org.gnome.desktop.a11y.applications`` schema and configuration of
+word completion (see below).
+
+For the keyboard to fold and unfold automatically make sure the
+``gtk-im-module`` key of the ``org.gnome.desktop.interface`` schema is
+set to the empty string (`''`).  This is the default in most
+distributions. If unsure check via:
+
+::
+
+  gsettings get org.gnome.desktop.interface gtk-im-module
+
+
+WORD COMPLETION
+^^^^^^^^^^^^^^^
+
+``phosh-osk-stevia`` has support for word completion and correction via various
+completers (see below). It has several modes of operation represented
+by flags that can be combined:
+
+- `off`: no word completion
+- `manual`: enable and disable completion via an option in the language popover
+- `hint`: enables and disables completion based on the text input's `completion`
+  hint.
+
+Valid settings are `off`, `manual`, `hint` and `manual+hint`. These can be
+configured via the `gsettings` command:
+
+::
+
+  # off
+  gsettings set mobi.phosh.osk completion-mode "[]"
+  # manual
+  gsettings set mobi.phosh.osk completion-mode "['manual']"
+  # hint
+  gsettings set mobi.phosh.osk completion-mode "['hint']"
+  # manual+hint
+  gsettings set mobi.phosh.osk completion-mode "['manual','hint']"
+  # Reset to default (off)
+  gsettings reset mobi.phosh.osk completion-mode
+
+Note that completion is always disabled when
+
+- No usable completers are found on startup
+- Terminal or emoji layout is in use
+- The application doesn't support text-input so ``phosh-osk-stevia`` is
+  falling back virtual-keyboard mode
+
+
+AVAILABLE COMPLETERS
+####################
+
+The available completers depend on how ``phosh-osk-stevia`` was
+built. Currently available completers include:
+
+  - ``hunspell``: word correction based on the Hunspell library
+  - ``presage``: (experimental) word prediction based on the Presage library
+  - ``pipe``: completer using a pipe
+  - ``fzf``: completer based on fzf command line tool. Useful for experiments
+  - ``varnam``: completer using govarnam for Indic languages
+  - ``uim``: completer using uim for Asian languages
+
+The default word completer is selected via the
+``mobi.phosh.osk.Completers`` ``default`` GSetting.
+
+::
+
+  gsettings set mobi.phosh.osk.Completers default hunspell
+
+You need to restart ``phosh-osk-stevia`` for the new default completer
+to become active.
+
+
+TEXT CORRECTION USING HUNSPELL
+******************************
+
+The Hunspell completer needs dictionaries and affix files in
+`/usr/share/hunspell`. Most importantly ``/usr/share/hunspell/en_US.dic``
+and ``/usr/share/hunspell/en_US.aff`` are used as fallbacks when no
+matching dictionary for the current layout is found.
+
+
+TEXT COMPLETION USING PRESAGE
+*****************************
+
+The Presage-based completer is considered experimental as there are
+some known issues when interacting with GTK4 applications.
+
+For the Presage-based completer to work you need a model file in
+`/usr/share/phosh/osk/presage/`. Your distribution likely already
+ships one with the presage library. You can simply symlink it
+there.  Models for more languages can be found at:
+https://data.phosh.mobi/osk-data/latest/presage/
+
+
+TEXT COMPLETION USING PIPE
+**************************
+
+This completer feeds the current input word (preedit) to an executable
+file and expects the executable to output possible completions on
+standard output. The executable to invoke is configured via the
+``command`` key of the ``mobi.phosh.osk.Completers.Pipe``  GSetting schema.
+It defaults to ``cat``. This can be used to experiment with different
+completion patterns without having to modify ``phosh-osk-stevia``
+itself.
+
+::
+
+  gsettings set mobi.phosh.osk.Completers.Pipe command 'wc -c'
+
+You need to restart ``phosh-osk-stevia`` for the new command to become
+active. A commonly used executable is swipeGuess:
+https://git.sr.ht/~earboxer/swipeGuess
+
+
+TEXT COMPLETION USING VARNAM
+****************************
+
+This completer feeds the current input word (preedit) to govarnam for easy
+input of Indic languages.
+
+For the completer to work, govarnam and the language schema files need
+to be installed. Please refer to the govarnam documentation.
+
+Note that while you can enable govarnam as the default completer this is
+not recommended. Instead enable it for a specific language via the
+``sources`` GSetting:
+
+::
+
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'varnam:ml'), ('ibus', 'varnam:ta')]"
+
+The above would only enable govranam for Malayalam and Tamil while the
+English US layout would still use the default completer.
+
+TEXT COMPLETION USING UIM
+*************************
+
+This completer feeds the current input word (preedit) to uim for input
+of Asian languages.
+
+For the completer to work it needs uim files installed. Please refer
+to the uim documentation.
+
+Note that while you can enable uim as default completer this is
+not recommended. Instead enable it for a specific language via the
+``sources`` GSetting:
+
+::
+
+  gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('ibus', 'uim:jp'), ('ibus', 'uim:cn')]"
+
+The above would enable uim for Japanese (Anthy) and Chinese (Pinyin)
+while the English US layout would still use the default completer.
+
+ADDITIONAL COMPLETION SOURCES
+*****************************
+
+Completers can augment their results with matches from additional
+sources. The following sources are currently available:
+
+   - ``emoji``: Add emojis
+   - ``keyword``: Complete special keywords (e.g. ``today``)
+
+They can be enabled via the ``mobi.phosh.osk`` ``sources`` GSetting.
+
+
+TERMINAL SHORTCUTS
+^^^^^^^^^^^^^^^^^^
+``phosh-osk-stevia`` can provide a row of keyboard shortcuts on the
+terminal layout. These are configured via the ``shortcuts`` GSetting:
+
+::
+
+  gsettings set mobi.phosh.osk.Terminal shortcuts "['<ctrl>a', '<ctrl>e', '<ctrl>r']"
+
+For valid values see documentation of ``gtk_accelerator_parse()``: https://docs.gtk.org/gtk3/func.accelerator_parse.html
+You can also add plain ``<ctrl>`` and ``<alt>`` keys. These then act as latched keys
+until the next regular key is pressed.
+
+The usable key names for non-modifier keys can be looked up in GTK's keysym list:
+https://gitlab.gnome.org/GNOME/gtk/-/blob/gtk-3-24/gdk/gdkkeysyms.h . So e.g.
+`GDK_KEY_Escape` would become `Escape` in the shortcuts setting.
+
+
+IGNORING ACTIVATION
+^^^^^^^^^^^^^^^^^^^
+For some applications you might not want to unfold the OSK when the
+application requests it. This can e.g. be useful when you usually read what
+the application displays (and hence want to use as much as screen
+space as possible) but the application focuses a text entry. By adding the
+application's app-id to the ``ignore-activation`` list you can prevent the automatic
+unfold. The OSK can still be unfolded by other means (e.g. via the DBus API or the OSK
+button in Phosh). To determine an application's app-id you can use the
+``foreign-toplevel`` command.
+
+::
+
+  gsettings set mobi.phosh.osk ignore-activation "['org.gnome.Calculator']"
+
+
+HARDWARE KEYBOARDS
+^^^^^^^^^^^^^^^^^^
+
+By default the on-screen keyboard does not show if it detects a
+connected hardware keyboard. To make it show nevertheless use
+
+::
+
+   gsettings set mobi.phosh.osk ignore-hw-keyboards true
+
+
+ADDITIONAL FEATURES
+^^^^^^^^^^^^^^^^^^^
+
+The ``osk-features`` setting is a flags-type setting enabling
+features that apply to all character layouts.
+
+* ``key-drag``: By default moving the finger while pressing a
+  character cancels the gesture and will not input it. This can be
+  changed by enabling ``key-drag``:
+
+::
+
+   gsettings set mobi.phosh.osk osk-features "['key-drag']"
+
+* ``key-indicator``: Setting this flag enables an additional popover
+  indicating the currently pressed key:
+
+::
+
+   gsettings set mobi.phosh.osk osk-features "['key-indicator']"
+
+
+Note that all of the above use the same GSetting key as it is a ``flag``
+type. If you want to set multiple options separate them with commas (``,``):
+
+::
+
+   gsettings set mobi.phosh.osk osk-features "['key-drag', 'key-indicator']"
+
+
+KEYBOARD SCALING
+^^^^^^^^^^^^^^^^
+
+While most of the mobile user interfaces features should respect the current
+output resolution on-screen keyboards are the exception from the rule as the
+size of the user's fingers doesn't change. We therefore want to allow the keyboard's
+keys to keep the same physical height on resolution changes. Furthermore on taller
+devices it can be useful to shift the keyboard a bit upwards. The ``scaling``
+setting handles this:
+
+* ``auto-portrait``: Automatically adjust the keyboard height in portrait mode based
+  on the display resolution to keep the physical height constant.
+
+* ``auto-landscape``: Automatically adjust the keyboard height in landscape mode based
+  on the display resolution to keep the physical height constant.
+
+* ``bottom-dead-zone``: Add an empty area at the bottom of the keyboard when enough
+  vertical space is available.
+
+To enable both of these features you can use:
+
+::
+
+    gsettings set mobi.phosh.osk scaling "['auto-portrait', 'bottom-dead-zone']"
+
+
+ENVIRONMENT VARIABLES
+---------------------
+
+``phosh-osk-stevia`` honors the following environment variables for debugging purposes:
+
+- ``POS_DEBUG``: A comma-separated list of flags:
+
+  - ``force-show``: Ignore the `screen-keyboard-enabled` GSettings key and always enable the OSK. This
+    GSetting is usually not managed by the user.
+  - ``force-completion``: Force text completion to ignore the `completion-mode` GSetting.
+- ``POS_TEST_LAYOUT``: Load the given layout instead of the ones configured via GSetting.
+- ``POS_TEST_COMPLETER``: Use the given completer instead of the configured ones.
+  The available values depend on how phosh-osk-stevia was built (see above).
+- ``G_MESSAGES_DEBUG``, ``G_DEBUG`` and other environment variables supported
+  by glib. https://docs.gtk.org/glib/running.html
+- ``GTK_DEBUG`` and other environment variables supported by GTK, see
+  https://docs.gtk.org/gtk3/running.html
+
+DBUS INTERFACE
+--------------
+
+Folding and unfolding of the keyboard is handled automatically via
+Wayland protocols as described above. On top of that Stevia implements
+Phosh's DBus interface. This allows Phosh to detect the keyboard's
+current state and to show or hide the OSK, overriding the current
+applications.
+
+See the following page for the protocol definition:
+https://world.pages.gitlab.gnome.org/Phosh/phosh/phosh-dbus-sm.puri.OSK0.html
+
+EXAMPLES
+--------
+
+Configure the ``Pipe`` completer to use ``swipeGuess`` for swipe
+input:
+
+::
+
+   gsettings set mobi.phosh.osk.Completers default pipe
+   gsettings set mobi.phosh.osk.Completers.Pipe command "swipeGuess /usr/local/share/swipeGuess/words/words-qwerty-en"
+   gsettings set mobi.phosh.osk osk-features "['key-drag']"
+
+Unfold the keyboard using the DBus interface
+
+::
+
+   busctl call --user sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0 SetVisible b true
+
+SEE ALSO
+--------
+
+``phosh(1)`` ``text2ngram(1)`` ``gsettings(1)`` ``hunspell(5)`` ``swipeGuess(1)``

@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# Display and configure a layout override
+
+set -e
+
+export GSETTINGS_SCHEMA_DIR=_build/data/
+
+function print_current()
+{
+  local app_id="$1"
+  local munged_id="$2"
+
+  echo -n "layout-override for $app_id: "
+  G_MESSAGES_DEBUG='' gsettings get mobi.phosh.osk.application:/mobi/phosh/osk/application/"$munged_id"/ override-layout
+}
+
+if [ -z "$1" ]; then
+  LAYOUTS="$(gsettings get org.gnome.desktop.input-sources sources | sed "s/\]//g"), ('terminal','')]"
+  cat <<EOF
+Usage: $0 APP-ID ["LAYOUT"]
+
+Possible layouts : $LAYOUTS
+
+Example: $0 Emacs "('terminal','')"
+EOF
+  exit 0
+fi
+
+APP_ID="$1"
+MUNGED_ID=$(echo "$1" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+
+if [ -z "$2" ]; then
+  print_current "$APP_ID" "$MUNGED_ID"
+  exit 0
+fi
+
+gsettings set mobi.phosh.osk.application:/mobi/phosh/osk/application/"$MUNGED_ID"/ override-layout "$2"
+
+print_current "$APP_ID" "$MUNGED_ID"

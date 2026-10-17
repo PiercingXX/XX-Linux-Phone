@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/mobi/phosh/stevia/">
+    <file preprocess="xml-stripblanks">ui/char-popup.ui</file>
+    <file preprocess="xml-stripblanks">ui/completion-bar.ui</file>
+    <file preprocess="xml-stripblanks">ui/emoji-picker.ui</file>
+    <file preprocess="xml-stripblanks">ui/indicator-popup.ui</file>
+    <file preprocess="xml-stripblanks">ui/input-surface.ui</file>
+    <file preprocess="xml-stripblanks">ui/keypad.ui</file>
+    <file preprocess="xml-stripblanks">ui/keypad-button.ui</file>
+    <file preprocess="xml-stripblanks">ui/shortcuts-bar.ui</file>
+    <file alias="keymap.txt">../data/keymap.txt</file>
+    <file compressed="true">stylesheet/adwaita-dark.css</file>
+    <file compressed="true">stylesheet/adwaita-hc-light.css</file>
+    <file compressed="true">stylesheet/common.css</file>
+    <!-- from gnome-shell -->
+    <file preprocess="json-stripblanks">layouts/am.json</file>
+    <file preprocess="json-stripblanks">layouts/ara.json</file>
+    <file preprocess="json-stripblanks">layouts/be.json</file>
+    <file preprocess="json-stripblanks">layouts/bg.json</file>
+    <file preprocess="json-stripblanks">layouts/by.json</file>
+    <file preprocess="json-stripblanks">layouts/ca.json</file>
+    <file preprocess="json-stripblanks">layouts/ch.json</file>
+    <file preprocess="json-stripblanks">layouts/ch+fr.json</file>
+    <file preprocess="json-stripblanks">layouts/cz.json</file>
+    <file preprocess="json-stripblanks">layouts/de.json</file>
+    <file preprocess="json-stripblanks">layouts/dk.json</file>
+    <file preprocess="json-stripblanks">layouts/ee.json</file>
+    <file preprocess="json-stripblanks">layouts/epo.json</file>
+    <file preprocess="json-stripblanks">layouts/es.json</file>
+    <file preprocess="json-stripblanks">layouts/es+cat.json</file>
+    <file preprocess="json-stripblanks">layouts/fi.json</file>
+    <file preprocess="json-stripblanks">layouts/fr.json</file>
+    <file preprocess="json-stripblanks">layouts/gb.json</file>
+    <file preprocess="json-stripblanks">layouts/ge.json</file>
+    <file preprocess="json-stripblanks">layouts/gr.json</file>
+    <file preprocess="json-stripblanks">layouts/hr.json</file>
+    <file preprocess="json-stripblanks">layouts/hu.json</file>
+    <file preprocess="json-stripblanks">layouts/id.json</file>
+    <file preprocess="json-stripblanks">layouts/il.json</file>
+    <file preprocess="json-stripblanks">layouts/in+bolnagri.json</file>
+    <file preprocess="json-stripblanks">layouts/in+mal.json</file>
+    <file preprocess="json-stripblanks">layouts/ir.json</file>
+    <file preprocess="json-stripblanks">layouts/is.json</file>
+    <file preprocess="json-stripblanks">layouts/it.json</file>
+    <file preprocess="json-stripblanks">layouts/ke.json</file>
+    <file preprocess="json-stripblanks">layouts/kg.json</file>
+    <file preprocess="json-stripblanks">layouts/kh.json</file>
+    <file preprocess="json-stripblanks">layouts/la.json</file>
+    <file preprocess="json-stripblanks">layouts/latam.json</file>
+    <file preprocess="json-stripblanks">layouts/lt.json</file>
+    <file preprocess="json-stripblanks">layouts/lv.json</file>
+    <file preprocess="json-stripblanks">layouts/mk.json</file>
+    <file preprocess="json-stripblanks">layouts/mn.json</file>
+    <file preprocess="json-stripblanks">layouts/my.json</file>
+    <file preprocess="json-stripblanks">layouts/nl.json</file>
+    <file preprocess="json-stripblanks">layouts/no.json</file>
+    <file preprocess="json-stripblanks">layouts/ph.json</file>
+    <file preprocess="json-stripblanks">layouts/pl.json</file>
+    <file preprocess="json-stripblanks">layouts/pt.json</file>
+    <file preprocess="json-stripblanks">layouts/ro.json</file>
+    <file preprocess="json-stripblanks">layouts/rs.json</file>
+    <file preprocess="json-stripblanks">layouts/ru.json</file>
+    <file preprocess="json-stripblanks">layouts/se.json</file>
+    <file preprocess="json-stripblanks">layouts/si.json</file>
+    <file preprocess="json-stripblanks">layouts/sk.json</file>
+    <file preprocess="json-stripblanks">layouts/th.json</file>
+    <file preprocess="json-stripblanks">layouts/tr.json</file>
+    <file preprocess="json-stripblanks">layouts/ua.json</file>
+    <file preprocess="json-stripblanks">layouts/us.json</file>
+    <file preprocess="json-stripblanks">layouts/us+colemak.json</file>
+    <file preprocess="json-stripblanks">layouts/us+dvorak.json</file>
+    <file preprocess="json-stripblanks">layouts/us+workman.json</file>
+    <file preprocess="json-stripblanks">layouts/vn.json</file>
+    <file preprocess="json-stripblanks">layouts/za.json</file>
+
+    <!-- handcrafted -->
+    <file preprocess="json-stripblanks" >layouts/terminal.json</file>
+
+    <!-- Completer specific layouts -->
+    <file preprocess="json-stripblanks">layouts/uim/anthy/jp.json</file>
+  </gresource>
+  <gresource prefix="/mobi/phosh/stevia/icons/">
+    <file alias="keyboard-enter-symbolic.svg">../data/icons/keyboard-enter-symbolic.svg</file>
+    <file alias="keyboard-shift-filled-symbolic.svg">../data/icons/keyboard-shift-filled-symbolic.svg</file>
+    <file alias="layout-menu-symbolic.svg">../data/icons/layout-menu-symbolic.svg</file>
+  </gresource>
+</gresources>

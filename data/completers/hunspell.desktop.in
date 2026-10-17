@@ -1,0 +1,7 @@
+[Completer]
+# Translators: Do not translate the Id. It's an internal name
+Id=hunspell
+# Translators: Do not translate the name. It's the name of a library
+Name=Hunspell
+Description=The Hunspell completer provides dictionary based text correction
+Comment=This completer needs language specific dictionaries installed

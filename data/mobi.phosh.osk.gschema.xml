@@ -1,0 +1,144 @@
+<schemalist>
+  <schema id="mobi.phosh.osk"
+          path="/mobi/phosh/osk/">
+    <key name="completion-mode" flags="mobi.phosh.osk.PhoshOskCompletionModeFlags">
+      <default>['hint']</default>
+      <summary>When to enable the on screen keyboard's text completion</summary>
+      <description>
+        Text completion can be disabled, only enabled when a text
+        inputs request or always enabled.
+      </description>
+    </key>
+
+    <key name="osk-features" flags="mobi.phosh.osk.PhoshOskFeatures">
+      <default>['key-indicator']</default>
+      <summary>Features to enable on all layouts</summary>
+      <description>
+        A list of features that should be enabled on all configured layouts.
+      </description>
+    </key>
+
+    <key name="ignore-activation" type='as'>
+      <default>['org.gnome.Calculator']</default>
+      <summary>Ignore requests to activate the OSK for certain applications</summary>
+      <description>
+        A list of application-ids that are ignored when they request an input method.
+        This means that the OSK doesn't unfold automatically on e.g. text inputs fields
+        in these applications and the user must unfold the OSK via other means.
+      </description>
+    </key>
+
+    <key name="ignore-hw-keyboards" type='b'>
+      <default>false</default>
+      <summary>Whether to ignore attached hardware keyboards</summary>
+      <description>
+        The OSK doesn't show when it detects an attached hardware keyboard. This setting
+        disables this detection.
+      </description>
+    </key>
+
+    <key name="scaling" flags='mobi.phosh.osk.PhoshOskScalingFlags'>
+      <default>['auto-portrait', 'auto-landscape']</default>
+      <summary>How to scale the on screen keyboard</summary>
+      <description>
+        These flags determine how the OSK adjusts to the screen size.
+      </description>
+    </key>
+
+    <key name="schema-migration" type='u'>
+      <default>0</default>
+      <summary>The schema migration state</summary>
+      <description>
+        This is an internal value, don't modify it.
+      </description>
+    </key>
+
+  </schema>
+
+  <schema id='mobi.phosh.osk.EmojiPicker'
+          path='/mobi/phosh/osk/emoji-picker/'>
+    <key name='recent-emoji' type='a((auss)u)'>
+      <default>[]</default>
+      <summary>Recently used Emoji</summary>
+      <description>
+        An array of Emoji definitions to show in the Emoji chooser. Each Emoji is
+        specified as an array of codepoints, name and keywords. The extra
+        integer after this pair is the code of the Fitzpatrick modifier to use in
+        place of a 0 in the codepoint array.
+      </description>
+    </key>
+  </schema>
+
+  <schema id='mobi.phosh.osk.Terminal'
+          path='/mobi/phosh/osk/terminal/'>
+    <key name='shortcuts' type='as'>
+      <default>[
+        'Tab', 'Escape',
+        <!-- modifiers -->
+        '&lt;ctrl&gt;', '&lt;alt&gt;',
+        <!-- cursor keys -->
+        'Left', 'Up', 'Down', 'Right',
+        <!-- shell navigation and search -->
+        '&lt;ctrl&gt;r', 'Home', 'End', '&lt;ctrl&gt;w', '&lt;alt&gt;b', '&lt;alt&gt;f',
+        <!-- copy / paste -->
+        '&lt;ctrl&gt;v', '&lt;ctrl&gt;c',  '&lt;ctrl&gt;&lt;shift&gt;v', '&lt;ctrl&gt;&lt;shift&gt;c', 'Menu'
+      ]</default>
+      <summary>Shortcuts for terminal layout</summary>
+      <description>
+        List of keyboard shortcuts available in the terminal layout.
+      </description>
+    </key>
+  </schema>
+
+  <schema id='mobi.phosh.osk.Completers'
+          path='/mobi/phosh/osk/completers/'>
+    <key name='default' type='s'>
+      <default>''</default>
+      <summary>The default completer to use. An empty value let's the osk make a pick.
+      </summary>
+      <description/>
+    </key>
+
+    <key name='sources' flags="mobi.phosh.osk.PhoshOskCompletionSourceFlags">
+      <default>['emoji', 'keyword']</default>
+      <summary>Extra completion sources to use</summary>
+      <description>
+        Additional completion sources to use.
+      </description>
+    </key>
+
+    <key name='auto-space' type='b'>
+      <default>true</default>
+      <summary>Automatic space handling around punctuation</summary>
+      <description>
+        When enabled the completer swaps punctuation and space after a
+        word completion and also adds a space whenever inserting a
+        punctuation character.
+      </description>
+    </key>
+
+  </schema>
+
+  <schema id='mobi.phosh.osk.Completers.Pipe'
+          path='/mobi/phosh/osk/completers/pipe/'>
+    <key name='command' type='s'>
+      <default>'cat'</default>
+      <summary>The command to use for the pipe based completer. The given command should read
+        the preedit from standard input and output possible completions newline separated on stdout.
+      </summary>
+      <description/>
+    </key>
+  </schema>
+
+  <schema id="mobi.phosh.osk.application">
+    <key name="override-layout" type="(ss)">
+      <default>('','')</default>
+      <summary>Default layout for the application</summary>
+      <description>
+        What layout should stevia pick by default for this application.
+        Empty string input purpose decides.
+      </description>
+    </key>
+  </schema>
+
+</schemalist>

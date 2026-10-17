@@ -1,0 +1,7 @@
+[Completer]
+# Translators: Do not translate the Id. It's an internal name
+Id=presage
+# Translators: Do not translate the name. It's the name of a library
+Name=Presage
+Description=The Presage completer provides intelligent predictive text entry
+Comment=This completer needs language specific data installed

@@ -1,0 +1,4 @@
+usr/bin/phosh-osk-stevia
+usr/lib/systemd/user/*.service usr/share/phosh-osk-stevia/
+usr/share/applications/*.desktop usr/share/phosh-osk-stevia/
+usr/share/metainfo/

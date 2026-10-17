@@ -1,0 +1,548 @@
+phosh-osk-stevia 0.58.0
+-----------------------
+Released October 2026
+* Fail loudly when Wayland protocols are missing
+* Allow to install completion dictionaries into $HOME.
+  This allows users to install their own on immutable systems.
+* Contributors:
+    * Guido Günther
+* UI translations:
+    * Antonio Marin (ro)
+    * Asier Saratsua Garmendia (eu)
+    * Balázs Úr (hu)
+    * Baurzhan Muftakhidinov (kk)
+    * burns (pt_BR)
+    * Danial Behzadi (fa)
+    * Emin Tufan Çetin (tr)
+    * twlvnn kraftwerk (bg)
+    * Yaron Shahrabani (he)
+    * Марко Костић (sr)
+
+phosh-osk-stevia 0.57.0
+-----------------------
+Released August 2026
+* Improved Japanese input
+  * Add tailored layout for anthy input
+  * Add a mode popover to provide more modes
+  * Fix untypeable punctuation characters
+* terminal-layout: Don't use smaller keys in the lower case layout.
+  Move `tab` and `esc` to the completion bar for that.
+* Add `„` and `‚` to ch, cz, de and sk layouts.
+* Fix text input for X11 apps
+* Robustness fixes
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/113
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/work_items/104
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/work_items/114
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/work_items/79
+* Contributors:
+    * Gregor Düster
+    * Guido Günther
+    * v34
+* UI translations:
+    * Anders Jonsson (sv)
+    * Daniel Rusek (cs)
+    * Martin (sl)
+    * Yuri Chornoivan (uk)
+
+phosh-osk-stevia 0.56.0
+-----------------------
+Released July 2026
+* Allow to specify default layout per app. This allows to e.g.
+  always use the terminal layout with Emacs.
+* Enable key repeat to non-modifier keys in the shortcuts bar
+* Add cursor keys to shortcuts bar by default
+* Add locale and flavor to layout information so Mobile
+  Settings can make use of it.
+* Switch to ext-data-control-v1 for paste handling
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/work_items/105
+* Updated layouts
+  - ge: Add missing keys
+* Contributors:
+    * Guido Günther
+    * Łukasz Osadnik
+    * skysphr
+
+phosh-osk-stevia 0.55.0
+-----------------------
+Released May 2026
+* UI translations:
+    * nicole mikołajczyk (pl)
+    * Ryo Nakano (ja)
+
+phosh-osk-stevia 0.54.0
+-----------------------
+Released April 2026
+* Initial support for Japanese and Chinese via uim
+* Support more modifiers in shortcuts bar
+* Migrate schema entries to `mobi.phosh`
+* Make layout order in the popover match the input sources
+* Fix automatic space in hunspell
+* Allow to disable automatic space mode
+* Leak fixes
+* Updated layouts
+  - ch+fr
+* New layouts
+  - us+workman
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/97
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/74
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/98
+* Contributors:
+    * Achill Gilgenast
+    * Guido Günther
+    * Paul Black
+* UI translations:
+    * Ekaterine Papava (ka)
+    * Ryo Nakano (ja)
+
+phosh-osk-stevia 0.53.0
+-----------------------
+Released February 2026
+* Allow to scale up in landscape too
+* Scale up key font and icons when scaling up keys
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/52
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stevia 0.52.1
+-----------------------
+Released January 2026
+* Use `type=dbus` in systemd unit. Otherwise the session
+  might spawn us before the bus is up.
+* Add new us+colemak layout
+* Contributors:
+    * Guido Günther
+    * Paul Black
+
+phosh-osk-stevia 0.52.0
+-----------------------
+Released January 2026
+* Fix delayed osk unfold when vertical size changed
+* Make fzf word list a compile time option
+* Enable typed character popover by default
+* Scale OSK by default
+* Contributors:
+    * Achill Gilgenast
+    * Guido Günther
+
+phosh-osk-stevia 0.51.0
+-----------------------
+Released November 2025
+* Give up when we fail to claim the DBus name on startup
+* Don't spawn two instances with gnome-session-bin < 49
+* Fix backspace delete issues in emoji and numeric layouts
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/77
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stevia 0.50.1
+-----------------------
+Released October 2025
+* Fix OSK not showing up in some cases after login
+* Drop 'Ѕ' from Serbian layout
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/76
+* Contributors:
+    * Guido Günther
+    * Иван Јањић
+
+phosh-osk-stevia 0.50.0
+-----------------------
+Released October 2025
+* Make backspace delete more useful by deleting complete words
+* Delete space before inserted punctuation
+* Make cursor navigation less sensitive to wiggles
+* presage completer: Fix completing partially deleted words
+* Make the char popup styling more similar to typing indicator
+* Fix rendering with multiple outputs attached
+* Add systemd unit to work with gnome-session >= 49
+* Make keys and `Return` look a bit more prominent
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/73
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/30
+* Contributors:
+    * Caleb Connolly
+    * Guido Günther
+
+phosh-osk-stevia 0.49.0
+-----------------------
+Released August 2025
+* Allow to keep physical size constant in portrait mode
+* Allow to add empty bottom bar in portrait mode
+* Fix adding additional completions in hunspell
+* Use system default font instead of hardcoding Cantarell
+* Drop built in emoji data
+* Use `key-pressed` instead of `button-pressed` for
+  feedback
+* Fix translations of completer information in p-m-s
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/45
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/61
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/69
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/71
+* Contributors:
+    * Achill Gilgenast
+    * Guido Günther
+* UI translations:
+    * Guido Günther (de)
+
+phosh-osk-stevia 0.48.0
+-----------------------
+Released June 2025
+* Rename to stevia
+* Fix hunspell completer with non-UTF8 dictionaries (e.g. PL)
+* Several leak fixes
+* Change completer right away. Until know it would only get
+  updated on layout changes
+* Add pipe completer example
+* New layouts:
+    * us+dvorak
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/66
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/67
+* Contributors:
+    * chri2
+    * Guido Günther
+    * Michael
+    * Paul Black
+
+phosh-osk-stub 0.47.0
+---------------------
+Released May 2025
+* Add popover to indicate the currently typed character
+  (optional, off by default)
+* Add emojis to completions (optional, on by default)
+* Add special keywords like "today" to completion (optional, on by
+  default)
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/58
+* Contributors:
+    * Guido Günther
+* UI translations:
+    * iramosu (ar)
+
+phosh-osk-stub 0.46.0
+---------------------
+Released March 2025
+* Improve key symbols for layer switching
+* Simplify switching to Symbols2 layer
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/43
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.45.0
+---------------------
+Released February 2025
+* Long press on shift toggles caps lock
+* Update emoji data
+* Make IL layout as close as possible to SI-1452-2
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/53
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/31
+* Contributors:
+    * Boris Shtrasman
+    * Guido Günther
+
+phosh-osk-stub 0.44.0
+---------------------
+Released December 2024
+* Add special layouts for pin, digit and phone number input purpose
+* Make Persian layout close to ISIRI 9147
+* Contributors:
+    * Danial Behzadi
+    * Guido Günther
+* UI translations:
+    * Danial Behzadi (fa)
+
+phosh-osk-stub 0.43.0
+---------------------
+Released November 2024
+* Add <ctrl> and <alt> modifiers and <menu> key to the shortcuts bar
+* Support accent colors
+* Better handle overlapping key presses to ease fast typing
+* Make lower- and upper-case view of terminal layout more consistent
+* presage: Don't set abbrev predictor as it adds random unicode chars
+* Ship completer descriptions so mobile settings knows about them
+* User documentation updates
+* Various bug fixes
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/44
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/41
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/49
+* Contributors:
+    * Guido Günther
+    * Julian
+    * MoonlightWave-12
+
+phosh-osk-stub 0.42.0
+---------------------
+Released September 2024
+* Fix several input issues when using completers that take
+  surrounding text into account (like presage)
+* data: Enable opportunistic completion by default. With the recent
+  compositor and OSK fixes it should be stable enough to at least
+  enable in those cases where the application recommends to use
+  completion (e.g. gnome-text-editor or chatty).
+* Lower velocity needed to swipe close the OSK a bit
+* Contributors:
+    * Guido Günther
+    * Teemu Ikonen
+
+phosh-osk-stub 0.42~rc1
+-----------------------
+Released September 2024
+* Provide layout information so e.g. phosh-mobile-settings can use
+  it to show only supported layouts
+* Allow to paste clipboard contents
+* varnam completer: Learn accepted words to improve predictions
+* Issues fixed:
+    * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/26
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.41.1
+---------------------
+Released August 2024
+* Prevent accidental keyboard closing by requiring a higher
+  velocity
+* Unswap Backspace and Enter
+* Contributors:
+    * Guido Günther
+    * undef
+
+phosh-osk-stub 0.41.0
+---------------------
+Released August 2024
+* Allow to swipe close the keyboard
+* Allow for more rows to support e.g. Thai layouts
+* Add more layouts
+* Screenshot layouts in CI
+* Allow to open OSK settings from menu popover
+* Contributors:
+    * Guido Günther
+    * Teemu Ikonen
+
+phosh-osk-stub 0.38.0
+---------------------
+Released: April 2024
+* (Optionally) hide OSK if a hardware keyboard is present
+* Fix completion bar styling when using HighContrast
+* Issues fixed:
+  * https://gitlab.gnome.org/World/Phosh/stevia/-/issues/37
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.37.0
+---------------------
+Released: March 2024
+* Support Presage 2 / trie predictor
+* Update emoji data
+* Add temporary workaround for phosh splashs timing out
+  until GTK is fixed.
+* Contributors:
+    * Guido Günther
+    * Teemu Ikonen
+
+phosh-osk-stub 0.36.0
+---------------------
+Released: February 2024
+* presage: Allow to completer to capitalize words based on input
+* Various fixes including better support for Enter/Return in Firefox
+  and other search fields
+* Issues fixed:
+  - https://gitlab.gnome.org/World/Phosh/stevia/-/issues/27
+* Contributors:
+    * Anna “CyberTailor”
+    * Guido Günther
+    * Teemu Ikonen
+
+phosh-osk-stub 0.35.0
+---------------------
+Released: January 2024
+* Drop duplicate completions returned by govarnam
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.34.0
+---------------------
+Released: December 2023
+* Properly switch back to last layout used (when text-input is in
+  use).
+* Add some default keyboard shortcuts for the terminal layout
+* Add gnome-calculator to list of apps that don't unfold the OSK
+* Run style checks in ci
+* Issues fixed:
+  - https://gitlab.gnome.org/World/Phosh/stevia/-/issues/10
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.33.0
+---------------------
+Released: October 2023
+* Allow to use per language completers. If set this is used instead
+  of the default completer. Can be used to e.g. complete different
+  Indic scripts with govarnam while using hunspell for English.
+* Better handle emojies and characters from popovers under XWayland
+* Be more robust when picking invalid keysyms for the shortcuts bar
+* Issues fixed:
+  https://gitlab.gnome.org/World/Phosh/stevia/-/issues/16
+  https://gitlab.gnome.org/World/Phosh/stevia/-/issues/22
+  https://gitlab.gnome.org/World/Phosh/stevia/-/issues/24
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.32.0
+---------------------
+Released: September 2023
+* Initial support for Malayalam via Manglish using govarnam
+* Avoid margins on the left and right of the OSK on wider displays
+  (but don't grow over a certain width)
+* Generate keymaps for layouts on the fly. This allows us to support
+  non US layouts in virtual-keyboard mode.
+* Generate keymaps for character popovers on the fly. This allows us
+  to support non US layouts in virtual-keyboard mode.
+* Deduplicate listening for input method changes and more internal rework
+  for better vk-driver and completer support.
+* Contributors:
+    * Guido Günther
+    * Kai Lüke
+    * Subin Siby
+
+phosh-osk-stub 0.31.0
+---------------------
+Released: September 2023
+* Allow to add 'menu' key to the shortcuts toolbar
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.30.0
+---------------------
+Released: August 2023
+* Allow to prevent automatic keyboard unfold based on app-id
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.28.0
+---------------------
+Released: May 2023
+* Add a mode that allows to input characters without lifting the finger
+  With this swipeGuess can sensibly be used as pipe based completer
+* Add Esc key to terminal layout in the capital layer
+* Contributors:
+    * Guido Günther
+    * Undef
+
+phosh-osk-stub 0.27.0
+---------------------
+Released: April 2023
+* Allow to switch default completion engine via environment variable
+  or GSetting.
+* Add unix pipe like completer that allows to get completions
+  from the output of an executable.
+* Add hunspell based completer for typo correction
+* Word completion itself isn't considered experimental anymore.  The
+  completion engines using surrounding text like the presage based completers
+  still are.
+* Some style fixups
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.25.0
+---------------------
+Released: January 2023
+* Make sure space bar gets all available horizontal space
+* Terminal: Fit more shortcuts into the shortcuts row
+* Terminal: Make frequently used shell characters easier to reach
+* Disable layout switching via swipes by default
+* Contributors:
+    * Guido Günther
+
+phosh-osk-stub 0.24.0
+---------------------
+Released: January 2023
+* Add Emoji Layout
+* Indicate keys with popover by displaying the first
+  popover char on the key.
+* Improve support for languages without a "caps" layer
+  like Arabic and Hebrew.
+* Add layouts for fr, ge, gr, hr, il, rs, si, sk, tr and za
+* Honor stricter protocol implementation in wlroots 0.16.0
+* Contributors:
+	Guido Günther
+	Sam Hewitt
+
+phosh-osk-stub 0.23.0~rc2
+-------------------------
+Released: December 2022
+* Add shortcuts bar to terminal layout
+  (see manpage on how to enable it)
+* Add experimental presage based completion support
+  (see manpage on how to enable it and README for requirements)
+* Make feedback consistent (trigger on all button presses)
+* Allow to use separate desktop file name to ease integration
+  for distributions
+* Add a manpage
+* Several bug fixes
+
+phosh-osk-stub 0.23.0~rc1
+-------------------------
+Released: November 2022
+* Add layout selection popover
+* support more keyboard layouts
+* make layout testing simpler via POS_TEST_LAYOUT env
+  var
+* make testing osk-stub easier via `--replace`
+* Use update-alternatives instead of override to manage
+  /u/s/applications/sm.puri.OSK0.desktop.
+* Style keys like backspace and esc properly
+
+phosh-osk-stub 0.22.0
+---------------------
+Released: November 2022
+* Make `force-show` debug option more useful
+* Fixes and cleanups that were dormant in other branches
+* Sync up with phosh's versioning
+
+phosh-osk-stub 0.21.0
+---------------------
+Released: Septemnber 2022
+* Unblur icons
+* Add (experimental) copy/paste buttons
+
+No changes over 0.20.0~beta1
+phosh-osk-stub 0.20.0
+---------------------
+Released: August 2022
+No changes over 0.20.0~beta1
+
+phosh-osk-stub 0.20.0~beta1
+---------------------------
+Released: July 2022
+* Add key repeat
+* Honor screen-keyboard-enabled gsetting
+* Initial "terminal like" keyboard (Function keys, ESC, Tab)
+* Lots of internal rework and fixes
+
+phosh-osk-stub 0.0.1
+--------------------
+Released: February 2022
+* This is an alpha release
+* Debug surface for IM state
+* Initial keyboard widget with popovers for additional
+  characters on long press
+* Cursor movement via long press on space
+* Switches layouts via swipe
+* Animates show/hide
+* Can parse a subset of gnome-shell's keyboard layouts
+  to avoid duplication.
+* Falls back to virtual-keyboard protocol for e.g.
+  X11 apps.
+* Handles sm.puri.OSK0 DBus interface
+* Initial layouts
+  tested: de, in+mal, us
+  untested: ara, bg, cz, in+bolnagri, pl, ru

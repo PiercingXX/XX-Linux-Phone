@@ -1,0 +1,237 @@
+---
+include:
+  - project: 'World/Phosh/meta-phosh'
+    ref: 'bb29803e2403eccd26e0bd9d65e59abe225afd6b'
+    file: '/ci/phosh-common-jobs.yml'
+  - project: 'Infrastructure/freedesktop-ci-templates'
+    ref: '6a40df92957c8ce9ee741aaccc5daaaf70545b1e'
+    file: '/templates/ci-fairy.yml'
+
+stages:
+  - build
+  - test+docs
+  - style-checks
+  - deploy
+
+default:
+  # Protect CI infra from rogue jobs
+  timeout: 15 minutes
+  # Allow jobs to be caneled on new commits
+  interruptible: true
+  # Retry on infra hickups automatically
+  retry:
+    max: 1
+    when:
+      - 'api_failure'
+      - 'runner_system_failure'
+      - 'scheduler_failure'
+      - 'stuck_or_timeout_failure'
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    # Don't trigger a branch pipeline if there is an open MR
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH
+
+variables:
+  # For ci-fairy
+  FDO_UPSTREAM_REPO: World/Phosh/stevia
+  DEBIAN_IMAGE: $CI_REGISTRY/world/phosh/stevia/debian:v0.0.2026-08-19
+  XVFB_RUN: xvfb-run -a -s -noreset
+  COMMON_BUILD_OPTS: --werror -Db_coverage=true -Dprefix=/usr
+  ALPINE_EDGE_DEPS: alpine-sdk dconf-dev elogind-dev feedbackd-dev fzf git glib-dev
+                    gmobile-dev gnome-desktop-dev gtk+3.0-dev hunspell-dev
+                    json-glib-dev libhandy1-dev meson musl-dev ninja presage-dev
+                    ttf-dejavu uim-dev wayland-dev wayland-protocols
+
+.forky_vars: &forky_vars
+  variables:
+    DIST: forky
+    BUILD_OPTS: ${COMMON_BUILD_OPTS}
+
+.forky_prep: &forky_prep
+  before_script:
+    - apt-get -y update
+    - apt-get -y build-dep .
+
+.build_step: &build_step
+  script:
+    - 'echo "Build opts: ${BUILD_OPTS}"'
+    - meson ${BUILD_OPTS} . _build
+    - meson compile -C _build
+
+.test_step: &test_step
+  script:
+    - ${XVFB_RUN} meson test --print-errorlogs -C _build
+    - ninja  -C _build coverage-html
+
+check-consistency:
+  stage: test+docs
+  extends: .phosh-check-consistency
+
+check-po:
+  stage: test+docs
+  extends: .phosh-check-po
+
+check-markdown:
+  stage: style-checks
+  extends:
+    - .phosh-check-markdown
+  variables:
+    PHOSH_MARKDOWN_PATHS: "-s .mdl.rb *.md doc/*.md"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        paths:
+          - "*.md"
+          - "doc/*.md"
+
+# Sanity checks of MR settings and commit logs
+sanity:
+  extends:
+    - .fdo.ci-fairy
+  stage: style-checks
+  variables:
+    GIT_DEPTH: "100"
+  needs: []
+  script: |
+    ci-fairy check-commits --signed-off-by --junit-xml=commit-message-junit-report.xml
+  artifacts:
+    reports:
+      junit: commit-message-junit-report.xml
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME'
+
+build:native-debian-forky:
+  stage: build
+  image: ${DEBIAN_IMAGE}
+  <<: *forky_prep
+  <<: *forky_vars
+  <<: *build_step
+  artifacts:
+    paths:
+      - _build
+
+test:native-debian-forky:
+  stage: test+docs
+  image: ${DEBIAN_IMAGE}
+  <<: *forky_prep
+  needs:
+    - build:native-debian-forky
+  <<: *forky_vars
+  <<: *test_step
+  coverage: '/^lines:\s+([\d.]+\%)\s+/'
+  artifacts:
+    when: always
+    reports:
+      junit: _build/meson-logs/testlog.junit.xml
+
+asan-test-native-debian-forky:
+  stage: test+docs
+  image: ${DEBIAN_IMAGE}
+  tags: [asan]
+  needs: []
+  <<: *forky_prep
+  variables:
+    WLR_BACKENDS: headless
+    PHOC: dbus-launch phoc --no-xwayland
+  script:
+    - !reference [.phosh-prepare-apt]
+    - meson setup -Db_sanitize=address _build-asan
+    - XDG_RUNTIME_DIR=$PWD ${PHOC} -E "meson test --print-errorlogs -C _build-asan"
+  allow_failure: true
+  artifacts:
+    paths:
+      - _build-asan
+
+doc:
+  stage: test+docs
+  image: ${DEBIAN_IMAGE}
+  <<: *forky_prep
+  needs: []
+  variables:
+    BUILD_OPTS: >-
+      -Dgtk_doc=true
+  script:
+    - meson ${BUILD_OPTS} _build
+    - meson compile -C _build
+    - mv _build/doc/pos-0 _doc/
+  artifacts:
+    paths:
+      - _doc/
+
+test-layouts:
+  image: ${DEBIAN_IMAGE}
+  stage: test+docs
+  variables:
+    PHOSH_ADDITIONAL_PKGS: >
+      phoc swaybg grim imagemagick
+      phosh-wallpapers dbus-x11
+      fonts-noto-core libuim8
+  needs:
+    - build:native-debian-forky
+  <<: *forky_prep
+  script:
+    - !reference [.phosh-prepare-apt]
+    - XDG_RUNTIME_DIR=$PWD
+      WLR_RENDERER=pixman
+      NO_AT_BRIDGE=1
+      dbus-launch tools/screenshot-all-layouts.py
+  artifacts:
+    expose_as: 'Layouts'
+    paths:
+      - _build/screenshots/
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        paths:
+          # Only run when layouts change…
+          - src/layouts/*.json
+          # …or the code handling them…
+          - src/pos-osk-widget.c
+          - src/pos-osk-key.c
+          # …or the stylesheets…
+          - src/stylesheet/
+          # …or we're building a release…
+          - NEWS
+
+build:native-alpinelinux-edge:
+  stage: build
+  image: alpine:edge
+  allow_failure: true
+  before_script:
+    - echo "https://alpine.global.ssl.fastly.net/alpine/edge/testing" >> /etc/apk/repositories
+    - apk add $ALPINE_EDGE_DEPS
+  artifacts:
+    paths:
+      - _build
+  script:
+    - git submodule update --recursive
+    - meson --werror . _build
+    - meson compile -C _build
+
+format-check:
+  stage: style-checks
+  needs: []
+  extends: .phosh-format-check
+  allow_failure: true
+
+check-meson:
+  stage: style-checks
+  extends:
+    - .phosh-check-meson
+
+pages:
+  stage: deploy
+  before_script: []
+  needs: ['doc']
+  script:
+    - mv _doc/ public/
+  artifacts:
+    paths:
+      - public
+  only:
+    - main

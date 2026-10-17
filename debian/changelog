@@ -1,0 +1,2169 @@
+phosh-osk-stevia (0.58.0) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * presage: Lookup dictionaries in XDG_DATA_HOME too
+  * doc: Document uim completer
+  * doc: Copy-edit manpage for consistency
+  * stevia: Exit with failure if we can't bind all Wayland protocols.
+  * packaging: Sync with Debian
+
+  [ Antonio Marin ]
+  * Add Romanian translation
+
+  [ Baurzhan Muftakhidinov ]
+  * Add Kazakh translation
+
+  [ Danial Behzadi ]
+  * Update Persian translation
+
+  [ Asier Saratsua Garmendia ]
+  * Add Basque translation
+
+  [ Yaron Shahrabani ]
+  * Add Hebrew translation
+
+  [ Emin Tufan Çetin ]
+  * Add Turkish translation
+
+  [ Balázs Úr ]
+  * Add Hungarian translation
+
+  [ twlvnn kraftwerk ]
+  * Add Bulgarian translation.
+
+  [ Марко Костић ]
+  * Add Serbian translation
+
+  [ burns ]
+  * Add Brazilian Portuguese translation
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 03 Oct 2026 17:10:23 +0200
+
+phosh-osk-stevia (0.57.0) experimental; urgency=medium
+
+  [ Anders Jonsson ]
+  * Add Swedish translation
+
+  [ Yuri Chornoivan ]
+  * Add Ukrainian translation
+
+  [ Guido Günther ]
+  * docs: Mention that Stevia is currently the default OSK
+  * docs: Modernize contributing information
+  * doap: Rename to git repo name.
+
+  [ Martin ]
+  * Add Slovenian translation
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 19 Aug 2026 13:24:55 +0200
+
+phosh-osk-stevia (0.57~rc1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * write-layout-info: Skip layouts with '/'
+    This allows us to namespace special completer layouts.
+  * input-surface: Allow to specify a base layout.
+    The US layout is not always the best base for a completer. E.g.
+    JP wants some additional keys.
+  * completers/uim: Allow to specify a base layout.
+    We allow to specify it per language as different scripts have
+    different requirements.
+  * ci: Update shared scripts to bb29803
+  * tree: Drop G_GNUC_CONST from get_type()
+    First call has side effects, see
+    https://gitlab.gnome.org/GNOME/glib/-/merge_requests/5223
+    for details.
+  * completer: Add a menu model for the completers mode button.
+    This allows more complex selections.
+  * completers/uim: Add empty mode menu
+  * completion-bar: Show mode menu and trigger it's actions.
+    If the completer set a mode menu show it on long press.
+  * input-surface: Let the completion bar use the completers menu and actions
+  * shortcuts-bar: Better handle Escape and Tab.
+    Use a short name or symbol respectively.
+  * shortcuts-bar: Add escape and tab by default.
+    They're no longer in the regular layouts
+  * terminal: Move ~ and ` into the popover of q and Q.
+    This brings us to the same amount of keys than the regular US layout.
+  * terminal: Drop tab and esc keys.
+    They're available in the completion bar
+  * packaging: Depend on color emoji font.
+    Otherwise the emojis look rather odd
+  * activation-filter: Handle empty app-id gracefully.
+    Otherwise we crash on empty app-ids
+  * build: Allow long markdown lines in code blocks.
+    We'll use PHOSH_MARKDOWN_OPTS once we updated the shared scripts.
+  * doc: Clarify resource overlay use
+  * doc: Document testing in a nested session
+  * doc: Add some suggestions for layout testing
+  * input-surface: Log im active changes.
+    This eases debugging
+  * vk-driver: Base layout on xkb defaults.
+    Otherwise we don't get a proper keymap in XWayland apps as
+    the keysymbols are all off.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/work_items/104
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/work_items/79
+
+  [ v34 ]
+  * layouts: Add Japanese layout.
+    Add a jp layout tailored for anthy input and register it in the layout
+    list and the resource bundle.
+  * completers/uim: Pass printable symbols to the engine
+    symbol_to_key() only forwarded alphanumeric and whitespace characters.
+    Any other printable ASCII (',', '.', '-', …) fell through to the
+    fallback and was turned into a space, so punctuation could not be typed
+    via anthy or pinyin.
+    Forward printable symbols as-is so they reach the input method.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/113
+  * completers/uim: Populate the mode menu from the input method's modes.
+    Build the mode menu from the current input
+    method's actions so the popover lists the localized mode names, and add
+    a 'selectmode' action that activates the picked mode.
+    Add max_rotate_action so the mode button only cycles through the main
+    modes (direct/hiragana for Anthy) while the remaining modes stay
+    menu-only.
+  * completers/uim: Show a concise glyph on the mode button.
+    The mode button showed the completer's long mode name. Add a mode-symbol
+    property so completers can expose a short glyph for the button while
+    keeping the full name for the popover / accessibility.
+    uim prefers a curated icon per mode ("英" for direct input, "中" for
+    Pinyin) and falls back to uim's iconic label ("あ", "ア", …) and finally
+    the mode name, since uim's generic on/off labels ("O"/"-") are
+    meaningless on their own.
+
+  [ Gregor Düster ]
+  * layouts: Add „ and ‚ to ch, cz, de and sk layout.
+    See https://unicode.org/versions/Unicode17.0.0/core-spec/chapter-6/#G4963
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/work_items/114
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 06 Aug 2026 15:20:21 +0200
+
+phosh-osk-stevia (0.56.0) experimental; urgency=medium
+
+  * layout-override: Fix typo in key name.
+    Also make shellcheck happy
+  * layout-override: Add example.
+    Switch to `cat <<EOF` for easier quoting
+  * input-surface: Don't leak in test
+  * schema: Add cursor keys to terminal layout by default.
+    Coming from other OSes lots of ppl don't seem to assume that these things
+    are possible and thus never get them.
+  * shortcuts-bar: Add key repeat to non-modifier keys.
+    This allows to use key repeat with e.g. cursor keys.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/work_items/105
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 04 Jul 2026 09:48:41 +0200
+
+phosh-osk-stevia (0.56~rc1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * input-surface: Split out layout name building.
+    This will be used in a follow up commit
+
+  [ Łukasz Osadnik ]
+  * treewide: Add layout override signal to toplevel
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 27 Jun 2026 16:27:38 +0200
+
+phosh-osk-stevia (0.56~alpha1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * metainfo: Fix XML.
+    Fixes: e40133faf ("treewide: Document changes and release 0.55.0")
+  * packaging: Depend on appstream.
+    That way we run the appstream validation in CI
+  * ci: Update shared scripts to 4a59c2b
+  * tree: Switch to ext-data-control-v1 protocol.
+    Let's use the non-wlr one.
+  * layout-info: Add language codes.
+    This will allow configuration widgets to match by language
+  * layouts: Mark flavors
+    colemak, dvorak and workman are always variants
+    of a default layout. Mark them as such. Don't
+    use the term `variant` as that has meaning in xkb.
+  * layout-info: Provide flavor.
+    This will help UI to pick a good default.
+
+  [ skysphr ]
+  * layouts: Fix Georgian keyboard.
+    Added missing characters from the Georgian layout,
+    using shift for ease of use and consistency with other keyboards.
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 23 Jun 2026 08:43:02 +0200
+
+phosh-osk-stevia (0.55.0) experimental; urgency=medium
+
+  [ Ryo Nakano ]
+  * po: Update Japanese translation.
+
+  [ nicole mikołajczyk ]
+  * po: Add Polish translation
+  * po: Update LINGUAS
+
+ -- Guido Günther <agx@sigxcpu.org>  Sun, 10 May 2026 10:08:53 +0200
+
+phosh-osk-stevia (0.54.0) experimental; urgency=medium
+
+  * hunspell: Set surrounding text.
+    This is needed for automatic space ↔ punctuation swap
+    Fixes: Fixes: 78c6ef621 ("completers/hunspell: Try to be clever when inserting punctuation")
+  * completer-base: Add gsetting to disable auto punctuation.
+    Not all users want it.
+  * completer: Don't insert space when auto-space is disabled.
+    When automatic space handling is disabled we should also not
+    insert space after word separators.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/38
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 03 Apr 2026 10:36:04 +0200
+
+phosh-osk-stevia (0.54~rc1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * layouts/ch+fr: Add overlay keys.
+    Use the same overlay than fr.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/97
+  * data: Ignore leak inside govarnam
+  * data: Ignore leak when presage creates the DB.
+    Seen in ci.
+  * osk-key: Free strings when setting props.
+    We only set them once atm but let's make it more robust
+  * osk-widget: Use g_ptr_array_new_full
+  * osk-widget: Safe guard against empty rows
+  * widget: Free all layers.
+    Some layouts like `ara` are sparse so just goint
+    to n_layers is not enough. We need to check all slots.
+  * completer/hunspell: Don't strdup into builder.
+    The builder does that already
+  * emoji-db: Don't leak when exiting loop
+  * test-size-manager: Don't leak output
+  * packaging: Sort via wrap-and-sort
+  * ci: Update image
+  * ci: Drop PKG_ONLY
+    not used since ages
+  * ci: Run ASAN
+  * osk-key: Fix use.
+    It's an enum, not a bool
+  * input-surface: Hide popover without animation.
+    In most situations we want it to go right away.
+  * service: Don't restart too quickly.
+    There's no point to restart as fast as possible when e.g. we're
+    waiting for the DBus name to become available
+  * doc: Document how to find valid keysyms better
+  * doc: Mention `auto-landscape` scaling setting.
+    Fixes: 48df39fa2 ("size-manager: Allow to scale up larget displays in landscape")
+  * doc: Mention DBus interface and add example
+  * completer-base: Clarify that it is optional
+  * completer: Fix doc string
+  * osk-widget: Assert on invalid values.
+    Helps to not accidentally add odd keys
+  * input-surface: Allow completer to handle the completion selection.
+    Rather than just submitting the selection from the completion bar
+    some completers like uim need to handle the submission as they
+    don't submit the selected text verbatim. Allow them to override it.
+  * completion-bar: Add mode button.
+    The button allows to show a mode name and emit a signal
+    when pressed. This allows completers to switch their
+    current mode. What a mode is depends on the completer.
+    We put the button at the very end to make it easy to reach.
+  * completers: Add mode toggling to interface
+  * input-surface: Forward mode toggling to completer.
+    We forward the toggle events and bind the information provided
+    by the completer
+  * completers: Add support for Japanese and Chinese via uim.
+    When then invoked as
+     gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'ara'), ('ibus', 'uim:ja')]"
+     G_MESSAGES_DEBUG=pos-completer-uim _build/run --replace
+    To test:
+    - Select `Japanese (anthy)` from popover
+    - Hit top right mode toggle to switch from uim-anthy's `direct` to `hiragana` mode.
+    Preedit and candidate selection then works e.g.:
+        a s <space> <space>
+    and you can type romaji like
+        ocha <space> <return> <space>
+    yields お茶 (tea) and
+        fujisan <space> <return> <space>
+    yields 富士山 (Mount Fuji).
+    For Chinese use `('ibus', 'uim:cn')`:
+        gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us'), ('xkb', 'ara'), ('ibus', 'uim:jp'), ('ibus', 'uim:cn')]"
+    Chinese example:
+        n i h a o <return> <space>
+    yields 你好(hello)
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/74
+  * packaging: Update dependencies for uim
+  * vk-driver: Map GDK's `shift` and `ctrl` to vk modifiers as well
+  * shortcuts-bar: Print parsed modifiers
+  * shortcuts-bar: Parse <super> and <shift> too.
+    While those keys could be used in key combinations just fine
+    they couldn't be added as stand alone keys.
+    We now also allow to use `<super>` and `<shift>` as standalone keys
+    in the shortcuts bar matching standalone `<ctrl>` and `<alt>`.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/98
+  * dconf-migration: Add migration helpers from enter-tex.
+    The files are GPL-3.0-or-later by Sébastien Wilmet
+  * treewide: Move schema to mobi.phosh
+  * stevia: Migrate dconf entries to mobi.phosh.osk.
+    This will make it simpler to keep things in sync when e.g. adding
+    OSK layout selection to first-boot.
+  * packaging: Add Breaks on older mobile-settings.
+    This ensures it uses a recent enough schema
+  * build: Drop unneeded rfkill check
+  * input-surface: Preserve layout ordering.
+    The current layout in the popover doesn't reflect the order of
+    input sources so sorting layouts in e.g. p-m-s helps for hardware
+    keyboard use but not for the OSK.
+    Use a GPtrArray instead of the hashmap to preserve ordering.
+
+  [ Ekaterine Papava ]
+  * po: Add Georgian translation
+
+  [ Paul Black ]
+  * layout: Added us+workman
+
+  [ Ryo Nakano ]
+  * po: Add Japanese translation
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 25 Mar 2026 09:23:46 +0100
+
+phosh-osk-stevia (0.53.0) experimental; urgency=medium
+
+  * No changes over rc1
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 13 Feb 2026 16:31:17 +0100
+
+phosh-osk-stevia (0.53~rc1) experimental; urgency=medium
+
+  * osk-widget: Drop outdated comment. We have a numeric layout and we'd
+    not add other layouts there after all.
+  * packaging: Stop providing osk-stub. This only causes dependency
+    confusion
+  * shortcuts-bar: Propagate width.
+    Allows it to use more space on wide screens like tablets
+  * input-surface: Scale allowed OSK width with window height.
+    This allows us to take some more space on wide screens
+  * size-manager: Allow to scale up larget displays in landscape.
+    We don't have a good implementation for scaling down on portrait phones
+    but lets have at least landscape tablets scale up.
+    We base that on the screen size not the chassis type.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/52
+  * data: Enable landscape scale-up by default
+  * osk-widget: Scale up key font and icons when scaling up the OSK widget.
+    As keys scale mostly up in portrait (e.g. on phones) but mostly to the
+    side in landscape (on tablets) we use the minimum value to make sure we
+    still fit the space.
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 05 Feb 2026 15:24:55 +0100
+
+phosh-osk-stevia (0.52.1) experimental; urgency=medium
+
+  [ Paul Black ]
+  * layout: Added us+colemak
+
+  [ Guido Günther ]
+  * data: Use type=dbus for the system unit
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 16 Jan 2026 12:43:33 +0100
+
+phosh-osk-stevia (0.52.0) experimental; urgency=medium
+
+  * settings: Use key indicator popover by default.
+    See https://social.phosh.mobi/@phosh/statuses/01KD3NS5DN8AZB94VG6W0CRS4R
+  * settings: Use auto-portrait by default.
+    While not as prominent as the key indicator in
+    https://social.phosh.mobi/@phosh/statuses/01KD3NS5DN8AZB94VG6W0CRS4R
+    it doesn't change anything (or at least not much) in the default scales
+    and it is quick to disable.
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 03 Jan 2026 11:28:10 +0100
+
+phosh-osk-stevia (0.52~rc1) experimental; urgency=medium
+
+  [ Achill Gilgenast ]
+  * completers/fzf: Add meson option for a custom word list file.
+    There doesn't seem to be a global default path for a word list. Debian packages
+    a scowl word list of american dictionary as /words. Alpine ships Aspell
+    dictionaries with the language as filename (like /american-english).
+    So make this path configure, that distributions can adapt that to their word list.
+
+  [ Guido Günther ]
+  * input-surface: Adjust surface height when animation starts.
+    This avoids the
+       Animation did not finish in time: 0.000000
+    warnings and the delayed OSK unfold.
+  * input-surface: Actually set exclusive zone at the start.
+    This makes the code match the comment
+  * completer: Check correct vfunc
+  * completer-base: Add docstring.
+    This fixes the doc build warning
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 24 Dec 2025 13:06:02 +0100
+
+phosh-osk-stevia (0.51.0) experimental; urgency=medium
+
+  * doc: Fix default keyboard mention.
+    Most distros ship stevia as default so it can be confusing if
+    we say something else in the docs.
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 14 Nov 2025 17:13:29 +0100
+
+phosh-osk-stevia (0.51~rc1) experimental; urgency=medium
+
+  * input-surface: Don't trigger key repeat when deleting in emoji layout.
+    Otherwise we delete until the user presses another symbol
+    Fixes: 1de94920e ("input-surface: Delete last word on backspace long press")
+  * input-surface: Don't trigger key repeat when deleting in number layout.
+    Fixes: 1de94920e ("input-surface: Delete last word on backspace long press")
+  * run: Better restore keyboard state.
+    Always restore the state when the script exits
+  * input-surface: Reset layout in one place.
+    We do the same thing when switching away from special layouts, to that in a single place.
+    No functional change.
+  * input-surface: Restore old layout when hiding keyboard.
+    When hiding the keyboard we want to make sure the next time it is opened the layout matches the
+    input purpose rather than what the user selected. Otherwise the user might see the emoji
+    layout rather than a regular layout after swipe closing the keyboard and unfolding it again.
+  * stevia: Remove pointless cast
+  * stevia: Make debug flags static.
+    They should move into PhoshOskStevia at some point
+  * stevia: Rename application class object.
+    Name the application object as such. This is shorter but more
+    importantly fits our name space.
+  * app: Add to shared header.
+    This makes the application object available to other parts
+    of the OSK.
+  * build: Exclude pos-osk-dbus from library.
+    We want to spit pos-app out out into its own file at some point
+    but that needs more disentangling so rather move pos-osk-dbus
+    out of the shared lib for the moment to fix the doc build.
+  * stevia: Allow to get app singleton
+  * app: Allow to quit with exit status.
+    Add a method to exit the main loop with an exit status. Using
+    this we can pass our app object around rather than the main loop
+    giving us more type safety.
+  * emoji-picker: Only unref `data` when set.
+    Otherwise we might throw a critical when the data was never
+    loaded.
+  * dbus: Exit when we couldn't ever grab the DBus name.
+    This makes sure stevia exits when it grab the DBus name on startup.
+    We still allow for another instance to temporarily grab the name.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/77
+  * data: Let gnome-session-bin prefer the systemd unit.
+    This avoids having multiple instances spawned.
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 04 Nov 2025 15:15:16 +0100
+
+phosh-osk-stevia (0.50.1) experimental; urgency=medium
+
+  [ Иван Јањић ]
+  * layout: Remove letter S from serbian layout.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/76
+
+  [ Guido Günther ]
+  * packaging: Update dev doc description as well
+  * osk-widget: Set state flags.
+    Fetching state when the widget's state doesn't match causes
+    needless debug messages making debugging harder.
+  * main: Set gdk backends before initing anything
+  * wayland: No need to set backends twice
+  * stevia: Consolidate input surface creation.
+    Use a single path that ensures all needed bits are there. This
+    should fix the case where the OSK doesn't show after login with
+    gnome-session >= 49.
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 07 Oct 2025 10:27:17 +0200
+
+phosh-osk-stevia (0.50.0) experimental; urgency=medium
+
+  * treewide: Use gm_str_is_null_or_empty()
+    Let's drop our custom macro
+  * completers/presage: Remove unused future
+  * completers/presage: Remove unused headers
+  * completers/presage: Use self for non public function.
+    No need to use the interface here
+  * completer: Add interface to lookup completions.
+    What should be displayed as completion to the user is not necessarily
+    what needs to be appended as text. E.g. we want to show the full word
+    while we only append the remaining bit.
+    Add an interface so completer users can lookup the "better" result.
+  * input-surface: Lookup better completions
+  * completers/presage: Lookup better completions.
+    Presage knows the difference between the prediction and what should
+    actually be completed. So if the user e.g. types "time" then the
+    predictions are "time" and "timetable". The actual completions are
+    " " and "table ". Make use of that feature so e.g. deleting backwards
+    into a word works better.
+  * completers/presage: Handle capitalized completions.
+    We need to transform the compmap in this case. We do that past
+    captialization.
+  * doc: Use canonical matrix room address
+  * stevia: Make sure we don't leak autostart id.
+    Child processes like the pipe completer must not ever see these.
+  * stevia: Add systemd unit.
+    Add a systemd unit that will be pulled in by Phosh's mobi.phosh.OSK target.
+    This ensures the OSK is started with gnome-session >= 49.
+  * packaging: Add alternative.
+    This way we manage both together
+  * packaging: Ignore Part-of: when generating changelog
+  * vk-driver: Fix argument names. Silence some doc generation warnings.
+  * size-manager: Fall back to default hight.
+    When we have multiple outputs and thus can't yet reliably determine
+    the optimal height fall back to the default height rather than 0.
+    This frees the upper layer from guessing a suitable height (which
+    it got wrong 😀).
+    Fixes: ad7bc05df ("size-manager: New object to calculate input surface size")
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/75
+  * osk-widget: Use bold font for keys.
+    Makes the appearance a bit more prominent. We don't make the
+    "123/ABC" toggle bold to match the icons.
+    We don't make the popover hints bold either as that lowers readability.
+  * osk-widget: Make return more prominent.
+    Make it a bit larger and bump line width
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 02 Oct 2025 22:13:49 +0200
+
+phosh-osk-stevia (0.50~rc1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * Revert "emoji-db: Take endianess into account"
+    This reverts commit 87a7a84812416ac80752efbcf7d21f974b420ed9.
+    When using GTK's emoji data we don't need to convert things.
+    Fixes: c66d8a248 ("emoji-db: Use GTKs emoji data")
+  * input-surface: Scale new layouts.
+    This ensures they get the correct height.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/73
+  * util: Use memfd when available.
+    Update the code from phosh. To keep further updates simple we
+    keep the PHOSH_ symbol prefix.
+  * vk-driver: Clarify function naming.
+    These functions are only for the terminal layouts
+    Fixes: 10093f1eb ("vk-driver: Use the built-in keymap for the terminal layout")
+  * vk-driver: Add some missing terminal keysyms.
+    Thanks to 2rkdddcp9i4
+  * char-popup: Don't constrain the popover.
+    This makes it show up above the long-pressed key which
+    is more predictable.
+  * char-popup: Make style similar to typing indicator.
+    Makes it look less out of place and the larger symbols are easier
+    to hit.
+    Helps: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/59
+  * treewide: Switch URL to World/Phosh.
+    Part-of: <https://gitlab.gnome.org/World/Phosh/stevia/-/merge_requests/233>
+  * build: Avoid meson warning.
+    We use a prefix of type list with `cc.has_function`
+    Fixes: c1f97f48a ("util: Use memfd when available")
+    Part-of: <https://gitlab.gnome.org/World/Phosh/stevia/-/merge_requests/234>
+  * run: Ease running the OSK.
+    We usually want the OSK enabled to handle that and turn it off
+    when we hit CTRL-C.
+  * build: Rename options
+    `meson.options` is the recommended name nowadays
+  * completer: Rename test.
+    We can test more features of the completer there
+  * completer: Add helper to get last word offset.
+    To delete surrounding text we need the offset of the last word.
+    We'll use that in the next commit but it will also be useful in
+    more clever replacements later on.
+  * osk-widget: Emit up after symbol.
+    Otherwise it's not possible to do anything after the symbol was
+    emitted. We're not using the up signal anywhere at the moment so
+    this is no functional change.
+  * input-surface: Remove unused header
+  * input-surface: Move define upwards.
+    They go before the structs and enums
+  * input-surface: Move feedback triggering upwards.
+    This will avoid a forward declaration. While at that we unify
+    it into a single function.
+  * input-surface: Ease submitting a symbol.
+    Add a forward declaration so we can use it more easily and avoid
+    using the a `on_` handler but rather use a proper function name.
+    This cleans up the emoji delete and will be further used in the next
+    commit.
+  * input-surface: Move key repeat handling out of osk-widget.
+    We only use it to track backspace so name it accordingly
+  * input-surface: Delete last word on backspace long press.
+    Instead of deleting individual chars fast delete whole words
+    at a slightly lower speed instead. This gives better control
+    and doesn't let haptic buzz like crazy.
+  * completer: Drop before-text and after-text properties.
+    The input method passes this to us, we don't set it.
+    Part-of: <https://gitlab.gnome.org/World/Phosh/stevia/-/merge_requests/238>
+  * completer: Enhance commit-string.
+    Make it possible to submit the amount of bytes to delete from
+    surrounding text too.
+    Part-of: <https://gitlab.gnome.org/World/Phosh/stevia/-/merge_requests/238>
+  * completer-base: Allow to track surrounding text.
+    Offer a helper to completers that want to do this so we don't
+    need to duplicate the code.
+    Part-of: <https://gitlab.gnome.org/World/Phosh/stevia/-/merge_requests/238>
+  * completer-base: Make it simple to check for punctuation.
+    Part-of: <https://gitlab.gnome.org/World/Phosh/stevia/-/merge_requests/238>
+  * completers/presage: Try to be clever when inserting punctuation.
+    If the preceding char is a space we drop it as that usually means
+    a completed word was inserted.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/30
+    Part-of: <https://gitlab.gnome.org/World/Phosh/stevia/-/merge_requests/238>
+  * completers/hunspell: Try to be clever when inserting punctuation.
+    If the preceding char is a space we drop it as that usually means
+    a completed word was inserted.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/30
+    Part-of: <https://gitlab.gnome.org/World/Phosh/stevia/-/merge_requests/238>
+  * osk-widget: Track drag events.
+    This allows us to use the velocity for cursor movements
+    Somwhat inspired from what hdy's swipe tracker does.
+  * osk-widget: Allow to switch direction during drag.
+    A high velocity in the vertical direction allows to switch the
+    drag direction.
+
+  [ Caleb Connolly ]
+  * osk-widget: Only allow dragging in one direction.
+    Draging the cursor both horizontally AND virtually is useful in some
+    scenarios, but for the most common cases of typing messages or using a
+    terminal it's easy for one to accidentally trigger a vertical keypress
+    while trying to move the cursor horizontally.
+    Adjust the logic to lock dragging to whichever direction the pointer
+    moves in first.
+    A potential idea for improving this would be to "unlock" the direction
+    if the finger hasn't moved for some time, this would allow switching
+    directions without having to exit and re-enter the cursor mode.
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 27 Sep 2025 18:27:13 +0200
+
+phosh-osk-stevia (0.49.0) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * emoji-db: Make it easier to read.
+    We just 0-terminate the string here
+  * emoji-db: Take endianess into account.
+    The db is LE so convert to host byte order
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/61
+  * emoji-db: Use GTKs emoji data
+  * emoji: Drop emoji data.
+    We can just pick up what GTK ships.
+
+  [ Achill Gilgenast ]
+  * stylesheet: Drop cantarell as font family.
+    GNOME switched to Adwaita Fonts for their font family and dropped Cantarell.
+    Just use the default font used in the system and don't hardcode it.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/69
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 14 Aug 2025 10:23:59 +0200
+
+phosh-osk-stevia (0.49~rc1) experimental; urgency=medium
+
+  * wayland: New singleton to track Wayland protocols.
+    Similar to what we do in phosh. This frees the stevia
+    class from the protocol handling and makes it easier
+    to access Wayland protocols in other classes.
+    We emit a `ready` signal once all needed protocols
+    were announced by the registry.
+  * stevia: Instantiate wayland singleton
+  * stevia: Use wayland singleton.
+    This allows us to drop the registry handling
+  * stevia: Track Wayland outputs
+  * completer: Fix path to po data.
+    Otherwise the translations won't be added to the completer
+    info files.
+  * completer: Make sure description gets replaced in the desktop file.
+    This makes sure `Description` gets transfered from the po file
+    to the generated desktop file.
+  * po: Add `Description` keyword.
+    Otherwise it will not be extracted from the completer "desktop" like files
+    in data/completers when running `ninja -C _build phosh-osk-stevia-update-po`
+  * po: Update German translation
+  * data/schema: Add description for keyboard shortcuts.
+    Makes `gsettings describe` more useful.
+  * osk-widget: Make key height a property
+  * input-surface: Fix size comparison.
+    We want to compare with the widget height not a variable
+    that is currently never set (thus zero).
+  * input-surface: No need to request natural size.
+    We don't use it
+  * input-surface: Add a minimum height.
+    If the layer surface is smaller than that we will require
+    at least that height.
+  * input-surface: Add dead-zone property.
+    This allows to configure an empty space at the bottom of all layouts.
+  * input-surface: Adjust key height based on surface size
+  * osk-widget: Allow to get max rows.
+    Gets the maximum number of key rows in a layout.
+  * input-surface: Take number of layout rows into account.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/45
+  * size-manager: New object to calculate input surface size.
+    The size manager takes the current outputs physical and logical
+    size into account to calculate height when the corresponding
+    gsettings are enabled.
+    This is currently limited to portrait mode.
+    We target the keyboard's key area height to be 4cm so keys are reasonably
+    sized. The target height for the dead zone at the bottom is 8mm. This
+    is useful on taller devices as otherwise when typing the bottom row requires
+    additional force as the center of gravity is far away from the supporting
+    fingers.
+  * osk-stevia: Instantiate size manager
+  * stevia: Make default input surface height a variable
+  * stevia: Wire up size manager.
+    Bind the `dead-zone` and `height` property
+  * doc: Document new configuration flags
+  * input-surface: Separate button and key press.
+    This will allow us to use the new fbd event for OSK key presses
+  * input-surface: Use key new event.
+    We set the important hint as we want the OSK's haptic
+    feedback to stay on when the phone goes to silent mode
+    (unless the user turns it off explicitly).
+  * hunspell-completer: Fix additional completions.
+    We used the old completer rather than the new one from the builder.
+    While at that make the presage and hunspell completers more look
+    alike by using `GStrvBuilder` everywhere.
+    Fixes: a849b11de ("hunspell: Check for emojis too by using PosCompleterBase")
+  * doc: Link to blog posts.
+    They provide useful information for development. Brush
+    up the README a bit while at that.
+  * doc: Explain how to test layout changes.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/71
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 06 Aug 2025 07:26:23 +0200
+
+phosh-osk-stevia (0.48.0) experimental; urgency=medium
+
+  * completion: Fix keyword completion value.
+    The resulting value is the same but that way it matches
+    the other flags.
+  * hunspell-completer: Reject non-UTF8 encodings.
+    Didn't expect that hunspell can return results in other
+    encodings than UTF-8 in 2025.
+    In case someone wants to make this more elaborate one
+    could use `g_convert` to perform conversion.
+    Helps: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/67
+  * hunspell-completer: Try conversion to UTF-8.
+    If hunspell's results aren't utf-8 we try to convert via iconv.
+    Closes: Helps: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/67
+  * hunspell-completer: Try input conversion from UTF-8.
+    Convert input so accented characters get handled.
+    Tested-by: Łukasz Osadnik
+  * completer: Document `get_display_name`
+    It's transfer full.
+  * tests: Split hunspell tests to separate file
+  * tests: Ease running under asan
+  * hunspell-completer: Don't forget to free hunspell's suggestions
+  * pipe-completer: Don't leak command
+  * tests: Leak fixes
+  * packaging: Bump provides.
+    This makes sure e.g. p-m-s is happy
+  * ui: Don't use `margin`. It doesn't exist in GTK4
+  * treewide: Avoid gtk_widget_{show,hide}
+    Deprecated in GTK4. We don't worry about gtk_wiget_show_all().
+  * keypad: Avoid container APIs.
+    Use a `define` for the function that will be introduced with GTK4.
+  * completer-manager: Notify when default completer changes
+  * input-surface: Listen and act on default completer changes.
+    Default completer changes were so far only applied when one switched
+    layouts. This can be surprising to the user so update the completer
+    right away.
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 27 Jun 2025 10:58:41 +0200
+
+phosh-osk-stevia (0.48~rc1) experimental; urgency=medium
+
+  * doc: Fix typo in hardware keyboard chapter
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 21 Jun 2025 23:52:21 +0200
+
+phosh-osk-stevia (0.48~alpha1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * Rename from phosh-osk-stub to Stevia. This name is less confusing
+    and it's a full OSK since some time.
+  * doc: Update features
+  * treewide: Rename resources as well
+
+  [ chri2 ]
+  * pipe-completer: Add a demo as a head start
+    https://gitlab.gnome.org/World/Phosh/phosh-osk-stub/-/issues/60
+
+  [ Paul Black ]
+  * layout: Added us+dvorak
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 26 May 2025 09:25:17 +0200
+
+phosh-osk-stub (0.47.0) experimental; urgency=medium
+
+  * No changes over rc2
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 15 May 2025 11:17:23 +0200
+
+phosh-osk-stub (0.47~rc2) experimental; urgency=medium
+
+  * schema: Use canonical prefix
+  * osk-enums: Add key-indicator feature
+  * input-surface: Update features of OSK layout too.
+    It's not part of the language layout hash table.
+  * tests: Init resources in osk-widget test.
+    This will be needed in follow up commits as the osk-widget needs the
+    resources for the indicator popover.
+  * indicator-popup: New widget to show currently pressed down key.
+    As the finger often covers the currently touched character it
+    can be helpful to indicate the current key. This popup is meant
+    to make that possible.
+  * osk-widget: Show indicator popup when enabled.
+    When the gsetting is flipped show the indicator popup.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/58
+  * completer-base: Complete some special keywords.
+    This eases inserting things like current date and time
+  * data: Enable keyword completer by default
+  * doc: Document keyword completer flag
+
+ -- Guido Günther <agx@sigxcpu.org>  Sun, 11 May 2025 11:18:52 +0200
+
+phosh-osk-stub (0.47~rc1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * emoji-picker: Use more automatic cleanup
+  * completer: Scope loop variable
+  * osk-stub: Avoid warning on startup.
+    This is only a debugging help
+  * tests: Don't use presage specific header.
+    The test isn't presage specific
+  * tests: Use subdir_done()
+    Saves one indent level
+  * tests: Depend on schemas.
+    Upcoming tests will lookup gsettings
+  * presage: Allow to set dictionary directory.
+    Useful in tests
+  * presage: Return empty string for initial before and after text.
+    This makes it consistent with other completers like `pipe`
+  * hunspell: Make find_dict public.
+    Useful to find out whether we should skip the test
+  * packaging: Depend on presage and hunspell.
+    We want text2ngram to build a small test corpus for presage and a default
+    dictionary for the hunspell completer to init successfully.
+    For that to be found we switch the `prefix` used in CI to `/usr`
+  * tests: Add smoketests for our completers.
+    This makes sure creating the object and accessing the properties
+    doesn't raise any criticals and eases testing under valgrind.
+    We have presage in a separate test as it needs a bit more setup
+    and we want to create more tests later on.
+  * completion-bar: Use more horizontal space.
+    Disabling `homogeneous` when elements don't allows us to fit
+    more elements. If they still don't fit we make things scrollable.
+    This avoids ellipsizing elements which makes them hard to read.
+  * completion-bar: Reindent ui.  No other changes
+  * data: Move schema flags to canonical domain
+  * emoji-db: New class to hold emojis
+  * osk-stub: Instantiate emoji db.
+    This ensures a clear life cycle of the singleton.
+  * emoji-picker: Use our emoji singleton.
+    No need to track the data in two places.
+  * presage: Init resource in tests.
+    Will be needed in follow up commits when we lookup emojis
+  * completion: Add flags for additional sources
+  * completer-base: New base class for completer.
+    These can be used to handle common properties. The base
+    class is currently "opt-in" (not a requirement of the
+    `PosCompleter` interface) but that might change in the future.
+  * presage: Check for emojis too by using PosCompleterBase
+  * hunspell: Check for emojis too by using PosCompleterBase
+  * doc: Document additional completion sources
+  * emoji-db: Drop unused property.
+    Fixes 39d130241 ("emoji-db: New class to hold emojis")
+  * completion-bar: Move completion box to separate widget.
+    This will allow us to better deal with size allocations
+  * pos-completer-box: Better use available space.
+    Make list homogeneous when we have enough space, otherwise
+    distribute the available space.
+
+  [ iramosu ]
+  * po: Add Arabic translation
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 08 May 2025 09:03:01 +0200
+
+phosh-osk-stub (0.46.0) experimental; urgency=medium
+
+  * Update metainfo
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 29 Mar 2025 14:57:24 +0100
+
+phosh-osk-stub (0.46~rc1) experimental; urgency=medium
+
+  * build: Update dotfiles from meta-phosh
+  * treewide: Format meson files
+  * ci: Update shared scripts to 0ed15ed
+  * ci: Check meson format
+  * char-popup: Simplify with gtk-builder-tool
+  * char-popup: Drop properties at their defaults for derived widgets
+  * completion-bar: Simplify with gtk-builder-tool
+  * completion-bar: Drop properties at their defaults for derived widgets
+  * emoji-picker: Simplify with gtk-builder-tool
+  * input-surface: Simplify with gtk-builder-tool
+  * input-surface: Simplify and drop properties at their defaults.
+    Do this for derived and Hdy widgets
+  * keypad-button: Simplify with gtk-builder-tool
+  * keypad: Simplify with gtk-builder-tool
+  * keypad: Simplify and drop properties at their defaults.
+    Do this for derived and Hdy widgets
+  * shortcuts-bar: Simplify with gtk-builder-tool
+  * shortcuts-bar: Simplify and drop properties at their defaults.
+    Do this for derived and Hdy widgets
+  * osk-widget: The variant can be NULL
+  * osk-key: Document some more methods
+  * osk-key: Add getter for `icon`
+    Will be useful in the tests
+  * tests: Simplify creating tests.
+    No need to define them individually
+  * osk-widget: Simplify logic flow a bit.
+    Don't set the new layer when it didn't change. This happened in
+    pos_osk_widget_set_layer anyway but this way it is more obvious.
+  * tests: Test layer switching.
+    Test the layer switching state machine so we don't accidentally break
+    things when making changes.
+  * osk-widget: Make it easier to switch to symbols2 layer.
+    So far one needed to press symbols -> shift. Allow shift -> symbols to
+    trigger that layer as well.
+    Also pressing the symbols key when caps lock is on triggers symbols2
+    and turns off caps lock (as all layer changes do so)
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/43
+  * osk-widget: Improve key symbols.
+    Hint which symbol layer will be activated
+    Helps: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/40
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 22 Mar 2025 09:37:21 +0100
+
+phosh-osk-stub (0.45.0) experimental; urgency=medium
+
+  * Fix typo in man page
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 13 Feb 2025 11:38:19 +0100
+
+phosh-osk-stub (0.45~rc1) experimental; urgency=medium
+
+  [ Boris Shtrasman ]
+  * layout: Make IL layout to be as close as possible to SI-1452-2.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/53
+
+  [ Guido Günther ]
+  * osk-stub: Add minimal GObject.
+    This will allow us to remove the static variables in there and hence
+    make the surface creation easier to track.
+  * osk-stub: Move session registration into PhoshOskStub
+  * osk-stub: Register icon path in PhoshOskStub
+  * osk-stub: Make main loop private to PhoshOskStub
+  * osk-stub: Move Wayland protocols into PhoshOskStub.
+    Reduces the amount of parameters we need to pass around
+  * osk-stub: Move input surface into PhoshOskStub
+  * osk-stub: Remove unused argument from respond_to_end_session
+  * osk-stub: Move osk_dbus into PhoshOskStub.
+    We can clean this up further by passing the necessary flags to
+    PhoshOskStub and then doing the PosOskDBus setup in `constructed`.  but
+    that's enough to get all the globals into the object's scope for now
+    (hence avoiding the mixture of global and non-global vars that became
+    odd to track).
+  * osk-stub: Move wl_display and registry into PhoshOskStub
+  * osk-stub: Pass self around instead of input-surface.
+    Gives us access to the other members
+  * osk-stub: Move hw-tracker and device-state into object.
+    Moves the remaining globals into the object
+  * osk-widget: Long press on shift toggles caps lock.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/31
+  * dir-locals: Set fill indicator column
+  * emoji: Update emoji data.
+    Taken from GTK commit
+      a97513bd8d ("emoji: Update data to CLDR v46")
+    Contains Unicode 16 changes
+
+ -- Guido Günther <agx@sigxcpu.org>  Sun, 09 Feb 2025 09:53:39 +0100
+
+phosh-osk-stub (0.44.0) experimental; urgency=medium
+
+  * metainfo: Make metainfo match app-id.
+  * docs: Add "Getting in touch"
+  * packaging: Fix hunspell package name.  Should be all lowercase
+  * treewide: Remove "experimental" We consider it stable nowadays
+  * screenshots: Update. We had several style changes in phosh and p-o-s
+    since we added the initial screenshots.
+
+ -- Guido Günther <agx@sigxcpu.org>  Sun, 29 Dec 2024 14:21:18 +0100
+
+phosh-osk-stub (0.44~rc1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * metainfo: Make metainfo match app-id
+  * keypad: Add new widget for keypads.
+    This is somewhat based on what we have in libcall-ui
+  * input-surface: Use keypad for pin, digit and phone number inputs
+  * pos-keypad: Fix several doc strings.
+    The function arguments were superfluous or incorrectly named.
+  * packaging: Update alternative name too.
+    Fixes 6316a3d06 ("metainfo: Make metainfo match app-id")
+
+  [ Danial Behzadi ]
+  * po: Add Persian translation
+  * layout: Make Persian layout close to ISIRI 9147
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 20 Dec 2024 14:25:15 +0100
+
+phosh-osk-stub (0.43.0) experimental; urgency=medium
+
+  * metainfo: Don't mark release notes as translatable. No need to put
+    translator effort into these
+  * po: Remove generated pot file.
+  * po: Fix path to completer files.
+    We use a .desktop extension so they get picked up by
+    gettext properly.
+  * po: Mark pos-input-surface as translatable
+  * ci: Check po. Make sure we don't forget any translatable files again
+  * docs: Cleanup markdown
+  * ci: Lint markdown
+  * main: Set text domain so translations get picked up
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 14 Nov 2024 13:23:59 +0100
+
+phosh-osk-stub (0.43~rc1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * css: Drop superfluous semicolon
+  * debug-widget: Drop ui. Fixes bdaf2f8ab ("debug-widget: Drop it")
+  * presage: Always set predictors.
+    This ensures we don't have unwanted predictors like the abbreviation
+    predictor in there that currently doesn't work as intended as it adds
+    unwanted tab characters.
+  * packaging: No need to link abbreviations. We're not using them anymore
+  * build: Drop icon theme update. We don't install icons
+  * dbus: Update OSK0 protocol from phosh. Let's use the canonical version
+  * build: Install completer descriptions.
+    We only install descriptions of completers found at build time.
+  * packaging: Install completer data
+  * doc: Document swipeGuess use
+  * ci: Update shared scripts to 5e3667e
+  * ci: Use common style check
+  * ci: Update ci-fairy check
+  * ci: Use update image.
+    Update to Debian Trixie as of 2024-10-21
+  * shortcuts-bar: Use correct return type. We return a pointer so use `NULL`.
+  * input-surface: Drop unused clipboard-copy
+  * shortcuts-bar: Allow to add `<ctrl>` and `<alt>`
+    They're tracked as toggle buttons that latch until the next character
+    is entered.
+  * vk-driver: Helper to convert between modifier flags. We want to
+    convert from Gdk to our internal ones.
+  * input-surface: Track latched modifiers.
+    Currently then can only come form the shortcuts bar (thus affect the
+    terminal layout).
+  * schema: Add alt and ctrl to shortcuts bar
+  * doc: Document latched modifiers in the shortcuts bar
+  * css: Use current adwait's background color.
+    Makes the OSK look more integrated
+  * treewide: Move resources to mobi.phosh
+  * build: Depend on recent schema. Needed for accent colors
+  * style-manager: Add class from phosh. Copy from phosh's
+      64035d6f5 ("Merge branch 'for-upstream/phosh/accent-colours' into 'main'")
+  * style-manager: Adjust gresource path and prefix
+  * css: Override GTK defaults for menu buttons.
+    This gives us proper styling with accent colors
+  * input-method: Use style manager.
+    This gives us accent color support and frees PosInputSurface
+    from style handling.
+  * emoji-picker: Place section at the right edge in RTL locales.
+    Helps: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/44
+  * emoji-picker: Select correct section in RTL locales.
+    When scrolling in RTL locales we bring in the new section from the
+    right. Take that into account when highlighting the currently active
+    section.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/44
+  * osk-widget: Move key press logic to separate function.
+    We'll use that for touch event handling
+  * osk-widget: Make key_release_action symmetric to key_press_action
+    key_press_actions sets `self->current` so `self->current` should
+    be unset in `key_release_action`.
+  * osk-widget: Handle touch events.
+    This allows us to process overlapping key presses by looking at the
+    individual touch events rather than handling them as button presses.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/41
+  * input-surface: Don't submit empty preedit.
+    This needlessly clears selected text and is similar
+    to https://gitlab.gnome.org/World/Phosh/phoc/-/merge_requests/592
+    Fixes f8edcb646 ("input-surface: Submit preedit on layout changes to emoji or terminal")
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/49
+
+  [ Julian ]
+  * shortcuts-bar: Add shortcut for Menu
+
+  [ MoonlightWave-12 ]
+  * layouts/terminal: Fix indentation
+  * layouts/terminal: Add `,`-button to the upper-case-view
+    to reduce unnecessary layout-changes,
+    when switching the view with the Shift-button.
+    The `,`-button is already there in the lower-case-view.
+  * layouts/terminal: Move `/` to the popover of the `,`-button
+    where `|` is available, so that similar symbols are in the same popover.
+  * layouts/terminal: Add `\` to the popover of the `,`-button
+    where `/` is available, so that similar symbols are in the same popover.
+  * layouts/terminal: Add `&` to the popover of the `,`-button
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 09 Nov 2024 08:18:21 +0100
+
+phosh-osk-stub (0.42.0) experimental; urgency=medium
+
+  * layout-info: Ensure stable sorting.
+    This makes sure we stay reproducible
+  * input-surface: Better check for completion mode.
+    When the IM signals surrounding text changes we want to perform the same
+    checks as on preedit changes (`on_completer_preedit_changed`) or
+    completion updates (`on_completer_update`). Otherwise we end up picking
+    up preedit again due to:
+    Long press for cursor mode
+     -> on_osk_mode_changed()
+       -> submit preedit via pos_input_surface_submit_current_preedit()
+       … due to that commit we receive new surrounding text from the compositor
+        -> pos_completer_presage_set_surrounding_text
+          -> we update preedit again
+    This fixes the long standing issue where entering cursor mode would
+    double the preedit when using the presage completer (hunspell and others
+    are not affected as they don't care about changed surrounding text).
+  * presage: Don't try to grab last word.
+    We only want that for "edit" mode (when deleting backwards into a word)
+    but trigger it in many other situations triggering lost or duplicated
+    text.
+    This should allow us to use presage completion in a stable way rather
+    than keeping it experimental forever.
+  * input-surface: Submit preedit on layout changes to emoji or terminal.
+    Otherwise funky things happen
+  * data: Validate schemas
+  * data: Enable opportunistic completion by default.
+    With the recent compositor and OSK fixes it should be stable enough to
+    at least enable in those cases where the application recommends to use
+    completion (e.g. gnome-text-editor or chatty).
+
+  [ Teemu Ikonen ]
+  * input-surface: Reduce MIN_Y_VELOCITY on swipe to hide
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 28 Sep 2024 11:38:38 +0200
+
+phosh-osk-stub (0.42~rc1) experimental; urgency=medium
+
+  * input-surface: Close popover when spawning settings.
+    This avoids flicker when the OSK folds
+  * build: Ack libfeedback's unstable API just once.
+    No need to do it in multiple places
+  * completer: Add vfunc to learn accepted words.
+    Implementation by completers is optional
+  * varnam: Learn accepted words.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/26
+  * build: Install layout information.
+    This allows other tools to figure out which layouts
+    we support.
+  * logind-session: Clear manager location.
+    Otherwise we trigger a use after free if the manager gets
+    unref'ed and we want a new one.
+  * input-surface: Drop explicit-notify from construct-only properties.
+    It makes no sense as they're only set once so we can let glib
+    handle it.
+  * completer-manager: Fix outdated doc string.
+    We never added `set_from_info`
+  * build: Make doc warnings fatal.
+    Make sure we spot broken links early
+  * build: Add gmobile dependency
+  * treewide: Bump glib dependency to 2.80.
+    Fix the deprecations. We can just remove the function triggering the
+    deprecation warning from phosh's utils as it's unused.
+  * vk-driver: Allow to pass additional modifiers.
+    This allows us to submit complex key combos for virtual keyboards
+  * vk-driver: Drop now unused copy/paste symbols
+  * clipboard-manager: New object to handle clipboard interaction.
+    We use wlr-data-control-v1 to track the clipboard contents and store any
+    text offers we see.
+  * input-surface: Use clipboard manager.
+    This allows us to paste text via a paste button
+  * completion-bar: Add paste button
+  * input-surface: Add paste button to popover
+  * debug-surface: Drop paste button.
+    Now handled via popover
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 20 Sep 2024 17:19:53 +0200
+
+phosh-osk-stub (0.41.1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * osk-widget: Unswap enter and backspace.
+    Fixes: 627395651 ("osk-widget: Make number of rows dynamic")
+
+  [ undef ]
+  * readme: Fix meson compile command.
+  * input-surface: Don't hide keyboard on small downswipes.
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 20 Aug 2024 08:31:55 +0200
+
+phosh-osk-stub (0.41.0) experimental; urgency=medium
+
+  * data: Drop "stub" from user visible names.
+    Otherwise the name looks confusing in UI descriptions
+  * treewide: Document changes and release 0.41.0
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 12 Aug 2024 23:04:11 +0200
+
+phosh-osk-stub (0.41.0~rc1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * build: Bump minimum meson requirement.
+    Fixes the
+      * 0.60.0: {'dependency with more than one name'}
+    build warning
+  * build: Don't pass file() element to str.format()
+    Silences a build warning
+  * build: Add explicit gdk{-wayland} dependencies.
+    Instead of relying that `gtk3.0.pc` will do the right thing add an
+    explicit dependency as we use it's functions.
+  * osk-stub: Short circuit checks when force-show is true.
+    Short circuit all other visibility checks as otherwise e.g. a hardware
+    keyboard breaks showing the OSK.
+  * widget: Drop unused parameters in draw
+  * osk-widget: Make number of rows dynamic.
+    Don't hard code the maximum number of keyboard rows that can be parsed
+    but rather set an upper limit. Adjust the common keys placement based on
+    that.
+  * osk-widget: Bottom align layouts
+  * layouts: Add more layouts.
+    Fixes: 187aea18a ("layouts: Add more layouts")
+  * layouts/ir: Remove duplicate space (0x20) key.
+    Both use the same ASCII code.
+  * tools: Robustify layout screenshots.
+    Rewrite in Python, exit on criticals.
+  * ci: Screenshot layouts
+  * layouts: Make layout names match xkb names.
+    E.g. xkb is `gb`. Also add those to the resources.
+  * osk-stub: Mark globals as static.
+    We only use them from this module
+  * completer: Don't forget to pragma push.
+    We pop right afterwards
+  * logind-session: New class to handle logind interaction.
+    We currently use it to get the `LockedHint` to figure out if the user
+    session is locked.
+
+  [ Teemu Ikonen ]
+  * input-surface: Hide keyboard on swipe down
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 08 Aug 2024 10:39:36 +0200
+
+phosh-osk-stub (0.38.0) experimental; urgency=medium
+
+  * osk-stub: Make protocol static.
+    No need to have it visible in other compilation units
+  * protocols: Add device-state.
+    This will allow us to detect connected hw keyboards and disable the OSK.
+  * README: Document new features
+  * hw-tracker: Track connected keyboards and allow to prevent unfold.
+    Usually when a hardware keyboard is attached one doesn't want to show
+    the OSK as this takes up screen space.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/37
+  * hw-tracker: Add setting to ignore hw-keyboards.
+    This helps in situations where people want an OSK and a hardware
+    keyboard.
+  * osk-stub: Revalidate whether to show the OSK when attached hw changed.
+    This allows to show/hide the OSK immediately on hw changes (and not
+    delay that decision until the next activation).
+  * pos-input-surface: Delay initial key submission.
+    Wait until phosh is hopefully up.
+    Improves 353e39a86 ("input-surface: Make sure we have an input serial")
+  * input-surface: Set a style class.
+    This allows us to style the area outside of the osk widget
+  * osk-widget: Use a osk specific background color in all variants
+    @pos_bg_color was already used for the completion bar but undefined.
+    This fixes unreadable completion bar text in high contrast mode and
+    also gives us an easy way to change the default background color
+    for the osk-widget and input-surface.
+  * style: Introduce our own fg color.
+    We can use that wherever @theme_fg_color would be used. For all
+    themes we currently handle there's no visible change.
+  * input-surface: Use our theme bg color.
+    So far the surface defaulted to whatever the theme used. This allows
+    us to override it.
+  * completion-bar: Avoid button background.
+    We want it to be colored like the completion bar's background.
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 02 Apr 2024 13:29:34 +0200
+
+phosh-osk-stub (0.37.0) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * input-surface: Make sure we have an input serial.
+    This works around the lack of input serials on touch only systems. See
+    https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/5628
+  * emoji: Update emoji data to CLDR v43.
+    This corresponds to GTK commit
+      5a8a0814f7 ("emoji: Update data to CLDR v43")
+    Based on emojibase v15.2.0
+  * ci: Use plain trixie.
+    The gi-docgen issue is long fixed
+
+  [ Teemu Ikonen ]
+  * build: Define POS_HAVE_PRESAGE2 if presage version 2 is found.
+    Presage version 2 is maintained by the sailfish-keyboard project at
+    https://github.com/sailfish-keyboard/presage
+  * presage: Use the libmarisa trie predictor if POS_HAVE_PRESAGE2.
+    Set the required predictors in presage config if they are missing from
+    the user-supplied configuration.
+    The trie databases for some languages can be found at
+    https://github.com/sailfish-keyboard/presage-database
+    See presage 2 README on how to create a database with your own corpus:
+    https://github.com/sailfish-keyboard/presage/blob/master/README.md
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 04 Mar 2024 18:01:45 +0100
+
+phosh-osk-stub (0.36.0) experimental; urgency=medium
+
+  [ Anna “CyberTailor” ]
+  * build: Allow elogind to be used on systems without SystemD
+
+  [ Teemu Ikonen ]
+  * shortcutsbar: Add shorter labels for Page_Up and Page_Down.
+    Rename we_know_better_than_gtk() to pos_accelerator_get_label() and
+    refactor setting shortcut->name so that the name from there takes
+    precedence.
+  * presage: Capitalize completions according to preedit
+  * presage: Add tests for capitalize_by_template()
+  * completer: Don't assume the out value is inited to FALSE
+
+  [ Guido Günther ]
+  * hunspell: Fix indent.
+    Fix some harmless indent glitches. No functional change.
+    Gbp-dch: Ignore
+  * debug-widget: Drop it.
+    We've not used it since ages and overly long surrounding text can mess
+    up the keyboard widgets.
+  * completer: Special case Enter/Return.
+    Return/Enter is special as we want it to submit the preedit but can't
+    just append '\n' as lots of programs listen to the key event to toggle
+    actions.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/27
+  * completer: Add more characters to word separators
+  * completer: Improve documentation of pos_completer_add_preedit
+  * presage: Guard last word grabbing against preedit changes.
+    We only want to grab the last word when preedit isn't being updated.
+    Otherwise we might mix the preedit with the last word and Enter/Return
+    being ignored.
+  * input-surface: Don't crash on ibus layouts without a language.
+    E.g. `typing-booster` only has ('ibus', 'typing-booster').
+  * input-surface: Don't forget to cleanup vk-driver
+  * vk-driver: Don't forget to free virtual keyboard
+  * osk-widget: Don't forget to free symbols
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 02 Feb 2024 10:32:21 +0100
+
+phosh-osk-stub (0.35.0) experimental; urgency=medium
+
+  * varnam: Skip over identical words.
+    Govarnam often gives us the same word multiple times in a row. Skip over
+    these.
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 01 Jan 2024 15:18:58 +0100
+
+phosh-osk-stub (0.34.0) experimental; urgency=medium
+
+  * tests: Use memory gsettings backend.
+    This avoids test failures when running in a restricted environment
+  * ci: Switch to trixie
+  * ci: Make it simple to rebuild the image
+  * ci: Modernize by using meson where easily possible
+  * ci: Switch to trixie
+  * ci: Make sure docker image is current.
+    We pull gir-docgen from sid to work around an RC bug
+  * ci: Add uncrustify config and checker.
+    Based on what we added to phoc recently. We copy it in here so users
+    don't have to get any extra submodules or similar to run these locally.
+  * ci: Run style checks on merge requests.
+    We move ci-fairy to the new stage too as it checks commit message style.
+  * doc: Be a bit more specific which entry to select
+  * input-surface: Add callback to finish animation.
+    When we blank and the screen lock kicks in the GTK's frame clock stops
+    ticking. Finish the animation in that case.
+    This will become superfluous when we switch to compositor driven
+    animations via the draggable layer surface.
+  * input-surface: Make it simple to check for language layouts.
+    This makes it simple to distinguish "language" layouts from
+    "special" layouts like emoji or terminal.
+  * input-surface: Make it simple to check for terminal layouts.
+    This makes it simple to distinguish the terminal layout from
+    language or other layouts.
+  * input-surface: Ignore "special" layouts when remembering last layout.
+    This allows us to switch back to the last language layout. The only
+    special layout is currently the terminal layout but there will be more
+    like PIN.
+    Helps: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/14
+  * data: Add some terminal keyboard shortcuts.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/10
+  * schema: Ignore OSK activation for gnome-calculator.
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 01 Dec 2023 12:41:00 +0100
+
+phosh-osk-stub (0.33.0) experimental; urgency=medium
+
+  * vk-driver: Make the two loops more alike.  No need to use different loop
+    variables
+  * vk-driver: Make pos_vk_driver_set_overlay_keymap match regular keymap code.
+    Use the same pattern in the loop.
+  * vk-driver: Don't leak layout-id
+  * input-surface: Restore keymap with slight delay.
+    When closing the popup apply a slight delay before restoring the keymap
+    as otherwise the symbol sent to the popup might get applied to the new
+    keymap set (rather than the one set for the popup).
+    The virtual-keyboard requests are sent from pos in the right ordering
+    and the compositor gets them correctly too so it fails within the X11
+    bits.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/22
+  * input-surface: Handle emojis when no input method is in use.
+    As this doesn't happen often we just built a keymap for that one symbol.
+    This works for e.g. chromium under XWayland but fails for e.g. chromium
+    in Wayland mode as it cuts of the topmost byte.
+  * input-surface: Handle tone modifiers and combining characters.
+    This allows tone modifiers in the emoji popover to work. As with
+    the previous commit this works in e.g. chromium's search bar when
+    running using XWayland.
+  * vk-driver: Don't crash when gdk keysm conversion fails
+    gdk_wayland_keymap_get_entries_for_keyval is supposed to return FALSE
+    when conversion fails but currently doesn't. See
+      https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/6492
+    so check n_keys as well.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/24
+  * shortcuts-bar: Allow for more keys as shortcuts.
+    GTK needs to be pretty strict regarding accelerators but we can allow
+    for more keys like arrow keys.
+  * input-surface: Indicate that we handle xkb layouts
+  * completer-manager: Keep a hash table of inited completers.
+    And allow to get them
+  * completers/presage: Drop unused variable
+  * completers/varnam: Use member variable
+  * completers/varnam: Don't leak completions
+  * input-surface: Move layout init to constructed.
+    We'll init completers there soon and those aren't yet available
+    in init().
+  * completer: Allow empty region
+  * completer: Allow to get a display name.
+    The display name can be supplied by the completion engine
+  * completion-manager: Add completer info.
+    The completion info can be used by other parts of the stack to fetch a
+    completer with a given configuration.
+  * input-surface: Build layout name in one place.
+    We allow to prepend the engine name which we'll need for completion
+    engines. We also avoid guessing information from the name, use the
+    primary values instead.
+  * input-surface: Don't skip non xkb layouts.
+    Instead use the information to init a completer that is attached to that
+    layout.
+  * completers/varnam: Allow to set language and get display name
+  * language popover: Use display name in menu
+  * input-surface: Check for errors loading the terminal layout
+  * input-surface: Enable completion when the layout requires it.
+    Layouts like the varnam driven Malayalam need a completion engine
+    so we need to have it on when the widget is used.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/16
+  * input-surface: Don't ignore errors when setting completion fallback
+  * docs: Explain govarnam setting
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 25 Oct 2023 18:46:00 +0200
+
+phosh-osk-stub (0.32.0) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * build: Bump meson to 0.58.0.
+    Avoids warning due to str.replace usage
+  * build: Avoid get_pkgconfig_variable.
+    Silences another meson warning
+  * vk-driver: Add 'delete'
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/11
+  * Add varnam based completer.
+    The config is currently hardcoded and uses 'ml' as language.
+  * input-surface: Fix comment.
+    It was lacking the one most important word
+  * virtual-keyboard: Push keymap selection upwards into the vk-driver.
+    This allows us to sync it with the keycodes sent.
+  * vk-driver: Only update keymap when it changed
+  * osk-widget: Add xkb keymap layout-id.
+    This allows us to keep keymaps in sync
+  * input-surface: Switch keymap when switching layout.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/15
+  * input-surface: Add doc string for keyboard-driver
+  * vk-driver: Allow AltGr as modifier
+  * vk-driver: Don't hardcode us keycodes.
+    Set them based on the keymap.
+  * vk-driver: Add German layout.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/12
+  * input-surface: Scale up to 1024px.
+    This makes for less empty space on wider displays
+  * README: Mention varnam.
+    We'll expand on that after switching to govarnam
+    and landing more bits.
+  * docs: Mention varnam based completer
+  * key: Include enums.
+    Helps clang
+  * vk-driver: Allow to set an overlay keymap.
+    This creates a temporary keymap with the provided symbols.
+  * osk-widget: Emit signal when character popover is shown or hidden
+  * input-surface: Proxy popover symbols to vk driver.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/18
+  * vk-driver: Don't listen for input source changes.
+    Continuing from f5bb966b4b6cd33ed7661198beca8ea80359e13b where we pushed
+    listening to input-source changes from the virtual_keyboard to the
+    vk_driver we can now remove it there too and just invoke
+    pos_vk_driver_set_keymap().
+    This avoids listening for the same setting in two places and will also
+    allow us to pass more information from the osk in use.
+  * osk-widget: Allow to get symbols of the current layout
+  * vk-driver: Create keymaps on the fly.
+    The keymap is built on the fly avoiding keys that chromium thinks it can
+    interpret as evdev keycodes.
+    This way we can get more layouts to work in virtual keyboard mode like
+    Ukrainian.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/19
+  * vk-driver: Drop handcrafted de layout.
+    We only keep the us layout for the moment as this is useful for the
+    terminal layout.
+  * input-surface: Use "terminal" as layout_id for the Termian layout.
+    This is basically the only reason why we keep the built in keymap.
+  * vk-driver: Use the built-in keymap for the terminal layout.
+    Instead of hoping for the best when switching keymaps use the built-in
+    keymap for the terminal layout. This decouple us completely from the
+    system keymaps.
+    We can look into generating this one as well at a later point.
+  * vk-driver: Add last missing symbols
+    ℅, ®, ©, ¢, €, ¥, and ™ are on the terminal layout but weren't in the keymap.
+  * input-surface: Split keymap and completion language setting.
+    This makes the code easier to follow and we also don't fail
+    to set an initial keymap.
+  * doc: Mention virtual keyboard mode.
+    Mention the limitations and advantages of using it as input-method.
+  * input-method: Free the full im state.
+    Otherwise we leak the surrounding text
+  * completers/hunspell: Don't leak completions
+  * osk-key: Don't leak symbols
+  * vk-driver: Try harder to get an event code.
+    If it's not in the table use GDK's reverse mapping function.
+    Closes: https://gitlab.gnome.org/World/Phosh/stevia/-/issues/21
+  * vk-driver: Minimize GDK mapping table.
+    We keep the regular letters to not e.g. swap Z and Y when the German
+    layout is active.
+
+  [ Kai Lüke ]
+  * layouts: Prefer capital eszett over double S as German capitalization.
+    The ezsett character didn't have a capitalization in fonts for long
+    time and thus double S was used instead. Since some years a proper
+    unicode capitalization is available and can be used instead (see
+    https://en.wikipedia.org/wiki/%C3%9F#Development_of_a_capital_form).
+    Prefer the new capital eszett but still offer the double S as second
+    alternative.
+
+  [ Subin Siby ]
+  * Use govarnam instead of deprecated libvarnam
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 27 Sep 2023 10:02:51 +0200
+
+phosh-osk-stub (0.31.0) experimental; urgency=medium
+
+  * vk-driver: Add menu key.
+    This allows to add the menu key to the keyboard shortcuts
+
+ -- Guido Günther <agx@sigxcpu.org>  Sun, 03 Sep 2023 10:49:22 +0200
+
+phosh-osk-stub (0.30.0) experimental; urgency=medium
+
+  * docs: Mention org.gnome.desktop.interface gtk-im-module
+  * Allow to keep the OSK folded when some apps are active
+  * doc: Document ignore-activation gsetting
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 01 Aug 2023 20:41:00 +0200
+
+phosh-osk-stub (0.28.0) experimental; urgency=medium
+
+  [ Undef ]
+  * layouts/terminal: Add escape to capital layer.
+    Not having this key means that every key in the middle row moves slightly
+    right on pressing shift, leading to occasional typos on the terminal
+    keyboard.
+
+  [ Guido Günther ]
+  * manpage: Minor consistency tweak
+  * osk-stub: Document all debug flags
+  * osk-stub: Remove unused variable
+  * osk-widget: Move actual key actions into separate functions
+  * osk-widget: Add 'delete' key use.
+    Adding more use-types will allow us to do less string parsing in the
+    future and to specify the key-use in the layouts already. This will also
+    be useful for more complex layout switchings e.g. for uim.
+  * osk-widget: Limit key repeat to delete.
+    It doesn't work for keys with popovers anyway, it's not needed for space
+    as we move the cursor with that so backspace (and maybe <return>) remain
+    the only sensible users.
+  * osk-widget: Allow to drag fingers between keys.
+    The default is to cancel the keypress when the finger leaves the area of
+    one key and enters the area of another. Add a new mode that marks the
+    old key as released and the new key as pressed instead.
+    For that introduce features flags.
+  * input-surface: Add common features for all layouts.
+    There's some features we want to configure for all layouts.
+    Allow to set them via a property on the input-surface and
+    bind it to a gsetting.
+  * metainfo: Switch to inputmethod.
+    It's not a desktop application but rather a wayland input method
+    and virtual keyboard.
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 31 May 2023 17:50:40 +0200
+
+phosh-osk-stub (0.27.0) experimental; urgency=medium
+
+  * Update doap file.
+    Fix some copy and paste errors when bringing that one in from
+    phosh.
+  * Add appstream metainfo
+  * tools: Properly pick up default phoc.ini
+  * tools: Use headless backend for screenshots.
+    No need to bring up a window on the host and this way it's
+    simpler in CI.
+  * build: Detect available completers.
+    The check for fzf is actually a runtime check but use it as this is
+    solely for testing we assume build-time env == runtime env.
+    We don't break any existing configurations since switching completers
+    needed code changes anyway.
+  * Add completer-manager.
+    This class is responsible for mapping completion engines to keyboard
+    layouts / locales.
+    It keeps the input-surface clear from any knowledge about which
+    completers are available.
+    This introduces the minimal object which just returns the presage
+    completer. The next commits will then add more completers.
+  * input-surface: Hook up completer-manager.
+    This already allows to switch the default completer via an environment
+    variable.
+  * completers/fzf: Drop commented out code
+  * completers/fzf: Take an error location and use initable.
+    This makes completers consistent. We use that as an opportunity to check
+    if the word list is present.
+  * completer-manager: Allow to select completer via POS_TEST_COMPLETER.
+    This moves the default completer from compile time to program startup
+    time.
+  * Use a common dependency for all completers.
+    This way we can keep the knowledge about available completers in
+    completers/ (and PosCompleterManager).
+  * shortcutsbar: Make css actually apply
+  * css: Add section markers
+  * doc: Fix POS_TEST_COMPLETER docs.
+    The value descriptions ended up in the wrong place.
+  * completers: Add unix pipe like completer.
+    The completer gets the current preedit on stdin and can output a list of
+    completions. We default to `cat` which just offers the current preedit
+    as completion.
+  * input-surface: Don't leak completions pos_completer_get_completions is
+    "transfer: full"
+  * completion-bar: Use a bold font for suggestions.  Makes them a bit more
+    prominent
+  * pipe: Only force kill command if still running
+  * build: Move presage definitions to completers
+  * completers: Make name a r/o property and set it
+  * completer-manager: Allow to set default completer via GSetting.  Keep
+    presage as the default.
+  * osk-widget: Set language and region.  This corresponds the parts of a unix
+    locale like <lang>_<region> although we use all lowercase.
+  * completer: Split language and region.  This avoids leaking implementation
+    details of the layouts into the completer.
+  * input-surface: No need to switch language when switching to terminal
+  * ci: Switch to image with libhunspell-dev
+  * packaging: Enable hunspell completer.
+    It's easier to set up than presage and pretty useful in en-us at least.
+  * completers: Add simple hunspell completer.
+  * Allow to use either hunspell or presage.
+    We prefer hunspell atm. Later on we want presage and hunspell active
+    at the same time.
+  * doc: Update manpage.
+    Document gsettings, mark completion in general as no longer
+    experimental.
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 26 Apr 2023 11:34:01 +0200
+
+phosh-osk-stub (0.25.0) experimental; urgency=medium
+
+  * shortcuts-bar: Don't change background on hover
+  * shortcuts-bar: Allow shortcuts to have different width.
+    Ctrl+Shift+a takes considerably more space than e.g. Ctrl-a
+    and as we want as many shortcuts in reach as possible allow
+    for different sizes.
+    Use slightly larger padding to make things not look too crammed.
+  * shortcuts-bar: Make scrollbar consistent with emoji picker scrollbar
+  * input-surface: Disable layout switching via swipe gesture by default.
+    It's confusing to users and we have a popover now and copy/paste buttons
+    can be added to the terminal shortcuts bar.
+  * osk-stub: Allow to enable debug surface.
+    We simply do this by allowing swipes.
+  * doc: Link to GTK docs for valid accelerator values
+  * news: Fix wording
+  * input-surface: Set the terminal layout early.
+    Just so we have layout setting closer together
+  * input-surface: Mark Terminal display name as translatable
+  * build: Drop config.h template.
+    Extra effort to keep it in sync when adding
+    new configuration data.
+  * layouts/terminal: Make special shell characters easier to reach.
+    The often needed ones should now be reachable via the first symbol level
+    or a popover on the default level.
+  * input-surface: Make sure we select the test layout.
+    We want it visible right away.
+  * Add helper to screenshot all language layouts.
+    We screenshot at the 360x720, this can be changed by giving another
+    phoc.ini
+    Somewhat based on phosh's (long retired) smoketest:
+  * packaging: Recommend fonts-noto-core.
+    Otherwise we lack characters like the tab key
+  * osk-key: Add expand property.
+    This allows a key to take up extra horizontal space in a row.
+  * osk-key: Allow to modify key width.
+    So far it was construct-only but we want to fix it up later on.
+  * osk-widget: Break overly long line
+  * osk-widget: Allow space bar to take extra horizontal space.
+    Instead of hardcoding a few values based on the number of keys rather
+    expand to the maximum width.
+    This avoids that the keys to switch layers jump around a lot based on
+    the with of the space key. It's still not perfect in layouts that use
+    11 keys in the `normal` layer but 10 keys in the `symbols` layer (e.g.
+    Swedish).
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 27 Feb 2023 09:30:12 +0100
+
+phosh-osk-stub (0.24.0) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * build: Drop trailing character
+  * packaging: Move desktop file to private dir.
+    This avoids listing it twice e.g. in mobile-setting's feedback
+    pane.
+  * osk-widget: Use layer sensitive label on symbol-layer key.
+    Use "123" when not on the symbols layer, otherwise "ABC". This
+    will make it consistent to what we use in the emoji widget.
+  * input-surface: Add helper to submit current preedit.
+    This is needed in several places e.g. when switching modes.
+  * Add emoji data.
+    Taken from GTK as of commit
+    1a4e368c7e5995b342db0be74f56c1eced74a0e6
+  * Add emoji-picker.
+    This is based on GTK's emoji picker. Besides
+    smaller fixes and dropping unneeded bits:
+    - switch to horizontal scrolling
+    - wrap section in a scrolled window
+    - add back and delete buttons
+  * input-surface: Wire up emoji picker
+  * input-surface: Submit preedit before inserting emoji.
+    In completion mode we don't want to complete on emojies
+    but rather submit the current text and append the emoji.
+  * oskw-widget: Allow for empty rows.
+    This avoids a crash in e.g. the arabic layout which lacks
+  * osk-widget: Improve warning.
+    Print out the "missing" layer name
+  * Update Layer surface from phosh.
+    This syncs up to
+    811c55204d2be4f4714d66fe3863bdc8d7552bed
+    to fix the potential problems like
+    https://gitlab.gnome.org/World/Phosh/squeekboard/-/issues/285
+  * osk-widget: Add a hint that there's a popover.
+    We display the first symbol in a slightly dimed color.
+  * vk-driver: Unreak <alt> in shortcuts in the terminal's shortcut bar
+  * input-surface: Don't try to adjust completion without an input method
+  * input-surface: Switch widget and layer according to input purpose.
+  * input-surface: Make sure to update language after setting completer.
+    Otherwise we might be completing for the wrong language
+  * manpage: Mention phosh manpage
+  * build: Use summary()
+  * main: Use g_init_once()
+  * input-surface: Initialize resources.  This avoids lots of scary warnings
+    when building the documentation.
+  * README: Update screenshots
+  * ci: Run tests in xvfb. We test widgets now
+  * build: Allow to disable building the tests
+  * tests: Use environment() to set test environment.
+    A bit easier to read as we have key / value pairs.
+  * layouts: Add more layouts.
+    Again taken from gnome-shell as of
+    The keyboard layouts were taken from gnome-shell as of
+    6a88c0f0be5aed836f33ed2989d33add58c01403
+  * osk-widget: Don't hardcode max layers in several locations.
+    Get the array size from the enum.
+  * osk-widget: Take layer name into account when parsing layers
+    ara and il have only three layers and we want to match to the correct
+    ones as otherwise we'll have symbols on the caps layer.
+  * input-layer: Don't assume we have all layers.
+    Otherwise we can't switch to symbols2.
+  * osk-widget: Allow for empty layers on cleanup
+    g_ptr_array_free() doesn't handle NULL well so guard against that.
+  * osk-widget: Don't add a shift key if there's no caps layer.
+    This is true in e.g. arabic and hebrew layouts.
+  * tests: Load all layout into an osk-widget.
+    This makes sure all osk-widgets can be instantiated.
+
+  [ Sam Hewitt ]
+  * emoji-picker: Improve styling
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 23 Jan 2023 19:08:20 +0100
+
+phosh-osk-stub (0.23.0~rc2) experimental; urgency=medium
+
+  * input-method: Use g_warning when we can't become the input method.
+    This makes it easier to debug why the keyboard might not pop up.
+  * d/control: Add breaks on older gtk3.
+    We need a very recent version for completion to work due to Carlos fixes
+    around 92813e52cde864139f3b740992e8c267a7a6bd1d.
+  * input-surface: Adjust size based on size request.
+    This makes us resize based on the presence of the completion bar
+    and will later help resizing when we have fewer rows.
+  * Add completer interface.
+    Completers will implement this so we can have
+    different completers.
+  * Add completion bar widget.
+    This holds the completions. We currently hardcode the minimal height.
+  * input-surface: Allow to set completer.
+    This allows to set a completer that gets fed via the input-method (when
+    active). Possible completions are displayed above the osk widgets.
+  * completers: Add presage based completer.
+    It doesn't override the presage config atm so config e.g. language via
+    ~/.presage/presage.xml
+  * completers: Add a fzf based example completer.
+    This completer uses `fzf` and the systems wordlist to complete the
+    current preedit. The worldlist location is fixed. On Debian the default
+    word list can be changed via
+      select-default-wordlist
+    The main purpose is to demo a simple completer.
+  * osk-stub: Instantiate presage based completer
+  * input-surface: Allow to turn completion on/off.
+    We default to off and let the user turn it on when needed
+    for the moment. This ensures we can easily recover in case
+    of problems.
+  * input-surface: Submit preedit on cursor moves.
+    This allows e.g. for in word editing
+  * completer: Add error quark.
+    This allows to return more detailed errors.
+  * completer-presage: Switch completion language.
+    Switch language when OSK layout changes. We currently only use the
+    "language" bits and don't use different corpi for e.g. de_DE, de_AT or
+    de_CH. We'll change that once the first copi for situations like this
+    show up.
+  * osk-stub: Allow to force completion on.
+    Helps for development
+  * input-surface: Allow to toggle completion via menu.
+    We do so by using a GPropertyAction that binds the `win.word-completion`
+    action to the `completion-enabled` property.
+    Since GPropertyAction holds a ref on the object (PosInputSurface) we
+    need to connect to the `destroy` signal in order to break the reference
+    cycle when calling `gtk_wiget_destroy` on PosInputSurface. Otherwise the
+    input surface would never get disposed since the action_map holds a
+    reference on the GPropertyAction which in turn holds a reference on the
+    input surface.
+    Since we don't want to have `destroy` and `dispose` we move the cleanup
+    of the hash map there too.
+    With GTK4 we can move to `gtk_widget_class_install_property_action` to
+    get rid of this.
+  * build: Use separate path for completion data.
+    This will allow to share it more easily between OSKs
+    without tripping up other completers.
+  * d/control: Recommend phosh-osk-data-eu.
+    Since we have the presage completer enabled (not the fzf one) recommend
+    data useful for that.
+  * README: Document completion requirements
+  * input-method: Reset hint on activate.
+    Needs to happen according to protocol. This fixes the problem where
+    opportunistic completion stays active when switching apps although.
+  * build: Add run script.
+    This keeps it simple to run phosh-osk-stub, even when the schema
+    isn't installed.
+  * Add enums and schema for completion mode
+  * input-surface: Opportunistically enable completion.
+    When the input-method hints us to enable completion do so, otherwise
+    turn it off but respect the users prefs.
+  * debian: Install schema files
+  * input-surface: Disable completion button when completion mode is 'none'
+  * README: Document gsetting and feature
+  * README: Update how to start osk-stub.
+    As we have custom schema now we wrap it in the run script as
+    otherwise osk-stub won't start.
+  * build: Use gnome.post_install()
+    Makes it a bit nicer to install to /usr/share/local/
+  * input-surface: Remove unused variable
+  * input-surface: Move feedbackd notification to separate function
+  * input-surface: Emit feedback on all gtk button presses.
+    Otherwise we e.g. don't have feedback when selecting entries
+    in the menu or when picking a word completion
+  * build: Allow to avoid sm.puri.OSK0.desktop.
+    For testing it's convenient to just use phosh's expected filename for
+    the OSK. For distros it causes file conflicts
+    so allow to use a osk-stub specific desktop filename.
+  * input-surface: Don't allow to enable completion without completer.
+    Hide "Enable word completion" button if the completer failed to
+    initialize (e.g. because there' no dictionary).
+  * completion-bar: Highlight button on press
+  * vk-driver: Fix doc string
+  * osk-widget: Don't forget to untoggle space in cursor mode.
+    When using long press on space to move the cursor make sure we
+    reset space to normal state afterwards.
+  * input-surface: Remove superfluous return
+  * input-surface: Reindent.
+    Now that most bits landed, reindent the ui file.
+  * virtual-keyboard: Update modifier settings.
+    Based on looking what wl_keyboard sends
+  * vk-driver: Remove spurious empty line
+  * Add a manpage.
+    This allows us to have documentation on the system and keeps the
+    README size under control
+  * debian: Install manpage
+  * vk-driver: Allow to submit button presses based on GDK keycodes.
+    We can even drop the kernel input-code based bits based on that
+    later on.
+  * Add a shortcuts-bar widget.
+    It reads the shortcuts from gsettings and emits signals when pressed.
+    Using GTKs accelerators for that has the upside that we can also easily
+    add widgets to configure shortcuts to a settings app.
+  * input-surface: Wire up shortcuts bar
+  * docs: Mention shortcuts configuration
+  * README: Update meson invocation
+    `meson setup` is preferred nowadays and while at that ignore the doc
+    built to reduce required dependencies and speed up the build even more.
+  * osk-widget: Fix typo
+  * input-surface: Indentation fixes
+  * data: Disable completion by default.
+    Fixes: bb4703adc495fe6b82d605df40dd7adaf8ca590b
+  * input-surface: Hide completion bar more aggressively.
+    We only want it with "regular" language layouts
+  * completion-bar: Use all horizontal space.
+    This makes completion easier to hit and ensures unchanging
+    suggestions stays in place.
+  * input-surface: Hide separator when completion option is invisible.
+    This avoids having the separator at the bottom of the popover when
+    completion isn't enabled at all.
+
+ -- Guido Günther <agx@sigxcpu.org>  Thu, 15 Dec 2022 15:59:21 +0100
+
+phosh-osk-stub (0.23.0~rc1) experimental; urgency=medium
+
+  * debian: Remove d/clean.  The files listed in there don't exist
+  * build: Error out on missing function declarations
+  * input-surface: Make pending labels match submitted ones
+  * osk-stub: Make _proxy non-global
+  * osk-stub: Avoid idle callback on quit.
+    We already use g_unix_signal_add () so no need to schedule
+    this even later.
+  * osk-stub: Make loop non-global
+  * osk-stub: Always use main loop.
+    All invocations already have a running main loop so use that
+    instead of exit (0).
+  * osk-stub: Use automatic cleanup for GError.
+    Rename to `err` to consistency with other error locations in this file
+  * osk-stub: Use automatic cleanup for object_path
+  * osk-stub: Use automatic cleanup for GVariant
+  * osk-stub: Don't create osk_dbus multiple times.
+    We don't want a new object when the surface gets recreated
+  * osk-dbus: Fix indentation
+  * osk-dbus: Log failure when we failed to acquire the well known name
+  * osk-dbus: Allow to specify replacement policy.
+    So far we always allowed replacement and replaced always, we might
+    not always want to do this.
+  * osk-dbus: Track whether we have the sm.puri.OSK0 dbus name.
+    This allows other parts of the osk to react.
+  * osk-stub: Only maintain input surface when we own the DBus name.
+    This allows us to easily replace the running keyboard for development
+    purposes and makes sure we get back a working one when the replacement
+    goes away.
+  * data: Allow replacement by default.
+    This makes it simple to toy with other implementations without any other
+    modificatins.
+  * ci: Update build-deps.  This way we don't have to redo the image with
+    every new build dependency.
+  * ci: Drop Byzantium build.
+    It's too cumpersome to keep it up to date, we do that downstream.
+  * osk-widget: Parse style.
+    This allows us to set style classes.
+  * style: Add 'sys' key class.
+    This is for non-character keys that are not toggles (e.g. esc, tab)
+  * osk-widget: Make backspace 'sys' styled.
+    Easier to spot this way.
+  * terminal: Use sys class
+  * osk-stub: Don't race with wayland registry on startup.
+    If we acquire the DBus name before all wayland globals are registered
+    we'd hit an assert. Avoid this by just not creating the surface on
+    startup, it will happen once all wl globals are there.
+  * dir-locals: Fix JS indentation.
+    We indent with 2 spaces by default
+  * input-methods: Fix doc strings
+  * build: Only maintain glib version in a single place
+  * layouts: Add more layouts.
+    Again taken from gnome-shell as of
+    The keyboard layouts were taken from gnome-shell as of
+    6a88c0f0be5aed836f33ed2989d33add58c01403
+  * input-surface: Move adding a layout to an extra function
+  * input-surface: Honor POS_TEST_LAYOUT env var.
+    This allows to quickly test a layout via
+        POS_TEST_LAYOUT=nl POS_DEBUG=force-show _build/src/phosh-osk-stub --replace
+    without having to change anything else.
+  * input-surface: Emit a warning when we fail to lookup layout info
+  * Use less generic name for `config.h`
+  * char-popup: Use a grid.
+    With lots of chars the single row is hard to use
+  * char-popup: Use slightly larger font and more padding.
+    This should make the buttons easier to hit.
+  * build: Bump glib dependency to 2.66.
+    Just to catch up a bit
+  * input-surface: Move debug info to separate widget.
+    Move the surface that keeps the debug information (which was
+    phosh-osk-stub's initial purpose) into a separate widget. This makes
+    pos-input-surface focus more in input and also allows us to add new
+    things to the debug surface more easily without getting into conflict
+    with e.g. the completion code.
+    We keep the input-surface's callbacks needed for completion in place.
+  * input-surface: Don't leak old_keys
+    g_hash_table_get_keys_as_array is transfer: container
+  * osk-widget: Handle height requests.
+    This allows us to align properly within the input-surface as we're
+    no longer dependent on the size of the debug output's box size
+  * osk-widget: Make the current mode a property.
+    So we can listen for changes
+  * osk-widget: Parse locale from layout as well
+  * osk-widget: Simplify adding common keys.
+    Less code and will allow us to add multiple keys
+  * osk-widget: Fix indentation
+  * osk-widget: Clearly separate name and display name.
+    The name is a unique identifier like `de` or `us` (corresponding to the
+    basename of the layout file) while the display name is s.th. like
+    `German` or `English (US)`.
+  * osk-widget: Move get_popup_pos up
+    and drop unused parameters
+  * input-surface: Implement GActionMap and GActionGroup.
+    This allows us to add actions from other places.
+  * readme: Document --replace
+  * readme: Use meson consistently.
+    This makes it e.g. simpler to pick individual tests, etc.
+  * osk-widget: Add key for popover menu
+  * input-surface: Add popover menu.
+    This allows to select the current layout
+  * osk-widget: Center symbols.
+    This helps when e.g. the text on the space bar breaks over two lines.
+  * osk-widget: Drop '?" from symbol layer toggle.
+    This makes it fit a bit better.
+  * debug-widget: Use swapped-object-signal.
+    This makes sure we disconnect from the input-method when
+    when the input-surface goes away.
+  * input-surface: Use swapped-object-signal.
+    This makes sure we disconnect from the input-method when
+    when the input-surface goes away.
+  * input-method: Fix signal docs
+  * input-surface: Make sure we have a valid input-method
+  * debian: Use update-alternatives.
+    This allows for easy selection between squeekboard and phosh-osk-stub
+    while having both packages installed.
+    Note that the user can still override the OSK completely via
+    usr/share/applications/sm.puri.OSK0.desktop.
+  * d/control: Update description a bit.
+    We're not just a stub surface anymore
+  * Update README
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 29 Nov 2022 14:13:16 +0100
+
+phosh-osk-stub (0.22.0) experimental; urgency=medium
+
+  * virtual-keyboard: Set default keymap if there are no layouts.
+    When there are no layouts define set the default keymap. Failing to do
+    so would make us abort with a protocol error as we'd send keys but never
+    sent a keymap.
+  * Clarify 'force-show' debug setting handling.
+    Use it to override the GSetting rather than always showing the surface.
+    The later was broken and is less useful as we usually want to hide
+    the surface without text-input.
+    The current interpretation of the option allows us to e.g. to run
+    with GSETTINGS_BACKEND=memory easily.
+  * data: Remove unused icons
+  * build: Fix gettext package name
+  * gitignore: Ignore doc package.
+    Also drop nonexistent subprojects
+  * input-surface: Construct parent object first
+  * input-surface: Reduce row spacing on debug page.
+    This allows us to fit more information
+  * input-surface: Display surrounding text
+  * pos-input-method: Fix return argument.
+    Return NULL in case of API misuse
+  * input-method: Allow to buffer client state.
+    If we want to bother about preedit and surrounding-text we need to buffer
+    client state and only apply on explicit commit. Add the necessary helpers
+    to do that.
+  * input-surface: Use actions instead of signals.  This will ease the move to
+    a menu later on.
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 02 Nov 2022 18:37:44 +0100
+
+phosh-osk-stub (0.21.0) experimental; urgency=medium
+
+  * vk-driver: Handle CTRL modifier
+  * vk-driver: Handle KEY_{COPY,PASTE} as copy/paste keys
+  * input-surface: Add copy/paste buttons.
+    Let's see how this works out. E.g. it won't work in terminals.
+  * ci: Update Debian image
+  * osk-widget: Unblur icons.
+    I've had these in screenshots and that doesn't look nice.
+
+ -- Guido Günther <agx@sigxcpu.org>  Wed, 31 Aug 2022 11:39:55 +0200
+
+phosh-osk-stub (0.20.0) experimental; urgency=medium
+
+  * Release 0.20.0. No changes over 0.20.0~beta1.
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 08 Aug 2022 11:30:17 +0200
+
+phosh-osk-stub (0.20.0~beta1) experimental; urgency=medium
+
+  [ Guido Günther ]
+  * Sync version number with phosh. This makes sure older phosh-osk-stub
+    in the archive doesn't replace us.
+  * osk-stub: Use g_autoptr for GError
+  * Add input-method.
+    Move the wayland bits into a separate object
+  * Use input-method instead of open coding
+  * Move input-surface to lib.
+    This allows us to include it in the documentation and separates
+    things more from the binary
+  * osk-widget: Add key repeat
+  * gitlab-ci: Skip doc build when using PKG_ONLY
+  * osk-widget: Cancel current symbol in cursor mode.
+    Otherwise we emit a space character when space is released after cursor mode
+  * osk-widget: Ignore double click.
+  * build: Add generated sources to library dependency.
+    Otherwise generated files like the DBus headers might not be around
+    when compiling pos-osk-stub.c.
+  * pos-input-method: Fix typo
+  * pos-input-surface: Notify about screen-keyboard-enabled prop changes.
+    The property is G_PARAM_EXPLICIT_NOTIFY.
+  * pos-osk-widget: Fix doc string
+  * pos-input-surface: Drop (for now) unused prototype
+  * pos-input-surface: Add getter for 'surface-visible'
+  * pos-input-surface: Add getter for 'screen-keyboard-visible' property
+  * pos-input-surface: Handle screen-keyboard-enabled gsetting.
+    So far we only adjusted the debug surface string.
+  * pos-osk-widget: Split setting of layer to separate function.
+    This will allow to trigger it from other parts of the code
+  * pos-osk-widget: Rename get_layer to get_keyboard_layer.
+    This avoids confusion between the Layer enum and the KeyboardLayer
+    struct.
+  * pos-osk-widget: Rename get_level to get_layer.
+    This makes it match the property and the setter.
+  * pos-input-surface: Reset keyboard layer when current osk changes
+  * pos-input-surface: Reset keyboard layer to normal on fold.
+    This makes sure the user doesn't see "random" levels when e.g. switching
+    between apps.
+  * data: Indicate that we're using feedbackd.
+    This will allow configuration tools to pick up that intent.
+  * Recreate input surface when it goes away.
+    This can happen when e.g. the output with it is unplugged.
+  * osk-widget: Allow to parse PosOskKey.
+    Allow to parse the key object rather than just plain strings as we
+    do in the current layouts. This allows us to wire up tab, etc in
+    layouts.
+  * vk-driver: Add function keys
+  * Add initial terminal layout.
+    This lacks menu key, pos1/end, pg-up/pg-down, esc and control
+  * data: Add icon to desktop file
+
+  [ InsanePrawn ]
+  * vk-driver: Add keycode for ESC
+  * terminal: Add ~, TAB and ESC
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 26 Jul 2022 11:59:46 +0200
+
+phosh-osk-stub (0.0.1) experimental; urgency=medium
+
+  * Initial release
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 07 Feb 2022 10:09:57 +0100
