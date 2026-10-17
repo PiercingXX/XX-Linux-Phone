@@ -85,25 +85,27 @@ def brightness_label(pct: int) -> str:
 def theme_css(preset: ThemePreset) -> str:
     return f"""
     .piercing-hud-box {{
-        background: alpha({preset.surface}, 0.82);
-        border-radius: 16px;
-        border: 1.5px solid alpha({preset.foreground}, 0.18);
-        padding: 14px 22px;
+        background: {preset.surface};
+        border-radius: 20px;
+        border: 1px solid {preset.border};
+        padding: 12px 16px;
+    }}
+    .piercing-hud-icon {{
+        color: {preset.foreground};
     }}
     .piercing-hud-label {{
         color: {preset.foreground};
-        font-size: 40px;
-        font-weight: 700;
+        font-size: 12pt;
     }}
     .piercing-hud-level {{
-        min-width: 180px;
-        min-height: 8px;
-        border-radius: 4px;
+        min-width: 140px;
+        min-height: 6px;
+        border-radius: 3px;
         background: alpha({preset.foreground}, 0.18);
     }}
     .piercing-hud-level > trough > progress {{
         background: {preset.foreground};
-        border-radius: 4px;
+        border-radius: 3px;
     }}
 """
 
@@ -154,20 +156,34 @@ if _HAS_GTK:
                 win_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10,
             )
 
-            self._label = Gtk.Label(label='50%')
+            self._icon = Gtk.Image.new_from_icon_name(
+                'audio-volume-medium-symbolic')
+            self._icon.add_css_class('piercing-hud-icon')
+            self._icon.set_pixel_size(24)
+            self._icon.set_valign(Gtk.Align.CENTER)
+
+            self._label = Gtk.Label(label='50%', xalign=0)
             self._label.add_css_class('piercing-hud-label')
+            self._label.set_max_width_chars(14)
 
             self._level = Gtk.ProgressBar()
             self._level.add_css_class('piercing-hud-level')
             self._level.set_fraction(0.5)
             self._level.set_show_text(False)
+            self._level.set_hexpand(True)
 
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            text.set_hexpand(True)
+            text.set_valign(Gtk.Align.CENTER)
+            text.append(self._label)
+            text.append(self._level)
+
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             box.add_css_class('piercing-hud-box')
             box.set_halign(Gtk.Align.CENTER)
             box.set_valign(Gtk.Align.START)
-            box.append(self._label)
-            box.append(self._level)
+            box.append(self._icon)
+            box.append(text)
             self._box = box
             self.set_child(box)
 
@@ -220,11 +236,21 @@ if _HAS_GTK:
         def show_volume(self, pct: int) -> None:
             """Display a volume level ('Volume N%', 'Muted' at 0)."""
             pct = max(0, min(100, int(pct)))
+            if pct == 0:
+                icon = 'audio-volume-muted-symbolic'
+            elif pct < 34:
+                icon = 'audio-volume-low-symbolic'
+            elif pct < 67:
+                icon = 'audio-volume-medium-symbolic'
+            else:
+                icon = 'audio-volume-high-symbolic'
+            self._icon.set_from_icon_name(icon)
             self._flash(volume_label(pct), pct)
 
         def show_brightness(self, pct: int) -> None:
             """Display a brightness level ('Brightness N%')."""
             pct = max(0, min(100, int(pct)))
+            self._icon.set_from_icon_name('display-brightness-symbolic')
             self._flash(brightness_label(pct), pct)
 
         def show_level(self, pct: int) -> None:

@@ -112,11 +112,12 @@ def test_switcher_has_close_button_and_tappable_cards():
 
 
 def test_shade_dismisses_via_scrim_drag_and_key():
-    # The merged shade keeps the explicit Close button (an affordance for
-    # users who cannot swipe) AND dismisses without it: scrim tap, swipe,
-    # sheet drag, and Escape all hide the shade.
-    assert "label='▲ Close'" in SHADE_SRC
-    assert 'shade-dismiss' in SHADE_SRC
+    # One dismiss set only: scrim tap, swipe, sheet drag, and Escape hide
+    # the shade. The merge-leftover Close button and its shade-dismiss
+    # selector are gone.
+    assert "label='▲ Close'" not in SHADE_SRC
+    assert 'shade-dismiss' not in SHADE_SRC
+    assert 'shade-scrim' in SHADE_SRC
     assert 'LayerShell.Edge.BOTTOM, True' in SHADE_SRC
     assert '_SHEET_CLOSE_DY' in SHADE_SRC
     show = SHADE_SRC.split('def show_shade')[1].split('def hide_shade')[0]

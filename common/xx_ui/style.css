@@ -595,6 +595,53 @@ button.xx-danger-text {
   font-size: ${title_px}px;
 }
 
+/* ---- Status tiles: rounded squares, inverted while on ---- */
+
+.xx-tile {
+  min-width: 72px;
+  min-height: 64px;
+  padding: 0 2px;
+  background-color: ${surface};
+  background-image: none;
+  border: 1px solid ${border};
+  border-radius: 16px;
+  color: ${foreground};
+  /* State flips paint instantly: libadwaita fades button backgrounds,
+     and a frozen mid-fade would pin the old fill. */
+  transition: none;
+  animation: none;
+}
+
+.xx-tile.active,
+.xx-tile.active:checked,
+button.xx-tile.toggle.active:checked:dir(ltr),
+button.xx-tile.toggle.active:checked:dir(rtl) {
+  background-color: ${foreground};
+  background-image: none;
+  color: ${background};
+  border-color: ${foreground};
+  /* State flips paint instantly: libadwaita fades toggle fills, and a
+     frozen mid-fade pins the old fill (or blanks the frame). This lives
+     on the toggle-qualified selectors because the fade does. */
+  transition: none;
+  animation: none;
+}
+
+.xx-tile-label {
+  font-size: ${chip_px}px;
+  letter-spacing: 0.12em;
+}
+
+.xx-tile-state {
+  font-size: ${tiny_px}px;
+  color: ${muted};
+}
+
+.xx-tile.active .xx-tile-state {
+  color: ${background};
+  opacity: 0.75;
+}
+
 /* ---- Dialog / menu ---- */
 
 .xx-dialog {

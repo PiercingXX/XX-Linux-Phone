@@ -64,9 +64,11 @@ class _WindowBase:
 _AppSwitcherBase = Gtk.Window if _GTK_AVAILABLE else _WindowBase
 
 def theme_css(preset: ThemePreset) -> str:
+    # Opaque background: the home clock and dock must not show through
+    # behind the cards. The app name is a caption under each card.
     return f"""
 window.switcher-window {{
-    background: alpha({preset.background}, 0.55);
+    background: {preset.background};
 }}
 .switcher-root {{
     background: transparent;
@@ -85,29 +87,28 @@ window.switcher-window {{
     color: {preset.muted};
 }}
 .switcher-empty {{
-    font-size: 13pt;
-    color: {preset.foreground};
-}}
-.app-card {{
-    background: {preset.surface};
-    border-radius: 24px;
-    padding: 16px;
-}}
-.app-card:hover, .app-card:focus {{ background: {preset.surface_alt}; }}
-.app-card-thumb {{
-    border-radius: 16px;
-}}
-.card-name {{
-    font-size: 13pt;
-    font-weight: 400;
-    color: {preset.foreground};
-}}
-.card-title {{
     font-size: 11pt;
     color: {preset.muted};
 }}
+.app-card {{
+    background: {preset.surface};
+    border-radius: 16px;
+    padding: 12px;
+}}
+.app-card:hover, .app-card:focus {{ background: {preset.surface_alt}; }}
+.app-card-thumb {{
+    border-radius: 8px;
+}}
+.card-name {{
+    font-size: 11pt;
+    font-weight: 400;
+    color: {preset.muted};
+}}
+.card-title {{
+    font-size: 10pt;
+    color: {preset.muted};
+}}
 .card-kill {{
-    font-size: 12pt;
     color: {preset.muted};
     min-width: 32px;
     min-height: 32px;
@@ -124,7 +125,7 @@ window.switcher-window {{
 
 _SWIPE_DISMISS_THRESHOLD = 120  # px upward drag to dismiss a card
 _SHEET_CLOSE_DY = 100  # px downward drag to close recents (resume the app)
-_EMPTY_STATE_TEXT = 'No open apps'
+_EMPTY_STATE_TEXT = 'No open apps.'
 # Pixel-style overview: one large centered card, not a 280px bottom sheet.
 _CARD_WIDTH_FRAC = 0.82
 _CARD_HEIGHT_FRAC = 0.68
@@ -229,8 +230,9 @@ class AppInfo:
 class AppSwitcher(_AppSwitcherBase):
     """Full-screen recents (Pixel overview). Long swipe-up.
 
-    Tap dim / swipe down / back resume the current app. Card swipe-up or ×
-    closes that app. Short swipe-up is lisgd home, not this surface.
+    Tap dim / swipe down / back resume the current app. Card swipe-up or
+    the close icon closes that app. Short swipe-up is lisgd home, not
+    this surface.
     """
 
     def __init__(self, manager: ToplevelManager | None = None,
@@ -519,23 +521,22 @@ class AppSwitcher(_AppSwitcherBase):
 
     def _make_card(self, app: AppInfo) -> Gtk.Widget:
         from gi.repository import Pango
-        name_label = Gtk.Label(label=self._card_name(app), xalign=0)
+        caption = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        caption.set_hexpand(True)
+        name_label = Gtk.Label(label=self._card_name(app).upper(), xalign=0.5)
         name_label.add_css_class('card-name')
         name_label.set_ellipsize(Pango.EllipsizeMode.END)
-        name_label.set_hexpand(True)
-        name_label.set_valign(Gtk.Align.END)
-
-        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        text_box.set_hexpand(True)
-        text_box.append(name_label)
+        name_label.set_max_width_chars(24)
+        caption.append(name_label)
         subtitle = self._card_subtitle(app)
         if subtitle:
-            title_label = Gtk.Label(label=subtitle, xalign=0)
+            title_label = Gtk.Label(label=subtitle, xalign=0.5)
             title_label.add_css_class('card-title')
             title_label.set_ellipsize(Pango.EllipsizeMode.END)
-            text_box.append(title_label)
+            title_label.set_max_width_chars(24)
+            caption.append(title_label)
 
-        kill_btn = Gtk.Button(label='✕')
+        kill_btn = Gtk.Button.new_from_icon_name('window-close-symbolic')
         kill_btn.add_css_class('card-kill')
         kill_btn.set_halign(Gtk.Align.END)
         kill_claim = Gtk.GestureClick.new()
@@ -566,32 +567,34 @@ class AppSwitcher(_AppSwitcherBase):
             if fit is not None:
                 pic.set_content_fit(fit.COVER)
             inner.append(pic)
-            text_box.set_vexpand(False)
-        else:
-            text_box.set_vexpand(True)
-        inner.append(text_box)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        outer.set_valign(Gtk.Align.CENTER)
+        outer.append(inner)
+        outer.append(caption)
 
         # A wrapping Gtk.Button never saw clicked: the inner GestureDrag
         # stole the sequence. Tap is a click on the card; swipe-up kills.
+        # Both live on the outer box so the caption taps through to focus.
         click = Gtk.GestureClick.new()
         click.connect(
             'released',
             lambda _g, _n, _x, _y, a=app: self._on_card_tap(a),
         )
-        inner.add_controller(click)
+        outer.add_controller(click)
 
         drag = Gtk.GestureDrag()
         drag.connect(
             'drag-update',
-            lambda g, _dx, dy, card=inner: self._on_card_drag(g, card, dy),
+            lambda g, _dx, dy, card=outer: self._on_card_drag(g, card, dy),
         )
         drag.connect(
             'drag-end',
             lambda _g, _dx, dy, a=app: self._on_card_drag_end(dy, a),
         )
-        inner.add_controller(drag)
+        outer.add_controller(drag)
 
-        return inner
+        return outer
 
     def _on_card_drag(self, gesture: Gtk.GestureDrag, card: Gtk.Box, dy: float) -> None:
         if dy < -20:

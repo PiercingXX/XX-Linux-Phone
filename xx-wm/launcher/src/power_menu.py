@@ -18,7 +18,7 @@ from gi.repository import Adw, Gdk, Gtk
 if _HAS_LAYER:
     from gi.repository import Gtk4LayerShell as LayerShell
 
-from config import ShellConfig, ThemePreset
+from config import DANGER_RED, ShellConfig, ThemePreset
 from shell_log import get_logger
 
 _log = get_logger('power')
@@ -193,12 +193,12 @@ window.power-menu-window {{
     background: alpha({preset.background}, 0.85);
 }}
 .power-menu-row {{
-    font-size: 20pt;
-    font-weight: 300;
+    font-size: 16pt;
+    font-weight: 400;
     color: {preset.foreground};
     background: transparent;
     border: none;
-    border-radius: 12px;
+    border-radius: 0;
     min-height: 64px;
 }}
 .power-menu-row:hover {{
@@ -207,6 +207,9 @@ window.power-menu-window {{
 .power-menu-row.armed {{
     color: {preset.accent};
     background: alpha({preset.surface}, 0.6);
+}}
+.power-menu-row.danger {{
+    color: {DANGER_RED};
 }}
 .power-menu-cancel {{
     font-size: 15pt;
@@ -312,7 +315,7 @@ class PowerMenu(Gtk.Window):
             'Restart', 'reboot', lambda _: self._on_danger_tap('reboot'))
         self._poweroff_row = _row(
             'Power off', 'poweroff',
-            lambda _: self._on_danger_tap('poweroff'))
+            lambda _: self._on_danger_tap('poweroff'), 'danger')
         self._cancel_row = _row(
             'Cancel', None, lambda _: self._dismiss(), 'power-menu-cancel')
 
@@ -331,10 +334,13 @@ class PowerMenu(Gtk.Window):
         clamp.set_margin_start(24)
         clamp.set_margin_end(24)
 
-        # The scrolled middle shrinks instead of clipping: a short screen
-        # scrolls the list while the gaps collapse to nothing.
+        # The scrolled middle claims its content height (every row shows
+        # on a tall screen) and shrinks into an internal scroll on a
+        # short one. Without propagate_natural_height the window only
+        # ever shows the first row.
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_height(True)
         scroll.set_child(clamp)
         scroll.set_hexpand(True)
         scroll.set_vexpand(False)

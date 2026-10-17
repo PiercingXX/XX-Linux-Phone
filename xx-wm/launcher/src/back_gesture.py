@@ -88,12 +88,14 @@ class _ArrowOverlay(Gtk.Window):
             win_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 10,
         )
 
-        label = Gtk.Label(label='←')
-        label.add_css_class('piercing-back-arrow')
+        chevron = Gtk.Image.new_from_icon_name(
+            'go-previous-symbolic' if left else 'go-next-symbolic')
+        chevron.add_css_class('piercing-back-arrow')
+        chevron.set_pixel_size(30)
         box = Gtk.Box()
         box.set_halign(Gtk.Align.CENTER)
         box.set_valign(Gtk.Align.CENTER)
-        box.append(label)
+        box.append(chevron)
         self.set_child(box)
 
         # The edge strip spans the full screen height while visible; drop

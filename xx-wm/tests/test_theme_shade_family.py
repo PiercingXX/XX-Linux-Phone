@@ -20,7 +20,20 @@ SHEETS = {
     'power_menu': 'power_menu',
 }
 
-FIELDS = ('background', 'foreground', 'surface', 'surface_alt', 'muted', 'accent')
+# Fields each module's sheet interpolates, per its element inventory:
+# quick_actions tiles moved to the shared xx-tile builder (common/xx_ui),
+# so its sheet only owns the slider rows now.
+FIELDS_PER_MODULE = {
+    'notification_shade': (
+        'background', 'foreground', 'surface', 'surface_alt', 'muted',
+        'accent',
+    ),
+    'quick_actions': ('foreground', 'surface_alt', 'muted'),
+    'power_menu': (
+        'background', 'foreground', 'surface', 'surface_alt', 'muted',
+        'accent',
+    ),
+}
 
 
 @functools.lru_cache(maxsize=1)
@@ -42,7 +55,7 @@ def test_every_preset_interpolates_all_fields():
     for key, preset in THEME_PRESETS.items():
         for name, theme_css in _sheets().items():
             css = theme_css(preset)
-            for field in FIELDS:
+            for field in FIELDS_PER_MODULE[name]:
                 value = getattr(preset, field)
                 assert value in css, f'{name}/{key}: missing {field}={value}'
 

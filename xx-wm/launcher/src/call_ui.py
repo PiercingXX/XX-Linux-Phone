@@ -22,14 +22,17 @@ if _LAYER_SHELL:
 
 
 def theme_css(preset: ThemePreset) -> str:
+    # Toggle tiles render through the shared xx-tile builder
+    # (common/xx_ui); this sheet owns the header type, the info cards
+    # and the answer / end-call buttons.
     return f"""
 .call-root {{
     background: {preset.background};
     color: {preset.foreground};
 }}
 .call-caller {{
-    font-size: 28pt;
-    font-weight: 300;
+    font-size: 32pt;
+    font-weight: 400;
     color: {preset.foreground};
 }}
 .call-number {{
@@ -37,32 +40,41 @@ def theme_css(preset: ThemePreset) -> str:
     color: {preset.muted};
 }}
 .call-status {{
-    font-size: 12pt;
+    font-size: 11pt;
     color: {preset.muted};
-    letter-spacing: 0.1em;
+    letter-spacing: 0.14em;
 }}
 .call-timer {{
-    font-size: 18pt;
+    font-size: 36pt;
     font-weight: 300;
     color: {preset.foreground};
     font-variant-numeric: tabular-nums;
 }}
+.call-card {{
+    background: {preset.surface};
+    border-radius: 16px;
+    padding: 12px 16px;
+}}
+.call-card-icon {{
+    color: {preset.accent};
+}}
 .call-btn {{
     font-size: 12pt;
     min-width: 100px;
-    min-height: 72px;
+    min-height: 56px;
     border-radius: 20px;
     border: none;
     padding: 0;
 }}
 .btn-accept {{
-    background: {preset.accent};
+    background: {preset.foreground};
     color: {preset.background};
 }}
-.btn-accept:hover {{ background: mix({preset.accent}, {preset.background}, 0.85); }}
+.btn-accept:hover {{ background: {preset.surface_alt}; }}
 .btn-decline {{
-    background: {preset.surface};
-    color: {preset.muted};
+    background: transparent;
+    color: {preset.foreground};
+    border: 1px solid {preset.border};
 }}
 .btn-decline:hover {{ background: {preset.surface_alt}; }}
 .btn-hangup {{
@@ -73,10 +85,6 @@ def theme_css(preset: ThemePreset) -> str:
 .btn-mute, .btn-speaker {{
     background: {preset.surface};
     color: {preset.foreground};
-}}
-.btn-mute.active, .btn-speaker.active {{
-    background: {preset.accent};
-    color: {preset.background};
 }}
 .btn-mute:hover, .btn-speaker:hover {{ background: {preset.surface_alt}; }}
 .call-bar-root {{
@@ -169,6 +177,17 @@ def display_name(number: str) -> str:
         return ContactBook().lookup_number(number) or number
     except Exception:
         return number
+
+
+def caller_initials(name: str) -> str:
+    """Avatar initials: first letters of the first two name words.
+
+    Pure, so the digit-only remote side falls back to an empty (dashed)
+    disc instead of digit soup.
+    """
+    words = [word for word in (name or '').split()
+             if word and word[0].isalpha()]
+    return ''.join(word[0].upper() for word in words[:2])
 
 
 _EARPIECE_PROFILES = ('Voice Call', 'voice-call', 'HiFi Voice Call')
@@ -996,33 +1015,73 @@ class CallUI(Gtk.Window):
         data = theme_css(preset if preset is not None else self._config.theme)
         self._theme_provider.load_from_data(data.encode('utf-8'))
 
-    def _page_shell(self, status_text: str) -> tuple:
-        """Shared full-screen page: status + caller + number over a bottom
-        action area, with Minimize and a hidden modem-timeout Close."""
+    def _page_shell(self, status_text: str, centered: bool = False) -> tuple:
+        """Shared full-screen page: status + avatar + caller + number over
+        a bottom action area, with Minimize and a hidden modem-timeout
+        Close."""
+        from gi.repository import Pango
+        from xx_ui import widgets
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        page.set_margin_top(100)
-        page.set_margin_start(32)
-        page.set_margin_end(32)
+        page.set_margin_top(64)
+        page.set_margin_start(20)
+        page.set_margin_end(20)
+        xalign = 0.5 if centered else 0.0
 
-        status = Gtk.Label(label=status_text, xalign=0)
+        status = Gtk.Label(label=status_text.upper(), xalign=xalign)
         status.add_css_class('call-status')
+        status.set_hexpand(True)
 
-        caller = Gtk.Label(label='', xalign=0)
+        avatar = widgets.avatar('', 88, dashed=True)
+        avatar.set_halign(
+            Gtk.Align.CENTER if centered else Gtk.Align.START)
+        avatar.set_margin_top(24)
+        avatar.set_margin_bottom(8)
+
+        caller = Gtk.Label(label='', xalign=xalign)
         caller.add_css_class('call-caller')
+        caller.set_hexpand(True)
         caller.set_wrap(True)
+        caller.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        caller.set_max_width_chars(12)
 
-        number = Gtk.Label(label='', xalign=0)
+        number = Gtk.Label(label='', xalign=xalign)
         number.add_css_class('call-number')
+        number.set_hexpand(True)
         number.set_wrap(True)
+        number.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        number.set_max_width_chars(24)
 
         spacer = Gtk.Box()
         spacer.set_vexpand(True)
 
         page.append(status)
+        page.append(avatar)
         page.append(caller)
         page.append(number)
         page.append(spacer)
-        return page, caller, number
+        return page, caller, number, avatar
+
+    @staticmethod
+    def _set_avatar(avatar, name: str) -> None:
+        """Paint an avatar disc from a caller name; unknown sides stay a
+        dashed empty disc. Getattr-guarded by callers so bare test
+        harnesses (built without __init__) keep working."""
+        try:
+            initials = caller_initials(name)
+            avatar.set_text(initials)
+            if initials:
+                avatar.remove_css_class('dashed')
+            else:
+                avatar.add_css_class('dashed')
+        except Exception:
+            pass
+
+    def _paint_avatar(self, key: str, name: str) -> None:
+        """Repaint a page's avatar disc from the caller name. The getattr
+        keeps bare test harnesses (built without __init__) working."""
+        avatar = getattr(self, key, None)
+        if avatar is not None:
+            self._set_avatar(avatar, name)
 
     def _page_footer(self, page: Gtk.Widget) -> None:
         """Minimize + hidden Close row shared by every page."""
@@ -1047,22 +1106,26 @@ class CallUI(Gtk.Window):
         page.append(row)
 
     def _build_incoming(self) -> Gtk.Widget:
-        page, caller, number = self._page_shell('Incoming call')
+        page, caller, number, avatar = self._page_shell('Incoming call')
         self._inc_caller, self._inc_number = caller, number
+        self._inc_avatar = avatar
 
-        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
-        btn_row.set_halign(Gtk.Align.CENTER)
-        btn_row.set_margin_bottom(32)
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        btn_row.set_hexpand(True)
+        btn_row.set_homogeneous(True)
+        btn_row.set_margin_bottom(24)
 
         decline_btn = Gtk.Button(label='Decline')
         decline_btn.add_css_class('call-btn')
         decline_btn.add_css_class('btn-decline')
         decline_btn.connect('clicked', self._on_decline_clicked)
+        decline_btn.set_hexpand(True)
 
-        accept_btn = Gtk.Button(label='Accept')
+        accept_btn = Gtk.Button(label='Answer')
         accept_btn.add_css_class('call-btn')
         accept_btn.add_css_class('btn-accept')
         accept_btn.connect('clicked', self._on_accept_clicked)
+        accept_btn.set_hexpand(True)
 
         btn_row.append(decline_btn)
         btn_row.append(accept_btn)
@@ -1071,14 +1134,15 @@ class CallUI(Gtk.Window):
         return page
 
     def _build_outgoing(self) -> Gtk.Widget:
-        page, caller, number = self._page_shell('Calling…')
+        page, caller, number, avatar = self._page_shell('Calling…')
         self._out_caller, self._out_number = caller, number
+        self._out_avatar = avatar
 
-        hangup_btn = Gtk.Button(label='Hang up')
+        hangup_btn = Gtk.Button(label='End call')
         hangup_btn.add_css_class('call-btn')
         hangup_btn.add_css_class('btn-hangup')
-        hangup_btn.set_margin_bottom(32)
-        hangup_btn.set_halign(Gtk.Align.CENTER)
+        hangup_btn.set_hexpand(True)
+        hangup_btn.set_margin_bottom(24)
         hangup_btn.connect('clicked', self._on_hangup_clicked)
 
         page.append(hangup_btn)
@@ -1086,22 +1150,31 @@ class CallUI(Gtk.Window):
         return page
 
     def _build_active(self) -> Gtk.Widget:
-        page, caller, number = self._page_shell('Active call')
+        from xx_ui import widgets
+        page, caller, number, avatar = self._page_shell(
+            'Active call', centered=True)
         self._act_caller, self._act_number = caller, number
+        self._act_avatar = avatar
 
-        self._act_timer = Gtk.Label(label='0:00', xalign=0)
+        self._act_timer = Gtk.Label(label='0:00', xalign=0.5)
         self._act_timer.add_css_class('call-timer')
-        self._act_timer.set_margin_top(12)
+        self._act_timer.set_hexpand(True)
+        self._act_timer.set_margin_top(8)
+        self._act_timer.set_margin_bottom(8)
         page.append(self._act_timer)
 
         # Waiting second call (MM state 6): Hold & answer / Decline.
         self._waiting_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self._waiting_box.add_css_class('call-card')
         self._waiting_box.set_halign(Gtk.Align.CENTER)
-        self._waiting_box.set_margin_top(16)
+        self._waiting_box.set_margin_bottom(12)
         self._waiting_box.set_visible(False)
         self._waiting_label = Gtk.Label(label='', xalign=0)
         self._waiting_label.add_css_class('call-bar-label')
         self._waiting_label.set_wrap(True)
+        _wait_icon = widgets.icon_image('call-start-symbolic', 20)
+        _wait_icon.add_css_class('call-card-icon')
+        self._waiting_box.append(_wait_icon)
         hold_btn = Gtk.Button(label='Hold & answer')
         hold_btn.add_css_class('call-btn')
         hold_btn.add_css_class('btn-accept')
@@ -1115,30 +1188,32 @@ class CallUI(Gtk.Window):
         self._waiting_box.append(wait_decline_btn)
         page.append(self._waiting_box)
 
-        ctrl_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
-        ctrl_row.set_halign(Gtk.Align.CENTER)
-        ctrl_row.set_margin_bottom(20)
-        ctrl_row.set_margin_top(24)
+        self._mute_btn = widgets.status_tile(
+            'Mute', '', False, self._on_mute_toggled)
 
-        self._mute_btn = Gtk.ToggleButton(label='Mute')
-        self._mute_btn.add_css_class('call-btn')
-        self._mute_btn.add_css_class('btn-mute')
-        self._mute_btn.connect('toggled', self._on_mute_toggled)
+        self._speaker_btn = widgets.status_tile(
+            'Speaker', '', False, self._on_speaker_toggled)
 
-        self._speaker_btn = Gtk.ToggleButton(label='Speaker')
-        self._speaker_btn.add_css_class('call-btn')
-        self._speaker_btn.add_css_class('btn-speaker')
-        self._speaker_btn.connect('toggled', self._on_speaker_toggled)
+        self._keypad_btn = widgets.status_tile(
+            'Keypad', '', False, self._on_keypad_toggled)
+        self._hold_btn = widgets.status_tile(
+            'Hold', '', False, self._on_hold_toggled)
+        self._add_btn = widgets.status_tile(
+            'Add call', '', False, self._on_add_call_toggled)
+        self._bt_btn = widgets.status_tile(
+            'Bluetooth', '', False, self._on_bt_toggled)
 
-        self._keypad_btn = Gtk.ToggleButton(label='Keypad')
-        self._keypad_btn.add_css_class('call-btn')
-        self._keypad_btn.add_css_class('btn-mute')
-        self._keypad_btn.connect('toggled', self._on_keypad_toggled)
-
-        ctrl_row.append(self._mute_btn)
-        ctrl_row.append(self._speaker_btn)
-        ctrl_row.append(self._keypad_btn)
-        page.append(ctrl_row)
+        tiles = Gtk.Grid(row_spacing=8, column_spacing=8,
+                         column_homogeneous=True)
+        tiles.set_hexpand(True)
+        tiles.set_margin_bottom(16)
+        for col, tile in enumerate((self._mute_btn, self._keypad_btn,
+                                   self._speaker_btn)):
+            tiles.attach(tile, col, 0, 1, 1)
+        for col, tile in enumerate((self._hold_btn, self._add_btn,
+                                   self._bt_btn)):
+            tiles.attach(tile, col, 1, 1, 1)
+        page.append(tiles)
 
         self._keypad_grid = Gtk.Grid(row_spacing=8, column_spacing=8)
         self._keypad_grid.set_halign(Gtk.Align.CENTER)
@@ -1152,11 +1227,11 @@ class CallUI(Gtk.Window):
             self._keypad_grid.attach(key, idx % 3, idx // 3, 1, 1)
         page.append(self._keypad_grid)
 
-        hangup_btn = Gtk.Button(label='Hang up')
+        hangup_btn = Gtk.Button(label='End call')
         hangup_btn.add_css_class('call-btn')
         hangup_btn.add_css_class('btn-hangup')
-        hangup_btn.set_margin_bottom(32)
-        hangup_btn.set_halign(Gtk.Align.CENTER)
+        hangup_btn.set_hexpand(True)
+        hangup_btn.set_margin_bottom(24)
         hangup_btn.connect('clicked', self._on_hangup_clicked)
         page.append(hangup_btn)
         self._page_footer(page)
@@ -1184,6 +1259,7 @@ class CallUI(Gtk.Window):
         self._current_number = number
         self._inc_caller.set_text(caller or number)
         self._inc_number.set_text(number if caller else '')
+        self._paint_avatar('_inc_avatar', caller or number)
         self._stack.set_visible_child_name('incoming')
         self._maybe_present(path, 'incoming')
 
@@ -1196,6 +1272,7 @@ class CallUI(Gtk.Window):
         self._current_number = number
         self._out_caller.set_text(caller or number)
         self._out_number.set_text(number if caller else '')
+        self._paint_avatar('_out_avatar', caller or number)
         self._stack.set_visible_child_name('outgoing')
         self._maybe_present(path, 'outgoing')
 
@@ -1213,6 +1290,7 @@ class CallUI(Gtk.Window):
         self._current_number = number
         self._act_caller.set_text(caller or number)
         self._act_number.set_text(number if caller else '')
+        self._paint_avatar('_act_avatar', caller or number)
         self._adopt_timer_base(path, started_at)
         self._reset_toggles()
         self._stack.set_visible_child_name('active')
@@ -1235,7 +1313,10 @@ class CallUI(Gtk.Window):
         self._speakerphone = False
         for btn, state in ((getattr(self, '_mute_btn', None), False),
                            (getattr(self, '_speaker_btn', None), False),
-                           (getattr(self, '_keypad_btn', None), False)):
+                           (getattr(self, '_keypad_btn', None), False),
+                           (getattr(self, '_hold_btn', None), False),
+                           (getattr(self, '_add_btn', None), False),
+                           (getattr(self, '_bt_btn', None), False)):
             if btn is not None:
                 try:
                     btn.set_active(state)
@@ -1294,6 +1375,30 @@ class CallUI(Gtk.Window):
                 pass
         self._ensure_tick()
 
+    def _primary_held(self) -> bool:
+        """True while the snapshot's primary call sits HELD (the HOLD
+        tile's inverted visual tracks this, never a local guess)."""
+        from modem_monitor import _STATE_HELD
+        primary = primary_call(self._live_snapshot)
+        return primary is not None and primary.state == _STATE_HELD
+
+    def _sync_hold_tile(self) -> None:
+        """Paint the HOLD tile from the snapshot; a programmatic set that
+        changes nothing fires no toggled, so the handler below only ever
+        sees real user taps."""
+        hold = getattr(self, '_hold_btn', None)
+        if hold is None:
+            return
+        try:
+            held = self._primary_held()
+        except Exception:
+            return
+        try:
+            if hold.get_active() != held:
+                hold.set_active(held)
+        except Exception:
+            pass
+
     def _render_active_call(self, primary, waiting, name: str, number: str) -> None:
         self._primary_path = primary.path
         self._surface_live = True
@@ -1301,6 +1406,8 @@ class CallUI(Gtk.Window):
         self._current_number = number
         self._act_caller.set_text(name or number or 'Unknown call')
         self._act_number.set_text(number if name and name != number else '')
+        self._paint_avatar('_act_avatar', name or number)
+        self._sync_hold_tile()
         self._adopt_timer_base(primary.path, primary.started_at)
         self._update_waiting(waiting)
         self._stack.set_visible_child_name('active')
@@ -1642,6 +1749,39 @@ class CallUI(Gtk.Window):
         if grid is not None:
             try:
                 grid.set_visible(btn.get_active())
+            except Exception:
+                pass
+
+    def _on_hold_toggled(self, btn: Gtk.ToggleButton) -> None:
+        # A waiting second call holds the active one for real (same action
+        # as the waiting banner); a lone call cannot hold over D-Bus, so
+        # the tile snaps back to the snapshot's HELD truth instead of
+        # faking a hold.
+        if self._waiting_path is not None and btn.get_active():
+            self._on_hold_answer_clicked(btn)
+            return
+        try:
+            btn.set_active(self._primary_held())
+        except Exception:
+            pass
+
+    def _on_add_call_toggled(self, btn: Gtk.ToggleButton) -> None:
+        # Collapse to the CallBar so a second call can be placed from the
+        # dialer; the tile is momentary and snaps back at once.
+        if btn.get_active():
+            try:
+                btn.set_active(False)
+            except Exception:
+                pass
+        self.minimize()
+
+    def _on_bt_toggled(self, btn: Gtk.ToggleButton) -> None:
+        # No Bluetooth audio route exists on this shell: in-call audio
+        # rides CallAudioRouter behind the SPEAKER tile, so the toggle
+        # snaps back instead of faking a route.
+        if btn.get_active():
+            try:
+                btn.set_active(False)
             except Exception:
                 pass
 

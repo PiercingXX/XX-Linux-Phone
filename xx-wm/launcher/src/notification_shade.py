@@ -177,12 +177,6 @@ window.shade-window {{
 .shade-scrim {{
     background: alpha({preset.background}, 0.85);
 }}
-.shade-dismiss {{
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    min-height: 0;
-}}
 .shade-time {{
     font-size: 20pt;
     font-weight: 700;
@@ -224,7 +218,7 @@ window.shade-window {{
     color: {preset.muted};
 }}
 .notif-app {{
-    font-size: 10pt;
+    font-size: 11pt;
     color: {preset.muted};
 }}
 .notif-title {{
@@ -243,17 +237,6 @@ window.shade-window {{
     margin-bottom: 6px;
 }}
 .notif-row:hover {{ background: {preset.surface_alt}; }}
-.dismiss-button {{
-    font-size: 14pt;
-    color: {preset.muted};
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 18px;
-    padding: 0;
-    background: transparent;
-    border: none;
-}}
-.dismiss-button:hover {{ background: {preset.surface_alt}; }}
 .cal-header {{
     font-size: 11pt;
     color: {preset.muted};
@@ -420,7 +403,6 @@ class NotificationShade(Gtk.Window):
         outer.append(self._revealer)
         self._scrim = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._scrim.add_css_class('shade-scrim')
-        self._scrim.add_css_class('shade-dismiss')
         self._scrim.set_hexpand(True)
         self._scrim.set_vexpand(True)
         scrim_tap = Gtk.GestureClick.new()
@@ -516,7 +498,7 @@ class NotificationShade(Gtk.Window):
         power_btn.set_tooltip_text('Power')
         power_btn.connect('clicked', self._on_power_clicked)
 
-        top_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        top_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         top_header.set_margin_top(6)
         self._datetime_btn.set_hexpand(True)
         self._datetime_btn.set_halign(Gtk.Align.START)
@@ -601,14 +583,6 @@ class NotificationShade(Gtk.Window):
         self._empty_label.set_margin_start(6)
         self.list_box.set_placeholder(self._empty_label)
 
-        close_btn = Gtk.Button(label='▲ Close')
-        close_btn.add_css_class('flat')
-        close_btn.add_css_class('shade-btn')
-        close_btn.set_halign(Gtk.Align.CENTER)
-        close_btn.set_margin_top(8)
-        close_btn.connect('clicked', lambda _b: self.hide_shade())
-
-
         root.append(top_header)
         root.append(self._privacy_revealer)
         root.append(self._calendar_revealer)
@@ -625,7 +599,6 @@ class NotificationShade(Gtk.Window):
         root.append(notif_header)
         root.append(self._external_hint)
         root.append(scroller)
-        root.append(close_btn)
         return root
 
     def _toggle_expand(self, _btn: Gtk.Button) -> None:
@@ -976,19 +949,14 @@ class NotificationShade(Gtk.Window):
                 action_row.append(btn)
             content.append(action_row)
 
-        # Resident rows (e.g. the wireless-debugging indicator) are
-        # persistent: no dismiss button and no swipe-to-dismiss, so the
-        # user cannot swipe away state the shell must keep showing.
+        # A row dismisses with a sideways swipe; resident rows (e.g. the
+        # wireless-debugging indicator) are persistent and keep no drag, so
+        # the user cannot swipe away state the shell must keep showing.
         resident = bool((notif.hints or {}).get('resident', False))
 
         row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         row_box.add_css_class('notif-row')
         row_box.append(content)
-        if not resident:
-            dismiss_btn = Gtk.Button(label='×')
-            dismiss_btn.add_css_class('dismiss-button')
-            dismiss_btn.connect('clicked', lambda _b, nid=notif.id: self.dismiss(nid))
-            row_box.append(dismiss_btn)
 
         # Tap invokes the "default" action when the app offered one, and only
         # otherwise launches the desktop entry.

@@ -1205,3 +1205,62 @@ class TestPowerPressHook:
         mgr._on_event(*self._power(1))
         mgr._on_event(*self._power(0))
         assert blanks == [True]
+
+
+class TestCallTiles:
+    """The in-call tile grid: live toggles, HOLD truth, momentary ADD
+    CALL, and the Bluetooth snap-back (no BT audio route exists)."""
+
+    def test_initials_from_name(self):
+        assert call_ui.caller_initials('Mara Voss') == 'MV'
+        assert call_ui.caller_initials('Ridgeline Dental') == 'RD'
+        assert call_ui.caller_initials('Mom') == 'M'
+        assert call_ui.caller_initials('') == ''
+        assert call_ui.caller_initials('+15550001111') == ''
+        assert call_ui.caller_initials(None) == ''
+
+    def test_hold_answers_waiting_call(self, monkeypatch):
+        _names(monkeypatch)
+        held = []
+        ui = _make_ui(
+            _hold_accept_fn=lambda m, done: held.append(m) or done(True, None))
+        monkeypatch.setattr(call_ui, '_resolve_modem_path', lambda: MODEM)
+        ui._live_snapshot = [_call(state=4, started_at=1.0),
+                             _call(path=CALL2, number='+15550002222',
+                                   direction=1, state=6)]
+        ui._waiting_path = CALL2
+        btn = FakeToggle()
+        btn.set_active(True)
+        ui._on_hold_toggled(btn)
+        assert held == [MODEM]
+
+    def test_hold_snaps_back_without_waiting(self):
+        ui = _make_ui()
+        ui._live_snapshot = [_call(state=4, started_at=1.0)]
+        btn = FakeToggle()
+        btn.set_active(True)
+        ui._on_hold_toggled(btn)
+        assert btn.get_active() is False
+
+    def test_hold_tracks_held_primary(self):
+        ui = _make_ui()
+        ui._live_snapshot = [_call(state=5, started_at=1.0)]
+        assert ui._primary_held() is True
+        ui._live_snapshot = [_call(state=4, started_at=1.0)]
+        assert ui._primary_held() is False
+
+    def test_add_call_minimizes_and_snaps_back(self):
+        ui = _make_ui()
+        btn = FakeToggle()
+        btn.set_active(True)
+        ui._on_add_call_toggled(btn)
+        assert btn.get_active() is False
+        assert ui._minimized is True
+        assert ui.hidden == 1
+
+    def test_bluetooth_snaps_back(self):
+        ui = _make_ui()
+        btn = FakeToggle()
+        btn.set_active(True)
+        ui._on_bt_toggled(btn)
+        assert btn.get_active() is False

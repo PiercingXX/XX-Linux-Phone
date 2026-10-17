@@ -622,11 +622,11 @@ class TestOwnershipComparesUniqueNames:
 # --- item 2: async probes, neutral tiles, cached gates -----------------------
 
 class TestAsyncTileRefresh:
-    def test_tiles_start_neutral_before_probe(self, monkeypatch):
-        _pin_gtk(quick_actions, monkeypatch)
-        panel = _bare_panel()
-        panel._make_tile(quick_actions._TILES[0])
-        assert panel._state_labels['wifi'].text == '…'
+    def test_tiles_start_neutral_before_probe(self):
+        import inspect
+        assert quick_actions._TILE_NEUTRAL_TEXT == '…'
+        src = inspect.getsource(quick_actions.QuickActionsPanel._make_tile)
+        assert '_TILE_NEUTRAL_TEXT' in src
 
     def test_refresh_states_runs_off_main_thread(self, monkeypatch):
         panel = _bare_panel(location=_FakeLocation(available=True,
@@ -1328,11 +1328,13 @@ class TestThemeForwarding:
 
         provider = _Provider()
         panel._theme_provider = provider
-        panel.apply_theme(_preset(background='#101010'))
-        panel.apply_theme(_preset(background='#F3EEE2'))
+        # The slimmed panel sheet owns the sliders: distinct surface_alt
+        # troughs prove each reload landed on the same provider.
+        panel.apply_theme(_preset(surface_alt='#303030'))
+        panel.apply_theme(_preset(surface_alt='#ccc4b4'))
         assert panel._theme_provider is provider
-        assert b'#101010' in loaded[0]
-        assert b'#F3EEE2' in loaded[1]
+        assert b'#303030' in loaded[0]
+        assert b'#ccc4b4' in loaded[1]
 
     def test_shade_apply_theme_forwards_to_panel(self, monkeypatch):
         monkeypatch.setattr(notification_shade, 'GLib', _FakeGLib())

@@ -579,8 +579,12 @@ class TestTileLongPressWiring:
         _pin_shade_gtk(monkeypatch)
         panel = _bare_panel(on_open_settings=callback)
         tile = next(t for t in quick_actions._TILES if t.key == key)
-        panel._make_tile(tile)
-        btn = panel._tile_buttons[key]
+        # The tile body comes from the shared design-system builder (real
+        # Gtk segfaults without a display); the press wiring is driven
+        # through its own seam with a fake button.
+        btn = _FakeToggleButton()
+        panel._wire_tile_press(btn, tile)
+        panel._tile_buttons[key] = btn
         presses = [c for c in btn.controllers
                    if 'pressed' in c.handlers]
         assert len(presses) == 1
@@ -617,8 +621,9 @@ class TestTileLongPressWiring:
         _pin_shade_gtk(monkeypatch)
         panel = _bare_panel(on_open_settings=lambda section: None)
         tile = next(t for t in quick_actions._TILES if t.key == 'focus')
-        panel._make_tile(tile)
-        btn = panel._tile_buttons['focus']
+        btn = _FakeToggleButton()
+        panel._wire_tile_press(btn, tile)
+        panel._tile_buttons['focus'] = btn
         assert btn.controllers, 'focus tile lost its long-press'
         for controller in btn.controllers:
             for callback, _args in controller.handlers.values():
@@ -690,7 +695,9 @@ class TestShadeSurface:
         assert 'Notifications' in labels
         assert 'QUICK SETTINGS' not in labels
         assert 'NOTIFICATIONS' not in labels
-        assert {'Settings', 'Clear all', '▲ Close', '⏻'} <= buttons
+        assert {'Settings', 'Clear all', '⏻'} <= buttons
+        # One dismiss set only (scrim tap, swipe, Escape): no Close button.
+        assert '▲ Close' not in buttons
 
     def test_no_letter_spaced_truncation_classes(self, monkeypatch):
         _shade, root, _outer = self._built(monkeypatch)
@@ -710,9 +717,11 @@ class TestShadeSurface:
         assert '.shade-scrim' in css
         assert 'alpha(#101010, 0.85)' in css
 
-    def test_close_lives_inside_panel_not_on_scrim(self, monkeypatch):
+    def test_no_close_button_anywhere(self, monkeypatch):
+        # The merge-leftover Close button is gone: the shade dismisses via
+        # scrim tap, swipe, or Escape, and the scrim carries no buttons.
         shade, root, _outer = self._built(monkeypatch)
-        assert '▲ Close' in {btn.label for btn in _walk(root, _FakeButton)}
+        assert '▲ Close' not in {btn.label for btn in _walk(root, _FakeButton)}
         assert _walk(shade._scrim, _FakeButton) == []
 
     def test_layer_surface_source_contract(self):
@@ -817,18 +826,35 @@ class TestApplyThemeProviders:
         provider = _Provider()
         panel._theme_provider = provider
         panel._config = SimpleNamespace(theme=_preset())
-        panel.apply_theme(_preset(background='#F3EEE2'))
-        panel.apply_theme(_preset(background='#F3EEE2'))
+        panel.apply_theme(_preset())
+        panel.apply_theme(_preset())
         assert panel._theme_provider is provider
         assert len(provider.loaded) == 2
-        assert b'#F3EEE2' in provider.loaded[0]
+        # The slimmed panel sheet owns the sliders: the preset's
+        # surface_alt trough proves the reload landed.
+        assert b'#303030' in provider.loaded[0]
 
     def test_tile_css_is_quiet_not_accent_fill(self):
-        css = quick_actions.theme_css(_preset(accent='#00FF00'))
-        assert 'min-width: 80px' not in css
-        assert 'min-height: 64px' in css
-        assert 'background: #00FF00' not in css
-        assert '1px solid #00FF00' in css
+        # Tiles render through the shared xx-tile builder: quiet surface,
+        # inverted (foreground fill) while on, never an accent fill.
+        from xx_ui import css as _xx_css
+        from xx_ui import theme as _xx_theme
+        active = _xx_theme.Theme(
+            key='t', background='#101010', surface='#202020',
+            surface_alt='#303030', border='#404040', foreground='#FFFFFF',
+            muted='#AAAAAA', accent='#00FF00', font_family='Sans',
+            scale=1.0, dark=True)
+        css = _xx_css.render(active)
+        assert '.xx-tile' in css
+        assert 'background-color: #00FF00' not in css
+        assert '.xx-tile.active' in css
+
+    def test_tiles_come_from_shared_builder(self):
+        src = Path(__file__).parent.parent.joinpath(
+            'launcher', 'src', 'quick_actions.py').read_text(
+                encoding='utf-8')
+        assert 'status_tile' in src
+        assert 'qa-tile' not in src
 
     def test_slider_css_uses_theme_not_libadwaita(self):
         css = quick_actions.theme_css(_preset())

@@ -114,6 +114,9 @@ def main() -> None:
         keys.append(widgets.keypad_key(digit, sub))
     rows.append(keys)
     rows.append(widgets.call_action('Speaker', active=True))
+    rows.append(widgets.status_tile('WiFi', 'HomeNet', active=True,
+                                    on_toggle=lambda _b: None))
+    rows.append(widgets.status_tile('Mute'))
     rows.append(widgets.end_call_button())
     rows.append(widgets.bubble('yeah. 9 at the laundromat', outgoing=True))
     rows.append(widgets.bubble('still on for tonight?', outgoing=False))

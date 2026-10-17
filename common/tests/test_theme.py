@@ -298,3 +298,31 @@ def test_install_applies_explicit_theme_object(isolated_home):
 
 def test_count_badge_css_exists(isolated_home):
     assert '.xx-count' in css.render(load())
+
+
+def test_tile_inversion_beats_toggle_fill(isolated_home):
+    # libadwaita repaints toggle :checked fills over a plain class rule,
+    # so the inverted tile re-asserts the fill on a toggle-qualified
+    # checked selector (same reason as the danger-text rule above).
+    out = css.render(load())
+    match = re.search(
+        r'button\.xx-tile\.toggle\.active:checked[^{]*\{([^}]*)\}', out)
+    assert match, 'no toggle-qualified inverted tile rule'
+    assert 'background-color' in match.group(1)
+    assert 'background-image: none' in match.group(1)
+
+
+def test_tile_state_flips_paint_instantly(isolated_home):
+    # A fading button background can freeze mid-fade and pin the old
+    # fill, so tiles carry no transition or animation — on the base rule
+    # and on the toggle-qualified checked rule (the fade lives there).
+    out = css.render(load())
+    base = re.search(r'\.xx-tile\s*\{([^}]*)\}', out)
+    assert base, 'no base tile rule'
+    assert 'transition: none' in base.group(1)
+    assert 'animation: none' in base.group(1)
+    checked = re.search(
+        r'button\.xx-tile\.toggle\.active:checked[^{]*\{([^}]*)\}', out)
+    assert checked, 'no toggle-qualified checked tile rule'
+    assert 'transition: none' in checked.group(1)
+    assert 'animation: none' in checked.group(1)

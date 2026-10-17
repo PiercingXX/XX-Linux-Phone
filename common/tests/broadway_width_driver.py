@@ -89,6 +89,7 @@ def main() -> None:
         keys.append(widgets.keypad_key(digit, sub))
     rows.append(keys)
     rows.append(widgets.call_action(LONG, active=True))
+    rows.append(widgets.status_tile(LONG, LONG, active=True))
     rows.append(widgets.end_call_button())
     rows.append(widgets.bubble(LONG, outgoing=True))
     rows.append(widgets.bubble(LONG, outgoing=False))

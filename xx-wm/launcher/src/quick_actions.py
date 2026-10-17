@@ -55,39 +55,13 @@ _PROPS_IFACE = 'org.freedesktop.DBus.Properties'
 
 
 def theme_css(preset: ThemePreset) -> str:
+    # Tiles render through the shared xx-tile builder (common/xx_ui), so
+    # this sheet only owns the panel chrome the design system has no
+    # component for: the slider rows.
     return f"""
 .qa-panel {{
     background: transparent;
     color: {preset.foreground};
-}}
-.qa-tile {{
-    min-height: 64px;
-    border-radius: 16px;
-    background: {preset.surface};
-    color: {preset.muted};
-    border: 1px solid {preset.background};
-    padding: 0;
-}}
-.qa-tile.active {{
-    background: {preset.surface_alt};
-    color: {preset.foreground};
-    border: 1px solid {preset.accent};
-}}
-.qa-tile:hover {{
-    background: {preset.surface_alt};
-}}
-.qa-tile.active:hover {{
-    background: {preset.surface_alt};
-    border-color: {preset.accent};
-}}
-.tile-label {{
-    font-size: 10pt;
-    font-weight: 600;
-}}
-.tile-state {{
-    font-size: 8pt;
-    margin-top: 2px;
-    opacity: 0.7;
 }}
 .qa-slider-label {{
     font-size: 10pt;
@@ -261,6 +235,10 @@ _TILE_SETTINGS_SECTIONS = {
 def tile_settings_section(key: str) -> str | None:
     """Settings page section a tile long-press opens (None = top of page)."""
     return _TILE_SETTINGS_SECTIONS.get(key)
+
+
+# State line a tile shows before the first async probe lands.
+_TILE_NEUTRAL_TEXT = '…'
 
 
 def _has_backlight() -> bool:
@@ -1151,33 +1129,23 @@ class QuickActionsPanel(Gtk.Box):
         self._sync_sliders_to_live_state()
 
     def _make_tile(self, tile: _TileDef) -> Gtk.ToggleButton:
-        try:
-            from gi.repository import Pango
-            ellipsize = Pango.EllipsizeMode.END
-        except Exception:
-            ellipsize = None
-        label_w = Gtk.Label(label=tile.label, max_width_chars=9)
-        label_w.add_css_class('tile-label')
-        if ellipsize is not None:
-            label_w.set_ellipsize(ellipsize)
-
-        state_w = Gtk.Label(label='…', max_width_chars=14)
-        state_w.add_css_class('tile-state')
-        if ellipsize is not None:
-            state_w.set_ellipsize(ellipsize)
-        self._state_labels[tile.key] = state_w
-
-        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        inner.set_halign(Gtk.Align.CENTER)
-        inner.set_valign(Gtk.Align.CENTER)
-        inner.append(label_w)
-        inner.append(state_w)
-
-        btn = Gtk.ToggleButton()
-        btn.add_css_class('qa-tile')
+        # Shared design-system tile: caps label over a live state line,
+        # inverted while on. The state label stays reachable for the
+        # async SSID/device refreshes paint into it.
+        from xx_ui import widgets
+        btn = widgets.status_tile(
+            tile.label, _TILE_NEUTRAL_TEXT, False,
+            on_toggle=lambda b: self._on_tile_toggled(b, tile))
         btn.set_hexpand(True)
-        btn.set_child(inner)
-        btn.connect('toggled', self._on_tile_toggled, tile)
+        self._state_labels[tile.key] = widgets.status_tile_state(btn)
+        self._wire_tile_press(btn, tile)
+        self._tile_buttons[tile.key] = btn
+        return btn
+
+    def _wire_tile_press(self, btn: Gtk.ToggleButton, tile: _TileDef) -> None:
+        """Long-press wiring for one tile, factored out of _make_tile so
+        headless tests drive the exact mapping without constructing real
+        widgets (real Gtk segfaults without a display)."""
         if tile.key == 'focus':
             # Long-press → take a break (focus suspends, auto-resumes)
             long_press = Gtk.GestureLongPress.new()
@@ -1190,8 +1158,6 @@ class QuickActionsPanel(Gtk.Box):
             settings_press.connect(
                 'pressed', self._on_tile_long_press, tile.key)
             btn.add_controller(settings_press)
-        self._tile_buttons[tile.key] = btn
-        return btn
 
     def _on_tile_long_press(self, gesture: Gtk.GestureLongPress,
                             _x: float, _y: float, key: str) -> None:
@@ -1498,7 +1464,7 @@ class QuickActionsPanel(Gtk.Box):
         lbl = Gtk.Label(label='Captions', xalign=0)
         lbl.add_css_class('qa-slider-label')
         state = Gtk.Label(label='Off', xalign=0)
-        state.add_css_class('tile-state')
+        state.add_css_class('xx-tile-state')
         state.set_hexpand(True)
         if ellipsize is not None:
             state.set_ellipsize(ellipsize)

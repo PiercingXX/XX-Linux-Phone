@@ -528,6 +528,59 @@ def end_call_button(callback=None) -> Gtk.Button:
                              ['xx-endcall'], callback)
 
 
+# Status tiles sit 4-up in a homogeneous grid: 10 narrow chars keep four
+# columns inside 336 px of content (an SSID longer than that ellipsizes).
+_TILE_LABEL_CHARS = 10
+_TILE_STATE_CHARS = 10
+
+
+def status_tile(label_text: str, state: str = '',
+                active: bool = False, on_toggle=None) -> Gtk.ToggleButton:
+    """Two-line caps toggle tile, inverted while on.
+
+    ``label_text`` is uppercased in code; ``state`` (SSID, On/Off) keeps
+    its own casing and hides its line while empty. ``on_toggle`` gets
+    the button on every user toggle. The ``active`` class always tracks
+    the switch state so the inverted fill never goes stale.
+    """
+    button = Gtk.ToggleButton()
+    button.add_css_class('xx-tile')
+    box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 2)
+    box.set_halign(Gtk.Align.CENTER)
+    box.set_valign(Gtk.Align.CENTER)
+    shown = label_text.upper()
+    name = Gtk.Label(label=shown)
+    name.add_css_class('xx-tile-label')
+    _fit_exact(name, shown, _TILE_LABEL_CHARS)
+    box.append(name)
+    sub = Gtk.Label(label=state)
+    sub.add_css_class('xx-tile-state')
+    _fit_exact(sub, state, _TILE_STATE_CHARS)
+    sub.set_visible(bool(state))
+    box.append(sub)
+    button.set_child(box)
+    # State first, listeners after: the initial value never fires toggled.
+    if active:
+        button.set_active(True)
+        button.add_css_class('active')
+
+    def _sync(*_args) -> None:
+        if button.get_active():
+            button.add_css_class('active')
+        else:
+            button.remove_css_class('active')
+
+    button.connect('toggled', _sync)
+    if on_toggle is not None:
+        button.connect('toggled', lambda _b: on_toggle(button))
+    return button
+
+
+def status_tile_state(button: Gtk.ToggleButton) -> Gtk.Label:
+    """The state line of a ``status_tile`` (for live text updates)."""
+    return button.get_child().get_last_child()
+
+
 def bubble(text: str, outgoing: bool = True) -> Gtk.Label:
     widget = label(text, 'xx-bubble-out' if outgoing else 'xx-bubble-in')
     _fit_wrap(widget)

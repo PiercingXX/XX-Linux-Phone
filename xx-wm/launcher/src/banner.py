@@ -256,12 +256,13 @@ def theme_css(preset: ThemePreset) -> str:
         padding: 12px 16px;
     }}
     .banner-app {{
-        font-size: 10pt;
+        font-size: 11pt;
+        letter-spacing: 0.14em;
         color: {preset.muted};
     }}
     .banner-summary {{
-        font-size: 14pt;
-        font-weight: 500;
+        font-size: 16pt;
+        font-weight: 400;
         color: {preset.foreground};
     }}
     .banner-body {{
@@ -335,6 +336,8 @@ if _HAS_GTK:
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             card.add_css_class('banner-card')
             card.set_hexpand(True)
+            card.set_vexpand(False)
+            card.set_valign(Gtk.Align.START)
 
             self._app_label = Gtk.Label(xalign=0)
             self._app_label.add_css_class('banner-app')

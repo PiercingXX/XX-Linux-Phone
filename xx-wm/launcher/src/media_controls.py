@@ -179,7 +179,7 @@ def theme_css(preset: ThemePreset) -> str:
 }}
 .media-title {{
     font-size: 13pt;
-    font-weight: 600;
+    font-weight: 500;
     color: {preset.foreground};
 }}
 .media-sub {{

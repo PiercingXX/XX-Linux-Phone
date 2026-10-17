@@ -190,6 +190,17 @@ _MODULES = {
 
 
 class TestCustomThemeReachesSurfaces:
+    # Fields each surface sheet must carry for a custom preset: the
+    # panel's tiles moved to the shared xx-tile builder (common/xx_ui),
+    # so its own sheet carries the slider trough (surface_alt) while the
+    # tile surface arrives through the design-system sheet.
+    _CUSTOM_FIELDS = {
+        'app_switcher': ('surface', 'foreground'),
+        'back_gesture': ('surface', 'foreground'),
+        'quick_actions': ('surface_alt', 'foreground'),
+        'lock_screen': ('surface', 'foreground'),
+    }
+
     @pytest.mark.parametrize('name, cls', SURFACES)
     def test_display_preset_resolves_the_custom_palette(self, name, cls):
         """Injected custom-theme config → resolve_theme's derived preset,
@@ -205,14 +216,13 @@ class TestCustomThemeReachesSurfaces:
     def test_surface_sheet_renders_the_custom_color(self, name, cls):
         """End to end: injected config → resolved preset → that surface's
         pure sheet carries the derived custom palette (what actually gets
-        painted). surface + foreground are the two fields EVERY W1-B sheet
-        interpolates (test_theme_overlays pins each module's inventory)."""
+        painted)."""
         surf = _surface_with_config(
             cls, _config_with(theme='custom', custom_background=CUSTOM_BG))
         preset = surf._display_preset()
         sheet = _MODULES[name].theme_css(preset)
-        assert preset.surface in sheet
-        assert preset.foreground in sheet
+        for field in self._CUSTOM_FIELDS[name]:
+            assert getattr(preset, field) in sheet, field
 
     def test_overlay_resolves_the_custom_palette(self, hud_mod):
         """Same contract for the HUD overlay window (scoped import — see
