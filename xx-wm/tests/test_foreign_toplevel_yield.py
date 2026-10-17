@@ -204,11 +204,15 @@ class TestForeignToplevelYield:
 
 
 class TestHomeRecomputesPolicy:
-    def test_ipc_page_home_recomputes_policy(self):
+    def test_ipc_page_home_funnels_through_go_home(self):
         body = MAIN_PY.read_text(encoding='utf-8')
         start = body.find('def _show_ipc_page')
         assert start != -1
-        block = body[start:start + 600]
+        block = body[start:start + 900]
+        # page.home raises through go_home (which recomputes the layer
+        # policy via present_over_apps); other pages still switch the
+        # stack and recompute the policy inline.
+        assert 'go_home()' in block
         assert 'set_visible_child_name' in block
         assert '_apply_layer_policy' in block
 

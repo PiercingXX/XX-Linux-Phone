@@ -62,9 +62,36 @@ _SHELL_LAUNCHER_IDS = frozenset({
 })
 
 
-def _is_shell_or_launcher(app_id: str) -> bool:
+def _normalized_app_id(app_id: str) -> str:
     normalized = app_id[:-8] if app_id.endswith('.desktop') else app_id
-    return normalized.strip().casefold() in _SHELL_LAUNCHER_IDS
+    return normalized.strip().casefold()
+
+
+def _is_shell_or_launcher(app_id: str) -> bool:
+    return _normalized_app_id(app_id) in _SHELL_LAUNCHER_IDS
+
+
+# Stock apps superseded by an XX app: when the XX replacement is installed,
+# the stock entry leaves the drawer AND search (user-hidden apps stay
+# searchable; these do not). Only the pairs in this table, matched with or
+# without the .desktop suffix.
+_SUPERSEDED_STOCK_APPS = {
+    'org.gnome.Contacts': 'io.piercingxx.XXContacts',
+    'org.gnome.Calls': 'io.piercingxx.XXDialer',
+    'sm.puri.Chatty': 'io.piercingxx.TxxT',
+}
+
+_SUPERSEDED_BY = {
+    _normalized_app_id(stock): _normalized_app_id(replacement)
+    for stock, replacement in _SUPERSEDED_STOCK_APPS.items()
+}
+
+
+def _superseded(app_id: str, installed: set[str]) -> bool:
+    """True when `app_id` is a superseded stock app whose XX replacement
+    is installed (i.e. listed alongside it)."""
+    replacement = _SUPERSEDED_BY.get(_normalized_app_id(app_id))
+    return replacement is not None and replacement in installed
 
 
 class AppIndex:
@@ -111,6 +138,9 @@ class AppIndex:
             )
             seen.add(app_id)
 
+        installed = {_normalized_app_id(entry.app_id) for entry in entries}
+        entries = [entry for entry in entries
+                   if not _superseded(entry.app_id, installed)]
         self.entries = sorted(entries, key=lambda entry: entry.name.casefold())
         return self.entries
 

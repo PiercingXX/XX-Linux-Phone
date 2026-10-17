@@ -346,6 +346,57 @@ def _names(monkeypatch):
                    '+15550002222': 'Second'}.get(n, n))
 
 
+def _unknown_contact(monkeypatch):
+    import contacts
+    monkeypatch.setattr(
+        contacts, 'ContactBook',
+        lambda: types.SimpleNamespace(lookup_number=lambda n: None))
+
+
+class TestDisplayName:
+    """Unknown numbers read through xx_phone; saved names win."""
+
+    def test_unknown_number_formatted_through_xx_phone(self, monkeypatch):
+        import xx_phone
+        _unknown_contact(monkeypatch)
+        number = '+16145550177'
+        assert call_ui.display_name(number) == xx_phone.display(
+            number, xx_phone.user_country("", ""))
+
+    def test_saved_name_wins_over_number(self, monkeypatch):
+        import contacts
+        monkeypatch.setattr(
+            contacts, 'ContactBook',
+            lambda: types.SimpleNamespace(lookup_number=lambda n: 'Mom'))
+        assert call_ui.display_name('+16145550177') == 'Mom'
+
+    def test_empty_number_stays_empty(self):
+        assert call_ui.display_name('') == ''
+
+    def test_number_display_never_blocks_on_dbus(self, monkeypatch):
+        import contacts
+        import xx_phone
+
+        def _boom():
+            raise AssertionError(
+                'D-Bus autosource must not run on the main thread')
+
+        monkeypatch.setattr(xx_phone, '_auto_sources', _boom)
+        number = '+16145550177'
+        assert contacts.display_number(number) == xx_phone.display(
+            number, xx_phone.user_country("", ""))
+
+    def test_number_display_falls_back_to_raw(self, monkeypatch):
+        import contacts
+        import xx_phone
+
+        def _boom(raw, country=None):
+            raise RuntimeError('no engine')
+
+        monkeypatch.setattr(xx_phone, 'display', _boom)
+        assert contacts.display_number('+16145550177') == '+16145550177'
+
+
 class TestSelectPage:
     """Pure snapshot→page mapping (no widgets)."""
 

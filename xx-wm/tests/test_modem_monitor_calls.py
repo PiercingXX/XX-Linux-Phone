@@ -182,6 +182,12 @@ def _ringing_props(number='tel:+15550001111', direction=1, state=3):
     return {'Direction': direction, 'State': state, 'Number': number}
 
 
+def _shown(number: str) -> str:
+    """Expected caller text for an unsaved number: the xx_phone rule."""
+    import xx_phone
+    return xx_phone.display(number, xx_phone.user_country("", ""))
+
+
 def _add_call(monitor, bus, drain, call_path, props, modem=MODEM):
     """Drive Voice.CallAdded through the async GetAll fetch."""
     monitor._on_call_added(
@@ -262,7 +268,7 @@ class TestIncomingFlow:
         bus = FakeBus()
         monitor, fired, _, drain = _make_monitor(bus, monkeypatch)
         _add_call(monitor, bus, drain, CALL1, _ringing_props())
-        assert fired['incoming'] == [('+15550001111', '+15550001111')]
+        assert fired['incoming'] == [(_shown('+15550001111'), '+15550001111')]
         assert fired['answered'] == []
         assert fired['ended'] == 0
         assert len(fired['changed']) == 1
@@ -282,7 +288,8 @@ class TestIncomingFlow:
         _add_call(monitor, bus, drain, CALL1, _ringing_props(number=''))
         assert fired['incoming'] == [('', '')]
         _number_changed(monitor, drain, CALL1, 'tel:+15550001111')
-        assert fired['incoming'][-1] == ('+15550001111', '+15550001111')
+        assert fired['incoming'][-1] == (
+            _shown('+15550001111'), '+15550001111')
         assert monitor.calls()[0].number == '+15550001111'
 
     def test_active_transition_fires_answered_once_with_started_at(
@@ -294,7 +301,7 @@ class TestIncomingFlow:
         _add_call(monitor, bus, drain, CALL1, _ringing_props())
         assert monitor.calls()[0].started_at is None
         _state_changed(monitor, drain, CALL1, modem_monitor._STATE_ACTIVE)
-        assert fired['answered'] == [('+15550001111', '+15550001111')]
+        assert fired['answered'] == [(_shown('+15550001111'), '+15550001111')]
         started = monitor.calls()[0].started_at
         assert started is not None and started >= before
         _state_changed(monitor, drain, CALL1, modem_monitor._STATE_HELD)
@@ -347,7 +354,7 @@ class TestInitialEnumeration:
         drain()
         bus.complete_next(FakeReply(_ringing_props()))
         drain()
-        assert fired['incoming'] == [('+15550001111', '+15550001111')]
+        assert fired['incoming'] == [(_shown('+15550001111'), '+15550001111')]
         assert modem_monitor.active_call_path() == CALL1
 
     def test_modem_added_triggers_list_calls(self, monkeypatch):
@@ -757,3 +764,29 @@ class TestActiveCallPath:
     def test_none_without_monitor(self, monkeypatch):
         monkeypatch.setattr(modem_monitor, '_last_monitor', None)
         assert modem_monitor.active_call_path() is None
+
+
+class TestDisplayName:
+    """Unknown numbers read through xx_phone; saved names win."""
+
+    def test_unknown_number_formatted_through_xx_phone(self, monkeypatch):
+        import types as _types
+        import contacts
+        import xx_phone
+        monkeypatch.setattr(
+            contacts, 'ContactBook',
+            lambda: _types.SimpleNamespace(lookup_number=lambda n: None))
+        number = '+16145550177'
+        assert modem_monitor._display_name(number) == xx_phone.display(
+            number, xx_phone.user_country("", ""))
+
+    def test_saved_name_wins_over_number(self, monkeypatch):
+        import types as _types
+        import contacts
+        monkeypatch.setattr(
+            contacts, 'ContactBook',
+            lambda: _types.SimpleNamespace(lookup_number=lambda n: 'Mom'))
+        assert modem_monitor._display_name('+16145550177') == 'Mom'
+
+    def test_empty_number_stays_empty(self):
+        assert modem_monitor._display_name('') == ''

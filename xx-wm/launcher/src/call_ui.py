@@ -169,12 +169,12 @@ def format_elapsed(started_at: float, now: float) -> str:
 
 
 def display_name(number: str) -> str:
-    """Contact-book name for the remote number, else the number itself."""
+    """Contact-book name for the remote number, else the formatted number."""
     if not number:
         return ''
     try:
-        from contacts import ContactBook
-        return ContactBook().lookup_number(number) or number
+        from contacts import ContactBook, display_number
+        return ContactBook().lookup_number(number) or display_number(number)
     except Exception:
         return number
 
@@ -1106,7 +1106,8 @@ class CallUI(Gtk.Window):
         page.append(row)
 
     def _build_incoming(self) -> Gtk.Widget:
-        page, caller, number, avatar = self._page_shell('Incoming call')
+        page, caller, number, avatar = self._page_shell(
+            'Incoming call', centered=True)
         self._inc_caller, self._inc_number = caller, number
         self._inc_avatar = avatar
 

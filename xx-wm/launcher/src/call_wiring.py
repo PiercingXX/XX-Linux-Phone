@@ -494,9 +494,9 @@ class CallWiring:
                 get_logger('window').info(
                     '%s owns the session bus; leaving SMS to it', CHATTY_BUS_NAME)
             return
-        from contacts import ContactBook
+        from contacts import ContactBook, display_number
         try:
-            summary = ContactBook().lookup_number(number) or number
+            summary = ContactBook().lookup_number(number) or display_number(number)
         except Exception:
             summary = number
         # Route through the application's D-Bus notification path so the

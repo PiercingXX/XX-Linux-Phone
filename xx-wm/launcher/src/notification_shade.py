@@ -208,11 +208,6 @@ window.shade-window {{
 .shade-power:hover {{
     color: {DANGER_RED};
 }}
-.shade-section {{
-    font-size: 10pt;
-    color: {preset.muted};
-    letter-spacing: 0.05em;
-}}
 .notif-time {{
     font-size: 9pt;
     color: {preset.muted};
@@ -531,8 +526,8 @@ class NotificationShade(Gtk.Window):
         qa_header.set_margin_top(8)
         qa_header.set_margin_bottom(4)
 
-        qa_label = Gtk.Label(label='Quick settings', xalign=0)
-        qa_label.add_css_class('shade-section')
+        from xx_ui import widgets
+        qa_label = widgets.section_label('Quick settings')
         qa_label.set_hexpand(True)
         qa_label.set_margin_start(6)
 
@@ -548,8 +543,7 @@ class NotificationShade(Gtk.Window):
         sep.set_margin_top(8)
         sep.set_margin_bottom(8)
 
-        notif_label = Gtk.Label(label='Notifications', xalign=0)
-        notif_label.add_css_class('shade-section')
+        notif_label = widgets.section_label('Notifications')
         notif_label.set_hexpand(True)
         notif_label.set_margin_start(6)
 

@@ -27,6 +27,11 @@ class XXWMApplication(Adw.Application):
         self._replay_welcome = replay_welcome
         self._tour_visible = False
         self._shell: ShellWindow | None = None
+        # IPC verbs that arrive before the shell window is first presented
+        # (e.g. the a11y-bus timeout stalls the first present ~25 s) wait
+        # here and replay in order once the window is up, instead of being
+        # silently dropped.
+        self._pending_ipc: list[str] = []
         self._ipc: IPCServer | None = None
         self._notif_daemon: NotificationDaemon | None = None
         self._usage_tracker = None
@@ -66,6 +71,7 @@ class XXWMApplication(Adw.Application):
         self._shell = ShellWindow(self)
         self._shell.present()
         _log.info('shell window presented')
+        self._replay_pending_ipc()
         self._start_xxdb()
 
         # App standby (Doze parity): track shell-launched apps in systemd
@@ -159,6 +165,13 @@ class XXWMApplication(Adw.Application):
         if self._replay_welcome:
             self._replay_welcome = False
             self._show_welcome_tour()
+
+    def _replay_pending_ipc(self) -> None:
+        """Run IPC verbs queued before the first present, in arrival order."""
+        pending = getattr(self, '_pending_ipc', None) or []
+        self._pending_ipc = []
+        for command in pending:
+            self._on_ipc_command(command)
 
     def _wire_usage_lock(self) -> None:
         """Feed shell lock transitions to the usage tracker."""
@@ -384,7 +397,11 @@ class XXWMApplication(Adw.Application):
 
     def _on_ipc_command(self, command: str) -> None:
         _log.info('IPC command: %s', command)
-        if not self._shell:
+        if self._shell is None:
+            pending = getattr(self, '_pending_ipc', None)
+            if pending is None:
+                pending = self._pending_ipc = []
+            pending.append(command)
             return
         if (self._shell.is_locked()
                 and self._ipc_silenced_while_locked(command)):
@@ -437,12 +454,19 @@ class XXWMApplication(Adw.Application):
 
     def _show_ipc_page(self, page: str) -> None:
         """page.home/apps/settings IPC verb: switch the stack page."""
-        if self._shell is not None:
-            self._shell.stack.set_visible_child_name(page)
-            # A page change that lands on the already-visible page emits no
-            # notify signal, so recompute explicitly (a stale TOP layer
-            # would bury the next externally launched app).
-            self._shell._apply_layer_policy()
+        if self._shell is None:
+            return
+        if page == 'home':
+            # Home also raises the shell above any app window, like the
+            # gesture.home path; a bare stack switch would leave the app
+            # on top.
+            self._shell.go_home()
+            return
+        self._shell.stack.set_visible_child_name(page)
+        # A page change that lands on the already-visible page emits no
+        # notify signal, so recompute explicitly (a stale TOP layer
+        # would bury the next externally launched app).
+        self._shell._apply_layer_policy()
 
     def _open_ipc_settings(self, section: str | None) -> None:
         """settings.open[:section] IPC verb: the settings deep-link."""

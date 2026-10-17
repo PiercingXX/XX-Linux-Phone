@@ -469,9 +469,8 @@ class ShellWindow(Adw.ApplicationWindow):
             on_keyboard=self._on_entry_keyboard,
         )
 
-        # Right-aligned flat search, as in the PiercingXX Android launcher
+        # Flat search with the text after the icon, like xx_ui's search_bar
         self.apps_search = Gtk.SearchEntry(placeholder_text='Search')
-        self.apps_search.set_alignment(1.0)
         self.apps_search.add_css_class('drawer-search')
         self.apps_search.connect('search-changed', self._on_apps_search_changed)
         self.apps_search.connect('activate', self._on_apps_search_activate)

@@ -95,5 +95,35 @@ class TestSmsDeferral:
         assert modem_monitor.TXXT_BUS_NAME == 'io.piercingxx.TxxT.Daemon'
 
 
+class TestSmsNumberDisplay:
+    """The Messages banner summary reads through xx_phone; saved names win."""
+
+    def test_unknown_number_summary_uses_xx_phone(self, monkeypatch):
+        import contacts
+        import xx_phone
+        monkeypatch.setattr(modem_monitor, 'bus_name_has_owner',
+                            _owners({}))
+        monkeypatch.setattr(
+            contacts, 'ContactBook',
+            lambda: types.SimpleNamespace(lookup_number=lambda n: None))
+        win = _win()
+        number = '+16145550177'
+        CallWiring(win)._on_sms_received(number, 'hello')
+        assert len(win._posted) == 1
+        assert win._posted[0][2] == xx_phone.display(
+            number, xx_phone.user_country("", ""))
+
+    def test_saved_name_wins_in_summary(self, monkeypatch):
+        import contacts
+        monkeypatch.setattr(modem_monitor, 'bus_name_has_owner',
+                            _owners({}))
+        monkeypatch.setattr(
+            contacts, 'ContactBook',
+            lambda: types.SimpleNamespace(lookup_number=lambda n: 'Mom'))
+        win = _win()
+        CallWiring(win)._on_sms_received('+16145550177', 'hello')
+        assert win._posted[0][2] == 'Mom'
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

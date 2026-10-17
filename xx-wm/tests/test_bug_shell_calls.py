@@ -155,6 +155,12 @@ def _props(number='tel:+15550001111', direction=1, state=3):
     return {'Direction': direction, 'State': state, 'Number': number}
 
 
+def _shown(number: str) -> str:
+    """Expected caller text for an unsaved number: the xx_phone rule."""
+    import xx_phone
+    return xx_phone.display(number, xx_phone.user_country("", ""))
+
+
 class TestWaitingBecomesRinging:
     def test_waiting_to_ringing_is_announced(self, monkeypatch) -> None:
         monitor, bus, fired, drain = _make_monitor(monkeypatch)
@@ -168,7 +174,7 @@ class TestWaitingBecomesRinging:
             None, None, CALL_B, None, None,
             FakeParams((6, 3, 0)), None)
         drain()
-        assert fired['incoming'] == [('+15550002222', '+15550002222')], \
+        assert fired['incoming'] == [(_shown('+15550002222'), '+15550002222')], \
             'a waiting call that starts ringing must be screened and ring'
 
 

@@ -58,7 +58,6 @@ def decode_state_array(state: object) -> tuple[int, ...]:
 # on-screen keyboard (it is a regular toplevel while typing).
 _OWN_APP_ID = 'io.piercingxx.XXWM'
 _FILTERED_SUBSTRINGS = ('squeekboard',)
-_STATE_ACTIVATED = 2
 
 # Bind v1 only. phoc 0.56 still sends handle event 7 (`parent`, protocol v2+);
 # bindings generated from older output only know events 0–6, and pywayland
@@ -390,7 +389,7 @@ class WaylandToplevelBackend:
 
     def _on_state(self, toplevel, state) -> None:
         try:
-            activated = _STATE_ACTIVATED in _parse_states(state)
+            activated = STATE_ACTIVATED in decode_state_array(state)
         except Exception:  # noqa: BLE001 - a bad state array must not break dispatch
             activated = False
         if self._state_cb is not None:
@@ -877,26 +876,6 @@ class ToplevelManager:
                 )
         self._notify()
         self._recompute_active()
-
-
-def _parse_states(state: object) -> set[int]:
-    if state is None:
-        return set()
-    if isinstance(state, (bytes, bytearray, memoryview)):
-        raw = bytes(state)
-        return {
-            int.from_bytes(raw[i:i + 4], 'little')
-            for i in range(0, len(raw) - 3, 4)
-        }
-    if isinstance(state, (list, tuple, set)):
-        out: set[int] = set()
-        for item in state:
-            try:
-                out.add(int(item))
-            except (TypeError, ValueError):
-                continue
-        return out
-    return set()
 
 
 def _make_default_backend() -> object | None:

@@ -4,7 +4,6 @@ Text-first monochrome shade: full-screen scrim surface, no-truncate header,
 quiet tiles with SSID/BT state lines, themed sliders, newest-first grouped
 notifications. Headless via the recording-Gtk idiom from test_w1_notifications.
 """
-import re
 import sys
 import types
 from datetime import datetime, timedelta
@@ -329,6 +328,22 @@ class _FakeListBox:
         self.placeholder = widget
 
 
+class _StubWidgets(types.ModuleType):
+    """xx_ui.widgets stand-in: real Gtk segfaults without a display.
+
+    Mirrors the real section_label contract (uppercased caption text plus
+    the xx-caption/xx-section-label classes) so header assertions see
+    what the phone renders.
+    """
+
+    @staticmethod
+    def section_label(text):
+        label = _FakeLabel(label=text.upper())
+        label.add_css_class('xx-caption')
+        label.add_css_class('xx-section-label')
+        return label
+
+
 class _FakeScale:
     def __init__(self):
         self.value = 0.0
@@ -414,6 +429,13 @@ def _pin_shade_gtk(monkeypatch):
     for name, obj in names.items():
         monkeypatch.setattr(notification_shade.Gtk, name, obj, raising=False)
         monkeypatch.setattr(quick_actions.Gtk, name, obj, raising=False)
+    # The headers build through xx_ui.widgets, which binds Gtk at import
+    # time: point both the module cache and the package attribute at the
+    # stand-in (the test_w2_settings idiom) so no real widget is built.
+    import xx_ui
+    stub = _StubWidgets('xx_ui.widgets')
+    monkeypatch.setitem(sys.modules, 'xx_ui.widgets', stub)
+    monkeypatch.setattr(xx_ui, 'widgets', stub, raising=False)
 
 
 def _bare_shade(**kwargs):
@@ -691,13 +713,22 @@ class TestShadeSurface:
         _shade, root, _outer = self._built(monkeypatch)
         labels = {lbl.label_text for lbl in _walk(root, _FakeLabel)}
         buttons = {btn.label for btn in _walk(root, _FakeButton)}
-        assert 'Quick settings' in labels
-        assert 'Notifications' in labels
-        assert 'QUICK SETTINGS' not in labels
-        assert 'NOTIFICATIONS' not in labels
+        assert 'QUICK SETTINGS' in labels
+        assert 'NOTIFICATIONS' in labels
+        assert 'Quick settings' not in labels
+        assert 'Notifications' not in labels
         assert {'Settings', 'Clear all', '⏻'} <= buttons
         # One dismiss set only (scrim tap, swipe, Escape): no Close button.
         assert '▲ Close' not in buttons
+
+    def test_headers_are_design_section_labels(self, monkeypatch):
+        _shade, root, _outer = self._built(monkeypatch)
+        headers = [lbl for lbl in _walk(root, _FakeLabel)
+                   if lbl.label_text in ('QUICK SETTINGS', 'NOTIFICATIONS')]
+        assert len(headers) == 2
+        for header in headers:
+            assert 'xx-section-label' in header.classes
+            assert 'xx-caption' in header.classes
 
     def test_no_letter_spaced_truncation_classes(self, monkeypatch):
         _shade, root, _outer = self._built(monkeypatch)
@@ -706,9 +737,9 @@ class TestShadeSurface:
         css = notification_shade.theme_css(_preset())
         assert 'shade-header' not in css
         assert '0.18em' not in css
-        spacings = re.findall(r'letter-spacing:\s*([\d.]+)em', css)
-        assert spacings, 'section labels lost their spacing rule'
-        assert all(float(s) <= 0.06 for s in spacings), spacings
+        # The headers read through the shared xx-section-label rule now, so
+        # the shade's own sheet carries no letter-spacing at all.
+        assert 'letter-spacing' not in css
 
     def test_window_and_scrim_rules_in_sheet(self):
         css = notification_shade.theme_css(_preset(background='#101010'))

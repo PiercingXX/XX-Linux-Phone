@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
-from toplevel_manager import Toplevel, ToplevelManager, _parse_states
+from toplevel_manager import Toplevel, ToplevelManager, decode_state_array
 
 
 class FakeBackend:
@@ -169,9 +169,9 @@ def test_bad_callback_does_not_break_registry(backend: FakeBackend, manager: Top
 
 
 def test_parse_states_bytes_and_list() -> None:
-    assert _parse_states(None) == set()
-    assert 2 in _parse_states((2).to_bytes(4, 'little'))
-    assert _parse_states([0, 2]) == {0, 2}
+    assert decode_state_array(None) == ()
+    assert 2 in decode_state_array((2).to_bytes(4, 'little'))
+    assert decode_state_array([0, 2]) == (0, 2)
 
 
 def test_activated_app_id_tracks_focus(backend: FakeBackend, manager: ToplevelManager) -> None:

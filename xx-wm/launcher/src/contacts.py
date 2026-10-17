@@ -132,6 +132,19 @@ class ContactBook:
         return list(self._contacts)
 
 
+def display_number(number: str) -> str:
+    """`number` as it should read on shell surfaces (call UI, banners,
+    lock-screen notifications): the shared xx_phone rule for the locale
+    country. Explicit empty operator strings keep the country lookup off
+    D-Bus, so this never blocks the GTK main thread. Saved names still
+    win: resolve those first and only format the bare number."""
+    try:
+        import xx_phone
+        return xx_phone.display(number, xx_phone.user_country("", ""))
+    except Exception:
+        return number
+
+
 # ------------------------------------------------------------------ mmcli SMS
 
 def _resolve_mmcli_modem() -> str | None:

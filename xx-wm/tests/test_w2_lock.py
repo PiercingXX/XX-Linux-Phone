@@ -410,6 +410,7 @@ def _app_with_shell(locked):
         go_home=lambda: (
             shell.stack.set_visible_child_name('home'),
             shell.present_over_apps()),
+        _apply_layer_policy=lambda: calls.append('layer'),
     )
     app._shell = shell
     app._show_welcome_tour = lambda: calls.append('welcome')
@@ -468,6 +469,42 @@ class TestIpcGatedWhileLocked:
         app._on_ipc_command('gesture.back')
         assert 'back' in calls
         assert ('flash', True) in calls
+
+
+class TestIpcPageHome:
+    def test_page_home_raises_shell_like_gesture(self):
+        app, calls = _app_with_shell(locked=False)
+        app._on_ipc_command('page.home')
+        assert ('home', 'home') in calls
+        assert 'over-apps' in calls
+
+    def test_other_pages_still_switch_stack(self):
+        app, calls = _app_with_shell(locked=False)
+        app._on_ipc_command('page.apps')
+        assert calls == [('home', 'apps'), 'layer']
+
+
+class TestIpcReplayBeforePresent:
+    def _preshell_app(self):
+        app = object.__new__(main.XXWMApplication)
+        app._shell = None
+        app._pending_ipc = []
+        return app
+
+    def test_pre_present_commands_queue_in_order(self):
+        app = self._preshell_app()
+        app._on_ipc_command('gesture.home')
+        app._on_ipc_command('page.apps')
+        assert app._pending_ipc == ['gesture.home', 'page.apps']
+
+    def test_replay_runs_queued_commands_in_order(self):
+        app, calls = _app_with_shell(locked=False)
+        app._pending_ipc = ['gesture.home', 'page.apps']
+        app._replay_pending_ipc()
+        assert ('home', 'home') in calls
+        assert 'over-apps' in calls
+        assert ('home', 'apps') in calls
+        assert app._pending_ipc == []
 
 
 def _display_mgr(monkeypatch, **kwargs):

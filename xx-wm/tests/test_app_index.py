@@ -4,10 +4,12 @@ from pathlib import Path
 import pytest
 
 import sys
+import types
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
 
 gi = pytest.importorskip('gi')
 
+import app_index
 from app_index import AppEntry, AppIndex
 
 
@@ -53,3 +55,92 @@ class TestSearch:
     def test_resolve_keeps_order_and_drops_unknown(self, index):
         resolved = index.resolve(['term.desktop', 'missing.desktop', 'cam.desktop'])
         assert [e.name for e in resolved] == ['Terminal', 'Camera']
+
+
+class _FakeDesktopInfo:
+    """Minimal Gio.DesktopAppInfo double for refresh() tests."""
+
+    def __init__(self, app_id: str) -> None:
+        self._app_id = app_id
+
+    def get_id(self):
+        return self._app_id
+
+    def should_show(self):
+        return True
+
+    def get_nodisplay(self):
+        return False
+
+    def get_display_name(self):
+        return self._app_id
+
+    def get_name(self):
+        return self._app_id
+
+    def get_description(self):
+        return ''
+
+    def get_generic_name(self):
+        return ''
+
+    def get_executable(self):
+        return ''
+
+    def get_keywords(self):
+        return []
+
+
+def _refresh_with(monkeypatch, app_ids: list) -> AppIndex:
+    infos = [_FakeDesktopInfo(app_id) for app_id in app_ids]
+    fake_gio = types.SimpleNamespace(
+        AppInfo=types.SimpleNamespace(get_all=lambda: list(infos)),
+        DesktopAppInfo=_FakeDesktopInfo,
+    )
+    monkeypatch.setattr(app_index, 'Gio', fake_gio)
+    index = AppIndex()
+    index.refresh()
+    return index
+
+
+class TestSupersededStockApps:
+    def test_stock_contacts_hidden_when_xx_contacts_installed(
+            self, monkeypatch) -> None:
+        index = _refresh_with(monkeypatch, [
+            'org.gnome.Contacts.desktop', 'io.piercingxx.XXContacts.desktop'])
+        assert [e.app_id for e in index.entries] == [
+            'io.piercingxx.XXContacts.desktop']
+
+    def test_stock_contacts_kept_without_replacement(
+            self, monkeypatch) -> None:
+        index = _refresh_with(monkeypatch, ['org.gnome.Contacts.desktop'])
+        assert [e.app_id for e in index.entries] == [
+            'org.gnome.Contacts.desktop']
+
+    def test_calls_and_chatty_need_their_own_replacement(
+            self, monkeypatch) -> None:
+        index = _refresh_with(monkeypatch, [
+            'org.gnome.Calls.desktop', 'sm.puri.Chatty.desktop',
+            'io.piercingxx.XXContacts.desktop'])
+        assert {e.app_id for e in index.entries} == {
+            'org.gnome.Calls.desktop', 'sm.puri.Chatty.desktop',
+            'io.piercingxx.XXContacts.desktop'}
+
+    def test_calls_hidden_when_dialer_installed(self, monkeypatch) -> None:
+        index = _refresh_with(monkeypatch, [
+            'org.gnome.Calls.desktop', 'io.piercingxx.XXDialer.desktop'])
+        assert [e.app_id for e in index.entries] == [
+            'io.piercingxx.XXDialer.desktop']
+
+    def test_chatty_hidden_when_txxt_installed(self, monkeypatch) -> None:
+        index = _refresh_with(monkeypatch, [
+            'sm.puri.Chatty.desktop', 'io.piercingxx.TxxT.desktop'])
+        assert [e.app_id for e in index.entries] == [
+            'io.piercingxx.TxxT.desktop']
+
+    def test_superseded_stock_absent_from_search(
+            self, monkeypatch) -> None:
+        index = _refresh_with(monkeypatch, [
+            'org.gnome.Contacts.desktop', 'io.piercingxx.XXContacts.desktop'])
+        assert [e.app_id for e in index.search('contacts')] == [
+            'io.piercingxx.XXContacts.desktop']
