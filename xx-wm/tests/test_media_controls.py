@@ -833,9 +833,9 @@ class TestMediaCard:
         first = card.card._theme_provider
         card.card.apply_theme(THEME_PRESETS['paper'])
         assert card.card._theme_provider is first
-        assert THEME_PRESETS['paper'].background.encode() in first.data
+        assert THEME_PRESETS['paper'].foreground.encode() in first.data
         card.card.apply_theme(THEME_PRESETS['amoled'])
-        assert THEME_PRESETS['amoled'].background.encode() in first.data
+        assert THEME_PRESETS['amoled'].foreground.encode() in first.data
 
     def test_title_ellipsizes(self, card):
         assert card.card._title._ellipsize is not None
@@ -1003,8 +1003,9 @@ class TestMediaKeyRouting:
 
 
 class TestMediaTheme:
-    FIELDS = ('background', 'foreground', 'surface', 'surface_alt',
-              'muted', 'accent')
+    # The card sits on the shade's background and draws with the brand
+    # ramp of the foreground, so background itself never appears.
+    FIELDS = ('foreground', 'surface', 'surface_alt', 'muted', 'accent')
 
     def test_every_preset_interpolates_all_fields(self):
         for key, preset in THEME_PRESETS.items():

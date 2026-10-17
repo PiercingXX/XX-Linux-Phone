@@ -182,97 +182,228 @@ def _normalize_notif_actions(
 
 
 def theme_css(preset: ThemePreset) -> str:
+    """Shade chrome. Colors follow the brand ramp: the preset foreground
+    at 3.5% (raised), 10% (line), 25% (shade), 40%, 80% (strong) and 90%
+    (text) over the preset background; muted text is the preset muted;
+    emphasis inverts (foreground block, background text)."""
+    bg = preset.background
+    fg = preset.foreground
     return f"""
 window.xx-wm-shade {{
     background: transparent;
 }}
 window.shade-window {{
-    background: alpha({preset.background}, 0.55);
+    background: alpha({bg}, 0.55);
 }}
 .shade-root {{
-    background: {preset.background};
-    color: {preset.foreground};
+    background: {bg};
+    color: alpha({fg}, 0.90);
+    padding: 22px 16px 14px 16px;
 }}
 .shade-scrim {{
-    background: alpha({preset.background}, 0.85);
+    background: alpha({bg}, 0.85);
+}}
+button.shade-datetime,
+button.shade-datetime:hover,
+button.shade-datetime:active {{
+    padding: 0;
+    min-height: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
 }}
 .shade-time {{
-    font-size: 20pt;
-    font-weight: 700;
-    color: {preset.foreground};
+    font-size: 46px;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    color: alpha({fg}, 0.90);
 }}
 .shade-date {{
-    font-size: 11pt;
+    font-size: 11px;
+    letter-spacing: 0.16em;
     color: {preset.muted};
 }}
-.shade-btn {{
-    font-size: 12pt;
-    color: {preset.foreground};
-    padding: 0 8px;
+button.shade-icon-btn {{
+    min-width: 38px;
+    min-height: 38px;
+    padding: 0;
+    border-radius: 12px;
+    background: none;
+    box-shadow: none;
+    border: 1px solid alpha({fg}, 0.10);
+    color: alpha({fg}, 0.80);
+    -gtk-icon-size: 18px;
 }}
-.shade-privacy {{
-    font-size: 11pt;
-    color: {preset.accent};
-    padding: 0 8px;
+button.shade-icon-btn:hover {{
+    background: {preset.surface};
 }}
-.shade-privacy-detail {{
-    font-size: 10pt;
-    color: {preset.muted};
+button.shade-icon-btn:active {{
+    background: {preset.surface_alt};
 }}
-.shade-power {{
-    font-size: 15pt;
-    font-weight: 400;
-    padding: 0 8px;
-}}
-.shade-power:hover {{
+button.shade-power:hover {{
     color: {DANGER_RED};
 }}
-.notif-time {{
-    font-size: 9pt;
+button.shade-privacy {{
+    font-size: 11px;
+    min-height: 40px;
+    padding: 0 8px;
+    background: none;
+    box-shadow: none;
+    color: {preset.accent};
+}}
+.shade-privacy-detail {{
+    font-size: 11px;
+    color: {preset.muted};
+    margin-top: 12px;
+}}
+.shade-section {{
+    min-height: 28px;
+    margin-top: 22px;
+    margin-bottom: 10px;
+}}
+.shade-root .xx-section-label {{
+    margin: 0;
+    font-size: 10px;
+    letter-spacing: 0.18em;
     color: {preset.muted};
 }}
+button.shade-chevron {{
+    min-width: 32px;
+    min-height: 28px;
+    padding: 0;
+    border-radius: 8px;
+    background: none;
+    box-shadow: none;
+    border: none;
+    color: {preset.muted};
+    -gtk-icon-size: 16px;
+}}
+button.shade-chevron:hover {{
+    background: {preset.surface};
+}}
+.shade-notif-count {{
+    font-size: 10px;
+    font-feature-settings: "tnum";
+    color: alpha({fg}, 0.40);
+}}
+button.shade-text-btn {{
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    min-height: 28px;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+    color: alpha({fg}, 0.80);
+}}
+button.shade-text-btn:hover {{
+    color: alpha({fg}, 0.90);
+}}
+scrolledwindow.shade-notif-card {{
+    background: alpha({fg}, 0.035);
+    border: 1px solid alpha({fg}, 0.10);
+    border-radius: 16px;
+}}
+list.shade-notif-list {{
+    background: none;
+}}
+list.shade-notif-list > row {{
+    padding: 0;
+    background: none;
+}}
+.notif-row {{
+    padding: 0 16px;
+}}
+.notif-row:hover {{
+    background: alpha({fg}, 0.03);
+}}
+.notif-content {{
+    padding: 14px 0;
+    border-bottom: 1px solid alpha({fg}, 0.10);
+}}
+list.shade-notif-list > row:last-child .notif-content {{
+    border-bottom: none;
+}}
 .notif-app {{
-    font-size: 11pt;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    color: {preset.muted};
+}}
+.shade-empty {{
+    padding: 14px 16px;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+}}
+.shade-hint {{
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: {preset.muted};
+}}
+.notif-time {{
+    font-size: 10px;
+    letter-spacing: 0.06em;
     color: {preset.muted};
 }}
 .notif-title {{
-    font-size: 14pt;
-    font-weight: 500;
-    color: {preset.foreground};
+    font-size: 15px;
+    font-weight: 400;
+    color: alpha({fg}, 0.90);
 }}
 .notif-body {{
-    font-size: 11.5pt;
-    color: alpha({preset.foreground}, 0.85);
+    font-size: 13px;
+    font-weight: 300;
+    color: alpha({fg}, 0.80);
 }}
-.notif-row {{
-    background: {preset.surface};
-    border-radius: 16px;
-    padding: 14px 18px;
-    margin-bottom: 6px;
+.shade-handle {{
+    min-width: 40px;
+    min-height: 4px;
+    margin-top: 18px;
+    border-radius: 2px;
+    background: alpha({fg}, 0.25);
 }}
-.notif-row:hover {{ background: {preset.surface_alt}; }}
 .cal-header {{
-    font-size: 11pt;
+    font-size: 11px;
+    letter-spacing: 0.14em;
     color: {preset.muted};
 }}
 .cal-day {{
-    font-size: 10.5pt;
-    color: alpha({preset.foreground}, 0.85);
+    font-size: 13px;
+    color: alpha({fg}, 0.80);
     min-width: 34px;
     min-height: 30px;
 }}
 .cal-day.cal-today {{
-    color: {preset.background};
-    background: {preset.accent};
+    color: {bg};
+    background: {fg};
     border-radius: 15px;
-    font-weight: 700;
+    font-weight: 500;
 }}
 .cal-weekday {{
-    font-size: 9pt;
+    font-size: 10px;
+    letter-spacing: 0.1em;
     color: {preset.muted};
     min-width: 34px;
 }}
 """
+
+
+def _no_ellipsis(label) -> None:
+    """Section captions sit at exactly their natural width; a fractional
+    rounding would otherwise swap the last letter for an ellipsis."""
+    try:
+        from gi.repository import Pango
+        label.set_ellipsize(Pango.EllipsizeMode.NONE)
+    except Exception:
+        pass
+
+
+def format_shade_date(now: datetime, battery: int | None = None) -> str:
+    """Header date line: ``SAT 17 OCT`` plus `` · 44%`` when a battery
+    level is known (missing data is hidden, never guessed). Pure."""
+    text = now.strftime('%a %d %b').replace(' 0', ' ').upper()
+    if battery is None:
+        return text
+    return f'{text} \u00b7 {int(battery)}%'
+
 
 def format_rel_time(timestamp: datetime, now: datetime | None = None) -> str:
     """Compact relative age for a notification row ("now", "5m", "2h")."""
@@ -468,22 +599,20 @@ class NotificationShade(Gtk.Window):
     def _build_content(self) -> Gtk.Widget:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root.add_css_class('shade-root')
-        root.set_margin_top(8)
-        root.set_margin_start(12)
-        root.set_margin_end(12)
-        root.set_margin_bottom(12)
 
-        # Header: time + date on the left (tap → inline month calendar),
-        # Settings + power text buttons on the right (design.md "Notification
-        # shade & quick settings"). No letter-spacing anywhere here, so every
-        # row fits a 320 px screen without truncation.
+        # Header: Space Mono clock over a caps date line on the left (tap
+        # opens the inline month calendar); Settings + Power as 40 px
+        # outlined glyph buttons on the right.
         self._datetime_btn = Gtk.Button()
         self._datetime_btn.add_css_class('flat')
+        self._datetime_btn.add_css_class('shade-datetime')
         datetime_box = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        datetime_box.set_valign(Gtk.Align.CENTER)
+            orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._time_label = Gtk.Label(xalign=0)
         self._time_label.add_css_class('shade-time')
+        # Brand display face (Space Mono) via font_theme's global provider,
+        # so the clock still follows a user-picked family.
+        self._time_label.add_css_class('xx-display-face')
         self._date_label = Gtk.Label(xalign=0)
         self._date_label.add_css_class('shade-date')
         # Older harnesses drive _datetime_label directly; it is the time label.
@@ -493,9 +622,10 @@ class NotificationShade(Gtk.Window):
         self._datetime_btn.set_child(datetime_box)
         self._datetime_btn.connect('clicked', lambda _b: self._toggle_calendar())
 
-        settings_btn = Gtk.Button(label='Settings')
+        settings_btn = Gtk.Button(icon_name='xx-shade-settings-symbolic')
         settings_btn.add_css_class('flat')
-        settings_btn.add_css_class('shade-btn')
+        settings_btn.add_css_class('shade-icon-btn')
+        settings_btn.set_tooltip_text('Settings')
         settings_btn.connect('clicked', self._on_settings_clicked)
 
         self._privacy_btn = Gtk.Button(label='')
@@ -506,21 +636,26 @@ class NotificationShade(Gtk.Window):
         self._privacy_btn.connect('clicked', self._toggle_privacy_detail)
 
         # Power button, top-right — suspend / restart / power off via PowerMenu
-        power_btn = Gtk.Button(label='⏻')
+        power_btn = Gtk.Button(icon_name='xx-shade-power-symbolic')
         power_btn.add_css_class('flat')
-        power_btn.add_css_class('shade-btn')
+        power_btn.add_css_class('shade-icon-btn')
         power_btn.add_css_class('shade-power')
         power_btn.set_tooltip_text('Power')
         power_btn.connect('clicked', self._on_power_clicked)
 
-        top_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        top_header.set_margin_top(6)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_valign(Gtk.Align.START)
+        actions.set_margin_top(4)
+        actions.append(self._privacy_btn)
+        actions.append(settings_btn)
+        actions.append(power_btn)
+
+        top_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self._datetime_btn.set_hexpand(True)
         self._datetime_btn.set_halign(Gtk.Align.START)
+        self._datetime_btn.set_valign(Gtk.Align.START)
         top_header.append(self._datetime_btn)
-        top_header.append(self._privacy_btn)
-        top_header.append(settings_btn)
-        top_header.append(power_btn)
+        top_header.append(actions)
 
         self._privacy_revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
@@ -539,63 +674,82 @@ class NotificationShade(Gtk.Window):
             reveal_child=False,
         )
         self._calendar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._calendar_box.set_margin_top(16)
         self._calendar_revealer.set_child(self._calendar_box)
         self._refresh_datetime()
 
-        qa_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        qa_header.set_margin_top(8)
-        qa_header.set_margin_bottom(4)
-
         from xx_ui import widgets
+        qa_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        qa_header.add_css_class('shade-section')
         qa_label = widgets.section_label('Quick settings')
         qa_label.set_hexpand(True)
-        qa_label.set_margin_start(6)
+        qa_label.set_valign(Gtk.Align.CENTER)
+        _no_ellipsis(qa_label)
 
-        self._expand_btn = Gtk.Button(label='↓')
+        self._expand_btn = Gtk.Button(icon_name='xx-shade-expand-symbolic')
         self._expand_btn.add_css_class('flat')
-        self._expand_btn.add_css_class('shade-btn')
+        self._expand_btn.add_css_class('shade-chevron')
+        self._expand_btn.set_tooltip_text('Show all tiles')
         self._expand_btn.connect('clicked', self._toggle_expand)
 
         qa_header.append(qa_label)
         qa_header.append(self._expand_btn)
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        sep.set_margin_top(8)
-        sep.set_margin_bottom(8)
-
         notif_label = widgets.section_label('Notifications')
-        notif_label.set_hexpand(True)
-        notif_label.set_margin_start(6)
+        notif_label.set_valign(Gtk.Align.CENTER)
+        _no_ellipsis(notif_label)
+        self._notif_count = Gtk.Label(label='', xalign=0)
+        self._notif_count.add_css_class('shade-notif-count')
+        self._notif_count.set_valign(Gtk.Align.CENTER)
+        self._notif_count.set_visible(False)
+        notif_title = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        notif_title.set_hexpand(True)
+        notif_title.append(notif_label)
+        notif_title.append(self._notif_count)
 
-        clear_btn = Gtk.Button(label='Clear all')
+        clear_btn = Gtk.Button(label='CLEAR ALL')
         clear_btn.add_css_class('flat')
-        clear_btn.add_css_class('shade-btn')
+        clear_btn.add_css_class('shade-text-btn')
+        clear_btn.set_tooltip_text('Clear all')
         clear_btn.connect('clicked', lambda _b: self.clear_all())
 
         notif_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        notif_header.set_margin_bottom(8)
-        notif_header.append(notif_label)
+        notif_header.add_css_class('shade-section')
+        notif_header.append(notif_title)
         notif_header.append(clear_btn)
 
         # Honest empty state when an external daemon owns the notification
         # name: one muted line reusing .notif-app instead of a silent void.
         self._external_hint = Gtk.Label(
-            label='Notifications handled by external daemon', xalign=0)
+            label='Notifications handled by external daemon', xalign=0,
+            wrap=True, max_width_chars=32)
         self._external_hint.add_css_class('notif-app')
-        self._external_hint.set_margin_start(6)
+        self._external_hint.add_css_class('shade-hint')
+        self._external_hint.set_margin_bottom(10)
         self._external_hint.set_visible(False)
 
-        scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        # The list is one raised card (on the scroller, so its frame stays
+        # whole while rows scroll): rows split by inset hairlines.
+        self.list_box.add_css_class('shade-notif-list')
+        # The card hugs its rows (up to 360 px, then scrolls); the scrim
+        # below keeps the rest of the screen, so tap-outside still closes.
+        scroller = Gtk.ScrolledWindow(hexpand=True, vexpand=False)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_max_content_height(360)
         scroller.set_propagate_natural_height(True)
+        scroller.add_css_class('shade-notif-card')
         scroller.set_child(self.list_box)
 
         # Placeholder empty state: a single muted line while the list is empty.
         self._empty_label = Gtk.Label(label='No notifications', xalign=0)
         self._empty_label.add_css_class('notif-app')
-        self._empty_label.set_margin_start(6)
+        self._empty_label.add_css_class('shade-empty')
         self.list_box.set_placeholder(self._empty_label)
+
+        # Grab handle: the sheet's bottom edge (swipe up closes).
+        handle = Gtk.Box()
+        handle.add_css_class('shade-handle')
+        handle.set_halign(Gtk.Align.CENTER)
 
         root.append(top_header)
         root.append(self._privacy_revealer)
@@ -606,30 +760,42 @@ class NotificationShade(Gtk.Window):
         # working; a real shade always carries the card.
         media_card = getattr(self, 'media_card', None)
         if media_card is not None:
+            try:
+                media_card.set_margin_top(22)
+            except Exception:
+                pass
             root.append(media_card)
         root.append(qa_header)
         root.append(self.quick_actions)
-        root.append(sep)
         root.append(notif_header)
         root.append(self._external_hint)
         root.append(scroller)
+        root.append(handle)
         return root
 
     def _toggle_expand(self, _btn: Gtk.Button) -> None:
         expanded = not self.quick_actions.tier2_grid.get_visible()
         self.quick_actions.expand(expanded)
-        self._expand_btn.set_label('↑' if expanded else '↓')
+        self._expand_btn.set_icon_name(
+            'xx-shade-collapse-symbolic' if expanded
+            else 'xx-shade-expand-symbolic')
+        self._expand_btn.set_tooltip_text(
+            'Show fewer tiles' if expanded else 'Show all tiles')
 
     def _refresh_datetime(self) -> bool:
         now = datetime.now()
         time_part = now.strftime('%H:%M')
-        date_part = now.strftime('%a %d %b').replace(' 0', ' ')
+        try:
+            from system_status import battery_pct
+            battery = battery_pct()
+        except Exception:
+            battery = None
         time_label = getattr(self, '_datetime_label', None)
         if time_label is not None:
             time_label.set_text(time_part)
         date_label = getattr(self, '_date_label', None)
         if date_label is not None:
-            date_label.set_text(date_part)
+            date_label.set_text(format_shade_date(now, battery))
         return True
 
     def set_privacy_snapshot(self, snapshot: dict | None) -> None:
@@ -921,6 +1087,14 @@ class NotificationShade(Gtk.Window):
             nxt = child.get_next_sibling()
             self.list_box.remove(child)
             child = nxt
+        count = getattr(self, '_notif_count', None)
+        if count is not None:
+            total = len(self._notifications)
+            try:
+                count.set_text(f'{total:02d}')
+                count.set_visible(total > 0)
+            except Exception:
+                pass
         for group in group_notification_runs(self._notifications):
             first = True
             for notif in group:
@@ -933,7 +1107,8 @@ class NotificationShade(Gtk.Window):
         title_label = Gtk.Label(label=notif.summary, xalign=0, wrap=True, max_width_chars=36)
         title_label.add_css_class('notif-title')
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        content.add_css_class('notif-content')
         content.set_hexpand(True)
         # First row of each same-app run carries the shared app label plus
         # the relative age; the rows grouped under it show summary/body only.

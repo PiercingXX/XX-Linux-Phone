@@ -140,14 +140,28 @@ class _FakeLabel:
     def set_visible(self, value):
         self.visible = value
 
+    def set_valign(self, value):
+        pass
+
+    def set_margin_bottom(self, value):
+        pass
+
 
 class _FakeButton:
-    def __init__(self, label=''):
+    def __init__(self, label='', icon_name=None):
         self.label = label
+        self.icon_name = icon_name
+        self.tooltip = None
         self.visible = True
         self.handlers = {}
         self.classes = []
         self.child = None
+
+    def set_icon_name(self, name):
+        self.icon_name = name
+
+    def set_valign(self, value):
+        pass
 
     def connect(self, signal, callback, *args):
         self.handlers[signal] = (callback, args)
@@ -169,7 +183,7 @@ class _FakeButton:
         self.child = child
 
     def set_tooltip_text(self, text):
-        pass
+        self.tooltip = text
 
     def set_halign(self, value):
         pass
@@ -266,7 +280,10 @@ class _FakeGrid:
 
 class _FakeSeparator:
     def __init__(self, **kwargs):
-        pass
+        self.classes = []
+
+    def add_css_class(self, css):
+        self.classes.append(css)
 
     def set_margin_top(self, value):
         pass
@@ -293,6 +310,9 @@ class _FakeScroller:
 
     def set_child(self, child):
         self.child = child
+
+    def add_css_class(self, css):
+        pass
 
 
 class _FakeRow:
@@ -326,6 +346,9 @@ class _FakeListBox:
 
     def set_placeholder(self, widget):
         self.placeholder = widget
+
+    def add_css_class(self, css):
+        self.classes = getattr(self, 'classes', []) + [css]
 
 
 class _StubWidgets(types.ModuleType):
@@ -364,6 +387,9 @@ class _FakeScale:
     def set_draw_value(self, value):
         pass
 
+    def set_tooltip_text(self, text):
+        self.tooltip = text
+
     def set_value(self, value):
         self.value = value
 
@@ -375,6 +401,26 @@ class _FakeScale:
 
     def connect(self, signal, callback):
         return 1
+
+
+class _FakeImage:
+    def __init__(self, icon_name=None):
+        self.icon_name = icon_name
+        self.tooltip = None
+        self.classes = []
+
+    @classmethod
+    def new_from_icon_name(cls, name):
+        return cls(name)
+
+    def set_pixel_size(self, px):
+        self.pixel_size = px
+
+    def add_css_class(self, css):
+        self.classes.append(css)
+
+    def set_tooltip_text(self, text):
+        self.tooltip = text
 
 
 class _FakeGLib:
@@ -404,6 +450,7 @@ class _Provider:
 def _pin_shade_gtk(monkeypatch):
     names = {
         'Label': _FakeLabel,
+        'Image': _FakeImage,
         'Box': _FakeBox,
         'Button': _FakeButton,
         'ToggleButton': _FakeToggleButton,
@@ -713,11 +760,18 @@ class TestShadeSurface:
         _shade, root, _outer = self._built(monkeypatch)
         labels = {lbl.label_text for lbl in _walk(root, _FakeLabel)}
         buttons = {btn.label for btn in _walk(root, _FakeButton)}
+        tips = {btn.tooltip for btn in _walk(root, _FakeButton)}
+        icons = {btn.icon_name for btn in _walk(root, _FakeButton)}
         assert 'QUICK SETTINGS' in labels
         assert 'NOTIFICATIONS' in labels
         assert 'Quick settings' not in labels
         assert 'Notifications' not in labels
-        assert {'Settings', 'Clear all', '⏻'} <= buttons
+        # Settings and Power are glyph buttons (named by tooltip); Clear
+        # all stays caps text.
+        assert 'CLEAR ALL' in buttons
+        assert {'Settings', 'Power', 'Clear all'} <= tips
+        assert {'xx-shade-settings-symbolic', 'xx-shade-power-symbolic',
+                'xx-shade-expand-symbolic'} <= icons
         # One dismiss set only (scrim tap, swipe, Escape): no Close button.
         assert '▲ Close' not in buttons
 
@@ -736,10 +790,10 @@ class TestShadeSurface:
             assert 'shade-header' not in btn.classes, btn.label
         css = notification_shade.theme_css(_preset())
         assert 'shade-header' not in css
-        assert '0.18em' not in css
-        # The headers read through the shared xx-section-label rule now, so
-        # the shade's own sheet carries no letter-spacing at all.
-        assert 'letter-spacing' not in css
+        # The design tracks the section captions at +18% on the shared
+        # xx-section-label rule, scoped to the shade root.
+        assert '.shade-root .xx-section-label' in css
+        assert '0.18em' in css
 
     def test_window_and_scrim_rules_in_sheet(self):
         css = notification_shade.theme_css(_preset(background='#101010'))
@@ -884,7 +938,7 @@ class TestApplyThemeProviders:
         src = Path(__file__).parent.parent.joinpath(
             'launcher', 'src', 'quick_actions.py').read_text(
                 encoding='utf-8')
-        assert 'status_tile' in src
+        assert 'glyph_tile' in src
         assert 'qa-tile' not in src
 
     def test_slider_css_uses_theme_not_libadwaita(self):
@@ -921,9 +975,14 @@ class TestBrightnessRow:
         panel.sliders_box = _FakeBox()
         panel._build_sliders()
         assert panel._bright_row.visible is True
-        labels = [lbl.label_text for lbl in _walk(panel.sliders_box,
-                                                 _FakeLabel)]
-        assert labels == ['Brightness', 'Volume']
+        glyphs = [img for row in panel.sliders_box.children
+                  for img in row.children if isinstance(img, _FakeImage)]
+        assert [g.tooltip for g in glyphs] == ['Brightness', 'Volume']
+        assert [g.icon_name for g in glyphs] == [
+            'xx-shade-brightness-symbolic', 'xx-shade-volume-symbolic']
+        readouts = [lbl for lbl in _walk(panel.sliders_box, _FakeLabel)
+                    if 'qa-readout' in lbl.classes]
+        assert len(readouts) == 2
         assert 'shade-slider' in panel._bright_slider.classes
         assert 'shade-slider' in panel._vol_slider.classes
 

@@ -137,6 +137,36 @@ install_data(
   install_dir: shell_datadir,
 )
 
+# Shade glyphs (symbolic, fill-only; regenerate with tools/shade_glyphs.py).
+# quick_actions.ensure_shade_icons() adds this directory, next to the
+# modules, to the icon-theme search path so Gtk.Image recolors them.
+install_data(
+  [
+    'src/icons/xx-shade-airplane-symbolic.svg',
+    'src/icons/xx-shade-auto-br-symbolic.svg',
+    'src/icons/xx-shade-brightness-symbolic.svg',
+    'src/icons/xx-shade-bt-symbolic.svg',
+    'src/icons/xx-shade-captions-symbolic.svg',
+    'src/icons/xx-shade-collapse-symbolic.svg',
+    'src/icons/xx-shade-data-symbolic.svg',
+    'src/icons/xx-shade-dnd-symbolic.svg',
+    'src/icons/xx-shade-expand-symbolic.svg',
+    'src/icons/xx-shade-focus-symbolic.svg',
+    'src/icons/xx-shade-hotspot-symbolic.svg',
+    'src/icons/xx-shade-location-symbolic.svg',
+    'src/icons/xx-shade-night-symbolic.svg',
+    'src/icons/xx-shade-power-symbolic.svg',
+    'src/icons/xx-shade-record-symbolic.svg',
+    'src/icons/xx-shade-saver-symbolic.svg',
+    'src/icons/xx-shade-settings-symbolic.svg',
+    'src/icons/xx-shade-tailnet-symbolic.svg',
+    'src/icons/xx-shade-torch-symbolic.svg',
+    'src/icons/xx-shade-volume-symbolic.svg',
+    'src/icons/xx-shade-wifi-symbolic.svg',
+  ],
+  install_dir: join_paths(shell_datadir, 'icons'),
+)
+
 install_data(
   'data/phoc.ini',
   install_dir: shell_datadir,

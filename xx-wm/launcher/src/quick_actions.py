@@ -55,35 +55,128 @@ _PROPS_IFACE = 'org.freedesktop.DBus.Properties'
 
 
 def theme_css(preset: ThemePreset) -> str:
-    # Tiles render through the shared xx-tile builder (common/xx_ui), so
-    # this sheet only owns the panel chrome the design system has no
-    # component for: the slider rows.
+    # Tiles render through the shared glyph-tile builder (common/xx_ui),
+    # so this sheet only owns the panel chrome the design system has no
+    # component for: the slider card. Colors are the brand opacity ramp
+    # of the preset foreground (3.5% raised, 10% line, 25% shade, 80%
+    # strong) so every preset gets the same hierarchy as AMOLED.
+    fg = preset.foreground
     return f"""
 .qa-panel {{
     background: transparent;
-    color: {preset.foreground};
+    color: {fg};
+}}
+.qa-sep {{
+    min-height: 0;
+    margin: 0;
+    background: none;
+}}
+.qa-sliders {{
+    margin-top: 22px;
+    padding: 6px 14px;
+    border-radius: 16px;
+    background: alpha({fg}, 0.035);
+    border: 1px solid alpha({fg}, 0.10);
+}}
+.qa-row {{
+    min-height: 32px;
+    padding: 2px 0;
+}}
+.qa-sliders > .qa-row + .qa-row {{
+    border-top: 1px solid alpha({fg}, 0.10);
+}}
+.qa-row-glyph {{
+    color: alpha({fg}, 0.80);
+    -gtk-icon-size: 18px;
+    min-width: 20px;
+}}
+.qa-readout {{
+    font-size: 11px;
+    font-feature-settings: "tnum";
+    color: {preset.muted};
+    min-width: 28px;
 }}
 .qa-slider-label {{
-    font-size: 10pt;
+    font-size: 10px;
+    letter-spacing: 0.16em;
     color: {preset.muted};
 }}
-.shade-slider trough {{
+.qa-row-btn {{
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: none;
+    box-shadow: none;
+    border: 1px solid alpha({fg}, 0.10);
+    color: alpha({fg}, 0.80);
+}}
+.qa-row-btn:active {{
     background: {preset.surface_alt};
-    min-height: 6px;
-    border-radius: 3px;
+}}
+.qa-row-btn:checked {{
+    background: {fg};
+    color: {preset.background};
+    border-color: {fg};
+}}
+.shade-slider {{
+    padding: 0;
+    margin: 0;
+    min-height: 28px;
+}}
+.shade-slider trough {{
+    background: alpha({fg}, 0.25);
+    min-height: 2px;
+    border-radius: 1px;
+    outline: none;
 }}
 .shade-slider highlight {{
-    background: {preset.foreground};
-    border-radius: 3px;
+    background: {fg};
+    min-height: 2px;
+    border-radius: 1px;
 }}
 .shade-slider slider {{
-    background: {preset.foreground};
+    background: {fg};
     border: none;
-    border-radius: 999px;
-    min-width: 18px;
+    box-shadow: none;
+    outline: none;
+    border-radius: 2px;
+    min-width: 4px;
     min-height: 18px;
+    margin: -8px 0;
+}}
+.shade-slider:disabled highlight,
+.shade-slider:disabled slider {{
+    background: alpha({fg}, 0.25);
 }}
 """
+
+
+_ICON_DIR = Path(__file__).with_name('icons')
+
+# Tile keys whose glyph file carries another name.
+_TILE_GLYPHS = {'tailscale': 'tailnet', 'auto_br': 'auto-br'}
+
+
+def tile_icon_name(key: str) -> str:
+    """Symbolic icon a tile draws (installed next to this module)."""
+    return f'xx-shade-{_TILE_GLYPHS.get(key, key)}-symbolic'
+
+
+def ensure_shade_icons(display=None) -> None:
+    """Put the shade glyph directory on the display's icon-theme search
+    path (once). Symbolic icons recolor with the theme via CSS color."""
+    try:
+        display = display if display is not None else Gdk.Display.get_default()
+        if display is None:
+            return
+        icon_theme = Gtk.IconTheme.get_for_display(display)
+        path = str(_ICON_DIR)
+        if path not in list(icon_theme.get_search_path() or []):
+            icon_theme.add_search_path(path)
+    except Exception:
+        pass
 
 
 # --- DBus helpers (best-effort, all failures are silent) ---
@@ -225,6 +318,16 @@ def format_tile_state(key: str, active: bool, detail: str | None = None) -> str:
     if key in ('wifi', 'bt') and detail:
         return detail
     return 'On'
+
+
+_SIGN_IN_TEXT = 'Sign in'  # tailscale.SIGN_IN, kept import-free here
+
+
+def tile_needs_attention(key: str, active: bool,
+                         detail: str | None = None) -> bool:
+    """True while a tile wants the user (dot + text-weight state line):
+    today only a Tailnet that needs a browser sign-in."""
+    return key == 'tailscale' and not active and detail == _SIGN_IN_TEXT
 
 
 _TILE_SETTINGS_SECTIONS = {
@@ -941,8 +1044,9 @@ class QuickActionsPanel(Gtk.Box):
                  config: ShellConfig | None = None,
                  on_open_settings: object | None = None,
                  on_open_uri: object | None = None) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class('qa-panel')
+        ensure_shade_icons()
 
         self._dnd = dnd_state
         self._focus = focus_state
@@ -960,6 +1064,7 @@ class QuickActionsPanel(Gtk.Box):
         self._tile_state: dict[str, bool] = {}
         self._tile_details: dict[str, str] = {}
         self._state_labels: dict[str, Gtk.Label] = {}
+        self._readouts: dict[str, Gtk.Label] = {}
         self._updating = False
         self._als = ALSBrightness()
         self._location = LocationState(on_change=self._on_location_changed)
@@ -1187,12 +1292,18 @@ class QuickActionsPanel(Gtk.Box):
 
         self.tier2_grid = Gtk.Grid(row_spacing=8, column_spacing=8,
                                    column_homogeneous=True)
+        # Tier 2 continues the tier-1 grid: same 8 px gutter between rows.
+        self.tier2_grid.set_margin_top(8)
         for idx, tile in enumerate(tier2):
             self.tier2_grid.attach(self._make_tile(tile), idx % 4, idx // 4, 1, 1)
 
+        # Zero-height hook kept for the expand contract: the design runs
+        # tier 2 straight into the slider card with no rule between.
         self.sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        self.sep.add_css_class('qa-sep')
 
-        self.sliders_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.sliders_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.sliders_box.add_css_class('qa-sliders')
 
         self._build_sliders()
 
@@ -1207,15 +1318,16 @@ class QuickActionsPanel(Gtk.Box):
         self._sync_sliders_to_live_state()
 
     def _make_tile(self, tile: _TileDef) -> Gtk.ToggleButton:
-        # Shared design-system tile: caps label over a live state line,
-        # inverted while on. The state label stays reachable for the
-        # async SSID/device refreshes paint into it.
+        # Shared design-system glyph tile: symbolic glyph over a caps
+        # label and a live state line, inverted while on. The state label
+        # stays reachable for the async SSID/device refreshes.
         from xx_ui import widgets
-        btn = widgets.status_tile(
-            tile.label, _TILE_NEUTRAL_TEXT, False,
+        btn = widgets.glyph_tile(
+            tile_icon_name(tile.key), tile.label, _TILE_NEUTRAL_TEXT, False,
             on_toggle=lambda b: self._on_tile_toggled(b, tile))
         btn.set_hexpand(True)
-        self._state_labels[tile.key] = widgets.status_tile_state(btn)
+        btn.set_tooltip_text(tile.label)
+        self._state_labels[tile.key] = widgets.glyph_tile_state(btn)
         self._wire_tile_press(btn, tile)
         self._tile_buttons[tile.key] = btn
         return btn
@@ -1290,15 +1402,28 @@ class QuickActionsPanel(Gtk.Box):
         self.refresh_states()
 
     def _build_sliders(self) -> None:
-        for label_text, key in [('Brightness', 'bright'), ('Volume', 'vol')]:
+        # One raised card: glyph, 2 px track with a 4x18 thumb, numeric
+        # readout. The words stay as tooltips for the glyph-only rows.
+        readouts = getattr(self, '_readouts', None)
+        if readouts is None:
+            self._readouts = readouts = {}
+        for label_text, key, glyph in [('Brightness', 'bright', 'brightness'),
+                                       ('Volume', 'vol', 'volume')]:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-            lbl = Gtk.Label(label=label_text, xalign=0)
-            lbl.add_css_class('qa-slider-label')
+            row.add_css_class('qa-row')
+            icon = Gtk.Image.new_from_icon_name(f'xx-shade-{glyph}-symbolic')
+            icon.set_pixel_size(18)
+            icon.add_css_class('qa-row-glyph')
+            icon.set_tooltip_text(label_text)
             slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
             slider.add_css_class('shade-slider')
             slider.set_hexpand(True)
             slider.set_draw_value(False)
+            slider.set_tooltip_text(label_text)
             slider.set_value(_SLIDER_DEFAULT_PCT)
+            readout = Gtk.Label(label=str(_SLIDER_DEFAULT_PCT), xalign=1)
+            readout.add_css_class('qa-readout')
+            readouts[key] = readout
             if key == 'bright':
                 # Adjust brightness AND flash the level on the HUD (T4).
                 slider.connect(
@@ -1308,8 +1433,9 @@ class QuickActionsPanel(Gtk.Box):
                 slider.connect(
                     'value-changed',
                     lambda s: self._on_volume_changed(int(s.get_value())))
-            row.append(lbl)
+            row.append(icon)
             row.append(slider)
+            row.append(readout)
             self.sliders_box.append(row)
 
             if key == 'bright':
@@ -1324,12 +1450,23 @@ class QuickActionsPanel(Gtk.Box):
         except Exception:
             pass
 
+    def _set_readout(self, key: str, pct: int) -> None:
+        readout = (getattr(self, '_readouts', None) or {}).get(key)
+        if readout is None:
+            return
+        try:
+            readout.set_text(str(int(pct)))
+        except Exception:
+            pass
+
     def _on_brightness_changed(self, pct: int) -> None:
         """Brightness slider moved: the trailing value is applied (with a HUD
         flash) once per drag after the debounce window."""
+        self._set_readout('bright', pct)
         self._queue_slider_apply('bright', pct)
 
     def _on_volume_changed(self, pct: int) -> None:
+        self._set_readout('vol', pct)
         self._queue_slider_apply('vol', pct)
 
     def _queue_slider_apply(self, key: str, pct: int) -> None:
@@ -1387,10 +1524,13 @@ class QuickActionsPanel(Gtk.Box):
             self._refresh_captions_ui()
             return
         if tile.key == 'tailscale':
-            # up/down finish on a worker; show progress, then the real state
+            # up/down finish on a worker; show progress (dashed WORKING
+            # border), then the real state
             lbl = self._state_labels.get('tailscale')
             if lbl is not None:
                 lbl.set_text(_TILE_NEUTRAL_TEXT)
+            self._set_tile_class('tailscale', 'working', True)
+            self._set_tile_class('tailscale', 'attention', False)
             return
         self._apply_tile_ui(tile.key, new_state)
 
@@ -1407,6 +1547,7 @@ class QuickActionsPanel(Gtk.Box):
 
     def _apply_tailscale(self, result) -> bool:
         import tailscale
+        self._set_tile_class('tailscale', 'working', False)
         self._apply_tile_state('tailscale', result.state == tailscale.RUNNING,
                                result.detail)
         opener = getattr(self, '_on_open_uri', None)
@@ -1506,6 +1647,11 @@ class QuickActionsPanel(Gtk.Box):
                     btn.remove_css_class('active')
             except Exception:
                 pass
+            try:
+                starting = _captions_controller(self).tile_state == 'starting'
+            except Exception:
+                starting = False
+            self._set_tile_class('captions', 'working', starting)
             if error:
                 try:
                     btn.set_tooltip_text(str(error))
@@ -1568,14 +1714,16 @@ class QuickActionsPanel(Gtk.Box):
         except Exception:
             ellipsize = None
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        lbl = Gtk.Label(label='Captions', xalign=0)
+        row.add_css_class('qa-row')
+        lbl = Gtk.Label(label='CAPTIONS', xalign=0)
         lbl.add_css_class('qa-slider-label')
         state = Gtk.Label(label='Off', xalign=0)
-        state.add_css_class('xx-tile-state')
+        state.add_css_class('qa-readout')
         state.set_hexpand(True)
         if ellipsize is not None:
             state.set_ellipsize(ellipsize)
         btn = Gtk.ToggleButton(label='Turn on')
+        btn.add_css_class('qa-row-btn')
         btn.connect('toggled', self._on_captions_row_toggled)
         row.append(lbl)
         row.append(state)
@@ -1697,9 +1845,24 @@ class QuickActionsPanel(Gtk.Box):
                 btn.add_css_class('active')
             else:
                 btn.remove_css_class('active')
+        self._set_tile_class(key, 'attention',
+                             tile_needs_attention(key, state, detail))
         lbl = self._state_labels.get(key)
         if lbl:
             lbl.set_text(format_tile_state(key, state, detail))
+
+    def _set_tile_class(self, key: str, css: str, on: bool) -> None:
+        """Toggle a look class (working/attention) on one tile."""
+        btn = (getattr(self, '_tile_buttons', None) or {}).get(key)
+        if btn is None:
+            return
+        try:
+            if on:
+                btn.add_css_class(css)
+            else:
+                btn.remove_css_class(css)
+        except Exception:
+            pass
 
     def expand(self, expanded: bool) -> None:
         self.tier2_grid.set_visible(expanded)
@@ -1723,6 +1886,8 @@ class QuickActionsPanel(Gtk.Box):
             self._vol_slider.set_value(vol)
         finally:
             self._syncing_sliders = False
+        self._set_readout('bright', bright)
+        self._set_readout('vol', vol)
         return False
 
     def _sync_sliders_to_live_state_async(self) -> None:

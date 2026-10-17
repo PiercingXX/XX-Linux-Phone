@@ -170,44 +170,57 @@ def progress_fraction(
 
 
 def theme_css(preset: ThemePreset) -> str:
+    # Same brand ramp as the shade around it: 3.5% raised card, 10%
+    # hairlines, 25% track, foreground fill; the accent is the focus ring.
+    fg = preset.foreground
     return f"""
 .media-card {{
-    background: {preset.surface};
-    border: 1px solid {preset.border};
+    background: alpha({fg}, 0.035);
+    border: 1px solid alpha({fg}, 0.10);
     border-radius: 16px;
-    padding: 10px 14px;
+    padding: 14px 16px;
 }}
 .media-title {{
-    font-size: 13pt;
-    font-weight: 500;
-    color: {preset.foreground};
+    font-size: 15px;
+    font-weight: 400;
+    color: alpha({fg}, 0.90);
 }}
 .media-sub {{
-    font-size: 10pt;
+    font-size: 11px;
+    letter-spacing: 0.02em;
     color: {preset.muted};
 }}
 .media-btn {{
-    font-size: 14pt;
-    color: {preset.foreground};
-    background: {preset.surface_alt};
+    font-size: 13px;
+    color: alpha({fg}, 0.80);
+    background: none;
+    box-shadow: none;
+    border: 1px solid alpha({fg}, 0.10);
     border-radius: 12px;
-    min-width: 48px;
-    min-height: 40px;
+    min-width: 46px;
+    min-height: 38px;
 }}
 .media-btn:hover {{
-    background: {preset.background};
+    background: {preset.surface};
+}}
+.media-btn:active {{
+    background: {preset.surface_alt};
+}}
+.media-btn:focus-visible {{
+    outline-color: {preset.accent};
 }}
 .media-btn:disabled {{
     color: {preset.muted};
 }}
 .media-progress trough {{
-    background: {preset.surface_alt};
-    min-height: 3px;
-    border-radius: 2px;
+    background: alpha({fg}, 0.25);
+    min-height: 2px;
+    border-radius: 1px;
 }}
 .media-progress progress {{
-    background: {preset.accent};
-    border-radius: 2px;
+    background: {fg};
+    min-height: 2px;
+    border-radius: 1px;
 }}
 """
 
