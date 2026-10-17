@@ -197,6 +197,8 @@ steps: list = []  # (callable, shot name or None)
 
 def _plan():
     steps.append((lambda: _open(None), 'menu'))
+    for index in range(1, MAX_VIEWPORTS):
+        steps.append(('viewport', 'menu', index))
     for key, _title, _sections in sp.SETTINGS_CATEGORIES:
         if ONLY and key not in ONLY:
             continue
