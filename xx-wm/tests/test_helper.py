@@ -708,11 +708,12 @@ def test_shipped_policy_has_three_actions_with_console_defaults():
             / 'io.piercingxx.XXWM.Helper.policy').read_text()
     for action in ('io.piercingxx.XXWM.Helper1.set-charge-limit',
                    'io.piercingxx.XXWM.Helper1.app-network',
-                   'io.piercingxx.XXWM.Helper1.freeze'):
+                   'io.piercingxx.XXWM.Helper1.freeze',
+                   'io.piercingxx.XXWM.Helper1.clean-system'):
         assert ('action id="%s"' % action) in text
-    assert text.count('<allow_active>yes</allow_active>') == 3
-    assert text.count('<allow_inactive>no</allow_inactive>') == 3
-    assert text.count('<allow_any>no</allow_any>') == 3
+    assert text.count('<allow_active>yes</allow_active>') == 4
+    assert text.count('<allow_inactive>no</allow_inactive>') == 4
+    assert text.count('<allow_any>no</allow_any>') == 4
 
 
 def test_shipped_bus_policy_allows_default_callers_without_at_console():

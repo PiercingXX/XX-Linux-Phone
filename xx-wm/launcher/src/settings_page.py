@@ -8,7 +8,8 @@ from gesture_config import IPC_VERBS, VALID_ACTIONS
 _SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'appearance',
                           'standby', 'permissions', 'smart_lock', 'charging',
                           'batteryuse', 'screentime', 'medical', 'recording',
-                          'captions', 'nearby', 'findmy', 'about')
+                          'captions', 'nearby', 'findmy', 'about',
+                          'storage', 'security')
 
 # Home side-swipe gestures the user can bind to an app in Settings
 _GESTURE_TITLES = {
@@ -237,9 +238,19 @@ class BackupSection(_Section):
     key = 'backup'
     title = 'Backup & restore'
 
+    def __init__(self) -> None:
+        self._source = ''
+        self._dest = ''
+        self._mirror = False
+        self._source_btn = None
+        self._dest_btn = None
+        self._mode_box = None
+        self._status = None
+
     def build(self, win) -> list:
         from gi.repository import Gtk
         from xx_ui import widgets
+        import filebackup
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         body.append(widgets.outline_button(
@@ -248,7 +259,208 @@ class BackupSection(_Section):
             'Restore from backup',
             lambda: win._on_restore_backup(win._restore_btn))
         body.append(win._restore_btn)
+        body.append(widgets.section_label('File backup'))
+        if not self._source:
+            sources = filebackup.backup_sources()
+            self._source = sources[0] if sources else ''
+        self._source_btn = widgets.outline_button(
+            self._source or 'Choose source…',
+            lambda: self._pick_source(win))
+        _shrink_button_label(self._source_btn)
+        body.append(self._source_btn)
+        self._dest_btn = widgets.outline_button(
+            self._dest or 'Choose destination…',
+            lambda: self._pick_dest(win))
+        _shrink_button_label(self._dest_btn)
+        body.append(self._dest_btn)
+        self._mode_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                 spacing=8)
+        body.append(self._mode_box)
+        self._render_mode(win)
+        body.append(widgets.outline_button(
+            'Preview', lambda: self._on_preview(win)))
+        body.append(widgets.primary_button(
+            'Back up now', lambda: self._on_transfer(win, 'Backup')))
+        body.append(widgets.outline_button(
+            'Restore now', lambda: self._on_transfer(win, 'Restore')))
+        self._status = _section_placeholder(
+            'Back up Photos, Documents, Videos and app data '
+            'to removable storage.')
+        body.append(self._status)
         return [_section_title(self.title), body]
+
+    def _render_mode(self, win) -> None:
+        from xx_ui import widgets
+        if self._mode_box is None:
+            return
+        _replace_box_children(self._mode_box, [widgets.segmented([
+            ('Add / update', not self._mirror,
+             lambda: self._set_mode(win, False)),
+            ('Mirror', self._mirror,
+             lambda: self._set_mode(win, True))])])
+
+    def _set_mode(self, win, mirror: bool) -> None:
+        self._mirror = bool(mirror)
+        self._render_mode(win)
+
+    def _say(self, text: str) -> None:
+        try:
+            if self._status is not None:
+                self._status.set_text(text)
+        except Exception:
+            pass
+
+    def _pick_source(self, win) -> None:
+        import filebackup
+        sources = filebackup.backup_sources()
+        if not sources:
+            self._say('No source folders found.')
+            return
+        actions = [(path, lambda p=path: self._set_source(win, p))
+                   for path in sources]
+        actions.append(('Cancel', lambda: None))
+        win.item_actions._show_action_menu(
+            self._source_btn, 'Back up which folder?', actions)
+
+    def _set_source(self, win, path: str) -> None:
+        self._source = path
+        try:
+            self._source_btn.set_label(path)
+        except Exception:
+            pass
+
+    def _pick_dest(self, win) -> None:
+        import filebackup
+        volumes = filebackup.list_volumes()
+        if not volumes:
+            self._say('No removable storage found.')
+            return
+        actions = [(path, lambda p=path: self._set_dest(win, p))
+                   for path in volumes]
+        actions.append(('Cancel', lambda: None))
+        win.item_actions._show_action_menu(
+            self._dest_btn, 'Back up to where?', actions)
+
+    def _set_dest(self, win, path: str) -> None:
+        self._dest = path
+        try:
+            self._dest_btn.set_label(path)
+        except Exception:
+            pass
+
+    def _endpoints(self, label: str):
+        import filebackup
+        if label == 'Restore':
+            src, dest = self._dest, self._source
+        else:
+            src, dest = self._source, self._dest
+        ok, error = filebackup.validate_transfer(src, dest, self._mirror)
+        if not ok:
+            self._say(error or 'Check source and destination.')
+            return None
+        return src, dest
+
+    def _on_preview(self, win) -> None:
+        import filebackup
+        endpoints = self._endpoints('Backup')
+        if endpoints is None:
+            return
+        src, dest = endpoints
+        self._say('Previewing…')
+
+        def _work():
+            return filebackup.dry_run_counts(src, dest, self._mirror)
+
+        _run_bg(_work, self._on_preview_done)
+
+    def _on_preview_done(self, res) -> None:
+        try:
+            _ok, text = res
+        except (TypeError, ValueError):
+            return
+        self._say(text)
+
+    def _on_transfer(self, win, label: str) -> None:
+        import filebackup
+        endpoints = self._endpoints(label)
+        if endpoints is None:
+            return
+        src, dest = endpoints
+        self._say('Previewing…')
+
+        def _work():
+            return filebackup.dry_run_counts(src, dest, self._mirror)
+
+        _run_bg(_work,
+                lambda res: self._confirm_transfer(win, label, src, dest,
+                                                   res))
+
+    def _confirm_transfer(self, win, label: str, src: str, dest: str,
+                          res) -> None:
+        try:
+            ok, text = res
+        except (TypeError, ValueError):
+            return
+        if not ok:
+            self._say(text)
+            return
+        if self._mirror:
+            prompt = ('%s (mirror): %s. Files in the destination '
+                      'that are not in the source will be DELETED. '
+                      'Run it?' % (label, text))
+        else:
+            prompt = '%s: %s. Run it?' % (label, text)
+        anchor = self._dest_btn
+        win.item_actions._show_action_menu(
+            anchor, prompt,
+            [('%s now' % label,
+              lambda: self._start_transfer(win, label, src, dest)),
+             ('Cancel', lambda: None)])
+
+    def _start_transfer(self, win, label: str, src: str, dest: str) -> None:
+        import filebackup
+        from gi.repository import GLib
+        self._say('Starting…')
+
+        def _preview():
+            return filebackup.dry_run_counts(src, dest, self._mirror)
+
+        def _on_previewed(res) -> None:
+            try:
+                ok, _text = res
+            except (TypeError, ValueError):
+                return
+            if not ok:
+                self._say(_text)
+                return
+            self._say('Copying… 0%')
+
+            def _work():
+                import re as _re
+                match = _re.match(r'(\d+) file', _text)
+                total = int(match.group(1)) if match else 0
+
+                def _progress(fraction: float) -> None:
+                    GLib.idle_add(self._say,
+                                  'Copying… %d%%' % int(fraction * 100))
+
+                return filebackup.run_transfer(src, dest, self._mirror,
+                                               total, _progress)
+
+            _run_bg(_work,
+                     lambda res: self._on_transferred(label, res))
+
+        _run_bg(_preview, _on_previewed)
+
+    def _on_transferred(self, label: str, res) -> None:
+        try:
+            ok, error = res
+        except (TypeError, ValueError):
+            return
+        if ok:
+            self._say('%s done.' % label)
+        else:
+            self._say(error or 'Transfer failed.')
 
 
 def _settings_entry(win, placeholder: str, text: str = '',
@@ -469,8 +681,10 @@ import settings_charging
 import settings_medical
 import settings_permissions
 import settings_screentime
+import settings_security
 import settings_smart_lock
 import settings_standby
+import settings_storage
 
 SETTINGS_SECTIONS: list[tuple[str, type[_Section]]] = [
     ('system', SystemSection),
@@ -482,6 +696,8 @@ SETTINGS_SECTIONS: list[tuple[str, type[_Section]]] = [
     ('batteryuse', settings_battery_use.BatteryUseSection),
     ('screentime', settings_screentime.ScreenTimeSection),
     ('backup', BackupSection),
+    ('storage', settings_storage.StorageSection),
+    ('security', settings_security.SecuritySection),
     ('mobile', MobileSection),
     ('appearance', AppearanceSection),
     ('standby', settings_standby.StandbySection),
@@ -554,6 +770,7 @@ class SettingsPage:
         win._settings_scroll = scroll
         win._settings_section_titles = {
             key: built[key][0] for key in _SETTINGS_SECTION_KEYS
+            if built.get(key)
         }
 
         scroll.set_child(box)

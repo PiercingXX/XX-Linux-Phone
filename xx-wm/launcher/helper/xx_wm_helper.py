@@ -32,6 +32,7 @@ ERROR_FAILED = 'org.freedesktop.DBus.Error.Failed'
 ACTION_CHARGE = BUS_NAME + '.set-charge-limit'
 ACTION_NETWORK = BUS_NAME + '.app-network'
 ACTION_FREEZE = BUS_NAME + '.freeze'
+ACTION_CLEAN = BUS_NAME + '.clean-system'
 
 POLKIT_BUS = 'org.freedesktop.PolicyKit1'
 POLKIT_PATH = '/org/freedesktop/PolicyKit1/Authority'
@@ -73,9 +74,28 @@ INTROSPECT_XML = """\
       <arg name="cgroup_path" type="s" direction="in"/>
       <arg name="frozen" type="b" direction="in"/>
     </method>
+    <method name="CleanSystem">
+      <arg name="categories" type="as" direction="in"/>
+      <arg name="cleaned" type="as" direction="out"/>
+    </method>
   </interface>
 </node>
 """
+
+# Cache cleanup the shell may run as root. Fixed argv lists only: no
+# package is ever removed, no firewall or service state changes, so the
+# polkit action stays allow_active=yes like the other entries here.
+CLEAN_SYSTEM_ALLOWLIST = {
+    'apk-cache': ['apk', 'cache', 'clean'],
+    'paccache-keep': ['paccache', '-rk2'],
+    'paccache-uninstalled': ['paccache', '-ruk0'],
+    'apt-clean': ['apt-get', 'clean'],
+    'journal-vacuum': ['journalctl', '--vacuum-time=2weeks',
+                       '--vacuum-size=500M'],
+}
+
+APK_CACHE_DIR_DEFAULT = '/etc/apk/cache'
+SYSTEMD_DIR_DEFAULT = '/run/systemd/system'
 
 
 class HelperError(Exception):
@@ -308,6 +328,62 @@ class HelperCore:
         self.save_state(state)
         return bool(allowed)
 
+    # -------------------------------------------------------- clean system
+
+    def clean_system(self, categories, *,
+                     apk_cache_dir: str = APK_CACHE_DIR_DEFAULT,
+                     systemd_dir: str = SYSTEMD_DIR_DEFAULT) -> dict:
+        """Run fixed-allowlist cache cleanups, skipping unusable entries.
+
+        ``categories`` must all name :data:`CLEAN_SYSTEM_ALLOWLIST`;
+        anything else raises InvalidArgs, so callers can never smuggle
+        in a free-form command. ``apk-cache`` runs only when the apk
+        cache dir exists, ``journal-vacuum`` only on systemd, and any
+        entry whose binary is missing is skipped. Returns
+        ``{'cleaned': [...], 'skipped': [...]}``.
+        """
+        if not isinstance(categories, (list, tuple)):
+            raise HelperError(ERROR_INVALID_ARGS,
+                              'categories must be a string array')
+        selected = []
+        for category in categories:
+            if not isinstance(category, str) \
+                    or category not in CLEAN_SYSTEM_ALLOWLIST:
+                raise HelperError(ERROR_INVALID_ARGS,
+                                  'unknown clean category: %r' % (category,))
+            if category not in selected:
+                selected.append(category)
+        cleaned: list[str] = []
+        skipped: list[str] = []
+        for category in selected:
+            if category == 'apk-cache' \
+                    and not os.path.isdir(apk_cache_dir):
+                skipped.append(category)
+                continue
+            if category == 'journal-vacuum' \
+                    and not os.path.isdir(systemd_dir):
+                skipped.append(category)
+                continue
+            argv = CLEAN_SYSTEM_ALLOWLIST[category]
+            if shutil.which(argv[0]) is None:
+                skipped.append(category)
+                continue
+            try:
+                proc = self._run(argv)
+            except OSError as err:
+                raise _failed('clean %s failed to start: %s'
+                              % (category, err)) from None
+            if getattr(proc, 'returncode', 1) == 127:
+                skipped.append(category)
+                continue
+            if getattr(proc, 'returncode', 1) != 0:
+                stderr = (getattr(proc, 'stderr', '') or '').strip()
+                raise _failed('clean %s: %s'
+                              % (category, stderr or 'exit %d'
+                                 % getattr(proc, 'returncode', 1)))
+            cleaned.append(category)
+        return {'cleaned': cleaned, 'skipped': skipped}
+
     # ---------------------------------------------------------------- freeze
 
     def freeze_cgroup(self, cgroup_path: str, frozen: bool, uid: int) -> bool:
@@ -462,6 +538,7 @@ _METHOD_ACTIONS = {
     'SetChargeLimit': ACTION_CHARGE,
     'SetAppNetwork': ACTION_NETWORK,
     'FreezeCgroup': ACTION_FREEZE,
+    'CleanSystem': ACTION_CLEAN,
 }
 
 
@@ -553,6 +630,14 @@ class HelperService:
                 cgroup_path, frozen = args
                 self.core.freeze_cgroup(str(cgroup_path), bool(frozen),
                                         int(uid))
+            elif method == 'CleanSystem':
+                (cats,) = args
+                out = self.core.clean_system(
+                    [str(c) for c in cats] if isinstance(cats, list) else cats)
+                Gio, GLib = _require_gio()
+                invocation.return_value(
+                    GLib.Variant('(as)', (list(out.get('cleaned', [])),)))
+                return
             else:
                 invocation.return_dbus_error(
                     ERROR_INVALID_ARGS, 'unknown method: %s' % (method,))

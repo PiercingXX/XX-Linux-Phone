@@ -162,3 +162,28 @@ def freeze_cgroup(cgroup_path: str, frozen: bool,
         return
     _call_helper('FreezeCgroup', params,
                  lambda ok, _result: on_done(ok, None if ok else _result))
+
+
+def clean_system(categories: list[str], on_done: ResultCallback) -> None:
+    """Ask the helper to run fixed-allowlist cache cleanups.
+
+    ``categories`` names only the helper's allowlist (``apk-cache``,
+    ``paccache-keep``, ``paccache-uninstalled``, ``apt-clean``,
+    ``journal-vacuum``); anything else is rejected helper-side.
+    ``on_done(True, [cleaned...])`` on success, ``(False, error)``
+    otherwise.
+    """
+    try:
+        Gio, GLib = _gio()
+        params = GLib.Variant('(as)', ([str(c) for c in categories],))
+    except ImportError as err:
+        on_done(False, 'D-Bus unavailable: %s' % err)
+        return
+    except (TypeError, ValueError) as err:
+        on_done(False, 'clean categories must be strings: %s' % err)
+        return
+
+    def _done(ok: bool, result) -> None:
+        on_done(ok, list(result) if ok else result)
+
+    _call_helper('CleanSystem', params, _done)

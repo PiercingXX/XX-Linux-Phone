@@ -137,6 +137,14 @@ ALLOW = {
         'slider expand batch worker (_read_slider_values).',
     ('settings_page.py', '_gsm_connection_name'):
         'APN apply worker (_apply_apn _work).',
+    ('settings_storage.py', '_run'):
+        'sole subprocess chokepoint; invoked via _run_bg workers only.',
+    ('settings_security.py', '_run'):
+        'sole subprocess chokepoint; invoked via _run_bg workers only.',
+    ('filebackup.py', '_run_capture'):
+        'sole capturing chokepoint; dry-run preview worker only.',
+    ('filebackup.py', 'run_transfer'):
+        'rsync transfer worker thread (Popen + wait off the GTK loop).',
     ('sms.py', '_run_mmcli'):
         'SMS worker threads (send/history), documented worker-only.',
     ('sound.py', '_loop_worker'):
