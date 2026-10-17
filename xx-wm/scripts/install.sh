@@ -121,14 +121,14 @@ install_deps() {
         pkg_install py3-gobject3 gtk4.0 libadwaita gtk4-layer-shell \
             meson ninja rsync git squeekboard phoc lisgd wl-clipboard
         pkg_install py3-wayland
-        pkg_install py3-phonenumbers
+        pkg_install py3-phonenumbers openssl py3-cairo
         pkg_install geoclue
         pkg_install networkmanager
         pkg_install brightnessctl
     elif [ "$PKG" = pacman ]; then
         pkg_install python-gobject gtk4 libadwaita gtk4-layer-shell meson ninja \
             rsync git squeekboard phoc python-pywayland wl-clipboard geoclue \
-            networkmanager brightnessctl python-phonenumbers
+            networkmanager brightnessctl python-phonenumbers openssl python-cairo
         if command -v lisgd >/dev/null 2>&1; then
             echo "lisgd already present: $(command -v lisgd)"
         else
@@ -139,7 +139,7 @@ install_deps() {
             libgtk4-layer-shell0 meson ninja-build rsync git squeekboard \
             phoc lisgd wl-clipboard
         pkg_install python3-pywayland
-        pkg_install python3-phonenumbers
+        pkg_install python3-phonenumbers openssl python3-gi-cairo
         pkg_install geoclue-2.0
         pkg_install network-manager
         pkg_install brightnessctl
@@ -266,6 +266,25 @@ link_squeekboard_layouts() {
         "$HOME/.local/share/squeekboard/keyboards"
 }
 
+# The XX apps live next to xx-wm in the monorepo. xx-find is deliberately
+# absent: Find My Device is built but must not be installed or run until the
+# owner turns it on. One app failing to build never blocks the shell.
+XX_APPS="xx-contacts xx-dialer txxt xx-calendar xx-email xx-vitals xx-share xx-captions"
+
+install_apps() {
+    for app in $XX_APPS; do
+        echo "Building $app..."
+        if (cd "$REPO_DIR/../$app" &&
+            { meson setup build --prefix=/usr --reconfigure ||
+              meson setup build --prefix=/usr; } &&
+            $SUDO meson install -C build); then
+            :
+        else
+            echo "warn: $app did not install; the shell continues without it" >&2
+        fi
+    done
+}
+
 build_install() {
     echo "Building shared xx_ui design system..."
     cd "$REPO_DIR/../common" || return 1
@@ -275,6 +294,7 @@ build_install() {
     cd "$REPO_DIR/launcher" || return 1
     meson setup build --prefix=/usr --reconfigure || meson setup build --prefix=/usr || return 1
     $SUDO meson install -C build || return 1
+    install_apps
     cd "$REPO_DIR" || return 1
 
     link_squeekboard_layouts

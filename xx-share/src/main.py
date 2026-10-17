@@ -165,8 +165,12 @@ def bus_receiver_running() -> bool:
         return False
     try:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        owner = bus.get_name_owner("io.piercingxx.XXShare1")
-        return bool(owner)
+        reply = bus.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus",
+            "org.freedesktop.DBus", "NameHasOwner",
+            GLib.Variant("(s)", ("io.piercingxx.XXShare1",)),
+            GLib.VariantType("(b)"), Gio.DBusCallFlags.NONE, 1000, None)
+        return bool(reply.unpack()[0])
     except GLib.Error:
         return False
 

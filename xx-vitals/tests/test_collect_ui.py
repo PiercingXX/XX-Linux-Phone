@@ -103,7 +103,12 @@ def test_collect_install_wiring():
         assert rider in meson, rider
     assert "xx-vitals-collect-hw.service.in" in meson
     launcher = (ROOT / "data" / "xx-vitals-collect.in").read_text(encoding="utf-8")
-    assert "collect/service.py" in launcher
+    # Run as a module with the datadir on PYTHONPATH: running the file by
+    # path put xx_vitals/ itself on sys.path and the import failed.
+    assert "-m xx_vitals.collect.service" in launcher
+    assert 'PYTHONPATH="@app_dir@' in launcher
+    ui = (ROOT / "data" / "xx-vitals.in").read_text(encoding="utf-8")
+    assert "-m xx_vitals " in ui and "__main__.py" not in ui
     assert "sys.exit(0)" not in launcher
     timer = (ROOT / "data" / "systemd" / "xx-vitals-collect.timer").read_text(encoding="utf-8")
     assert "OnUnitActiveSec=15min" in timer

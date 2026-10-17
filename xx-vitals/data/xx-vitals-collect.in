@@ -7,4 +7,6 @@
 # is opt-in and off by default (collect_enabled in config.json): when
 # off, or when no accelerometer or step counter is present, this
 # writes nothing — gap days render as gaps, never zeroes.
-exec @python@ @app_dir@/xx_vitals/collect/service.py "$@"
+# Run as a module with the datadir on the path: running the file by
+# path puts the package directory itself on sys.path, not its parent.
+PYTHONPATH="@app_dir@${PYTHONPATH:+:$PYTHONPATH}" exec @python@ -m xx_vitals.collect.service "$@"
