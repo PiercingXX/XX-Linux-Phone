@@ -15,6 +15,7 @@ A complete, minimal phone experience for Linux phones: the **XX-WM** shell and t
 | [`xx-captions/`](xx-captions/) | On-device live captions and call transcription |
 | [`xx-find/`](xx-find/) | Self-hosted Find My Device (built, not enabled) |
 | [`xx-auto/`](xx-auto/) | Driving screen for a phone in a car mount (MPRIS media, maps, starred-contact calls) |
+| [`xx-radio/`](xx-radio/) | Unofficial YouTube Music player: search, radio, queue, background playback, offline downloads (spec + scaffold) |
 
 Each directory is a self-contained project with its own `meson.build`, tests and README. How the pieces talk to each other is in [`docs/dbus.md`](docs/dbus.md).
 
