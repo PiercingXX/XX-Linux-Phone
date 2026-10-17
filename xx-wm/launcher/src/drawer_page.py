@@ -9,6 +9,11 @@ if TYPE_CHECKING:
 _WEB_SEARCH_URL = 'https://duckduckgo.com/?q='
 
 
+def drawer_folder_title(label: str, member_count: int) -> str:
+    """Android-style folder row text: the name plus its member count."""
+    return f'{label} ({member_count})'
+
+
 def _open_settings(win) -> None:
     """Show settings with the TOP hop when the window offers it.
 
@@ -313,10 +318,14 @@ class DrawerPage:
         from gi.repository import Gtk, Pango
 
         win = self._win
+        members = next((m for i, _s, m in win._drawer_folder_slots()
+                        if i == slot_index), [])
         inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         # Same centered alignment as app rows; long folder names ellipsize
         # instead of forcing the page wider than the phone screen.
-        title = Gtk.Label(label=slot.get('label', ''), xalign=0.5)
+        title = Gtk.Label(
+            label=drawer_folder_title(slot.get('label', ''), len(members)),
+            xalign=0.5)
         title.add_css_class('app-name')
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.set_hexpand(True)
@@ -331,6 +340,8 @@ class DrawerPage:
         btn.add_css_class('app-entry')
         btn.set_child(inner)
         btn.connect('clicked', lambda _b, i=slot_index: win._toggle_drawer_folder(i))
+        self._add_long_press(
+            btn, lambda w: win.item_actions.show_folder_menu(w, slot_index))
 
         row = Gtk.ListBoxRow(selectable=False, activatable=False)
         row.set_child(btn)

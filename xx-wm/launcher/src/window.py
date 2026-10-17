@@ -1869,8 +1869,8 @@ class ShellWindow(Adw.ApplicationWindow):
     def _move_slot(self, idx: int, delta: int) -> None:
         return _home(self)._move_slot(idx, delta)
 
-    def _remove_slot(self, idx: int) -> None:
-        return _home(self)._remove_slot(idx)
+    def _remove_slot(self, idx: int, widget: Gtk.Widget | None = None) -> None:
+        return _home(self)._remove_slot(idx, widget)
 
     def _rename_slot(self, widget: Gtk.Widget, idx: int) -> None:
         return _home(self)._rename_slot(widget, idx)

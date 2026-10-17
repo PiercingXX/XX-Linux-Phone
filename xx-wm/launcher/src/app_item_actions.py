@@ -26,6 +26,21 @@ _DISABLE_DURATIONS = [('1 hour', 1), ('2 hours', 2), ('4 hours', 4), ('8 hours',
 _MENU_TEXT_WIDTH = 28
 
 
+def validate_folder_name(slots: list[dict], name: str,
+                         exclude: int | None = None) -> str | None:
+    """Folder-name rule shared by every create/rename path: blank names and
+    duplicate names (case-insensitive) are rejected with a short message."""
+    if not name.strip():
+        return 'Folder name cannot be blank.'
+    wanted = name.strip().casefold()
+    for idx, slot in enumerate(slots):
+        if slot.get('type') != 'folder' or idx == exclude:
+            continue
+        if str(slot.get('label', '')).casefold() == wanted:
+            return 'A folder with that name already exists.'
+    return None
+
+
 class AppItemActions:
     """Builds and shows item action popovers; mutations go through config."""
 
@@ -212,6 +227,9 @@ class AppItemActions:
             actions.append(('Unpin', lambda: self._set_pinned(entry, False)))
             actions.append(('Move up', lambda: self._move_pinned(entry, -1)))
             actions.append(('Move down', lambda: self._move_pinned(entry, +1)))
+            if len(config.pinned) >= 2:
+                actions.append(('Rearrange pinned…',
+                                lambda: self._show_pinned_reorder(anchor)))
         else:
             actions.append(('Pin', lambda: self._set_pinned(entry, True)))
         display = config.label_for(entry.app_id, entry.name)
@@ -289,6 +307,10 @@ class AppItemActions:
     def _show_new_folder(self, anchor: Gtk.Widget, entry: AppEntry, display: str) -> None:
         def _commit(name: str) -> None:
             slots = self._config.home_slots
+            error = validate_folder_name(slots, name)
+            if error is not None:
+                self._on_status(error)
+                return
             if len(slots) >= 8:
                 self._on_status('Home is full — remove a slot first.')
                 return
@@ -301,9 +323,12 @@ class AppItemActions:
         self._show_entry_dialog(anchor, 'New folder', '', 'Create', _commit)
 
     def _set_hidden(self, entry: AppEntry, hide: bool) -> None:
-        hidden = [h for h in self._config.hidden_apps if h != entry.app_id]
+        self._set_hidden_id(entry.app_id, hide)
+
+    def _set_hidden_id(self, app_id: str, hide: bool) -> None:
+        hidden = [h for h in self._config.hidden_apps if h != app_id]
         if hide:
-            hidden.append(entry.app_id)
+            hidden.append(app_id)
         self._config.set_hidden_apps(hidden)
         self._on_changed()
         self._on_status('App hidden — still reachable via search.' if hide else 'App shown in drawer.')
@@ -362,9 +387,14 @@ class AppItemActions:
         actions.append(('App info', lambda: self._show_member_info(anchor, member)))
         actions.append(('Rename', lambda: self._show_member_rename(anchor, slot_index, member_index)))
         if app_id:
+            hidden = app_id in self._config.hidden_apps
+            actions.append(('Show' if hidden else 'Hide',
+                            lambda: self._set_hidden_id(app_id, not hidden)))
             actions.append(('Disable for…', lambda: self._show_disable_for(anchor, app_id, label)))
         actions.append(('Move up', lambda: self._move_member(slot_index, member_index, -1)))
         actions.append(('Move down', lambda: self._move_member(slot_index, member_index, +1)))
+        actions.append(('Sort A–Z', lambda: self.sort_folder_members(slot_index)))
+        actions.append(('Rearrange…', lambda: self._show_folder_reorder(anchor, slot_index)))
         actions.append(('Remove from folder', lambda: self._remove_member(slot_index, member_index)))
         self._show_action_menu(anchor, label, actions)
 
@@ -402,14 +432,21 @@ class AppItemActions:
 
     def _remove_member(self, slot_index: int, member_index: int) -> None:
         slots = self._config.home_slots
+        if not (0 <= slot_index < len(slots)):
+            return
         members = slots[slot_index].get('folder') or []
         if not (0 <= member_index < len(members)):
             return
         removed = members.pop(member_index)
-        slots[slot_index]['folder'] = members
+        if members:
+            slots[slot_index]['folder'] = members
+            self._on_status(f'{removed.get("label", "Item")} removed from folder.')
+        else:
+            label = slots[slot_index].get('label', 'Folder')
+            slots.pop(slot_index)
+            self._on_status(f'{label} deleted — its apps are back in the drawer.')
         self._config.set_home_slots(slots)
         self._on_changed()
-        self._on_status(f'{removed.get("label", "Item")} removed from folder.')
 
     def _move_member(self, slot_index: int, member_index: int, delta: int) -> None:
         slots = self._config.home_slots
@@ -422,3 +459,205 @@ class AppItemActions:
         slots[slot_index]['folder'] = members
         self._config.set_home_slots(slots)
         self._on_changed()
+
+    # -- drawer folder rows --------------------------------------------------
+
+    def _folder_slot(self, slot_index: int) -> dict | None:
+        slots = self._config.home_slots
+        if not (0 <= slot_index < len(slots)):
+            return None
+        slot = slots[slot_index]
+        return slot if slot.get('type') == 'folder' else None
+
+    def show_folder_menu(self, anchor: Gtk.Widget, slot_index: int) -> None:
+        slot = self._folder_slot(slot_index)
+        if slot is None:
+            return
+        actions: list[tuple[str, Callable[[], None]]] = [
+            ('Rename', lambda: self._show_folder_rename(anchor, slot_index)),
+            ('Move up', lambda: self.move_folder(slot_index, -1)),
+            ('Move down', lambda: self.move_folder(slot_index, +1)),
+            ('Sort A–Z', lambda: self.sort_folder_members(slot_index)),
+            ('Rearrange…', lambda: self._show_folder_reorder(anchor, slot_index)),
+            ('Delete', lambda: self.confirm_delete_folder(anchor, slot_index)),
+        ]
+        self._show_action_menu(anchor, slot.get('label', 'Folder'), actions)
+
+    def _show_folder_rename(self, anchor: Gtk.Widget, slot_index: int) -> None:
+        slot = self._folder_slot(slot_index)
+        if slot is None:
+            return
+
+        def _commit(text: str) -> None:
+            self.rename_folder(slot_index, text)
+
+        self._show_entry_dialog(
+            anchor, 'Rename folder', slot.get('label', ''), 'Rename', _commit)
+
+    def rename_folder(self, slot_index: int, name: str) -> bool:
+        slots = self._config.home_slots
+        if self._folder_slot(slot_index) is None:
+            return False
+        error = validate_folder_name(slots, name, exclude=slot_index)
+        if error is not None:
+            self._on_status(error)
+            return False
+        slots[slot_index]['label'] = name.strip()
+        self._config.set_home_slots(slots)
+        self._on_changed()
+        self._on_status(f'Renamed to {name.strip()}.')
+        return True
+
+    def move_folder(self, slot_index: int, delta: int) -> bool:
+        slots = self._config.home_slots
+        if self._folder_slot(slot_index) is None:
+            return False
+        new_idx = slot_index + delta
+        if not (0 <= new_idx < len(slots)):
+            self._on_status('Already at the top.' if delta < 0 else 'Already at the bottom.')
+            return False
+        slots[slot_index], slots[new_idx] = slots[new_idx], slots[slot_index]
+        self._config.set_home_slots(slots)
+        self._on_changed()
+        return True
+
+    def sort_folder_members(self, slot_index: int, notify: bool = True) -> bool:
+        slot = self._folder_slot(slot_index)
+        if slot is None:
+            return False
+        members = slot.get('folder') or []
+        members.sort(key=lambda m: str(m.get('label', '')).casefold())
+        slot['folder'] = members
+        self._config.set_home_slots(self._config.home_slots)
+        # The open reorder sheet owns its anchor: sorting from its Sort row
+        # persists silently and Done refreshes, so the popover never loses
+        # the row it is anchored on mid-drag.
+        if notify:
+            self._on_changed()
+        self._on_status(f'{slot.get("label", "Folder")} sorted A–Z.')
+        return True
+
+    def confirm_delete_folder(self, anchor: Gtk.Widget, slot_index: int) -> None:
+        slot = self._folder_slot(slot_index)
+        if slot is None:
+            return
+        name = slot.get('label', 'Folder')
+        self._show_action_menu(
+            anchor, f'Delete folder "{name}"? Its apps return to the drawer.',
+            [('Delete', lambda: self.delete_folder(slot_index)),
+             ('Cancel', lambda: None)])
+
+    def delete_folder(self, slot_index: int) -> None:
+        slots = self._config.home_slots
+        if self._folder_slot(slot_index) is None:
+            return
+        removed = slots.pop(slot_index)
+        self._config.set_home_slots(slots)
+        self._on_changed()
+        self._on_status(
+            f'{removed.get("label", "Folder")} deleted — its apps are back in the drawer.')
+
+    # -- drag-to-reorder sheets -----------------------------------------------
+
+    def show_reorder(self, anchor: Gtk.Widget, title: str,
+                     items: list[tuple[str, str]],
+                     on_order_changed: Callable[[list[str]], None],
+                     on_sort: Callable[[object], None] | None = None) -> None:
+        """One shared reorder sheet; drops persist silently and Done refreshes."""
+        import reorder_sheet
+
+        shown: dict = {}
+
+        def _done() -> None:
+            popover = shown.get('popover')
+            if popover is not None:
+                shown['popover'] = None
+                popover.popdown()
+            self._on_changed()
+
+        box, view = reorder_sheet.build_reorder_box(
+            title, items, on_order_changed,
+            on_sort=(lambda: on_sort(view)) if on_sort is not None else None,
+            on_done=_done)
+        shown['popover'] = self._show_popover(anchor, box)
+
+    def _show_folder_reorder(self, anchor: Gtk.Widget, slot_index: int) -> None:
+        slot = self._folder_slot(slot_index)
+        if slot is None:
+            return
+        members = slot.get('folder') or []
+        if len(members) < 2:
+            self._on_status('Needs at least two apps to rearrange.')
+            return
+        name = slot.get('label', 'Folder')
+        items = [(str(i), str(m.get('label', '')))
+                 for i, m in enumerate(members)]
+
+        def _on_sort(view) -> None:
+            self.sort_folder_members(slot_index, notify=False)
+            ordered = (self._folder_slot(slot_index) or {}).get('folder') or []
+            view.replace([(str(i), str(m.get('label', '')))
+                          for i, m in enumerate(ordered)])
+
+        self.show_reorder(
+            anchor, f'Rearrange {name}', items,
+            on_order_changed=lambda ids: self.apply_member_order(slot_index, ids),
+            on_sort=_on_sort)
+
+    def _show_pinned_reorder(self, anchor: Gtk.Widget) -> None:
+        pinned = list(self._config.pinned)
+        if len(pinned) < 2:
+            self._on_status('Needs at least two apps to rearrange.')
+            return
+        items = [(app_id, self._config.label_for(app_id, app_id))
+                 for app_id in pinned]
+        self.show_reorder(
+            anchor, 'Rearrange pinned apps', items,
+            on_order_changed=self.apply_pinned_order)
+
+    def show_home_reorder(self, anchor: Gtk.Widget) -> None:
+        slots = self._config.home_slots
+        if len(slots) < 2:
+            self._on_status('Needs at least two apps to rearrange.')
+            return
+        items = [(str(i), str(s.get('label', '')))
+                 for i, s in enumerate(slots)]
+        self.show_reorder(
+            anchor, 'Rearrange Home Screen', items,
+            on_order_changed=self.apply_slot_order)
+
+    def apply_member_order(self, slot_index: int, ids: list[str]) -> bool:
+        """Persist a whole member permutation silently; Done refreshes."""
+        slot = self._folder_slot(slot_index)
+        if slot is None:
+            return False
+        members = slot.get('folder') or []
+        try:
+            order = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            return False
+        if sorted(order) != list(range(len(members))):
+            return False
+        slot['folder'] = [members[i] for i in order]
+        self._config.set_home_slots(self._config.home_slots)
+        return True
+
+    def apply_slot_order(self, ids: list[str]) -> bool:
+        """Persist a whole home-slot permutation silently; Done refreshes."""
+        slots = self._config.home_slots
+        try:
+            order = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            return False
+        if sorted(order) != list(range(len(slots))):
+            return False
+        self._config.set_home_slots([slots[i] for i in order])
+        return True
+
+    def apply_pinned_order(self, ids: list[str]) -> bool:
+        """Persist a whole pinned permutation silently; Done refreshes."""
+        pinned = list(self._config.pinned)
+        if sorted(ids) != sorted(pinned):
+            return False
+        self._config.set_pinned(list(ids))
+        return True

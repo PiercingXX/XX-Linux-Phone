@@ -152,7 +152,7 @@ class HomeLauncher(Gtk.Box):
                  on_launch_slot: Callable[[dict], None] | None = None,
                  on_member_long_press: Callable[[Gtk.Widget, int, int], None] | None = None,
                  on_slot_move: Callable[[int, int], None] | None = None,
-                 on_slot_remove: Callable[[int], None] | None = None,
+                 on_slot_remove: Callable[[int, Gtk.Widget], None] | None = None,
                  on_slot_rename: Callable[[Gtk.Widget, int], None] | None = None,
                  on_edit_action: Callable[[str, Gtk.Widget], None] | None = None,
                  is_paused_fn: Callable[[str], bool] | None = None,
@@ -164,7 +164,7 @@ class HomeLauncher(Gtk.Box):
         self._on_launch_slot = on_launch_slot or (lambda slot: None)
         self._on_member_long_press = on_member_long_press
         self._on_slot_move = on_slot_move or (lambda idx, delta: None)
-        self._on_slot_remove = on_slot_remove or (lambda idx: None)
+        self._on_slot_remove = on_slot_remove or (lambda idx, _w: None)
         self._on_slot_rename = on_slot_rename or (lambda widget, idx: None)
         self._on_edit_action = on_edit_action or (lambda action, widget: None)
         self._is_paused = is_paused_fn or (lambda app_id: False)
@@ -242,6 +242,8 @@ class HomeLauncher(Gtk.Box):
         if slot_count < 8:
             actions.append(('add_app', '+ Add app'))
             actions.append(('new_folder', '+ New folder'))
+        if slot_count >= 2:
+            actions.append(('rearrange', 'Rearrange…'))
         actions.append(('settings', 'Settings'))
         actions.append(('done', 'Done'))
         return actions
@@ -273,7 +275,7 @@ class HomeLauncher(Gtk.Box):
 
         remove = Gtk.Button(label='✕')
         remove.add_css_class('home-edit-ctl')
-        remove.connect('clicked', lambda _b, i=idx: self._on_slot_remove(i))
+        remove.connect('clicked', lambda _b, i=idx, w=remove: self._on_slot_remove(i, w))
         row.append(remove)
         return row
 

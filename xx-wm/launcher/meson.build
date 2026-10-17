@@ -85,6 +85,7 @@ install_data(
     'src/power_menu.py',
     'src/privacy_monitor.py',
     'src/quick_actions.py',
+    'src/reorder_sheet.py',
     'src/settings_battery_use.py',
     'src/settings_charging.py',
     'src/settings_medical.py',

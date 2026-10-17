@@ -366,6 +366,8 @@ class HomePage:
         elif action == 'new_folder':
             win.item_actions._show_entry_dialog(
                 widget, 'New folder', '', 'Create', win._create_folder_slot)
+        elif action == 'rearrange':
+            win.item_actions.show_home_reorder(widget)
 
     def _add_app_slot(self, entry: AppEntry) -> None:
         win = self._win
@@ -383,12 +385,19 @@ class HomePage:
         win._show_status(f'{display} added to home.')
 
     def _create_folder_slot(self, name: str) -> None:
+        from app_item_actions import validate_folder_name
+
         win = self._win
         slots = win.config.home_slots
+        error = validate_folder_name(slots, name)
+        if error is not None:
+            win._show_status(error)
+            return
         if len(slots) >= 8:
             win._show_status('Home is full — remove a slot first.')
             return
-        slots.append({'type': 'folder', 'label': name, 'app_id': None, 'cmd': None, 'folder': []})
+        slots.append({'type': 'folder', 'label': name.strip(), 'app_id': None,
+                      'cmd': None, 'folder': []})
         win.config.set_home_slots(slots)
         win._home_launcher.refresh()
         win._home_launcher.set_edit_mode(True)
@@ -403,10 +412,13 @@ class HomePage:
         win.config.set_home_slots(slots)
         win._home_launcher.refresh(preserve_folder=True)
 
-    def _remove_slot(self, idx: int) -> None:
+    def _remove_slot(self, idx: int, widget=None) -> None:
         win = self._win
         slots = win.config.home_slots
         if not (0 <= idx < len(slots)):
+            return
+        if slots[idx].get('type') == 'folder' and widget is not None:
+            win.item_actions.confirm_delete_folder(widget, idx)
             return
         removed = slots.pop(idx)
         win.config.set_home_slots(slots)
@@ -415,13 +427,22 @@ class HomePage:
         win._show_status(f'{removed.get("label", "Slot")} removed from home.')
 
     def _rename_slot(self, widget, idx: int) -> None:
+        from app_item_actions import validate_folder_name
+
         win = self._win
         slots = win.config.home_slots
         if not (0 <= idx < len(slots)):
             return
 
         def _commit(text: str) -> None:
-            slots[idx]['label'] = text
+            if slots[idx].get('type') == 'folder':
+                error = validate_folder_name(slots, text, exclude=idx)
+                if error is not None:
+                    win._show_status(error)
+                    return
+                slots[idx]['label'] = text.strip()
+            else:
+                slots[idx]['label'] = text
             app_id = slots[idx].get('app_id')
             if slots[idx].get('type') == 'app' and app_id:
                 win.config.set_app_label(str(app_id), text)
