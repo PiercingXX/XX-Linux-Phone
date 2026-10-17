@@ -26,6 +26,7 @@ import threading  # noqa: E402
 
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_contacts import eds as eds_module  # noqa: E402
 from xx_contacts import import_export as import_export_module  # noqa: E402
 from xx_contacts import privacy  # noqa: E402
@@ -77,80 +78,60 @@ class ImportExportPage(Adw.NavigationPage):
         self._pending_backup: list = []
         self._pending_groups_applied = 0
         self._publisher = eds_module.EdsPublisher(
-            eds_module.make_publish_client, store.all_records,
+            eds_module.EBookClient, store.all_records,
             enabled=bool(getattr(config, "publish_to_eds", False)))
 
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        toolbar.add_top_bar(header)
+        header = widgets.compact_header(
+            self._on_back_clicked, "Import/export")
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_hexpand(True)
-        scrolled.set_vexpand(True)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        body.set_hexpand(True)
-        body.set_margin_start(12)
-        body.set_margin_end(12)
-        body.set_margin_top(12)
-        body.set_margin_bottom(12)
-        scrolled.set_child(body)
-        toolbar.set_content(scrolled)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.add_css_class("xx-page-body")
+        # Short bodies must pack at the top: a stretched viewport leaves
+        # phantom gaps between the first children (seen on the Me card).
+        body.set_valign(Gtk.Align.START)
 
-        body.append(self._section_label("Import"))
-        self._import_vcf_button = Gtk.Button(label="Import vCard file")
-        self._import_vcf_button.connect("clicked", self._on_pick_vcard)
+        body.append(widgets.section_label("Import"))
+        self._import_vcf_button = widgets.outline_button(
+            "Import vCard file", self._on_pick_vcard)
         body.append(self._import_vcf_button)
-        self._import_backup_button = Gtk.Button(
-            label="Import Android backup")
-        self._import_backup_button.connect("clicked",
-                                           self._on_pick_backup_vcf)
+        self._import_backup_button = widgets.outline_button(
+            "Import Android backup", self._on_pick_backup_vcf)
         body.append(self._import_backup_button)
-        self._import_eds_button = Gtk.Button(
-            label="Import from GNOME Contacts")
+        self._import_eds_button = widgets.outline_button(
+            "Import from GNOME Contacts", self._on_import_eds)
         self._import_eds_button.set_sensitive(eds_module.is_available())
-        self._import_eds_button.connect("clicked", self._on_import_eds)
         body.append(self._import_eds_button)
 
-        body.append(self._section_label("Export"))
-        self._export_button = Gtk.Button(label="Export all contacts")
-        self._export_button.connect("clicked", self._on_export)
+        body.append(widgets.section_label("Export"))
+        self._export_button = widgets.outline_button(
+            "Export all contacts", self._on_export)
         body.append(self._export_button)
 
-        body.append(self._section_label("GNOME Contacts mirror"))
-        publish_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                              spacing=8)
-        publish_label = Gtk.Label(label="Publish to GNOME Contacts")
-        publish_label.set_hexpand(True)
-        publish_label.set_xalign(0.0)
-        publish_label.set_wrap(True)
-        publish_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        publish_row.append(publish_label)
-        self._publish_switch = Gtk.Switch()
-        self._publish_switch.set_active(bool(
-            getattr(config, "publish_to_eds", False)))
+        body.append(widgets.section_label("GNOME Contacts mirror"))
+        self._publish_switch = widgets.make_switch(
+            bool(getattr(config, "publish_to_eds", False)),
+            lambda _active: self._on_publish_flipped())
         self._publish_switch.set_sensitive(eds_module.is_available())
-        self._publish_switch.connect("notify::active",
-                                     self._on_publish_toggled)
-        publish_row.append(self._publish_switch)
+        publish_row = widgets.setting_row(
+            "Publish to GNOME Contacts",
+            "One-way copy to GNOME Contacts",
+            self._publish_switch, last=True)
         body.append(publish_row)
 
-        self._status = Gtk.Label()
-        self._status.set_xalign(0.0)
+        self._status = widgets.label("", "xx-secondary")
         self._status.set_wrap(True)
         self._status.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         body.append(self._status)
 
-        self.set_child(toolbar)
+        self.set_child(widgets.page(header, body))
         self.set_title("Import/export")
         self.connect("unrealize", self._on_unrealize)
 
-    def _section_label(self, text: str) -> Gtk.Label:
-        label = Gtk.Label(label=text)
-        label.set_xalign(0.0)
-        label.add_css_class("xx-section-header")
-        return label
+    def _on_back_clicked(self) -> None:
+        self._navigation.pop()
+
+    def _on_publish_flipped(self) -> None:
+        self._on_publish_toggled(self._publish_switch, None)
 
     # ------------------------------------------------------------------ pick
 
@@ -166,7 +147,7 @@ class ImportExportPage(Adw.NavigationPage):
                                   args=(path, False), daemon=True)
         worker.start()
 
-    def _on_pick_vcard(self, _button: Gtk.Button) -> None:
+    def _on_pick_vcard(self) -> None:
         dialog = Gtk.FileDialog()
         dialog.set_title("Import vCard file")
         dialog.set_filters(vcard_filter_store())
@@ -187,7 +168,7 @@ class ImportExportPage(Adw.NavigationPage):
                                   args=(path, False), daemon=True)
         worker.start()
 
-    def _on_pick_backup_vcf(self, _button: Gtk.Button) -> None:
+    def _on_pick_backup_vcf(self) -> None:
         dialog = Gtk.FileDialog()
         dialog.set_title("Import Android contacts.vcf")
         dialog.set_filters(vcard_filter_store())
@@ -412,7 +393,7 @@ class ImportExportPage(Adw.NavigationPage):
 
     # ------------------------------------------------------------------- eds
 
-    def _on_import_eds(self, _button: Gtk.Button) -> None:
+    def _on_import_eds(self) -> None:
         self._set_status("Reading GNOME Contacts…")
         worker = threading.Thread(target=self._import_eds_in_worker,
                                   daemon=True)
@@ -451,7 +432,7 @@ class ImportExportPage(Adw.NavigationPage):
 
     # ----------------------------------------------------------------- export
 
-    def _on_export(self, _button: Gtk.Button) -> None:
+    def _on_export(self) -> None:
         dialog = Gtk.FileDialog()
         dialog.set_title("Export contacts")
         dialog.set_initial_name("contacts.vcf")

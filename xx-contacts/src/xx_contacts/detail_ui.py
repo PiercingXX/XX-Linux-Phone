@@ -1,11 +1,11 @@
 """L3 contact detail page pushed on the list's ``Adw.NavigationView``.
 
-Phone-first 360x720 (min 320x640): a scrolled vertical stack of sections
-from ``detail`` with the theme CSS classes, call/message/email/map
-actions through ``Gtk.UriLauncher``, star/business/blocked switches that
-write through the store (list + detail refresh off the ``Changed``
-watcher), portal vCard share, and delete with confirmation. Call history
-stays hidden until xx-dialer exposes it (see ``detail``'s seam).
+Phone-first 360x720: a compact back header with an edit action, a big
+avatar and display name, status chips, Call/Message actions, captioned
+fields from ``detail``, tag switches that write through the store
+(list + detail refresh off the ``Changed`` watcher), portal vCard
+share, and delete with confirmation. Call history stays hidden until
+xx-dialer exposes it (see ``detail``'s seam).
 
 Import-safe without a display: constructing the page needs a display, but
 importing this module must not. The page holds no text entries and never
@@ -23,6 +23,7 @@ import threading  # noqa: E402
 
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_contacts import avatar as avatar_module  # noqa: E402
 from xx_contacts import detail as detail_model  # noqa: E402
 from xx_contacts import mecard as mecard_module  # noqa: E402
@@ -32,7 +33,7 @@ from xx_contacts import vcard as vcard_module  # noqa: E402
 from xx_contacts.list_ui import ChangeWatcher, launch_uri  # noqa: E402
 from xx_contacts.store import NotFoundError, default_exports_dir  # noqa: E402
 
-DETAIL_PHOTO_PX = 64
+DETAIL_PHOTO_PX = 88
 
 ACTION_LABELS = {
     "call": "Call",
@@ -40,6 +41,18 @@ ACTION_LABELS = {
     "email": "Email",
     "map": "Map",
     "open": "Open",
+}
+
+_TAG_SUBTITLES = {
+    "starred": "Always rings",
+    "business": "Work contact",
+    "blocked": "Declines calls",
+}
+
+_TAG_TITLES = {
+    "starred": "Starred",
+    "business": "Business",
+    "blocked": "Blocked",
 }
 
 
@@ -67,73 +80,86 @@ class ContactDetailPage(Adw.NavigationPage):
         self._updating_switches = False
         self._watcher = ChangeWatcher(db_path, self._on_external_changed)
 
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        toolbar.add_top_bar(header)
+        header = widgets.compact_header(
+            self._on_back_clicked, "Details", "",
+            "document-edit-symbolic", self._on_edit_clicked)
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_hexpand(True)
-        scrolled.set_vexpand(True)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        body.set_hexpand(True)
-        body.set_margin_start(12)
-        body.set_margin_end(12)
-        body.set_margin_top(12)
-        body.set_margin_bottom(12)
-        scrolled.set_child(body)
-        toolbar.set_content(scrolled)
+        body.add_css_class("xx-page-body")
+        # Short bodies must pack at the top: a stretched viewport leaves
+        # phantom gaps between the first children (seen on the Me card).
+        body.set_valign(Gtk.Align.START)
 
-        ident = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                          spacing=12)
         avatar_box, avatar_image, avatar_fallback = (
             avatar_module.build_avatar(DETAIL_PHOTO_PX))
-        ident.append(avatar_box)
+        body.append(avatar_box)
         self._avatar_box = avatar_box
         self._avatar_image = avatar_image
         self._avatar_fallback = avatar_fallback
-        self._name = Gtk.Label()
-        self._name.set_xalign(0.0)
-        self._name.set_hexpand(True)
+
+        self._name = widgets.label("", "xx-display-large")
+        self._name.set_ellipsize(Pango.EllipsizeMode.NONE)
         self._name.set_wrap(True)
         self._name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._name.add_css_class("xx-title")
-        ident.append(self._name)
-        body.append(ident)
+        self._name.set_max_width_chars(16)
+        body.append(self._name)
 
+        self._chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                              spacing=8)
+        body.append(self._chips)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self._call_button = widgets.call_button("Call",
+                                                self._on_call_clicked)
+        self._call_button.set_hexpand(True)
+        self._call_button.set_sensitive(False)
+        actions.append(self._call_button)
+        self._message_button = widgets.outline_button(
+            "Message", self._on_message_clicked)
+        self._message_button.set_hexpand(True)
+        self._message_button.set_sensitive(False)
+        actions.append(self._message_button)
+        body.append(actions)
+
+        self._fields = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                               spacing=0)
+        body.append(self._fields)
+
+        body.append(widgets.section_label("Tags"))
         self._toggles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                spacing=4)
+                                spacing=0)
         body.append(self._toggles)
 
-        me_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        me_label = Gtk.Label(label="Me card")
-        me_label.set_hexpand(True)
-        me_label.set_xalign(0.0)
-        me_row.append(me_label)
-        self._me_button = Gtk.Button(label="Set as Me")
-        self._me_button.connect("clicked", self._on_me_clicked)
+        body.append(widgets.section_label("Me card"))
+        me_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        me_text = widgets.label("Your own card", "xx-title")
+        me_text.set_hexpand(True)
+        me_text.set_valign(Gtk.Align.CENTER)
+        me_row.append(me_text)
+        self._me_button = widgets.text_button("Set as Me",
+                                              self._on_me_clicked)
         me_row.append(self._me_button)
         body.append(me_row)
 
-        self._sections = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                 spacing=12)
-        body.append(self._sections)
+        bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        share_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                            spacing=12)
+        self._share_button = widgets.outline_button(
+            "Share vCard", self._on_share_clicked)
+        self._share_button.set_hexpand(True)
+        share_row.append(self._share_button)
+        self._edit_button = widgets.outline_button(
+            "Edit", self._on_edit_clicked)
+        self._edit_button.set_hexpand(True)
+        share_row.append(self._edit_button)
+        bottom.append(share_row)
+        self._delete_button = widgets.text_button(
+            "Delete", self._on_delete_clicked)
+        self._delete_button.add_css_class("xx-danger-text")
+        self._delete_button.set_halign(Gtk.Align.CENTER)
+        bottom.append(self._delete_button)
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._share_button = Gtk.Button(label="Share vCard")
-        self._share_button.connect("clicked", self._on_share_clicked)
-        actions.append(self._share_button)
-        self._edit_button = Gtk.Button(label="Edit")
-        self._edit_button.connect("clicked", self._on_edit_clicked)
-        actions.append(self._edit_button)
-        self._delete_button = Gtk.Button(label="Delete")
-        self._delete_button.add_css_class("destructive-action")
-        self._delete_button.connect("clicked", self._on_delete_clicked)
-        actions.append(self._delete_button)
-        body.append(actions)
-
-        self.set_child(toolbar)
+        self.set_child(widgets.page(header, body, bottom))
         self.set_title("Details")
         self.connect("unrealize", self._on_unrealize)
         self._watcher.start()
@@ -166,10 +192,34 @@ class ContactDetailPage(Adw.NavigationPage):
             record.photo_path or None,
             bool(getattr(self._config, "show_photos", False)),
             DETAIL_PHOTO_PX)
+        self._render_chips(record)
+        self._render_fields(record)
         self._render_toggles(record)
-        self._render_sections(record)
         self._refresh_me_button()
+        self._refresh_call_buttons(record)
         return False
+
+    def _render_chips(self, record) -> None:
+        child = self._chips.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            self._chips.remove(child)
+            child = following
+        tags: list[tuple[str, bool]] = []
+        if getattr(record, "starred", False):
+            tags.append(("★ Starred", True))
+        for group in (getattr(record, "groups", None) or [])[:2]:
+            tags.append((str(group), False))
+        if not tags:
+            self._chips.set_visible(False)
+            return
+        self._chips.set_visible(True)
+        for text, selected in tags:
+            chip = Gtk.Label(label=text.upper())
+            chip.add_css_class("xx-chip")
+            if selected:
+                chip.add_css_class("selected")
+            self._chips.append(chip)
 
     def _refresh_me_button(self) -> None:
         if self._config is None:
@@ -178,7 +228,7 @@ class ContactDetailPage(Adw.NavigationPage):
         mine = mecard_module.is_me(self._config, self._uid)
         self._me_button.set_label("Me ✓" if mine else "Set as Me")
 
-    def _on_me_clicked(self, _button: Gtk.Button) -> None:
+    def _on_me_clicked(self) -> None:
         if self._config is None:
             return
         if mecard_module.is_me(self._config, self._uid):
@@ -188,7 +238,33 @@ class ContactDetailPage(Adw.NavigationPage):
                                      self._uid)
         self._refresh_me_button()
 
-    def _on_edit_clicked(self, _button: Gtk.Button) -> None:
+    def _refresh_call_buttons(self, record) -> None:
+        call_uri, message_uri = "", ""
+        for section in detail_model.build_detail_sections(record,
+                                                          self._region):
+            for item in section.fields:
+                for action in item.actions:
+                    if action.kind == "call" and not call_uri:
+                        call_uri = action.uri
+                    if action.kind == "message" and not message_uri:
+                        message_uri = action.uri
+        self._call_uri = call_uri
+        self._message_uri = message_uri
+        self._call_button.set_sensitive(bool(call_uri))
+        self._message_button.set_sensitive(bool(message_uri))
+
+    def _on_call_clicked(self) -> None:
+        if getattr(self, "_call_uri", ""):
+            launch_uri(self._parent, self._call_uri)
+
+    def _on_message_clicked(self) -> None:
+        if getattr(self, "_message_uri", ""):
+            launch_uri(self._parent, self._message_uri)
+
+    def _on_back_clicked(self) -> None:
+        self._navigation.pop()
+
+    def _on_edit_clicked(self, _button: Gtk.Button | None = None) -> None:
         from xx_contacts.editor_ui import ContactEditorPage
 
         page = ContactEditorPage(
@@ -208,30 +284,24 @@ class ContactDetailPage(Adw.NavigationPage):
         self._switches = {}
         self._updating_switches = True
         try:
-            for key, label in (("starred", "Starred"),
-                               ("business", "Business"),
-                               ("blocked", "Blocked")):
-                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                              spacing=8)
-                text = Gtk.Label(label=label)
-                text.set_hexpand(True)
-                text.set_xalign(0.0)
-                switch = Gtk.Switch()
-                switch.set_active(bool(getattr(record, key)))
-                switch.connect("notify::active", self._on_toggle_flipped,
-                               key)
-                row.append(text)
-                row.append(switch)
-                self._toggles.append(row)
+            keys = ("starred", "business", "blocked")
+            for index, key in enumerate(keys):
+                switch = widgets.make_switch(
+                    bool(getattr(record, key)),
+                    lambda active, _k=key: self._on_toggle_flipped_by_key(
+                        _k, active))
+                self._toggles.append(widgets.setting_row(
+                    _TAG_TITLES[key], _TAG_SUBTITLES[key], switch,
+                    last=index == len(keys) - 1))
                 self._switches[key] = switch
         finally:
             self._updating_switches = False
 
-    def _on_toggle_flipped(self, switch: Gtk.Switch, _pspec, key: str) -> None:
+    def _on_toggle_flipped_by_key(self, key: str, active: bool) -> None:
         if self._updating_switches or not self._alive:
             return
         worker = threading.Thread(target=self._toggle_in_worker,
-                                  args=(key, switch.get_active(),),
+                                  args=(key, bool(active),),
                                   daemon=True)
         worker.start()
 
@@ -265,65 +335,50 @@ class ContactDetailPage(Adw.NavigationPage):
 
     # ------------------------------------------------------------- sections
 
-    def _render_sections(self, record) -> None:
-        child = self._sections.get_first_child()
+    def _render_fields(self, record) -> None:
+        child = self._fields.get_first_child()
         while child is not None:
             following = child.get_next_sibling()
-            self._sections.remove(child)
+            self._fields.remove(child)
             child = following
         for section in detail_model.build_detail_sections(record,
                                                           self._region):
-            header = Gtk.Label(label=section.title)
-            header.set_xalign(0.0)
-            header.add_css_class("xx-section-header")
-            self._sections.append(header)
             for item in section.fields:
-                self._sections.append(self._field_row(item))
+                caption = item.label or section.title
+                self._fields.append(
+                    widgets.field(caption, item.display))
+                # Call/Message stay on the big action buttons above; only
+                # the actions with no button of their own get text links.
+                rest = [action for action in item.actions
+                        if action.kind not in ("call", "message")]
+                if rest:
+                    row = Gtk.Box(
+                        orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+                    for action in rest:
+                        label = ACTION_LABELS.get(action.kind, action.kind)
+                        button = widgets.text_button(
+                            label,
+                            lambda _a=action: self._on_field_action(_a.uri)
+                            if _a.uri else None)
+                        row.append(button)
+                    self._fields.append(row)
         if detail_model.CALL_HISTORY_AVAILABLE:
             history = detail_model.get_call_history(self._uid)
             if history:
-                header = Gtk.Label(label="Recent calls")
-                header.set_xalign(0.0)
-                header.add_css_class("xx-section-header")
-                self._sections.append(header)
+                self._fields.append(widgets.section_label("Recent calls"))
                 for line in history:
-                    row = Gtk.Label(label=str(line))
-                    row.set_xalign(0.0)
-                    row.set_wrap(True)
-                    row.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                    self._sections.append(row)
+                    value = widgets.label(str(line), "xx-body")
+                    value.set_wrap(True)
+                    value.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                    self._fields.append(value)
 
-    def _field_row(self, item: detail_model.DetailField) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        if item.label:
-            kind = Gtk.Label(label=item.label)
-            kind.set_xalign(0.0)
-            kind.add_css_class("xx-muted")
-            box.append(kind)
-        value = Gtk.Label(label=item.display)
-        value.set_xalign(0.0)
-        value.set_hexpand(True)
-        value.set_wrap(True)
-        value.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        value.set_selectable(True)
-        box.append(value)
-        if item.actions:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            for action in item.actions:
-                label = ACTION_LABELS.get(action.kind, action.kind)
-                button = Gtk.Button(label=label)
-                button.connect("clicked", self._on_field_action, action.uri)
-                row.append(button)
-            box.append(row)
-        return box
-
-    def _on_field_action(self, _button: Gtk.Button, uri: str) -> None:
+    def _on_field_action(self, uri: str) -> None:
         if uri:
             launch_uri(self._parent, uri)
 
     # ---------------------------------------------------------------- share
 
-    def _on_share_clicked(self, _button: Gtk.Button) -> None:
+    def _on_share_clicked(self, _button: Gtk.Button | None = None) -> None:
         worker = threading.Thread(target=self._share_in_worker, daemon=True)
         worker.start()
 
@@ -407,7 +462,7 @@ class ContactDetailPage(Adw.NavigationPage):
 
     # --------------------------------------------------------------- delete
 
-    def _on_delete_clicked(self, _button: Gtk.Button) -> None:
+    def _on_delete_clicked(self, _button: Gtk.Button | None = None) -> None:
         dialog = Adw.AlertDialog.new(
             "Delete contact?",
             f"Delete {self._name.get_text()}? This cannot be undone.")

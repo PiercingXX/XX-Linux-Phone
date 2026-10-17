@@ -13,14 +13,19 @@ Full behavior spec: [PORT_SPEC.md](PORT_SPEC.md).
 ## Run from the checkout
 
 ```sh
-PYTHONPATH=src python3 -m xx_contacts
+PYTHONPATH=src:../common python3 -m xx_contacts
 ```
 
-Needs GTK4 + libadwaita via PyGObject. No pip dependencies.
+Needs GTK4 + libadwaita via PyGObject. No pip dependencies. The visual
+design comes from the shared `xx_ui` package in `common/` (themes, one
+stylesheet, widget builders): install `common` first, or put it on
+`PYTHONPATH` when running from source.
 
 ## Install
 
 ```sh
+meson setup ../common build-common
+meson install -C build-common
 meson setup build
 meson install -C build
 ```

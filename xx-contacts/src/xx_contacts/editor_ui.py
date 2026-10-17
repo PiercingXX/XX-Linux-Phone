@@ -1,15 +1,15 @@
 """L4 contact editor page pushed on the list's ``Adw.NavigationView``.
 
-Phone-first 360x720 (min 320x640): name parts with a live display-name
-preview, repeatable phone/email rows with human type labels (the same
-mapping the detail page uses), structured addresses, touch date
-pickers (``Gtk.Calendar`` in a popover, never free text), org/title,
-websites, notes, groups, star/business/blocked switches, and a portal
-photo pick. Every text entry takes focus only on tap, so opening the
-page never pops the on-screen keyboard. Saving performs exactly ONE
-service call (one global revision bump); the service emits the D-Bus
-``Changed`` notice itself. Cancelling asks about discarding only when
-the form is dirty.
+Phone-first 360x720: name parts with a live display-name preview,
+repeatable phone/email rows with human type labels (the same mapping
+the detail page uses), structured addresses, touch date pickers
+(``Gtk.Calendar`` in a popover, never free text), org/title, websites,
+notes, groups, star/business/blocked switches, and a portal photo pick.
+Every text entry takes focus only on tap, so opening the page never
+pops the on-screen keyboard. Saving performs exactly ONE service call
+(one global revision bump); the service emits the D-Bus ``Changed``
+notice itself. Cancelling asks about discarding only when the form is
+dirty.
 
 Import-safe without a display: constructing the page needs a display,
 but importing this module must not.
@@ -19,12 +19,14 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("Pango", "1.0")
 
 import os  # noqa: E402
 import threading  # noqa: E402
 
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_contacts import avatar as avatar_module  # noqa: E402
 from xx_contacts import editor as editor_model  # noqa: E402
 from xx_contacts import photos as photos_module  # noqa: E402
@@ -34,6 +36,10 @@ from xx_contacts.store import ContactData, NotFoundError  # noqa: E402
 
 PHOTO_SIZE_PX = 64
 PHOTO_READ_LIMIT = 20 * 1024 * 1024
+
+
+def _styled_entry(placeholder: str = "") -> Gtk.Entry:
+    return widgets.text_entry(placeholder)
 
 
 class _TypedRow:
@@ -47,10 +53,9 @@ class _TypedRow:
         self._touched = False
         self._kind = kind
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        entry = Gtk.Entry()
+        entry = _styled_entry(placeholder)
         entry.set_hexpand(True)
-        if placeholder:
-            entry.set_placeholder_text(placeholder)
+        install_tap_to_focus(entry)
         if value_text:
             entry.set_text(value_text)
         box.append(entry)
@@ -61,31 +66,30 @@ class _TypedRow:
             [label for _token, label in options])
         dropdown.set_selected(self._index_for(type_text))
         dropdown.connect("notify::selected", self._on_type_picked)
-        box.append(dropdown)
         self.dropdown = dropdown
+        remove = widgets.icon_button(
+            "window-close-symbolic",
+            lambda: page._on_row_remove(outer))
+        box.append(remove)
         check = Gtk.CheckButton(label="Main")
         check.set_active(bool(primary))
         check.connect("toggled", page._on_primary_toggled, self._kind)
-        box.append(check)
         self.check = check
-        label_entry = Gtk.Entry()
+        label_entry = _styled_entry("Custom label")
         label_entry.set_hexpand(True)
-        label_entry.set_placeholder_text("Label (optional)")
+        install_tap_to_focus(label_entry)
         if label_text:
             label_entry.set_text(label_text)
-        remove = Gtk.Button(label="Remove")
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        remove.connect("clicked", page._on_row_remove, outer)
-        outer.append(box)
         sub = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        sub.append(dropdown)
         sub.append(label_entry)
-        sub.append(remove)
+        sub.append(check)
+        outer.append(box)
         outer.append(sub)
         self.label_entry = label_entry
         self.box = outer
         self.inner = box
-        install_tap_to_focus(entry)
-        install_tap_to_focus(label_entry)
         page._tap_entries.extend((entry, label_entry))
 
     def _index_for(self, type_text: str) -> int:
@@ -128,14 +132,13 @@ class _AddressRow:
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.entries: dict[str, Gtk.Entry] = {}
         for key, placeholder in self.FIELDS:
-            entry = Gtk.Entry()
+            entry = _styled_entry(placeholder)
+            install_tap_to_focus(entry)
             entry.set_hexpand(True)
-            entry.set_placeholder_text(placeholder)
             if data is not None and getattr(data, key, ""):
                 entry.set_text(getattr(data, key))
             outer.append(entry)
             self.entries[key] = entry
-            install_tap_to_focus(entry)
             page._tap_entries.append(entry)
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         options = editor_model.type_options()
@@ -152,8 +155,9 @@ class _AddressRow:
         check.connect("toggled", page._on_primary_toggled, "address")
         row.append(check)
         self.check = check
-        remove = Gtk.Button(label="Remove")
-        remove.connect("clicked", page._on_row_remove, outer)
+        remove = widgets.icon_button(
+            "window-close-symbolic",
+            lambda: page._on_row_remove(outer))
         row.append(remove)
         outer.append(row)
         self.box = outer
@@ -184,18 +188,18 @@ class _UrlRow:
     def __init__(self, page, value_text: str = "") -> None:
         self._page = page
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        entry = Gtk.Entry()
+        entry = _styled_entry("https://…")
+        install_tap_to_focus(entry)
         entry.set_hexpand(True)
-        entry.set_placeholder_text("https://…")
         if value_text:
             entry.set_text(value_text)
         box.append(entry)
         self.entry = entry
-        remove = Gtk.Button(label="Remove")
-        remove.connect("clicked", page._on_row_remove, box)
+        remove = widgets.icon_button(
+            "window-close-symbolic",
+            lambda: page._on_row_remove(box))
         box.append(remove)
         self.box = box
-        install_tap_to_focus(entry)
         page._tap_entries.append(entry)
 
     def value(self) -> str:
@@ -234,35 +238,19 @@ class ContactEditorPage(Adw.NavigationPage):
         self._remove_photo = False
         self._saving = False
 
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        self._cancel_button = Gtk.Button(label="Cancel")
-        self._cancel_button.connect("clicked", self._on_cancel_clicked)
-        header.pack_start(self._cancel_button)
-        self._save_button = Gtk.Button(label="Save")
-        self._save_button.add_css_class("suggested-action")
-        self._save_button.connect("clicked", self._on_save_clicked)
-        header.pack_end(self._save_button)
-        toolbar.add_top_bar(header)
+        title = "New contact" if uid is None else "Edit contact"
+        header = widgets.compact_header(self._on_cancel_clicked, title)
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_hexpand(True)
-        scrolled.set_vexpand(True)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        body.set_hexpand(True)
-        body.set_margin_start(12)
-        body.set_margin_end(12)
-        body.set_margin_top(12)
-        body.set_margin_bottom(12)
-        scrolled.set_child(body)
-        toolbar.set_content(scrolled)
+        body.add_css_class("xx-page-body")
+        # Short bodies must pack at the top: a stretched viewport leaves
+        # phantom gaps between the first children (seen on the Me card).
+        body.set_valign(Gtk.Align.START)
 
-        self._error = Gtk.Label()
-        self._error.set_visible(False)
+        self._error = widgets.label("", "xx-danger-text")
         self._error.set_wrap(True)
-        self._error.add_css_class("error")
+        self._error.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self._error.set_visible(False)
         body.append(self._error)
 
         photo_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
@@ -274,149 +262,143 @@ class ContactEditorPage(Adw.NavigationPage):
         self._avatar_image = avatar_image
         self._avatar_fallback = avatar_fallback
         photo_buttons = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                spacing=6)
+                                spacing=0)
         photo_buttons.set_valign(Gtk.Align.CENTER)
-        self._photo_pick = Gtk.Button(label="Choose photo")
-        self._photo_pick.connect("clicked", self._on_photo_pick)
+        self._photo_pick = self._wide_text_button(
+            "Add photo", self._on_photo_pick)
         photo_buttons.append(self._photo_pick)
-        self._photo_remove = Gtk.Button(label="Remove photo")
-        self._photo_remove.connect("clicked", self._on_photo_remove)
+        self._photo_remove = self._wide_text_button(
+            "Remove", self._on_photo_remove)
         photo_buttons.append(self._photo_remove)
         photo_row.append(photo_buttons)
         body.append(photo_row)
-
-        name_group = Adw.PreferencesGroup()
-        name_group.set_title("Name")
-        self._entries: dict[str, Adw.EntryRow] = {}
-        for key, title in (("given", "First name"),
-                           ("family", "Last name"),
-                           ("prefix", "Prefix"),
-                           ("suffix", "Suffix"),
-                           ("nickname", "Nickname")):
-            row = Adw.EntryRow()
-            row.set_title(title)
-            name_group.add(row)
-            self._entries[key] = row
+        self._entries: dict[str, Gtk.Entry] = {}
+        for key, title_text in (("given", "First name"),
+                                ("family", "Last name")):
+            row = _styled_entry(title_text)
             install_tap_to_focus(row)
+            row.connect("changed", self._on_name_changed)
+            body.append(self._labeled(title_text, row))
+            self._entries[key] = row
             self._tap_entries.append(row)
-            if key in ("given", "family"):
-                row.connect("changed", self._on_name_changed)
-        body.append(name_group)
-        self._preview = Gtk.Label()
-        self._preview.set_xalign(0.0)
+        for key, title_text in (("prefix", "Prefix"),
+                                ("suffix", "Suffix"),
+                                ("nickname", "Nickname")):
+            row = _styled_entry(title_text)
+            install_tap_to_focus(row)
+            body.append(self._labeled(title_text, row))
+            self._entries[key] = row
+            self._tap_entries.append(row)
+        self._preview = widgets.label("", "xx-secondary")
         body.append(self._preview)
 
-        body.append(self._section_label("Phone numbers"))
+        body.append(widgets.section_label("Phone"))
         self._phone_rows_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=8)
         body.append(self._phone_rows_box)
-        add_phone = Gtk.Button(label="Add phone number")
-        add_phone.connect("clicked", self._on_add_phone)
-        body.append(add_phone)
+        body.append(self._wide_text_button("+ Add phone",
+                                                  self._on_add_phone))
 
-        body.append(self._section_label("Email addresses"))
+        body.append(widgets.section_label("Email"))
         self._email_rows_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=8)
         body.append(self._email_rows_box)
-        add_email = Gtk.Button(label="Add email address")
-        add_email.connect("clicked", self._on_add_email)
-        body.append(add_email)
+        body.append(self._wide_text_button("+ Add email",
+                                                  self._on_add_email))
 
-        body.append(self._section_label("Addresses"))
+        body.append(widgets.section_label("Details"))
+        for key, title_text in (("org", "Company"),
+                                ("title", "Job title")):
+            row = _styled_entry(title_text)
+            install_tap_to_focus(row)
+            body.append(self._labeled(title_text, row))
+            self._entries[key] = row
+            self._tap_entries.append(row)
+
+        body.append(widgets.section_label("Addresses"))
         self._address_rows_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=8)
         body.append(self._address_rows_box)
-        add_address = Gtk.Button(label="Add address")
-        add_address.connect("clicked", self._on_add_address)
-        body.append(add_address)
+        body.append(self._wide_text_button("+ Add address",
+                                                  self._on_add_address))
 
-        body.append(self._section_label("Dates"))
-        dates = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self._birthday_display = Gtk.Label(label="No birthday set")
-        self._birthday_display.set_xalign(0.0)
-        dates.append(self._birthday_display)
+        body.append(widgets.section_label("Birthday"))
+        self._birthday_display = widgets.label(
+            "No birthday set", "xx-secondary")
+        body.append(self._birthday_display)
         birthday_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                               spacing=8)
-        self._birthday_pick = Gtk.Button(label="Pick birthday")
-        self._birthday_pick.connect("clicked", self._on_birthday_pick)
+                               spacing=0)
+        self._birthday_pick = widgets.text_button(
+            "Pick date", self._on_birthday_pick)
         birthday_row.append(self._birthday_pick)
-        self._birthday_clear = Gtk.Button(label="Clear")
-        self._birthday_clear.connect("clicked", self._on_birthday_clear)
+        self._birthday_clear = widgets.text_button(
+            "Clear", self._on_birthday_clear)
         birthday_row.append(self._birthday_clear)
-        dates.append(birthday_row)
-        self._anniversary_display = Gtk.Label(label="No anniversary set")
-        self._anniversary_display.set_xalign(0.0)
-        dates.append(self._anniversary_display)
+        body.append(birthday_row)
+        body.append(widgets.caption("Anniversary"))
+        self._anniversary_display = widgets.label(
+            "No anniversary set", "xx-secondary")
+        body.append(self._anniversary_display)
         anniversary_row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._anniversary_pick = Gtk.Button(label="Pick anniversary")
-        self._anniversary_pick.connect("clicked",
-                                       self._on_anniversary_pick)
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._anniversary_pick = widgets.text_button(
+            "Pick date", self._on_anniversary_pick)
         anniversary_row.append(self._anniversary_pick)
-        self._anniversary_clear = Gtk.Button(label="Clear")
-        self._anniversary_clear.connect("clicked",
-                                        self._on_anniversary_clear)
+        self._anniversary_clear = widgets.text_button(
+            "Clear", self._on_anniversary_clear)
         anniversary_row.append(self._anniversary_clear)
-        dates.append(anniversary_row)
-        body.append(dates)
+        body.append(anniversary_row)
         self._birthday_popover = self._build_date_popover(
             self._birthday_pick, self._birthday_display, "birthday")
         self._anniversary_popover = self._build_date_popover(
             self._anniversary_pick, self._anniversary_display,
             "anniversary")
 
-        org_group = Adw.PreferencesGroup()
-        org_group.set_title("Organization")
-        for key, title in (("org", "Company or organization"),
-                           ("title", "Job title")):
-            row = Adw.EntryRow()
-            row.set_title(title)
-            org_group.add(row)
-            self._entries[key] = row
-            install_tap_to_focus(row)
-            self._tap_entries.append(row)
-        body.append(org_group)
-
-        body.append(self._section_label("Websites"))
+        body.append(widgets.section_label("Websites"))
         self._url_rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                      spacing=8)
         body.append(self._url_rows_box)
-        add_url = Gtk.Button(label="Add website")
-        add_url.connect("clicked", self._on_add_url)
-        body.append(add_url)
+        body.append(self._wide_text_button("+ Add website",
+                                                  self._on_add_url))
 
-        notes_group = Adw.PreferencesGroup()
-        notes_group.set_title("Notes and groups")
+        body.append(widgets.section_label("Notes"))
         self._note_view = Gtk.TextView()
         self._note_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self._note_view.set_size_request(-1, 96)
-        notes_group.add(self._note_view)
+        body.append(self._note_view)
         install_tap_to_focus(self._note_view)
         self._tap_entries.append(self._note_view)
-        groups_row = Adw.EntryRow()
-        groups_row.set_title("Groups (comma separated)")
-        notes_group.add(groups_row)
-        self._entries["groups"] = groups_row
+        groups_row = _styled_entry("Family, Business")
         install_tap_to_focus(groups_row)
+        body.append(self._labeled("Groups", groups_row))
+        self._entries["groups"] = groups_row
         self._tap_entries.append(groups_row)
-        body.append(notes_group)
 
-        flags_group = Adw.PreferencesGroup()
-        flags_group.set_title("Tags")
+        body.append(widgets.section_label("Tags"))
         self._switches: dict[str, Gtk.Switch] = {}
-        for key, title in (("starred", "Starred"),
-                           ("business", "Business"),
-                           ("blocked", "Blocked")):
-            row = Adw.ActionRow()
-            row.set_title(title)
-            switch = Gtk.Switch()
-            switch.set_valign(Gtk.Align.CENTER)
-            row.add_suffix(switch)
-            flags_group.add(row)
+        tags_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        for index, (key, title_text) in enumerate(
+                (("starred", "Starred"),
+                 ("business", "Business"),
+                 ("blocked", "Blocked"))):
+            switch = widgets.make_switch(False)
+            tags_box.append(widgets.setting_row(
+                title_text, "", switch,
+                last=index == 2))
             self._switches[key] = switch
-        body.append(flags_group)
+        body.append(tags_box)
 
-        self.set_child(toolbar)
+        bottom = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        bottom.add_css_class("xx-page-body")
+        self._save_button = widgets.primary_button(
+            "Save", self._on_save_clicked)
+        self._save_button.set_hexpand(True)
+        bottom.append(self._save_button)
+        self._cancel_button = widgets.text_button(
+            "Cancel", self._on_cancel_clicked)
+        bottom.append(self._cancel_button)
+
+        self.set_child(widgets.page(header, body, bottom))
         self.set_title("New contact" if uid is None else "Edit contact")
         self.connect("map", self._on_map_clear_focus)
         self.connect("unrealize", self._on_unrealize)
@@ -435,11 +417,20 @@ class ContactEditorPage(Adw.NavigationPage):
 
     # ------------------------------------------------------------------ build
 
-    def _section_label(self, title: str) -> Gtk.Label:
-        label = Gtk.Label(label=title)
-        label.set_xalign(0.0)
-        label.add_css_class("xx-section-header")
-        return label
+    def _labeled(self, title_text: str, entry: Gtk.Entry) -> Gtk.Box:
+        pair = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        pair.append(widgets.caption(title_text))
+        pair.append(entry)
+        return pair
+
+    def _wide_text_button(self, text: str, callback) -> Gtk.Button:
+        button = widgets.text_button(text, callback)
+        child = button.get_child()
+        if isinstance(child, Gtk.Label):
+            child.set_max_width_chars(16)
+            child.set_halign(Gtk.Align.START)
+        button.set_halign(Gtk.Align.START)
+        return button
 
     def _build_date_popover(self, anchor: Gtk.Button, display: Gtk.Label,
                             kind: str) -> Gtk.Popover:
@@ -455,11 +446,11 @@ class ContactEditorPage(Adw.NavigationPage):
         box.append(calendar)
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                           spacing=8)
-        set_button = Gtk.Button(label="Set date")
-        set_button.connect("clicked", self._on_calendar_set, kind)
+        set_button = widgets.text_button(
+            "Set date", lambda: self._on_calendar_set(kind))
         actions.append(set_button)
-        clear_button = Gtk.Button(label="Clear")
-        clear_button.connect("clicked", self._on_calendar_clear, kind)
+        clear_button = widgets.text_button(
+            "Clear", lambda: self._on_calendar_clear(kind))
         actions.append(clear_button)
         box.append(actions)
         popover.set_child(box)
@@ -494,7 +485,7 @@ class ContactEditorPage(Adw.NavigationPage):
             type_text=data.type if data is not None else "CELL",
             label_text=data.label if data is not None else "",
             primary=bool(data.is_primary) if data is not None else False,
-            placeholder="Phone number", kind="phone")
+            placeholder="Number", kind="phone")
         self._phone_rows.append(row)
         self._phone_rows_box.append(row.box)
 
@@ -505,7 +496,7 @@ class ContactEditorPage(Adw.NavigationPage):
             type_text=data.type if data is not None else "HOME",
             label_text=data.label if data is not None else "",
             primary=bool(data.is_primary) if data is not None else False,
-            placeholder="Email address", kind="email")
+            placeholder="Address", kind="email")
         self._email_rows.append(row)
         self._email_rows_box.append(row.box)
 
@@ -519,19 +510,19 @@ class ContactEditorPage(Adw.NavigationPage):
         self._url_rows.append(row)
         self._url_rows_box.append(row.box)
 
-    def _on_add_phone(self, _button: Gtk.Button) -> None:
+    def _on_add_phone(self) -> None:
         self._add_phone_row()
 
-    def _on_add_email(self, _button: Gtk.Button) -> None:
+    def _on_add_email(self) -> None:
         self._add_email_row()
 
-    def _on_add_address(self, _button: Gtk.Button) -> None:
+    def _on_add_address(self) -> None:
         self._add_address_row()
 
-    def _on_add_url(self, _button: Gtk.Button) -> None:
+    def _on_add_url(self) -> None:
         self._add_url_row()
 
-    def _on_row_remove(self, _button: Gtk.Button, box: Gtk.Widget) -> None:
+    def _on_row_remove(self, box: Gtk.Widget) -> None:
         self._phone_rows = [r for r in self._phone_rows if r.box is not box]
         self._email_rows = [r for r in self._email_rows if r.box is not box]
         self._address_rows = [r for r in self._address_rows
@@ -580,11 +571,11 @@ class ContactEditorPage(Adw.NavigationPage):
                 moment = GLib.DateTime.new_now_local()
         calendar.select_day(moment)
 
-    def _on_birthday_pick(self, _button: Gtk.Button) -> None:
+    def _on_birthday_pick(self) -> None:
         self._seed_calendar("birthday")
         self._birthday_popover.popup()
 
-    def _on_anniversary_pick(self, _button: Gtk.Button) -> None:
+    def _on_anniversary_pick(self) -> None:
         self._seed_calendar("anniversary")
         self._anniversary_popover.popup()
 
@@ -592,21 +583,21 @@ class ContactEditorPage(Adw.NavigationPage):
                             kind: str) -> None:
         return None
 
-    def _on_calendar_set(self, _button: Gtk.Button, kind: str) -> None:
+    def _on_calendar_set(self, kind: str) -> None:
         moment = self._calendar_for(kind).get_date()
         text = (f"{moment.get_year():04d}-{moment.get_month():02d}-"
                 f"{moment.get_day_of_month():02d}")
         self._display_for(kind).set_text(text)
         self._popover_for(kind).popdown()
 
-    def _on_calendar_clear(self, _button: Gtk.Button, kind: str) -> None:
+    def _on_calendar_clear(self, kind: str) -> None:
         self._display_for(kind).set_text("")
         self._popover_for(kind).popdown()
 
-    def _on_birthday_clear(self, _button: Gtk.Button) -> None:
+    def _on_birthday_clear(self) -> None:
         self._birthday_display.set_text("")
 
-    def _on_anniversary_clear(self, _button: Gtk.Button) -> None:
+    def _on_anniversary_clear(self) -> None:
         self._anniversary_display.set_text("")
 
     def _date_value(self, display: Gtk.Label, empty_text: str) -> str:
@@ -636,7 +627,7 @@ class ContactEditorPage(Adw.NavigationPage):
                                              or None),
             True, PHOTO_SIZE_PX)
 
-    def _on_photo_pick(self, _button: Gtk.Button) -> None:
+    def _on_photo_pick(self) -> None:
         dialog = Gtk.FileDialog()
         dialog.set_title("Choose a contact photo")
         images = Gtk.FileFilter()
@@ -693,7 +684,7 @@ class ContactEditorPage(Adw.NavigationPage):
         self._refresh_photo_preview()
         return False
 
-    def _on_photo_remove(self, _button: Gtk.Button) -> None:
+    def _on_photo_remove(self) -> None:
         self._pending_photo = None
         self._remove_photo = True
         self._refresh_photo_preview()
@@ -805,7 +796,7 @@ class ContactEditorPage(Adw.NavigationPage):
 
     # -------------------------------------------------------------------- save
 
-    def _on_save_clicked(self, _button: Gtk.Button) -> None:
+    def _on_save_clicked(self) -> None:
         if self._saving or not self._alive:
             return
         form = self._read_form()
@@ -888,7 +879,7 @@ class ContactEditorPage(Adw.NavigationPage):
 
     # ------------------------------------------------------------------ cancel
 
-    def _on_cancel_clicked(self, _button: Gtk.Button) -> None:
+    def _on_cancel_clicked(self, _button: Gtk.Button | None = None) -> None:
         if not self._alive:
             return
         if editor_model.is_dirty(self._saved_snapshot, self._read_form()

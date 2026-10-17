@@ -255,7 +255,8 @@ scale slider {
   color: ${muted};
 }
 
-.xx-danger-text {
+.xx-danger-text,
+button.xx-danger-text {
   color: ${danger};
 }
 

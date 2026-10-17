@@ -262,6 +262,13 @@ def test_config_event_ignores_other_files(isolated_home):
     assert css._debounce_id == 0
 
 
+def test_danger_text_beats_button_text_color(isolated_home):
+    out = css.render(load())
+    match = re.search(r'button\.xx-danger-text[^{]*\{([^}]*)\}', out)
+    assert match, 'no button-qualified danger rule'
+    assert DANGER_RED in match.group(1)
+
+
 @pytest.mark.parametrize('key', list(THEME_PRESETS) + ['custom-missing'])
 def test_never_raises(isolated_home, key, tmp_path):
     if key == 'custom-missing':

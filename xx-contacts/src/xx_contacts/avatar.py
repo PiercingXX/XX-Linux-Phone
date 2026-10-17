@@ -2,8 +2,9 @@
 
 Import-safe without a display: constructing widgets needs one, but
 importing this module must not, so pytest never instantiates it. The
-fallback disc colors come from ``currentColor`` (theme-provided), so no
-hardcoded palette sneaks in.
+fallback disc uses the ``xx-avatar`` class from the design system, so no
+hardcoded palette sneaks in; the one app-specific rule (round photos,
+flat search) lives in ``app.css`` next to this module.
 """
 
 import gi
@@ -12,29 +13,30 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
 
+from pathlib import Path  # noqa: E402
+
 from gi.repository import Gdk, GdkPixbuf, Gtk  # noqa: E402
 
 from xx_contacts.names import initials  # noqa: E402
 
 _CSS_LOADED = False
 
-AVATAR_CSS = (
-    ".xx-avatar { border-radius: 9999px; "
-    "background-color: alpha(currentColor, 0.15); }"
-    ".xx-avatar image { border-radius: 9999px; }"
-)
 
-
-def ensure_avatar_css() -> None:
-    """Install the round-avatar rule once; no-op without a display."""
+def ensure_app_css() -> None:
+    """Install the app-specific rules once; no-op without a display."""
     global _CSS_LOADED
     if _CSS_LOADED:
         return
     display = Gdk.Display.get_default()
     if display is None:
         return
+    try:
+        css = (Path(__file__).with_name("app.css")
+               .read_text(encoding="utf-8"))
+    except OSError:
+        return
     provider = Gtk.CssProvider()
-    provider.load_from_data(AVATAR_CSS.encode("utf-8"))
+    provider.load_from_data(css.encode("utf-8"))
     Gtk.StyleContext.add_provider_for_display(
         display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     _CSS_LOADED = True
@@ -46,12 +48,15 @@ def build_avatar(size_px: int):
     ``image`` shows the photo when one loads; ``fallback`` shows
     initials otherwise. Call :func:`set_avatar` to switch between them.
     """
+    ensure_app_css()
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
     box.set_size_request(size_px, size_px)
-    box.add_css_class("xx-avatar")
+    box.add_css_class("xx-contact-photo")
     box.set_halign(Gtk.Align.CENTER)
     box.set_valign(Gtk.Align.CENTER)
     fallback = Gtk.Label()
+    fallback.add_css_class("xx-avatar")
+    fallback.set_size_request(size_px, size_px)
     fallback.set_hexpand(True)
     fallback.set_vexpand(True)
     fallback.set_halign(Gtk.Align.CENTER)
@@ -94,7 +99,7 @@ def set_avatar(image: Gtk.Image, fallback: Gtk.Label, display_name: str,
                photo_path: str | None, show_photos: bool,
                size_px: int) -> None:
     """Show the photo when allowed and loadable, else initials."""
-    ensure_avatar_css()
+    ensure_app_css()
     if show_photos and photo_path:
         try:
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(

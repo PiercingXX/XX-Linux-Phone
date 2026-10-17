@@ -3,10 +3,10 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib  # noqa: E402
 
+import xx_ui  # noqa: E402
 from xx_contacts import __appid__  # noqa: E402
-from xx_contacts import shell_theme  # noqa: E402
 from xx_contacts.app_config import AppConfig, default_config_path  # noqa: E402
 from xx_contacts.list_ui import ContactsWindow  # noqa: E402
 from xx_contacts.store import ContactStore, default_db_path  # noqa: E402
@@ -69,25 +69,10 @@ class ContactsApp(Adw.Application):
         return 0
 
     def do_activate(self) -> None:
-        home = os.path.expanduser("~")
-        shell_data = shell_theme.load_shell_config(
-            os.path.join(home, ".config", "xx-wm", "config.json"))
-        preset = shell_theme.resolve_preset(shell_data)
-        css = shell_theme.to_css(
-            preset,
-            shell_theme.resolve_font_family(shell_data),
-            shell_theme.resolve_text_scale(shell_data),
-        )
-        provider = Gtk.CssProvider()
-        provider.load_from_data(css.encode("utf-8"))
-        display = Gdk.Display.get_default()
-        if display is not None:
-            Gtk.StyleContext.add_provider_for_display(
-                display, provider,
-                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-            )
+        xx_ui.apply(self)
         window = self.get_active_window()
         if window is None:
+            home = os.path.expanduser("~")
             config_path = default_config_path(home)
             config = AppConfig.load(config_path)
             store = ContactStore(default_db_path(home))

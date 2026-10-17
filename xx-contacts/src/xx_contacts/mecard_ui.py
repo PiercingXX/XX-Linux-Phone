@@ -21,6 +21,7 @@ import threading  # noqa: E402
 
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_contacts import avatar as avatar_module  # noqa: E402
 from xx_contacts import detail as detail_model  # noqa: E402
 from xx_contacts import mecard as mecard_module  # noqa: E402
@@ -55,66 +56,64 @@ class MeCardPage(Adw.NavigationPage):
         self._me_uid = ""
         self._watcher = ChangeWatcher(db_path, self._on_external_changed)
 
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        toolbar.add_top_bar(header)
+        header = widgets.compact_header(
+            self._on_back_clicked, "Me card")
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_hexpand(True)
-        scrolled.set_vexpand(True)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        body.set_hexpand(True)
-        body.set_margin_start(12)
-        body.set_margin_end(12)
-        body.set_margin_top(12)
-        body.set_margin_bottom(12)
-        scrolled.set_child(body)
-        toolbar.set_content(scrolled)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.add_css_class("xx-page-body")
+        # Short bodies must pack at the top: a stretched viewport leaves
+        # phantom gaps between the first children.
+        body.set_valign(Gtk.Align.START)
 
-        ident = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         avatar_box, avatar_image, avatar_fallback = (
             avatar_module.build_avatar(ME_PHOTO_PX))
-        ident.append(avatar_box)
+        body.append(avatar_box)
         self._avatar_box = avatar_box
         self._avatar_image = avatar_image
         self._avatar_fallback = avatar_fallback
-        self._name = Gtk.Label()
-        self._name.set_xalign(0.0)
-        self._name.set_hexpand(True)
+        self._name = widgets.label("", "xx-display-large")
+        self._name.set_ellipsize(Pango.EllipsizeMode.NONE)
         self._name.set_wrap(True)
         self._name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._name.add_css_class("xx-title")
-        ident.append(self._name)
-        body.append(ident)
+        self._name.set_max_width_chars(16)
+        body.append(self._name)
 
         self._sections = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                 spacing=12)
+                                 spacing=0)
         body.append(self._sections)
 
-        self._empty = Gtk.Label()
+        self._empty = widgets.label("", "xx-secondary")
         self._empty.set_wrap(True)
         self._empty.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         body.append(self._empty)
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._share_button = Gtk.Button(label="Share vCard")
-        self._share_button.connect("clicked", self._on_share_clicked)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self._share_button = widgets.outline_button(
+            "Share vCard", self._on_share_clicked)
+        self._share_button.set_hexpand(True)
         actions.append(self._share_button)
-        self._edit_button = Gtk.Button(label="Edit")
-        self._edit_button.connect("clicked", self._on_edit_clicked)
+        self._edit_button = widgets.outline_button(
+            "Edit", self._on_edit_clicked)
+        self._edit_button.set_hexpand(True)
         actions.append(self._edit_button)
-        self._remove_button = Gtk.Button(label="Remove Me")
-        self._remove_button.connect("clicked", self._on_remove_clicked)
-        actions.append(self._remove_button)
         body.append(actions)
+        self._remove_button = widgets.text_button(
+            "Remove Me", self._on_remove_clicked)
+        remove_label = self._remove_button.get_child()
+        if isinstance(remove_label, Gtk.Label):
+            remove_label.set_max_width_chars(16)
+        self._remove_button.add_css_class("xx-danger-text")
+        self._remove_button.set_halign(Gtk.Align.CENTER)
+        body.append(self._remove_button)
 
-        self.set_child(toolbar)
+        self.set_child(widgets.page(header, body))
         self.set_title("Me")
         self.connect("unrealize", self._on_unrealize)
         self._watcher.start()
         self._schedule_load()
+
+    def _on_back_clicked(self) -> None:
+        self._navigation.pop()
 
     # ------------------------------------------------------------------- load
 
@@ -164,16 +163,10 @@ class MeCardPage(Adw.NavigationPage):
             child = following
         for section in detail_model.build_detail_sections(record,
                                                           self._region):
-            header = Gtk.Label(label=section.title)
-            header.set_xalign(0.0)
-            header.add_css_class("xx-section-header")
-            self._sections.append(header)
             for item in section.fields:
-                value = Gtk.Label(label=f"{item.label}: {item.display}")
-                value.set_xalign(0.0)
-                value.set_wrap(True)
-                value.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                self._sections.append(value)
+                caption = item.label or section.title
+                self._sections.append(
+                    widgets.field(caption, item.display))
         self._share_button.set_sensitive(True)
         self._edit_button.set_sensitive(True)
         self._remove_button.set_sensitive(True)
@@ -194,7 +187,7 @@ class MeCardPage(Adw.NavigationPage):
 
     # ----------------------------------------------------------------- actions
 
-    def _on_edit_clicked(self, _button: Gtk.Button) -> None:
+    def _on_edit_clicked(self) -> None:
         if not self._me_uid:
             return
         from xx_contacts.editor_ui import ContactEditorPage
@@ -210,7 +203,7 @@ class MeCardPage(Adw.NavigationPage):
             except Exception:
                 pass
 
-    def _on_remove_clicked(self, _button: Gtk.Button) -> None:
+    def _on_remove_clicked(self) -> None:
         dialog = Adw.AlertDialog.new(
             "Remove Me card?",
             "This contact stays in your address book; it just won't be "
@@ -234,7 +227,7 @@ class MeCardPage(Adw.NavigationPage):
         mecard_module.clear_me_uid(self._config, self._config_path)
         self._schedule_load()
 
-    def _on_share_clicked(self, _button: Gtk.Button) -> None:
+    def _on_share_clicked(self) -> None:
         worker = threading.Thread(target=self._share_in_worker, daemon=True)
         worker.start()
 

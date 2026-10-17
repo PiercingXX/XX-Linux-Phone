@@ -48,6 +48,7 @@ class SectionHeader:
 @dataclass(frozen=True)
 class ListFilter:
     has_phone_only: bool = False
+    starred_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,8 @@ def apply_filters(rows: list[ListRow], query: str | None,
     kept: list[ListRow] = []
     for row in rows:
         if wanted.has_phone_only and not row.has_phone:
+            continue
+        if wanted.starred_only and not row.starred:
             continue
         if not show_on_list(row.blocked, query):
             continue

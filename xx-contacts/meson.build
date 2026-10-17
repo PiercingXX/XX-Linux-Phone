@@ -6,6 +6,14 @@ project(
 
 python = import('python').find_installation('python3')
 
+# The shared design system lives outside this app: common/meson.build
+# installs the xx_ui python package, and this app imports it at runtime.
+xx_ui_check = run_command(python, '-c', 'import xx_ui', check: false)
+if xx_ui_check.returncode() != 0
+  error('xx_ui python package is required: install common/ first, '
+    + 'then configure this app')
+endif
+
 prefix = get_option('prefix')
 bindir = join_paths(prefix, get_option('bindir'))
 app_subdir = 'xx-contacts'

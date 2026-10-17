@@ -93,8 +93,8 @@ def test_me_page_holds_no_entries_or_focus_grab():
     assert "Gtk.Entry" not in src
     assert "SearchEntry" not in src
     assert "grab_focus" not in src
-    assert "set_show_start_title_buttons(False)" in src
-    assert "set_show_end_title_buttons(False)" in src
+    assert "HeaderBar" not in src
+    assert "compact_header(" in src
     assert "Share vCard" in src
     assert "Set as Me" in src or "Remove Me" in src
 
@@ -112,7 +112,7 @@ def test_detail_has_edit_me_and_photo_header():
     src = _read("detail_ui.py")
     assert "ContactEditorPage" in src
     assert "Set as Me" in src
-    assert "DETAIL_PHOTO_PX = 64" in src
+    assert "DETAIL_PHOTO_PX = 88" in src
     assert "Gtk.Entry" not in src
     assert "SearchEntry" not in src
     assert "grab_focus" not in src

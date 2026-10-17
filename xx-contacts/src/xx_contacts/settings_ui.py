@@ -1,0 +1,105 @@
+"""App settings page pushed on the list's ``Adw.NavigationView``.
+
+Phone-first 360x720: the list toggles from the Android settings screen
+(hide contacts without a number, show photos) plus the entries that
+left the list header (the Me card, import/export). Every row follows
+the design system; switches restyle live with the theme.
+
+Import-safe without a display: constructing the page needs a display,
+but importing this module must not. The page holds no text entries and
+never grabs focus, so opening it never pops the on-screen keyboard.
+"""
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+
+from gi.repository import Adw, Gtk  # noqa: E402
+
+from xx_ui import widgets  # noqa: E402
+
+
+class SettingsPage(Adw.NavigationPage):
+    """Toggles and destinations that left the list header."""
+
+    def __init__(self, navigation: Adw.NavigationView, window,
+                 config, config_path: str, on_changed=None) -> None:
+        super().__init__()
+        self._navigation = navigation
+        self._window = window
+        self._config = config
+        self._config_path = config_path
+        self._on_changed = on_changed
+        self._alive = True
+
+        header = widgets.compact_header(self._on_back, "Settings")
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.add_css_class("xx-page-body")
+        # Short bodies must pack at the top: a stretched viewport leaves
+        # phantom gaps between the first children (seen on the Me card).
+        body.set_valign(Gtk.Align.START)
+
+        body.append(widgets.section_label("List"))
+        self._phone_switch = widgets.make_switch(
+            bool(config.has_phone_only), self._on_phone_toggled)
+        body.append(widgets.setting_row(
+            "Phone only", "Hide contacts without a number",
+            self._phone_switch))
+        self._photos_switch = widgets.make_switch(
+            bool(config.show_photos), self._on_photos_toggled)
+        body.append(widgets.setting_row(
+            "Photos", "Show contact photos in the list",
+            self._photos_switch, last=True))
+
+        body.append(widgets.section_label("More"))
+        body.append(self._nav_row("My card", "Your own contact card",
+                                  self._on_me_clicked))
+        body.append(self._nav_row("Import/export",
+                                  "vCard files and GNOME Contacts",
+                                  self._on_import_export_clicked,
+                                  last=True))
+
+        self.set_child(widgets.page(header, body))
+        self.set_title("Settings")
+
+    def _nav_row(self, title: str, subtitle: str, callback,
+                 last: bool = False) -> Gtk.Widget:
+        chevron = widgets.icon_image("go-next-symbolic")
+        row = widgets.setting_row(title, subtitle, chevron, last=last)
+        click = Gtk.GestureClick.new()
+        click.connect("pressed",
+                      lambda _g, _n, _x, _y: callback())
+        row.add_controller(click)
+        return row
+
+    def _save_and_notify(self) -> None:
+        try:
+            self._config.save(self._config_path)
+        except OSError:
+            pass
+        if self._on_changed is not None:
+            try:
+                self._on_changed()
+            except Exception:
+                pass
+
+    def _on_phone_toggled(self, active: bool) -> None:
+        self._config.has_phone_only = bool(active)
+        self._save_and_notify()
+
+    def _on_photos_toggled(self, active: bool) -> None:
+        self._config.show_photos = bool(active)
+        self._save_and_notify()
+
+    def _on_me_clicked(self) -> None:
+        if self._alive:
+            self._window.open_me_card()
+
+    def _on_import_export_clicked(self) -> None:
+        if self._alive:
+            self._window.open_import_export()
+
+    def _on_back(self) -> None:
+        self._alive = False
+        self._navigation.pop()

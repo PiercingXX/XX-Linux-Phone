@@ -1,0 +1,14 @@
+/* xx-contacts app-specific CSS. Theme colors come from xx_ui; these
+   rules only round photo images and flatten the bottom search entry. */
+
+.xx-contact-photo,
+.xx-contact-photo image {
+  border-radius: 9999px;
+}
+
+.xx-contact-search entry {
+  background: transparent;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}

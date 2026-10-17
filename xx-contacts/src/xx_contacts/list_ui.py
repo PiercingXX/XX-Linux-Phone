@@ -1,7 +1,12 @@
-"""L2 contacts list UI: search, sections, jump strip, row menu (Revision 2).
+"""L2 contacts list UI: search, sections, jump strip, row menu.
 
-Phone-first 360x720 (min 320x640) over ``Adw.NavigationView`` with the
-shell theme from ``shell_theme``. All store reads/writes run in worker
+Phone-first 360x720 over ``Adw.NavigationView`` with the shared
+``xx_ui`` design system: a ``PageHeader`` (title, count caption, New
+action, overflow menu), an All/Starred ``ChipBar``, a virtualized
+``Gtk.ListView`` of avatar rows with hairlines, an A-Z jump strip, and
+a flat bottom search entry. Filters, import/export, the Me card and the
+other preferences live in the overflow menu and the settings page; the
+list itself shows the list. All store reads/writes run in worker
 threads with results posted by ``GLib.idle_add``; the visible list is a
 ``Gtk.ListView`` over a ``Gio.ListStore`` so thousands of rows scroll.
 External changes arrive through ``ChangeWatcher`` (the service's
@@ -22,6 +27,7 @@ import threading  # noqa: E402
 
 from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_contacts import avatar as avatar_module  # noqa: E402
 from xx_contacts import phones as phones_module  # noqa: E402
 from xx_contacts import privacy  # noqa: E402
@@ -75,10 +81,16 @@ class RowItem(GObject.Object):
     title = GObject.Property(type=str, default="")
     detail = GObject.Property(type=str, default="")
     photo = GObject.Property(type=str, default="")
+    starred = GObject.Property(type=bool, default=False)
     is_header = GObject.Property(type=bool, default=False)
 
 
 LIST_PHOTO_PX = 32
+
+#: Row text caps: 20/24 chars of the theme font fit the 320 px content
+#: column next to a 40 px avatar without widening the 360 px canvas.
+_NAME_CHARS = 20
+_DETAIL_CHARS = 24
 
 
 def resolve_row_uid(picked) -> str | None:
@@ -275,71 +287,32 @@ class ContactsWindow(Adw.ApplicationWindow):
         self._debouncer = SearchDebouncer(SEARCH_DEBOUNCE_MS)
         self._debounce_id = 0
         self._refresh_id = 0
+        self._starred_only = False
+        self._overflow: Gtk.Popover | None = None
         self._watcher = ChangeWatcher(db_path, self._on_external_changed)
         self._photos_dir = os.path.join(
             os.path.dirname(os.path.abspath(db_path)), "photos")
         self.set_title("Contacts")
+        self.set_decorated(False)
         self.set_default_size(360, 720)
 
         navigation = Adw.NavigationView()
         self._navigation = navigation
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label="Contacts"))
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        self._new_button = Gtk.Button(label="+")
-        self._new_button.set_tooltip_text("New contact")
-        self._new_button.connect("clicked", self._on_new_clicked)
-        header.pack_start(self._new_button)
-        self._me_button = Gtk.Button(label="Me")
-        self._me_button.set_tooltip_text("My card")
-        self._me_button.connect("clicked", self._on_me_clicked)
-        header.pack_end(self._me_button)
-        toolbar.add_top_bar(header)
 
-        main_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                           spacing=0)
-        listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        listing.set_hexpand(True)
-        listing.set_margin_start(12)
-        listing.set_margin_end(4)
-        listing.set_margin_top(6)
-        listing.set_margin_bottom(6)
+        self._header = widgets.page_header(
+            "Contacts", "0 contacts",
+            actions=[("New", self._on_new_clicked)],
+            overflow_cb=self._show_overflow)
+        self._count_label = self._header.get_last_child()
 
-        self._search = Gtk.SearchEntry()
-        self._search.set_placeholder_text("Search name, number, email")
-        self._search.set_hexpand(True)
-        install_tap_to_focus(self._search)
-        listing.append(self._search)
+        self._chips_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                   spacing=0)
+        self._chips_slot.add_css_class("xx-page-body")
+        self._rebuild_chips()
 
-        filter_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                             spacing=8)
-        filter_label = Gtk.Label(label="Has phone number only")
-        filter_label.set_hexpand(True)
-        filter_label.set_xalign(0.0)
-        self._filter_switch = Gtk.Switch()
-        self._filter_switch.set_active(bool(config.has_phone_only))
-        filter_row.append(filter_label)
-        filter_row.append(self._filter_switch)
-        listing.append(filter_row)
-
-        photos_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                             spacing=8)
-        photos_label = Gtk.Label(label="Show photos")
-        photos_label.set_hexpand(True)
-        photos_label.set_xalign(0.0)
-        self._photos_switch = Gtk.Switch()
-        self._photos_switch.set_active(bool(config.show_photos))
-        photos_row.append(photos_label)
-        photos_row.append(self._photos_switch)
-        listing.append(photos_row)
-
-        self._import_export_button = Gtk.Button(label="Import/export")
-        self._import_export_button.connect(
-            "clicked", self._on_import_export_clicked)
-        listing.append(self._import_export_button)
-
+        middle = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        middle.set_hexpand(True)
+        middle.set_vexpand(True)
         # NoSelection: activation (not selection) drives navigation, and
         # SingleSelection autoselects item 0 (a header) at launch. The
         # row menu resolves the row under the pointer, never the
@@ -353,37 +326,54 @@ class ContactsWindow(Adw.ApplicationWindow):
         factory.connect("unbind", self._on_item_unbind)
         self._list = Gtk.ListView.new(self._selection, factory)
         self._list.set_single_click_activate(True)
+        self._list.set_hexpand(True)
         self._list.set_vexpand(True)
+        self._list.set_margin_start(20)
+        self._list.set_margin_end(12)
         self._scrolled = Gtk.ScrolledWindow()
+        self._scrolled.set_policy(Gtk.PolicyType.NEVER,
+                                  Gtk.PolicyType.AUTOMATIC)
+        self._scrolled.set_hexpand(True)
         self._scrolled.set_vexpand(True)
         self._scrolled.set_child(self._list)
-        listing.append(self._scrolled)
+        middle.append(self._scrolled)
 
-        self._empty = Adw.StatusPage()
-        self._empty.set_vexpand(True)
-        self._import_button = Gtk.Button(label="Import contacts")
-        self._import_button.connect("clicked", self._on_import_clicked)
-        self._empty.set_child(self._import_button)
-        self._empty.set_visible(False)
-        listing.append(self._empty)
+        self._empty_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                   spacing=0)
+        self._empty_slot.add_css_class("xx-page-body")
+        self._empty_slot.set_hexpand(True)
+        self._empty_slot.set_vexpand(True)
+        self._empty_slot.set_valign(Gtk.Align.CENTER)
+        self._empty_slot.set_visible(False)
+        middle.append(self._empty_slot)
 
-        main_row.append(listing)
         self._jump = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                              spacing=2)
         self._jump.set_valign(Gtk.Align.CENTER)
-        main_row.append(self._jump)
+        middle.append(self._jump)
 
-        toolbar.set_content(main_row)
-        page = Adw.NavigationPage(child=toolbar, title="Contacts")
-        navigation.push(page)
+        self._search = Gtk.SearchEntry()
+        self._search.set_placeholder_text("Search")
+        self._search.set_hexpand(True)
+        install_tap_to_focus(self._search)
+        search_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                             spacing=8)
+        search_bar.add_css_class("xx-searchbar")
+        search_bar.add_css_class("xx-contact-search")
+        search_bar.append(self._search)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root.add_css_class("xx-page")
+        root.append(self._header)
+        root.append(self._chips_slot)
+        root.append(middle)
+        root.append(search_bar)
+        list_page = Adw.NavigationPage(child=root, title="Contacts")
+        navigation.push(list_page)
         self.set_content(navigation)
         self.set_size_request(320, 640)
 
         self._search.connect("search-changed", self._on_search_changed)
-        self._filter_switch.connect("notify::active",
-                                    self._on_filter_toggled)
-        self._photos_switch.connect("notify::active",
-                                    self._on_photos_toggled)
         self._list.connect("activate", self._on_row_activated)
         right_click = Gtk.GestureClick.new()
         right_click.set_button(3)
@@ -401,27 +391,59 @@ class ContactsWindow(Adw.ApplicationWindow):
     # ------------------------------------------------------------- loading
 
     def _current_filter(self) -> ListFilter:
-        return ListFilter(has_phone_only=self._filter_switch.get_active())
+        return ListFilter(
+            has_phone_only=bool(self._config.has_phone_only),
+            starred_only=self._starred_only)
+
+    def _set_starred_only(self, active: bool) -> None:
+        self._starred_only = bool(active)
+        self._rebuild_chips()
+        self._schedule_reload()
+
+    def _rebuild_chips(self) -> None:
+        child = self._chips_slot.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            self._chips_slot.remove(child)
+            child = following
+        starred = self._starred_only
+        self._chips_slot.append(widgets.chip_bar([
+            ("All", not starred, lambda: self._set_starred_only(False)),
+            ("Starred", starred, lambda: self._set_starred_only(True)),
+        ]))
 
     def _schedule_reload(self) -> None:
         self._query_seq += 1
         seq = self._query_seq
         query = self._search.get_text()
-        has_phone_only = self._current_filter().has_phone_only
+        wanted = self._current_filter()
         worker = threading.Thread(target=self._load_in_worker,
-                                  args=(seq, query, has_phone_only),
+                                  args=(seq, query, wanted),
                                   daemon=True)
         worker.start()
 
     def _load_in_worker(self, seq: int, query: str,
-                        has_phone_only: bool) -> None:
+                        wanted: ListFilter) -> None:
         try:
             rows = fetch_list_rows(self._store, query, SEARCH_RESULT_LIMIT,
-                                   ListFilter(has_phone_only))
+                                   wanted)
             revision = self._store.get_revision()
         except Exception:
             rows, revision = None, None
         GLib.idle_add(self._apply_rows, seq, rows, revision)
+
+    def _fits_single(self, text_label: Gtk.Label, chars: int) -> None:
+        text_label.set_ellipsize(Pango.EllipsizeMode.END)
+        text_label.set_max_width_chars(chars)
+
+    def _widen_action(self, empty: Gtk.Widget) -> None:
+        box_child = empty.get_first_child()
+        while box_child is not None:
+            if isinstance(box_child, Gtk.Button):
+                text_child = box_child.get_child()
+                if isinstance(text_child, Gtk.Label):
+                    text_child.set_max_width_chars(16)
+            box_child = box_child.get_next_sibling()
 
     def _apply_rows(self, seq: int, rows: list[ListRow] | None,
                     revision: int | None) -> bool:
@@ -445,20 +467,36 @@ class ContactsWindow(Adw.ApplicationWindow):
                     detail = f"{detail} · Blocked"
                 elif entry.blocked:
                     detail = "Blocked"
-                title = ("★ " + entry.display_name if entry.starred
-                         else entry.display_name)
-                self._model.append(RowItem(uid=entry.uid, title=title,
+                self._model.append(RowItem(uid=entry.uid,
+                                           title=entry.display_name,
                                            detail=detail,
-                                           photo=entry.photo_path))
+                                           photo=entry.photo_path,
+                                           starred=entry.starred))
         self._rebuild_jump_strip(sections, flat)
         searching = bool(self._search.get_text().strip())
-        self._empty.set_title("No matches" if searching else "No contacts")
-        self._empty.set_description(
-            "Try a different search." if searching
-            else "Your address book is empty.")
+        if searching:
+            empty = widgets.empty_state(
+                "No matches. Try a different search.")
+        else:
+            empty = widgets.empty_state(
+                "Your address book is empty.", "Import contacts",
+                self._on_import_clicked)
+        child = self._empty_slot.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            self._empty_slot.remove(child)
+            child = following
+        self._widen_action(empty)
+        self._empty_slot.append(empty)
         has_rows = len(rows) > 0
         self._scrolled.set_visible(has_rows)
-        self._empty.set_visible(not has_rows)
+        self._empty_slot.set_visible(not has_rows)
+        self._jump.set_visible(has_rows and len(sections) > 1)
+        count = f"{len(rows)} CONTACTS" if len(rows) != 1 else "1 CONTACT"
+        try:
+            self._count_label.set_text(count)
+        except Exception:
+            pass
         return False
 
     def _rebuild_jump_strip(self, sections, flat) -> None:
@@ -479,6 +517,36 @@ class ContactsWindow(Adw.ApplicationWindow):
             self._jump.append(button)
         self._jump.set_visible(len(sections) > 1)
 
+    # ------------------------------------------------------------ overflow
+
+    def _show_overflow(self) -> None:
+        popover = Gtk.Popover()
+        self._overflow = popover
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        for title, target in (("Settings", "settings"),
+                              ("Import/export", "import-export"),
+                              ("My card", "me")):
+            row = widgets.menu_row(
+                title, lambda _t=target: self._open_overflow_target(
+                    _t, popover))
+            box.append(row)
+        popover.set_child(box)
+        popover.set_parent(self._header)
+        popover.popup()
+
+    def _open_overflow_target(self, target: str,
+                              popover: Gtk.Popover) -> None:
+        try:
+            popover.popdown()
+        except Exception:
+            pass
+        if target == "settings":
+            self.open_settings()
+        elif target == "import-export":
+            self.open_import_export()
+        elif target == "me":
+            self.open_me_card()
+
     # ---------------------------------------------------------------- input
 
     def _on_search_changed(self, _entry: Gtk.SearchEntry) -> None:
@@ -494,17 +562,7 @@ class ContactsWindow(Adw.ApplicationWindow):
             self._schedule_reload()
         return False
 
-    def _on_filter_toggled(self, switch: Gtk.Switch, _pspec) -> None:
-        self._config.has_phone_only = switch.get_active()
-        self._config.save(self._config_path)
-        self._schedule_reload()
-
-    def _on_photos_toggled(self, switch: Gtk.Switch, _pspec) -> None:
-        self._config.show_photos = switch.get_active()
-        self._config.save(self._config_path)
-        self._schedule_reload()
-
-    def _on_new_clicked(self, _button: Gtk.Button) -> None:
+    def _on_new_clicked(self) -> None:
         self.open_new_editor()
 
     def open_new_editor(self, prefill_phone: str = "") -> None:
@@ -525,13 +583,24 @@ class ContactsWindow(Adw.ApplicationWindow):
             on_saved=lambda _uid: self._schedule_reload())
         self._navigation.push(page)
 
-    def _on_me_clicked(self, _button: Gtk.Button) -> None:
+    def open_me_card(self) -> None:
         from xx_contacts.mecard_ui import MeCardPage
 
         page = MeCardPage(
             self._navigation, self, self._store, self._config,
             self._config_path, self._db_path, self._photos_dir,
             default_region=self._config.default_region)
+        self._navigation.push(page)
+
+    def _on_me_clicked(self, _button: Gtk.Button) -> None:
+        self.open_me_card()
+
+    def open_settings(self) -> None:
+        from xx_contacts.settings_ui import SettingsPage
+
+        page = SettingsPage(
+            self._navigation, self, self._config, self._config_path,
+            on_changed=self._schedule_reload)
         self._navigation.push(page)
 
     def _on_map_clear_focus(self, _window: Adw.ApplicationWindow) -> None:
@@ -610,33 +679,38 @@ class ContactsWindow(Adw.ApplicationWindow):
 
     def _on_item_setup(self, _factory: Gtk.SignalListItemFactory,
                        list_item: Gtk.ListItem) -> None:
-        header = Gtk.Label()
-        header.set_xalign(0.0)
-        header.add_css_class("xx-section-header")
+        header = widgets.caption("")
         avatar_box, avatar_image, avatar_fallback = (
             avatar_module.build_avatar(LIST_PHOTO_PX))
         name = Gtk.Label()
         name.set_xalign(0.0)
         name.set_hexpand(True)
-        name.set_ellipsize(Pango.EllipsizeMode.END)
+        name.add_css_class("xx-title")
+        self._fits_single(name, _NAME_CHARS)
         detail = Gtk.Label()
         detail.set_xalign(0.0)
         detail.set_hexpand(True)
-        detail.set_ellipsize(Pango.EllipsizeMode.END)
-        detail.add_css_class("xx-row-detail")
-        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        detail.add_css_class("xx-secondary")
+        self._fits_single(detail, _DETAIL_CHARS)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         text.set_hexpand(True)
         text.append(name)
         text.append(detail)
-        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        star = widgets.icon_image("starred-symbolic", 20)
+        star.set_valign(Gtk.Align.CENTER)
+        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row_box.add_css_class("xx-row")
+        row_box.set_valign(Gtk.Align.CENTER)
         row_box.append(avatar_box)
         row_box.append(text)
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        row_box.append(star)
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         page.append(header)
         page.append(row_box)
         list_item.header = header
         list_item.name = name
         list_item.detail = detail
+        list_item.star = star
         list_item.avatar_image = avatar_image
         list_item.avatar_fallback = avatar_fallback
         list_item.row_box = row_box
@@ -652,15 +726,22 @@ class ContactsWindow(Adw.ApplicationWindow):
         list_item.header.set_visible(is_header)
         list_item.row_box.set_visible(not is_header)
         if is_header:
-            list_item.header.set_text(item.title)
+            list_item.header.set_text(item.title.upper())
             list_item.row_box.uid = ""
             list_item.row_box._xx_uid = ""
         else:
             list_item.name.set_text(item.title)
             list_item.detail.set_text(item.detail)
             list_item.detail.set_visible(bool(item.detail))
+            list_item.star.set_visible(bool(item.starred))
             list_item.row_box.uid = item.uid
             list_item.row_box._xx_uid = item.uid
+            found, position = self._model.find(item)
+            n_items = self._model.get_n_items()
+            if found and position == n_items - 1:
+                list_item.row_box.add_css_class("last")
+            else:
+                list_item.row_box.remove_css_class("last")
             avatar_module.set_avatar(
                 list_item.avatar_image, list_item.avatar_fallback,
                 item.title, item.photo or None,
@@ -678,19 +759,26 @@ class ContactsWindow(Adw.ApplicationWindow):
     def _show_row_menu(self, row: ListRow) -> None:
         dialog = Gtk.Window(transient_for=self, modal=True,
                             title=row.display_name)
+        dialog.set_decorated(False)
         dialog.set_default_size(300, -1)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
+        box = widgets.dialog_box(row.display_name)
         for action in row_menu(row):
-            button = Gtk.Button(label=ACTION_LABELS[action])
             if action == "delete":
-                button.add_css_class("destructive-action")
+                button = widgets.menu_row(ACTION_LABELS[action])
+                button.add_css_class("xx-danger-text")
+            else:
+                button = widgets.menu_row(ACTION_LABELS[action])
             button.connect("clicked", self._on_menu_action, action,
                            row.uid, dialog)
             box.append(button)
+        cancel = widgets.menu_row("Cancel")
+        cancel.connect("clicked", lambda _b: dialog.destroy())
+        box.append(cancel)
+        # The snap harness captures dialogs at phone size; pin the rows
+        # to the top so they never spread across the extra height.
+        spacer = Gtk.Box()
+        spacer.set_vexpand(True)
+        box.append(spacer)
         dialog.set_child(box)
         dialog.present()
 
@@ -822,12 +910,12 @@ class ContactsWindow(Adw.ApplicationWindow):
         GLib.idle_add(self._reload_from_idle)
 
     def _on_import_clicked(self, _button: Gtk.Button) -> None:
-        self._open_import_export()
+        self.open_import_export()
 
     def _on_import_export_clicked(self, _button: Gtk.Button) -> None:
-        self._open_import_export()
+        self.open_import_export()
 
-    def _open_import_export(self) -> None:
+    def open_import_export(self) -> None:
         from xx_contacts.import_export_ui import ImportExportPage
 
         page = ImportExportPage(
@@ -835,6 +923,9 @@ class ContactsWindow(Adw.ApplicationWindow):
             self._config_path,
             default_region=self._config.default_region)
         self._navigation.push(page)
+
+    def _open_import_export(self) -> None:
+        self.open_import_export()
 
     def open_vcf_file(self, path: str) -> None:
         """Push the import page already reading a ``.vcf`` from Files.

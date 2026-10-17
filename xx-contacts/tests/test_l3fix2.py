@@ -17,7 +17,8 @@ from xx_contacts.list_ui import (
     _on_tap_to_focus_left,
     _on_tap_to_focus_pressed,
 )
-from xx_contacts.shell_theme import THEME_PRESETS, to_css
+from xx_ui import css as xx_css
+from xx_ui import theme as xx_theme
 from xx_contacts.store import (
     AddressEntry,
     ContactData,
@@ -97,26 +98,27 @@ def test_detail_sections_show_human_labels():
 # ------------------------------------------------- destructive-action style
 
 
-def test_every_preset_defines_danger():
-    assert THEME_PRESETS, "no presets registered"
-    for preset in THEME_PRESETS.values():
-        assert preset.danger, f"{preset.key} has no danger color"
-        assert preset.danger.startswith("#")
-        assert preset.danger.lower() != preset.background.lower()
+def test_danger_red_is_a_distinct_hex():
+    assert xx_theme.DANGER_RED.startswith("#")
+    assert len(xx_theme.DANGER_RED) == 7
+    for preset in xx_theme.PRESETS.values():
+        assert xx_theme.DANGER_RED.lower() != preset.background.lower()
 
 
-def test_css_colors_destructive_action_from_preset():
-    for preset in THEME_PRESETS.values():
-        css = to_css(preset, "Sans")
-        assert ".destructive-action" in css
-        assert preset.danger in css
+def test_css_colors_destructive_action_from_preset(isolated_home):
+    css = xx_css.render(xx_theme.load())
+    assert ".destructive-action" in css
+    assert "button.destructive-action" in css
+    assert xx_theme.DANGER_RED in css
 
 
-def test_delete_buttons_carry_destructive_class():
-    assert 'add_css_class("destructive-action")' in _read("detail_ui.py")
+def test_delete_buttons_carry_danger_style():
+    assert 'add_css_class("xx-danger-text")' in _read("detail_ui.py")
     list_src = _read("list_ui.py")
-    assert 'add_css_class("destructive-action")' in list_src
-    assert list_src.count("destructive-action") >= 1
+    assert 'add_css_class("xx-danger-text")' in list_src
+    assert list_src.count("xx-danger-text") >= 1
+    for name in ("list_ui.py", "detail_ui.py"):
+        assert "DESTRUCTIVE" in _read(name)
 
 
 # ------------------------------------------------- list guards (static)

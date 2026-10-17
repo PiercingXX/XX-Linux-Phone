@@ -11,7 +11,6 @@ import re
 from pathlib import Path
 
 import xx_contacts.main  # noqa: F401 (import stays display-free)
-from xx_contacts import shell_theme
 
 SRC = Path(__file__).parent.parent / "src" / "xx_contacts"
 
@@ -20,21 +19,20 @@ def _read(name: str) -> str:
     return (SRC / name).read_text(encoding="utf-8")
 
 
-def test_app_display_comes_from_gdk():
+def test_app_themes_through_design_system():
     src = _read("main.py")
     receivers = re.findall(r"(\S+)\.get_display\s*\(", src)
     assert not receivers, f"get_display() calls: {receivers}"
-    imports = next(line for line in src.splitlines()
-                   if line.startswith("from gi.repository import "))
-    assert "Gdk" in [name.strip() for name in
-                     imports.split("import ", 1)[1].split(",")]
-    assert "Gdk.Display.get_default()" in src
+    assert "import xx_ui" in src
+    assert "xx_ui.apply(" in src
+    assert "shell_theme" not in src
 
 
 def test_list_header_has_no_min_max_buttons():
     src = _read("list_ui.py")
-    assert "set_show_start_title_buttons(False)" in src
-    assert "set_show_end_title_buttons(False)" in src
+    assert "HeaderBar" not in src
+    assert "set_decorated(False)" in src
+    assert "page_header(" in src
     assert "Gtk.HeaderBar" not in src
 
 
@@ -60,17 +58,28 @@ def test_section_headers_are_not_selectable():
     assert "Gtk.ListScrollFlags.SELECT" not in src
 
 
-def test_theme_css_covers_listview_and_headers():
-    for preset in shell_theme.THEME_PRESETS.values():
-        css = shell_theme.to_css(preset, "Sans")
-        assert "listview" in css
-        assert preset.background in css
-        assert preset.foreground in css
-    forest = shell_theme.to_css(shell_theme.THEME_PRESETS["amoled"], "Sans")
-    lowered = forest.lower()
-    assert "#fff" not in lowered
+def test_theme_css_covers_listview_and_headers(isolated_home):
+    import json
+
+    from xx_ui import css as xx_css
+    from xx_ui import theme as xx_theme
+
+    for key in xx_theme.preset_keys():
+        path = (xx_theme.config_path().parent / "config.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"theme": key}), encoding="utf-8")
+        active = xx_theme.load()
+        assert active.key == key
+        out = xx_css.render(active)
+        assert "listview" in out
+        assert active.background in out
+        assert active.foreground in out
+    rendered = xx_css.render(xx_theme.load())
+    lowered = rendered.lower()
+    assert "#fff;" not in lowered
+    assert "#fff " not in lowered
     assert "white" not in lowered
-    assert ".xx-section-header" in forest
+    assert ".xx-setting" in rendered
 
 
 def test_list_shows_spaced_numbers():
@@ -83,8 +92,8 @@ def test_detail_page_has_no_text_entry_or_focus_grab():
     assert "Gtk.Entry" not in src
     assert "SearchEntry" not in src
     assert "grab_focus" not in src
-    assert "set_show_start_title_buttons(False)" in src
-    assert "set_show_end_title_buttons(False)" in src
+    assert "HeaderBar" not in src
+    assert "compact_header(" in src
 
 
 def test_dialog_choose_takes_cancellable_first():

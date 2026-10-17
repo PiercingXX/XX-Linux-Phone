@@ -12,8 +12,9 @@ import os
 import sys
 import traceback
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "src"))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, "..", "src"))
+sys.path.insert(0, os.path.join(_HERE, "..", "..", "common"))
 
 import gi  # noqa: E402
 
@@ -107,8 +108,22 @@ def main(argv: list) -> None:
         window.present()
         _pump(1.2)
         markers["LIST_VISIBLE"] = str(window.is_visible())
+        window._show_overflow()
+        _pump(0.4)
+        popover = window._overflow
+        labels: list[str] = []
+        box = popover.get_child()
+        child = box.get_first_child()
+        while child is not None:
+            text_child = child.get_child()
+            get_text = getattr(text_child, "get_text", None)
+            if callable(get_text):
+                labels.append(get_text())
+            child = child.get_next_sibling()
         markers["LIST_HAS_IMPORT_EXPORT"] = str(
-            window._import_export_button.is_visible())
+            popover.is_visible() and "Import/export" in labels)
+        popover.popdown()
+        _pump(0.2)
 
         page = ImportExportPage(
             window._navigation, window, store, config, config_path,
