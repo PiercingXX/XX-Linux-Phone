@@ -256,7 +256,6 @@ install_fonts() {
         pkg_install ttf-jetbrains-mono-nerd
         pkg_install ttf-jetbrains-mono
         pkg_install ttf-space-mono-nerd
-        pkg_install ttf-space-mono
     elif [ "$PKG" = apk ]; then
         pkg_install font-jetbrains-mono-nerd
         pkg_install font-jetbrains-mono

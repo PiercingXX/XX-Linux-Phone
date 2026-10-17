@@ -372,12 +372,22 @@ install_data(
 # `--apply-saved`). Output names must stay unique: meson maps every
 # configure_file output into the same build directory, so two outputs
 # sharing a basename collide even with different inputs/install dirs.
+# System units are only searched under lib/ (unlike user units, which
+# systemd also reads from share/): ask systemd, fall back to prefix/lib.
+systemd_dep = dependency('systemd', required: false)
+if systemd_dep.found()
+  system_unit_dir = systemd_dep.get_variable(pkgconfig: 'systemd_system_unit_dir',
+    pkgconfig_define: ['prefix', get_option('prefix')])
+else
+  system_unit_dir = join_paths(get_option('prefix'), 'lib', 'systemd', 'system')
+endif
+
 configure_file(
   input: 'data/systemd/xx-wm-helper-boot.service',
   output: 'xx-wm-helper-boot.service',
   configuration: helper_conf,
   install: true,
-  install_dir: join_paths(get_option('datadir'), 'systemd', 'system'),
+  install_dir: system_unit_dir,
 )
 
 configure_file(
