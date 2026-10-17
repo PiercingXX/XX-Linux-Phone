@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.piercingxx.XXAudiobook</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-Proprietary</project_license>
+  <name>XX-Audiobook</name>
+  <summary>Self-hosted audiobooks for Linux phones</summary>
+  <description>
+    <p>Native Linux port of the xx-audiobook client: library, book detail,
+    now playing with sleep timer and speed, offline downloads, Home Assistant
+    zones, reviews, bookmarks and stats against your own audiobook server.
+    Offline-first; the server stays the backend.</p>
+  </description>
+  <!-- Screenshot placeholders: capture Library, Book, Now Playing, Zones
+       and Setup at 360x720 once hosted shot URLs exist, then replace this
+       comment with a <screenshots> block. Imageless <screenshot> entries
+       and local paths both fail `appstreamcli validate` (screenshot-no-media,
+       web-url-expected), so no block ships until the images are hosted. -->
+  <developer>
+    <name>PiercingXX</name>
+  </developer>
+  <categories>
+    <category>Audio</category>
+  </categories>
+  <keywords>
+    <keyword>audiobook</keyword>
+    <keyword>audio</keyword>
+    <keyword>books</keyword>
+    <keyword>podcast</keyword>
+  </keywords>
+  <launchable type="desktop-id">io.piercingxx.XXAudiobook.desktop</launchable>
+  <provides>
+    <binary>xx-audiobook</binary>
+    <dbus type="session">io.piercingxx.XXAudiobook</dbus>
+    <id>org.mpris.MediaPlayer2.xx_audiobook</id>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-10-17" urgency="medium">
+      <description>
+        <p>Spec + scaffold: launcher, placeholder shell, auth/DB plan.</p>
+      </description>
+    </release>
+  </releases>
+</component>

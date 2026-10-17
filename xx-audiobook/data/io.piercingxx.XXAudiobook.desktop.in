@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=XX-Audiobook
+Comment=Self-hosted audiobooks for Linux phones
+Exec=@bindir@/xx-audiobook
+Icon=io.piercingxx.XXAudiobook
+Terminal=false
+Categories=Audio;AudioVideo;
+StartupNotify=true
+DBusActivatable=true
+X-Purism-FormFactor=Workstation;Mobile;
