@@ -41,6 +41,7 @@ THEME_PRESETS: dict[str, ThemePreset] = {
 
 FONT_FAMILIES = {
     'system-light': 'Sans Light',
+    'monospace': 'Monospace',
     'space-mono': 'Space Mono, Monospace',
     'jetbrains-mono': 'JetBrains Mono, Monospace',
     'jetbrains-mono-nerd': 'JetBrainsMono Nerd Font, JetBrains Mono, Monospace',
