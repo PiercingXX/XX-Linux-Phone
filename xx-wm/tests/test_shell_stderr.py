@@ -41,7 +41,7 @@ class TestWrapperStderr:
     def test_python_child_redirected(self, wrapper):
         assert '_xx_err_log="$HOME/.local/share/xx-wm/stderr.log"' in wrapper
         spawn = [line for line in wrapper.splitlines()
-                 if 'main.py' in line and line.strip().startswith('@python@')]
+                 if 'main.py' in line and '@python@ @shell_dir@/main.py' in line]
         assert spawn, 'python spawn line missing'
         assert any('2>>' in line and '_xx_err_log' in line for line in spawn)
 

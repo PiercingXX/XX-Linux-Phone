@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import sys
 
 import gi
@@ -16,6 +17,21 @@ from shell_log import get_logger, setup_logging
 from window import ShellWindow
 
 _log = get_logger('main')
+
+
+def drop_layer_shell_preload(environ=os.environ) -> None:
+    """Keep the gtk4-layer-shell LD_PRELOAD out of every app the shell
+    launches. It is loaded into this process already; children that are
+    not GTK4 (Firefox, GTK3 apps) abort when they inherit it."""
+    kept = [lib for lib in environ.get('LD_PRELOAD', '').split(':')
+            if lib and 'libgtk4-layer-shell' not in lib]
+    if kept:
+        environ['LD_PRELOAD'] = ':'.join(kept)
+    else:
+        environ.pop('LD_PRELOAD', None)
+
+
+drop_layer_shell_preload()
 
 
 class XXWMApplication(Adw.Application):

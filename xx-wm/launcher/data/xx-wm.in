@@ -96,8 +96,12 @@ if [ -z "$_ls_lib" ]; then
         [ -e "$_p" ] && _ls_lib="$_p" && break
     done
 fi
+# Preload only the shell process (see the main.py launch below), never the
+# wrapper's other children: a GTK3/Firefox app that inherits a GTK4 library
+# aborts at start.
+_xx_preload="${LD_PRELOAD:-}"
 if [ -n "$_ls_lib" ]; then
-    export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$_ls_lib"
+    _xx_preload="${_xx_preload:+$_xx_preload:}$_ls_lib"
 fi
 
 # systemd user session: the user manager has its own environment, so a
@@ -178,7 +182,7 @@ while :; do
     mkdir -p "$HOME/.local/share/xx-wm" 2>/dev/null || true
     chmod 700 "$HOME/.local/share/xx-wm" 2>/dev/null || true
     _xx_rotate_err_log
-    @python@ @shell_dir@/main.py "$@" 2>>"$_xx_err_log" &
+    LD_PRELOAD="$_xx_preload" @python@ @shell_dir@/main.py "$@" 2>>"$_xx_err_log" &
     _child=$!
     wait "$_child"
     _st=$?
