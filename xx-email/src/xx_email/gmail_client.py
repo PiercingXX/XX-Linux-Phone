@@ -394,7 +394,8 @@ class GmailClient:
                  params: dict | None = None,
                  json_body: dict | None = None,
                  raw_body: tuple[str, bytes] | None = None,
-                 upload: bool = False) -> dict:
+                 upload: bool = False,
+                 max_retries: int | None = None) -> dict:
         base = self.upload_base_url if upload else \
             self.base_url + "gmail/v1/users/me/"
         url = base + path
@@ -413,6 +414,8 @@ class GmailClient:
         token = self.get_token()
         headers = {"Authorization": f"Bearer {token}",
                    "Content-Type": content_type}
+        budget = self.max_retries if max_retries is None else \
+            max_retries
         authed_once = False
         rate_attempt = 0
         while True:
@@ -429,7 +432,7 @@ class GmailClient:
                 authed_once = True
                 continue
             if self._retriable(payload.status):
-                if rate_attempt >= self.max_retries:
+                if rate_attempt >= budget:
                     return self._decode(payload, url)
                 self._sleep(self._retry_delay(payload.headers,
                                               rate_attempt))
@@ -528,12 +531,14 @@ class GmailClient:
     def send_raw(self, rfc822: bytes) -> Message:
         return _parse_message(self._request(
             "POST", "messages/send?uploadType=media",
-            raw_body=media_body(rfc822), upload=True))
+            raw_body=media_body(rfc822), upload=True,
+            max_retries=0))
 
     def send_multipart(self, rfc822: bytes, thread_id: str) -> Message:
         return _parse_message(self._request(
             "POST", "messages/send?uploadType=multipart",
-            raw_body=multipart_body(rfc822, thread_id), upload=True))
+            raw_body=multipart_body(rfc822, thread_id), upload=True,
+            max_retries=0))
 
     def send(self, rfc822: bytes, thread_id: str | None = None) -> Message:
         """Media upload for fresh sends, multipart when threading a reply."""

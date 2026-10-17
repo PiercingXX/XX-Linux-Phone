@@ -299,22 +299,10 @@ class EmailApplication(Adw.Application):
         undo, self._pending_undo = self._pending_undo, None
         if undo is None:
             return
-
-        def _blocking():
-            conn = _open_db()
-            try:
-                undo.revert(conn)
-                return True
-            finally:
-                conn.close()
-
-        def _done(result) -> None:
-            if isinstance(result, Exception):
-                self.toast("Undo failed", None)
-            if self._mailbox_page is not None:
-                self._mailbox_page.load()
-
-        common_mod.run_in_background(self._executor, _blocking, _done)
+        try:
+            undo()
+        except Exception:
+            self.toast("Undo failed", None)
 
     def _open_browser(self, url: str) -> bool:
         try:

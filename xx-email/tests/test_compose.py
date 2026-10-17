@@ -574,7 +574,7 @@ def test_permanent_rejection_marks_failed(conn, files_dir):
     assert row.error == "bad request"
 
 
-def test_transient_errors_retry_then_fail(conn, files_dir):
+def test_server_error_fails_without_retry(conn, files_dir):
     calls = []
 
     def _flaky(account, thread_id, payload):
@@ -583,20 +583,16 @@ def test_transient_errors_retry_then_fail(conn, files_dir):
         raise HttpError(500, "server down")
 
     entry_id = _enqueue(conn, files_dir, undo_seconds=0)
-    for _ in range(4):
-        results = outbox_mod.drain_due_outbox(conn, files_dir,
-                                              _flaky, NOW)
-        assert [r.outcome for r in results] == ["RETRY"]
-        assert db.get_outbox(conn, entry_id).state == "QUEUED"
-    results = outbox_mod.drain_due_outbox(conn, files_dir, _flaky,
-                                          NOW)
+    results = outbox_mod.drain_due_outbox(conn, files_dir,
+                                          _flaky, NOW)
     assert [r.outcome for r in results] == ["MARK_FAILED"]
     assert db.get_outbox(conn, entry_id).state == "FAILED"
-    assert len(calls) == 5
+    assert len(calls) == 1, \
+        "the upload is not idempotent: never retry it automatically"
 
 
-def test_transport_unknown_retries_without_burning(conn,
-                                                  files_dir):
+def test_transport_error_fails_without_retry(conn,
+                                            files_dir):
     def _offline(account, thread_id, payload):
         _ = (account, thread_id, payload)
         raise OSError("no route to host")
@@ -604,8 +600,8 @@ def test_transport_unknown_retries_without_burning(conn,
     entry_id = _enqueue(conn, files_dir, undo_seconds=0)
     results = outbox_mod.drain_due_outbox(conn, files_dir,
                                           _offline, NOW)
-    assert [r.outcome for r in results] == ["RETRY"]
-    assert db.get_outbox(conn, entry_id).state == "QUEUED"
+    assert [r.outcome for r in results] == ["MARK_FAILED"]
+    assert db.get_outbox(conn, entry_id).state == "FAILED"
 
 
 def test_send_interrupted_by_death_recovers_to_failed(conn,

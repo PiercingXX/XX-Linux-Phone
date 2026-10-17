@@ -22,9 +22,16 @@ surfaces as FAILED for banner retry instead of silently resending.
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
+import threading
 import time
 from dataclasses import dataclass
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX platforms
+    fcntl = None  # type: ignore[assignment]
 
 from xx_email import db as db_mod
 from xx_email.compose import (
@@ -37,11 +44,44 @@ from xx_email.domain import (
     OutboxFiles,
     OutboxSend,
     SendCancelPolicy,
+    SendOutcome,
     SendRetryPolicy,
 )
 
 MAX_ATTEMPTS = SendRetryPolicy.MAX_ATTEMPTS
 INTERRUPTED_ERROR = "send interrupted"
+
+_DRAIN_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _exclusive_drain(files_dir: str | os.PathLike):
+    """Serialize drains in-process and across processes.
+
+    A second drain must never mark a row another live drain is
+    sending as interrupted: the stale write flips the in-flight row
+    to FAILED and a later retry sends a second copy. The thread lock
+    covers same-process workers; the file lock covers the daemon.
+    """
+    with _DRAIN_LOCK:
+        handle = None
+        if fcntl is not None:
+            try:
+                handle = open(os.path.join(os.fspath(files_dir),
+                                           "outbox.lock"), "a+b")
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            except OSError:
+                if handle is not None:
+                    handle.close()
+                handle = None
+        try:
+            yield
+        finally:
+            if handle is not None:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                finally:
+                    handle.close()
 
 
 @dataclass
@@ -164,9 +204,10 @@ def retry_failed_sends(conn, account_email: str) -> int:
     return len(rows)
 
 
-def due_outbox(conn, now_ms: int) -> list:
+def due_outbox(conn, now_ms: int,
+               account: str | None = None) -> list:
     """QUEUED rows whose undo window / schedule time has passed."""
-    return [entry for entry in db_mod.queued_outbox(conn)
+    return [entry for entry in db_mod.queued_outbox(conn, account)
             if entry.target_at <= now_ms]
 
 
@@ -200,7 +241,8 @@ def resolve_payload(conn, files_dir: str | os.PathLike,
 def drain_due_outbox(conn, files_dir: str | os.PathLike, send,
                      now_ms: int,
                      max_attempts: int = MAX_ATTEMPTS,
-                     on_sent=None) -> list[DrainResult]:
+                     on_sent=None,
+                     account: str | None = None) -> list[DrainResult]:
     """Send every due QUEUED row through ``send`` (worker thread only).
 
     ``send(account_email, thread_id, payload_bytes)`` performs the
@@ -208,53 +250,61 @@ def drain_due_outbox(conn, files_dir: str | os.PathLike, send,
     optional ``status`` attribute (HTTP status when the server
     answered). Rows still inside their undo window or scheduled for
     the future are left QUEUED; SENDING rows with no live send are
-    recovered to FAILED. Never raises: per-row failures land in the
-    returned results.
+    recovered to FAILED. When ``account`` is given, only that
+    account's rows are touched, so one account's sync can never send
+    another account's queued mail. A send error marks the row FAILED
+    for banner retry instead of requeueing: the upload is not
+    idempotent, so an automatic retry can deliver a second copy.
+    Never raises: per-row failures land in the returned results.
     """
     results: list[DrainResult] = []
-    for stale in db_mod.sending_outbox(conn):
-        db_mod.set_outbox_state(conn, stale.id, "FAILED",
-                                error=INTERRUPTED_ERROR)
-        results.append(DrainResult(entry_id=stale.id, outcome="FAILED",
-                                   state="FAILED",
-                                   error=INTERRUPTED_ERROR))
-    for entry in db_mod.queued_outbox(conn):
-        if entry.target_at > now_ms:
-            continue
-        if not db_mod.claim_outbox_if_queued(conn, entry.id):
-            continue
-        db_mod.increment_outbox_attempts(conn, entry.id)
-        attempts_used = entry.attempts + 1
-        try:
-            payload = resolve_payload(conn, files_dir, entry)
-        except Exception as exc:
-            results.append(_apply_retry(
-                conn, files_dir, entry, attempts_used, None, True,
-                str(exc), max_attempts))
-            continue
-        try:
-            send(entry.account_email, entry.thread_id, payload)
-        except Exception as exc:
-            status = getattr(exc, "status", None)
-            if isinstance(status, int):
-                outcome = SendRetryPolicy.decide(status, False)
-            else:
-                outcome = SendRetryPolicy.decide(None, True)
-            results.append(_apply_retry(
-                conn, files_dir, entry, attempts_used, None, False,
-                str(exc) or None, max_attempts,
-                forced=outcome))
-            continue
-        db_mod.set_outbox_state(conn, entry.id, "SENT")
-        OutboxFiles.delete_payload_file(files_dir, entry.path,
-                                        entry.id)
-        if on_sent is not None:
+    with _exclusive_drain(files_dir):
+        for stale in db_mod.sending_outbox(conn, account):
+            db_mod.set_outbox_state(conn, stale.id, "FAILED",
+                                    error=INTERRUPTED_ERROR)
+            results.append(DrainResult(entry_id=stale.id,
+                                       outcome="FAILED",
+                                       state="FAILED",
+                                       error=INTERRUPTED_ERROR))
+        for entry in db_mod.queued_outbox(conn, account):
+            if entry.target_at > now_ms:
+                continue
+            if not db_mod.claim_outbox_if_queued(conn, entry.id):
+                continue
+            db_mod.increment_outbox_attempts(conn, entry.id)
+            attempts_used = entry.attempts + 1
             try:
-                on_sent(entry)
-            except Exception:
-                pass
-        results.append(DrainResult(entry_id=entry.id,
-                                   outcome="MARK_SENT", state="SENT"))
+                payload = resolve_payload(conn, files_dir, entry)
+            except Exception as exc:
+                results.append(_apply_retry(
+                    conn, files_dir, entry, attempts_used, None, True,
+                    str(exc), max_attempts))
+                continue
+            try:
+                send(entry.account_email, entry.thread_id, payload)
+            except Exception as exc:
+                status = getattr(exc, "status", None)
+                if isinstance(status, int) and \
+                        200 <= status <= 299:
+                    outcome = SendOutcome.MARK_SENT
+                else:
+                    outcome = SendOutcome.MARK_FAILED
+                results.append(_apply_retry(
+                    conn, files_dir, entry, attempts_used, None, False,
+                    str(exc) or None, max_attempts,
+                    forced=outcome))
+                continue
+            db_mod.set_outbox_state(conn, entry.id, "SENT")
+            OutboxFiles.delete_payload_file(files_dir, entry.path,
+                                            entry.id)
+            if on_sent is not None:
+                try:
+                    on_sent(entry)
+                except Exception:
+                    pass
+            results.append(DrainResult(entry_id=entry.id,
+                                       outcome="MARK_SENT",
+                                       state="SENT"))
     return results
 
 
@@ -262,8 +312,6 @@ def _apply_retry(conn, files_dir, entry, attempts_used: int,
                  status: int | None, transport_error: bool,
                  error: str | None, max_attempts: int,
                  forced=None) -> DrainResult:
-    from xx_email.domain import SendOutcome
-
     outcome = forced if forced is not None else \
         SendRetryPolicy.decide(status, transport_error)
     if outcome == SendOutcome.MARK_SENT:

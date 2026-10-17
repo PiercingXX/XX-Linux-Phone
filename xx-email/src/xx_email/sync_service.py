@@ -288,7 +288,10 @@ class SyncEngine:
             return
 
         def _send(account: str, thread_id, payload: bytes):
-            _ = account
+            if account != email:
+                raise ValueError(
+                    f"Outbox row for {account} reached"
+                    f" {email}'s sync")
             return client.send(bytes(payload), thread_id)
 
         def _on_sent(entry) -> None:
@@ -299,7 +302,7 @@ class SyncEngine:
         try:
             outbox_mod.drain_due_outbox(
                 self.conn, self._files_dir, _send, self._now_ms(),
-                on_sent=_on_sent)
+                on_sent=_on_sent, account=email)
         except Exception:
             pass
 
@@ -511,7 +514,13 @@ class SyncEngine:
         for thread_id in thread_ids:
             try:
                 full = client.get_thread(thread_id, fmt="metadata")
-            except GmailTransportError:
+            except GmailTransportError as exc:
+                if exc.status == 404:
+                    db.delete_messages_for_thread(
+                        self.conn, email, thread_id)
+                    db.delete_threads_by_ids(
+                        self.conn, email, [thread_id])
+                    continue
                 failed.add(thread_id)
                 continue
             existing = db.get_thread(self.conn, email, thread_id)
@@ -551,5 +560,5 @@ class SyncEngine:
         if threads:
             db.upsert_threads(self.conn, threads)
         if messages:
-            db.upsert_messages(self.conn, messages)
+            db.upsert_message_metadata(self.conn, messages)
         return failed

@@ -597,6 +597,35 @@ def upsert_messages(conn: sqlite3.Connection,
         )
 
 
+def upsert_message_metadata(conn: sqlite3.Connection,
+                            messages: list[Message]) -> None:
+    """Upsert sync metadata without touching downloaded bodies.
+
+    Hydration only carries metadata format: including body columns
+    here would overwrite cached bodies with NULL on every sync and
+    break offline reading. Bodies are written solely through
+    update_message_bodies after an explicit full fetch.
+    """
+    with conn:
+        conn.executemany(
+            "INSERT INTO messages (accountEmail, id, threadId, subject, fromAddress,"
+            " toCsv, ccCsv, date, snippet, read, starred, hasAttachments,"
+            " labelsCsv, messageIdHeader, bodyFetched)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
+            " ON CONFLICT(accountEmail, id) DO UPDATE SET threadId=excluded.threadId,"
+            " subject=excluded.subject, fromAddress=excluded.fromAddress,"
+            " toCsv=excluded.toCsv, ccCsv=excluded.ccCsv, date=excluded.date,"
+            " snippet=excluded.snippet, read=excluded.read,"
+            " starred=excluded.starred, hasAttachments=excluded.hasAttachments,"
+            " labelsCsv=excluded.labelsCsv,"
+            " messageIdHeader=excluded.messageIdHeader",
+            [(m.account_email, m.id, m.thread_id, m.subject, m.from_address,
+              m.to_csv, m.cc_csv, m.date, m.snippet, int(m.read),
+              int(m.starred), int(m.has_attachments), m.labels_csv,
+              m.message_id_header) for m in messages],
+        )
+
+
 def messages_for_thread(conn: sqlite3.Connection, account: str,
                         thread_id: str) -> list[Message]:
     return [_message_from_row(r) for r in conn.execute(
@@ -636,6 +665,14 @@ def delete_message(conn: sqlite3.Connection, account: str,
         conn.execute(
             "DELETE FROM messages WHERE accountEmail = ? AND id = ?",
             (account, message_id))
+
+
+def delete_messages_for_thread(conn: sqlite3.Connection, account: str,
+                               thread_id: str) -> None:
+    with conn:
+        conn.execute(
+            "DELETE FROM messages WHERE accountEmail = ? AND threadId = ?",
+            (account, thread_id))
 
 
 def count_for_thread(conn: sqlite3.Connection, account: str,
@@ -693,16 +730,27 @@ def get_outbox(conn: sqlite3.Connection, entry_id: int) -> OutboxEntry | None:
     return _outbox_from_row(row) if row is not None else None
 
 
-def queued_outbox(conn: sqlite3.Connection) -> list[OutboxEntry]:
+def queued_outbox(conn: sqlite3.Connection,
+                    account: str | None = None) -> list[OutboxEntry]:
+    if account is None:
+        return [_outbox_from_row(r) for r in conn.execute(
+            "SELECT * FROM outbox WHERE state = 'QUEUED'"
+            " ORDER BY targetAt ASC")]
     return [_outbox_from_row(r) for r in conn.execute(
-        "SELECT * FROM outbox WHERE state = 'QUEUED' ORDER BY targetAt ASC")]
+        "SELECT * FROM outbox WHERE state = 'QUEUED'"
+        " AND accountEmail = ? ORDER BY targetAt ASC", (account,))]
 
 
-def sending_outbox(conn: sqlite3.Connection) -> list[OutboxEntry]:
+def sending_outbox(conn: sqlite3.Connection,
+                   account: str | None = None) -> list[OutboxEntry]:
     """Rows stuck SENDING: a dead worker left them, recover to FAILED."""
+    if account is None:
+        return [_outbox_from_row(r) for r in conn.execute(
+            "SELECT * FROM outbox WHERE state = 'SENDING'"
+            " ORDER BY createdAt ASC")]
     return [_outbox_from_row(r) for r in conn.execute(
         "SELECT * FROM outbox WHERE state = 'SENDING'"
-        " ORDER BY createdAt ASC")]
+        " AND accountEmail = ? ORDER BY createdAt ASC", (account,))]
 
 
 def open_outbox_for_account(conn: sqlite3.Connection,

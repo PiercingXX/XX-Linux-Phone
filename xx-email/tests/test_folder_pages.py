@@ -107,13 +107,14 @@ def test_fetch_folder_page_skips_failed_hydration():
         conn.close()
 
 
-def test_hydrate_returns_failed_ids_for_search_fill():
+def test_hydrate_prunes_gone_threads_for_search_fill():
     conn = open_conn()
     transport = DictTransport([], {"t1": thread_payload("t1")})
     engine = make_engine(conn, transport)
     try:
         failed = engine.hydrate(ACCOUNT, ["t1", "gone"])
-        assert failed == {"gone"}
+        assert failed == set(), \
+            "a 404 means deleted server-side: prune it, don't refetch"
         assert db.get_thread(conn, ACCOUNT, "t1") is not None
         assert db.get_thread(conn, ACCOUNT, "gone") is None
     finally:
