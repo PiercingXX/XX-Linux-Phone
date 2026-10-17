@@ -126,6 +126,99 @@ def _calls(win):
     return helper
 
 
+def _home_press_to_recents(win) -> bool:
+    """True when a Home press should open recents (home_to_recents).
+
+    Reads only plain attributes so bare test doubles without a config
+    keep the old go-home path."""
+    config = getattr(win, 'config', None)
+    if not getattr(config, 'home_to_recents', False):
+        return False
+    try:
+        if win.stack.get_visible_child_name() != 'home':
+            return False
+    except Exception:
+        return False
+    for attr in ('_switcher', '_shade', '_dialer'):
+        try:
+            surface = getattr(win, attr, None)
+            if surface is not None and surface.get_visible():
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def _sync_home_label(item: dict, names: dict, labels: dict) -> bool:
+    """Refresh one slot/member label from the index; True when rewritten."""
+    app_id = item.get('app_id')
+    if not app_id or item.get('cmd'):
+        return False
+    if app_id in labels:
+        return False
+    name = names.get(str(app_id))
+    if not name or item.get('label') == name:
+        return False
+    item['label'] = name
+    return True
+
+
+def _sync_home_labels(config, entries) -> None:
+    """Refresh never-renamed slot/member labels from the desktop index.
+
+    A .desktop Name change (update, rebrand) flows into every home slot
+    and folder member holding that app unless the user renamed it
+    (config.app_labels). Command slots keep their labels."""
+    names = {entry.app_id: entry.name for entry in entries}
+    labels = config.app_labels
+    slots = config.home_slots
+    changed = False
+    for slot in slots:
+        if _sync_home_label(slot, names, labels):
+            changed = True
+        if slot.get('type') == 'folder':
+            for member in slot.get('folder') or []:
+                if _sync_home_label(member, names, labels):
+                    changed = True
+    if changed:
+        config.set_home_slots(slots)
+
+
+def _purge_removed_from_config(config, removed: set) -> None:
+    """Drop uninstalled app ids from the home config (monitor path).
+
+    Covers home slots, folder members, pins, hidden apps and rename
+    labels. Command slots, built-in members and Waydroid entries
+    (bare package names, no .desktop suffix) are never matched."""
+    if not removed:
+        return
+
+    def _gone(item: dict) -> bool:
+        app_id = item.get('app_id')
+        return (isinstance(app_id, str) and app_id.endswith('.desktop')
+                and not item.get('cmd') and app_id in removed)
+
+    slots = [slot for slot in config.home_slots
+             if not (slot.get('type') == 'app' and _gone(slot))]
+    for slot in slots:
+        if slot.get('type') == 'folder':
+            members = [member for member in (slot.get('folder') or [])
+                       if not _gone(member)]
+            if len(members) != len(slot.get('folder') or []):
+                slot['folder'] = members
+    if slots != config.home_slots:
+        config.set_home_slots(slots)
+    pinned = [app_id for app_id in config.pinned if app_id not in removed]
+    if pinned != config.pinned:
+        config.set_pinned(pinned)
+    hidden = [app_id for app_id in config.hidden_apps
+              if app_id not in removed]
+    if hidden != config.hidden_apps:
+        config.set_hidden_apps(hidden)
+    for app_id in set(config.app_labels) & set(removed):
+        config.set_app_label(app_id, None)
+
+
 def decide_layer_policy(page: str | None, popover_open: bool,
                         over_apps: bool) -> tuple[str, str]:
     """Pure layer/keyboard decision for the shell window.
@@ -392,6 +485,9 @@ class ShellWindow(Adw.ApplicationWindow):
         self._swipe_drag_samples: list[tuple[float, float, float]] = []
         self._swipe_drag_claimed = False
         self._pick_slot_mode = False
+        # Change-app target for the pick mode: the next drawer tap replaces
+        # slots[_pick_slot_target] instead of appending a new slot.
+        self._pick_slot_target: int | None = None
         # When set to a gesture key ('swipe_left_home'/'swipe_right_home'),
         # the next drawer tap binds that app to the gesture instead of launching
         self._pick_gesture_key: str | None = None
@@ -467,6 +563,9 @@ class ShellWindow(Adw.ApplicationWindow):
             focus_state=self.focus_state,
             on_popover_changed=self._on_item_popover,
             on_keyboard=self._on_entry_keyboard,
+            real_name_fn=lambda app_id: next(
+                (entry.name for entry in self.app_index.entries
+                 if entry.app_id == app_id), None),
         )
 
         # Flat search with the text after the icon, like xx_ui's search_bar
@@ -889,7 +988,12 @@ class ShellWindow(Adw.ApplicationWindow):
 
         Recents swipe-down / tap-dim / back resume the current app; this
         path is the Pixel short swipe-up (and the in-shell `home` action).
+        With `home_to_recents`, pressing Home while already on home with
+        nothing on top opens the switcher instead.
         """
+        if _home_press_to_recents(self):
+            self._show_switcher()
+            return
         switcher = getattr(self, '_switcher', None)
         if switcher is not None and switcher.get_visible():
             switcher.hide_switcher()
@@ -1073,6 +1177,20 @@ class ShellWindow(Adw.ApplicationWindow):
     def _handle_back(self) -> None:
         """Called by BackGestureLayer on edge swipe from either side."""
         import subprocess
+        # Home first: collapse an open folder, then leave edit mode.
+        launcher = getattr(self, '_home_launcher', None)
+        if launcher is not None:
+            try:
+                if launcher.close_folder():
+                    return
+            except Exception:
+                pass
+            try:
+                if launcher.edit_mode:
+                    launcher.set_edit_mode(False)
+                    return
+            except Exception:
+                pass
         # Overlay first (switcher sits above the shade), then the shade.
         if self._switcher and self._switcher.get_visible():
             self._switcher.hide_switcher()
@@ -1478,6 +1596,7 @@ class ShellWindow(Adw.ApplicationWindow):
         # Leaving the drawer disarms both pick modes so a later tap launches
         if name != 'apps':
             self._pick_slot_mode = False
+            self._pick_slot_target = None
             self._pick_gesture_key = None
             self._pick_exempt_mode = False
             try:
@@ -1837,6 +1956,7 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _refresh_index(self, _button: Gtk.Button | None = None) -> None:
         self.app_index.refresh()
+        self._sync_home_labels_from_index()
         self._home_launcher.refresh()
         self._populate_apps(self.apps_search.get_text())
         self._show_status('Application index rebuilt.')
@@ -1857,6 +1977,9 @@ class ShellWindow(Adw.ApplicationWindow):
     def _on_home_long_press(self, gesture: Gtk.GestureLongPress, _x: float, _y: float) -> None:
         return _home(self)._on_home_long_press(gesture, _x, _y)
 
+    def _on_home_background_tap(self, n_press: int) -> None:
+        return _home(self)._on_home_background_tap(n_press)
+
     def _on_edit_action(self, action: str, widget: Gtk.Widget) -> None:
         return _home(self)._on_edit_action(action, widget)
 
@@ -1874,6 +1997,9 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _rename_slot(self, widget: Gtk.Widget, idx: int) -> None:
         return _home(self)._rename_slot(widget, idx)
+
+    def _replace_app_slot(self, idx: int, entry: AppEntry) -> None:
+        return _home(self)._replace_app_slot(idx, entry)
 
     def _make_drawer_folder_row(self, slot: dict, slot_index: int) -> Gtk.ListBoxRow:
         return _drawer(self)._make_drawer_folder_row(slot, slot_index)
@@ -1940,12 +2066,35 @@ class ShellWindow(Adw.ApplicationWindow):
     def _reload_app_index(self) -> bool:
         self._app_refresh_timer = None
         try:
+            previous = {entry.app_id for entry in self.app_index.entries}
             self.app_index.refresh()
+            current = {entry.app_id for entry in self.app_index.entries}
+            if current:
+                # A real uninstall: present before, gone from a non-empty
+                # rescan. A transient empty scan purges nothing.
+                removed = previous - current
+                if removed:
+                    _purge_removed_from_config(self.config, removed)
+            _sync_home_labels(self.config, self.app_index.entries)
             self._home_launcher.refresh(preserve_folder=True)
             self._populate_apps(self.apps_search.get_text())
         except Exception:
             pass
         return GLib.SOURCE_REMOVE
+
+    def _sync_home_labels_from_index(self) -> None:
+        """Refresh never-renamed slot/member labels from the desktop index."""
+        try:
+            _sync_home_labels(self.config, self.app_index.entries)
+        except Exception:
+            pass
+
+    def _purge_uninstalled_apps(self, removed: set[str]) -> None:
+        """Drop uninstalled app ids from the home config (monitor path)."""
+        try:
+            _purge_removed_from_config(self.config, removed)
+        except Exception:
+            pass
 
     def _setup_config_monitor(self) -> None:
         """Hot reload: editing ~/.config/xx-wm/* in a terminal is a

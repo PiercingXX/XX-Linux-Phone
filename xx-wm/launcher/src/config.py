@@ -58,6 +58,7 @@ DEFAULT_CONFIG = {
     'update_last_check': 0.0,
     'update_snooze_until': 0.0,
     'home_slots': [],
+    'home_to_recents': False,
     'search_auto_launch': False,
     'preload_gesture_apps': False,
     'default_layout_applied': False,
@@ -709,6 +710,18 @@ class ShellConfig:
         else:
             ignored[app_id] = str(day)
         self.data['app_limit_ignored'] = ignored
+        self.save()
+
+    def get(self, key: str, default=None):
+        """Cross-lane read helper: config value with a fallback default."""
+        return self.data.get(key, default)
+
+    @property
+    def home_to_recents(self) -> bool:
+        return bool(self.data.get('home_to_recents', False))
+
+    def set_home_to_recents(self, enabled: bool) -> None:
+        self.data['home_to_recents'] = bool(enabled)
         self.save()
 
     @property

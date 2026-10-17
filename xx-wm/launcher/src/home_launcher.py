@@ -156,7 +156,8 @@ class HomeLauncher(Gtk.Box):
                  on_slot_rename: Callable[[Gtk.Widget, int], None] | None = None,
                  on_edit_action: Callable[[str, Gtk.Widget], None] | None = None,
                  is_paused_fn: Callable[[str], bool] | None = None,
-                 get_alignment_fn: Callable[[], str] | None = None) -> None:
+                 get_alignment_fn: Callable[[], str] | None = None,
+                 on_status_fn: Callable[[str], None] | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_vexpand(True)
         self._open_dialer = open_dialer_fn
@@ -169,6 +170,7 @@ class HomeLauncher(Gtk.Box):
         self._on_edit_action = on_edit_action or (lambda action, widget: None)
         self._is_paused = is_paused_fn or (lambda app_id: False)
         self._get_alignment = get_alignment_fn or (lambda: 'center')
+        self._on_status = on_status_fn or (lambda message: None)
         self._open_folder_index: int | None = None
         self.edit_mode = False
         self._build()
@@ -366,6 +368,7 @@ class HomeLauncher(Gtk.Box):
         elif slot.get('folder'):
             self._open_folder_index = idx
         else:
+            self._on_status('Folder is empty')
             return
         self._build()
 

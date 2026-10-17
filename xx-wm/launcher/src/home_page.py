@@ -86,6 +86,7 @@ class HomePage:
             on_edit_action=win._on_edit_action,
             is_paused_fn=win.focus_state.is_paused_app,
             get_alignment_fn=lambda: win.config.home_alignment,
+            on_status_fn=win._show_status,
         )
 
         launcher_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -106,11 +107,31 @@ class HomePage:
         bot_pane.set_margin_bottom(24)
         bot_pane.append(launcher_scroll)
 
-        # Long-press anywhere on home → slot edit mode (design.md "Home screen")
+        # Background gestures dispatch gestures.json: double-tap runs
+        # double_tap_home, long-press runs long_press_home (edit = slot
+        # edit mode, settings = open Settings, none = nothing).
+        top_press = Gtk.GestureLongPress.new()
+        top_press.set_touch_only(False)
+        top_press.connect('pressed', win._on_home_long_press)
+        top_pane.add_controller(top_press)
+        top_tap = Gtk.GestureClick.new()
+        top_tap.set_touch_only(False)
+        top_tap.connect(
+            'pressed',
+            lambda _g, n, _x, _y: win._on_home_background_tap(n))
+        top_pane.add_controller(top_tap)
+
+        # Long-press anywhere on home → configured long_press_home action
         edit_press = Gtk.GestureLongPress.new()
         edit_press.set_touch_only(False)
         edit_press.connect('pressed', win._on_home_long_press)
         bot_pane.add_controller(edit_press)
+        bot_tap = Gtk.GestureClick.new()
+        bot_tap.set_touch_only(False)
+        bot_tap.connect(
+            'pressed',
+            lambda _g, n, _x, _y: win._on_home_background_tap(n))
+        bot_pane.add_controller(bot_tap)
 
         # --- 1/3 widgets / 2/3 launcher — a homogeneous grid, so there is
         # no Paned divider bar and no realize-time ratio hack. The widget
@@ -343,14 +364,30 @@ class HomePage:
 
     # -- home edit mode ----------------------------------------------------
 
+    def _on_home_background_tap(self, n_press: int) -> None:
+        """Double-tap on the home background runs double_tap_home."""
+        if n_press != 2:
+            return
+        win = self._win
+        action = win.gesture_config.get('double_tap_home') or 'none'
+        if action == 'none':
+            return
+        win._dispatch_gesture_action(action)
+
     def _on_home_long_press(self, gesture, _x: float, _y: float) -> None:
         from gi.repository import Gtk
 
         win = self._win
-        if win._home_launcher.edit_mode:
+        action = win.gesture_config.get('long_press_home') or 'edit'
+        if action == 'none':
             return
-        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        win._home_launcher.set_edit_mode(True)
+        if action == 'edit':
+            if win._home_launcher.edit_mode:
+                return
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            win._home_launcher.set_edit_mode(True)
+            return
+        win._dispatch_gesture_action(action)
 
     def _on_edit_action(self, action: str, widget) -> None:
         win = self._win
@@ -427,27 +464,97 @@ class HomePage:
         win._show_status(f'{removed.get("label", "Slot")} removed from home.')
 
     def _rename_slot(self, widget, idx: int) -> None:
-        from app_item_actions import validate_folder_name
-
+        """Edit-mode slot name tap: folders rename directly; app slots get
+        a Rename / Change app / App info menu like the Android picker."""
         win = self._win
         slots = win.config.home_slots
         if not (0 <= idx < len(slots)):
             return
+        if slots[idx].get('type') != 'app':
+            self._rename_slot_dialog(widget, idx)
+            return
+        win.item_actions._show_action_menu(
+            widget, slots[idx].get('label', ''),
+            [('Rename', lambda: self._rename_slot_dialog(widget, idx)),
+             ('Change app', lambda: self._pick_replace_slot(idx)),
+             ('App info', lambda: self._show_slot_info(widget, idx))])
+
+    def _pick_replace_slot(self, idx: int) -> None:
+        """Change app: drawer pick mode retargeted at slots[idx]."""
+        win = self._win
+        win._pick_slot_mode = True
+        win._pick_slot_target = idx
+        win.stack.set_visible_child_name('apps')
+        win._show_status('Tap an app to replace this slot.')
+
+    def _show_slot_info(self, widget, idx: int) -> None:
+        win = self._win
+        slots = win.config.home_slots
+        if not (0 <= idx < len(slots)):
+            return
+        win.item_actions._show_member_info(widget, dict(slots[idx]))
+
+    def _replace_app_slot(self, idx: int, entry: AppEntry) -> None:
+        """Swap the picked app into slots[idx], keeping its position."""
+        win = self._win
+        slots = win.config.home_slots
+        if not (0 <= idx < len(slots)) or slots[idx].get('type') != 'app':
+            self._add_app_slot(entry)
+            return
+        display = win.config.label_for(entry.app_id, entry.name)
+        slots[idx] = {'type': 'app', 'label': display, 'app_id': entry.app_id,
+                      'cmd': None, 'folder': None}
+        win.config.set_home_slots(slots)
+        win.stack.set_visible_child_name('home')
+        win._home_launcher.refresh()
+        win._populate_apps(win.apps_search.get_text())
+        win._show_status(f'{display} added to home.')
+
+    def _real_app_name(self, app_id: str) -> str | None:
+        index = getattr(self._win, 'app_index', None)
+        for entry in getattr(index, 'entries', []) or []:
+            if entry.app_id == app_id:
+                return entry.name
+        return None
+
+    def _rename_slot_dialog(self, widget, idx: int) -> None:
+        win = self._win
+        slots = win.config.home_slots
+        if not (0 <= idx < len(slots)):
+            return
+        slot = slots[idx]
+        app_id = slot.get('app_id')
 
         def _commit(text: str) -> None:
-            if slots[idx].get('type') == 'folder':
+            if slot.get('type') == 'folder':
+                from app_item_actions import validate_folder_name
                 error = validate_folder_name(slots, text, exclude=idx)
                 if error is not None:
                     win._show_status(error)
                     return
                 slots[idx]['label'] = text.strip()
-            else:
+                win.config.set_home_slots(slots)
+            elif slot.get('type') == 'app' and app_id:
+                # A blank rename clears the override and restores the
+                # app's real name; any other rename fans out to every
+                # slot and folder member holding the app.
+                key = str(app_id)
+                real = self._real_app_name(key)
+                if not text:
+                    win.config.set_app_label(key, None)
+                    label = real if real is not None else slot.get('label', '')
+                else:
+                    win.config.set_app_label(
+                        key, None if text == real else text)
+                    label = text
+                slots[idx]['label'] = label
+                win.item_actions._rename_in_slots(key, label)
+                win.config.set_home_slots(slots)
+            elif text:
                 slots[idx]['label'] = text
-            app_id = slots[idx].get('app_id')
-            if slots[idx].get('type') == 'app' and app_id:
-                win.config.set_app_label(str(app_id), text)
-            win.config.set_home_slots(slots)
+                win.config.set_home_slots(slots)
             win._refresh_after_item_action()
 
         win.item_actions._show_entry_dialog(
-            widget, 'Rename', slots[idx].get('label', ''), 'Rename', _commit)
+            widget, 'Rename', slots[idx].get('label', ''), 'Rename', _commit,
+            allow_empty=True)

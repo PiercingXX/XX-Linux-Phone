@@ -35,6 +35,7 @@ migration steps are ever required.
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `home_slots` | list | `[]` | Up to 8 slots: `{type: 'app'\|'folder', label, app_id, cmd, folder}`. `app_id` is a `.desktop` id; `cmd` an argv list for non-desktop entries; `folder` a list of `{label, app_id or cmd}` members. Seeded on first boot when empty. |
+| `home_to_recents` | bool | `false` | Pressing Home while already on home with nothing on top opens the app switcher instead of staying. |
 | `default_layout_applied` | bool | `false` | Set once seeding has run; never re-seeds. |
 | `app_labels` | dict | `{}` | `{app_id: label}` renames; shown everywhere, searched alongside original names. |
 | `pinned` | list | `[]` | App ids surfaced first in the drawer browse list, in this order. |
@@ -296,8 +297,8 @@ fails, it applies at the next session start.
 | `swipe_up_long` | `app_switcher` | lisgd → `gesture.switcher`. Verb-rebindable. A long swipe up opens full-screen recents. Swipe down, tap the dim, or back resumes the current app. |
 | `swipe_left_edge` | `back` | lisgd → `gesture.back` on both edges. Verb-rebindable. |
 | `long_press_bottom` | `search` | |
-| `double_tap_home` | `lock_screen` | Kept on Linux deliberately. |
-| `long_press_home` | `settings` | The shell opens slot edit mode on this. |
+| `double_tap_home` | `lock_screen` | Double-tap on the home background dispatches this action (the clock keeps its own double-tap-to-lock). |
+| `long_press_home` | `edit` | Long-press on the home background: `edit` opens slot edit mode, `settings` opens Settings, `none` does nothing. |
 | `swipe_left_home` | `none` | Seeded to `launch:<skippy>` when Skippy is installed. `none` falls through to page navigation. |
 | `swipe_right_home` | `camera` | |
 | `squeeze` | `assistant` | Hardware-gated (Active Edge); needs device support. |

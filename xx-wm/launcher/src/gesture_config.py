@@ -17,7 +17,7 @@ _DEFAULTS: dict[str, str] = {
     'swipe_left_edge':       'back',
     'long_press_bottom':     'search',
     'double_tap_home':       'lock_screen',
-    'long_press_home':       'settings',
+    'long_press_home':       'edit',
     'swipe_left_home':       'none',
     'swipe_right_home':      'camera',
     'squeeze':               'assistant',
@@ -57,6 +57,8 @@ def _is_valid_value(key: str, value: str) -> bool:
     """Actions are valid everywhere; verbs only for system-level slots."""
     if is_valid_action(value):
         return True
+    if key == 'long_press_home' and value == 'edit':
+        return True
     return key in LISGD_SLOTS and value in IPC_VERBS
 
 # Human-readable names for the settings UI
@@ -72,6 +74,7 @@ ACTION_LABELS: dict[str, str] = {
     'dialer':              'Dialer',
     'assistant':           'Assistant',
     'none':                'Do Nothing',
+    'edit':                'Edit home slots',
 }
 
 GESTURE_LABELS: dict[str, str] = {

@@ -49,13 +49,24 @@ class AppItemActions:
                  on_status: Callable[[str], None],
                  focus_state: object | None = None,
                  on_popover_changed: Callable[[bool], None] | None = None,
-                 on_keyboard: Callable[[bool], None] | None = None) -> None:
+                 on_keyboard: Callable[[bool], None] | None = None,
+                 real_name_fn: Callable[[str], str | None] | None = None) -> None:
         self._config = config
         self._on_changed = on_changed
         self._on_status = on_status
         self._focus = focus_state
         self._on_popover_changed = on_popover_changed
         self._on_keyboard = on_keyboard
+        self._real_name_fn = real_name_fn
+
+    def _real_name(self, app_id: str) -> str | None:
+        """The app's current desktop Name, for blank-rename resets."""
+        if not callable(self._real_name_fn):
+            return None
+        try:
+            return self._real_name_fn(app_id)
+        except Exception:
+            return None
 
     # -- popover plumbing --------------------------------------------------
 
@@ -124,7 +135,8 @@ class AppItemActions:
                                 commit_label: str,
                                 on_commit: Callable[[str], None],
                                 password: bool | None = None,
-                                on_popover_commit=None):
+                                on_popover_commit=None,
+                                allow_empty: bool = False):
         """Rename/confirm/entry dialog body: title, entry, primary commit.
 
         Returns (box, entry, commit). The popover wrapper commits first so
@@ -161,7 +173,7 @@ class AppItemActions:
             text = raw if is_password else raw.strip()
             if on_popover_commit is not None:
                 on_popover_commit()
-            if text:
+            if text or allow_empty:
                 on_commit(text)
 
         entry.connect('activate', _commit)
@@ -173,7 +185,8 @@ class AppItemActions:
 
     def _show_entry_dialog(self, anchor: Gtk.Widget, title: str, initial: str,
                            commit_label: str, on_commit: Callable[[str], None],
-                           password: bool | None = None) -> None:
+                           password: bool | None = None,
+                           allow_empty: bool = False) -> None:
         shown: dict = {}
 
         def _pop_shown() -> None:
@@ -184,7 +197,7 @@ class AppItemActions:
 
         box, entry, _commit = self._entry_dialog_content(
             title, initial, commit_label, on_commit, password,
-            on_popover_commit=_pop_shown)
+            on_popover_commit=_pop_shown, allow_empty=allow_empty)
         popover = self._show_popover(anchor, box)
         shown['popover'] = popover
 
@@ -211,6 +224,8 @@ class AppItemActions:
         actions.append(('App info', lambda: self._show_app_info(anchor, entry)))
         actions.append(('Rename', lambda: self._show_rename(anchor, entry)))
         actions.append(('Add to folder', lambda: self._show_add_to_folder(anchor, entry)))
+        actions.append(('Add to Home', lambda: self._add_to_home(
+            entry.app_id, config.label_for(entry.app_id, entry.name))))
         if entry.app_id in config.hidden_apps or hidden_view:
             actions.append(('Show', lambda: self._set_hidden(entry, False)))
         else:
@@ -258,12 +273,39 @@ class AppItemActions:
         current = self._config.label_for(entry.app_id, entry.name)
 
         def _commit(text: str) -> None:
+            if not text:
+                self._config.set_app_label(entry.app_id, None)
+                self._rename_in_slots(entry.app_id, entry.name)
+                self._on_changed()
+                self._on_status(f'Renamed to {entry.name}.')
+                return
             self._config.set_app_label(entry.app_id, None if text == entry.name else text)
             self._rename_in_slots(entry.app_id, text)
             self._on_changed()
             self._on_status(f'Renamed to {text}.')
 
-        self._show_entry_dialog(anchor, 'Rename', current, 'Rename', _commit)
+        self._show_entry_dialog(anchor, 'Rename', current, 'Rename', _commit,
+                                allow_empty=True)
+
+    def _add_to_home(self, app_id: str, display: str) -> None:
+        """Put an app in the next free home slot, up to the 8-slot cap."""
+        slots = self._config.home_slots
+        for slot in slots:
+            if slot.get('type') == 'app' and slot.get('app_id') == app_id:
+                self._on_status('Already on home.')
+                return
+            for member in slot.get('folder') or []:
+                if member.get('app_id') == app_id:
+                    self._on_status('Already on home.')
+                    return
+        if len(slots) >= 8:
+            self._on_status('Home is full — remove a slot first.')
+            return
+        slots.append({'type': 'app', 'label': display, 'app_id': app_id,
+                      'cmd': None, 'folder': None})
+        self._config.set_home_slots(slots)
+        self._on_changed()
+        self._on_status(f'{display} added to home.')
 
     def _rename_in_slots(self, app_id: str, label: str) -> None:
         slots = self._config.home_slots
@@ -390,6 +432,8 @@ class AppItemActions:
             hidden = app_id in self._config.hidden_apps
             actions.append(('Show' if hidden else 'Hide',
                             lambda: self._set_hidden_id(app_id, not hidden)))
+            actions.append(('Add to Home',
+                            lambda: self._add_to_home(app_id, label)))
             actions.append(('Disable for…', lambda: self._show_disable_for(anchor, app_id, label)))
         actions.append(('Move up', lambda: self._move_member(slot_index, member_index, -1)))
         actions.append(('Move down', lambda: self._move_member(slot_index, member_index, +1)))
@@ -421,14 +465,24 @@ class AppItemActions:
         member = (slots[slot_index].get('folder') or [])[member_index]
 
         def _commit(text: str) -> None:
-            slots[slot_index]['folder'][member_index]['label'] = text
-            if member.get('app_id'):
-                self._config.set_app_label(str(member['app_id']), text)
+            if text:
+                slots[slot_index]['folder'][member_index]['label'] = text
+                if member.get('app_id'):
+                    self._config.set_app_label(str(member['app_id']), text)
+                self._on_status(f'Renamed to {text}.')
+            elif member.get('app_id'):
+                # Blank clears the override and restores the real name at
+                # once, like the drawer rename.
+                self._config.set_app_label(str(member['app_id']), None)
+                real = self._real_name(str(member['app_id']))
+                if real:
+                    slots[slot_index]['folder'][member_index]['label'] = real
+                self._on_status('Name reset.')
             self._config.set_home_slots(slots)
             self._on_changed()
-            self._on_status(f'Renamed to {text}.')
 
-        self._show_entry_dialog(anchor, 'Rename', member.get('label', ''), 'Rename', _commit)
+        self._show_entry_dialog(anchor, 'Rename', member.get('label', ''), 'Rename', _commit,
+                                allow_empty=True)
 
     def _remove_member(self, slot_index: int, member_index: int) -> None:
         slots = self._config.home_slots

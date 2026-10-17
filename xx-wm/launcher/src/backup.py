@@ -82,6 +82,7 @@ def backup_export_dir() -> Path:
 
 _BOOL_KEYS = (
     'prefer_dark',
+    'home_to_recents',
     'search_auto_launch',
     'sound_ringtone',
     'sound_notifications',

@@ -560,7 +560,12 @@ class DrawerPage:
         win = self._win
         if win._pick_slot_mode:
             win._pick_slot_mode = False
-            win._add_app_slot(entry)
+            target = getattr(win, '_pick_slot_target', None)
+            win._pick_slot_target = None
+            if target is not None:
+                win._replace_app_slot(target, entry)
+            else:
+                win._add_app_slot(entry)
             return
         if win._pick_gesture_key:
             key = win._pick_gesture_key

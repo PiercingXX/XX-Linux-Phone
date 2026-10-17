@@ -71,6 +71,9 @@ def window():
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = mod
+        # Don't leak the fake-bound window module either (test_folders
+        # idiom): a later `import window` must rebind against real gi.
+        sys.modules.pop('window', None)
 
 
 def _install_dbus(window):
