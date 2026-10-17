@@ -1,0 +1,14 @@
+:authority: music.youtube.com
+:method: POST
+:path: /youtubei/v1/browse?alt=json&key=fake-key-0000
+:scheme: https
+accept: */*
+accept-language: en-US,en;q=0.9
+authorization: SAPISIDHASH 1700000000_fakehash0000brand
+content-type: application/json
+cookie: SID=fake-SID-brand-1001; HSID=fake-HSID-brand-1002; SSID=fake-SSID-brand-1003; __Secure-3PAPISID=fake-3PAPISID-brand-1007; LOGIN_INFO=fake-login-info-brand-1009; PREF=fake-PREF-brand-1010; YSC=fake-YSC-brand-1011
+origin: https://music.youtube.com
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FakeBrowser/120.0
+x-goog-authuser: 1
+x-goog-visitor-id: fake-visitor-brand-1013
+x-origin: https://music.youtube.com

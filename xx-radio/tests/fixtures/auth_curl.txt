@@ -1,0 +1,16 @@
+curl 'https://music.youtube.com/youtubei/v1/browse?alt=json&key=fake-key-0000' \
+  -H 'accept: */*' \
+  -H 'accept-language: en-US,en;q=0.9' \
+  -H 'authorization: SAPISIDHASH 1700000000_fakehash0000curl' \
+  -H 'content-type: application/json' \
+  -H 'cookie: SID=fake-SID-curl-2001; HSID=fake-HSID-curl-2002; SSID=fake-SSID-curl-2003; __Secure-3PAPISID=fake-3PAPISID-curl-2007; LOGIN_INFO=fake-login-info-curl-2009; PREF=fake-PREF-curl-2010; YSC=fake-YSC-curl-2011' \
+  -H 'origin: https://music.youtube.com' \
+  -H 'referer: https://music.youtube.com/' \
+  -H 'sec-ch-ua: "Chromium";v="120", "Not-A.Brand";v="99"' \
+  -H 'sec-fetch-mode: cors' \
+  -H 'user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FakeBrowser/120.0' \
+  -H 'x-goog-authuser: 0' \
+  -H 'x-goog-visitor-id: fake-visitor-curl-2013' \
+  -H 'x-origin: https://music.youtube.com' \
+  --data-raw '{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"1.20240101.01.00"}},"browseId":"FEmusic_liked_videos"}' \
+  --compressed

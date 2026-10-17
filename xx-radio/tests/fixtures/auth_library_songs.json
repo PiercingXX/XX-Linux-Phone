@@ -1,0 +1,18 @@
+[
+  {
+    "videoId": "fake-video-0001",
+    "title": "Glass Harbor",
+    "artists": [{"name": "Lumen Drive", "id": "fake-artist-0001"}],
+    "album": {"name": "Tidewater", "id": "fake-album-0001"},
+    "likeStatus": "LIKE",
+    "thumbnails": [{"url": "https://example.invalid/fake-art-0001", "width": 60, "height": 60}]
+  },
+  {
+    "videoId": "fake-video-0002",
+    "title": "Low Orbit",
+    "artists": [{"name": "Lumen Drive", "id": "fake-artist-0001"}],
+    "album": {"name": "Tidewater", "id": "fake-album-0001"},
+    "likeStatus": "INDIFFERENT",
+    "thumbnails": [{"url": "https://example.invalid/fake-art-0002", "width": 60, "height": 60}]
+  }
+]

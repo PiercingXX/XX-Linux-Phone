@@ -1,0 +1,23 @@
+:authority: music.youtube.com
+:method: POST
+:path: /youtubei/v1/browse?alt=json&key=fake-key-0000
+:scheme: https
+accept: */*
+accept-language: en-US,en;q=0.9
+authorization: SAPISIDHASH 1700000000_fakehash0000block
+content-length: 312
+content-type: application/json
+cookie: SID=fake-SID-block-0001; HSID=fake-HSID-block-0002; SSID=fake-SSID-block-0003; APISID=fake-APISID-block-0004; SAPISID=fake-SAPISID-block-0005; __Secure-1PAPISID=fake-1PAPISID-block-0006; __Secure-3PAPISID=fake-3PAPISID-block-0007; LOGIN_INFO=fake-login-info-block-0009; PREF=fake-PREF-block-0010; YSC=fake-YSC-block-0011; VISITOR_INFO1_LIVE=fake-visitor-block-0012
+host: music.youtube.com
+origin: https://music.youtube.com
+referer: https://music.youtube.com/
+sec-ch-ua: "Chromium";v="120", "Not-A.Brand";v="99"
+sec-ch-ua-mobile: ?0
+sec-fetch-dest: empty
+sec-fetch-mode: cors
+sec-fetch-site: same-origin
+user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FakeBrowser/120.0
+x-goog-visitor-id: fake-visitor-block-0013
+x-origin: https://music.youtube.com
+x-youtube-client-name: 67
+x-youtube-client-version: 1.20240101.01.00

@@ -1,0 +1,18 @@
+[
+  {
+    "videoId": "fake-video-0001",
+    "title": "Glass Harbor",
+    "artists": [{"name": "Lumen Drive", "id": "fake-artist-0001"}],
+    "album": {"name": "Tidewater", "id": "fake-album-0001"},
+    "played": "2026-10-16T20:00:00Z",
+    "thumbnails": [{"url": "https://example.invalid/fake-art-0001", "width": 60, "height": 60}]
+  },
+  {
+    "videoId": "fake-video-0004",
+    "title": "Cinder Road",
+    "artists": [{"name": "North Hollow", "id": "fake-artist-0002"}],
+    "album": {"name": "Ember Season", "id": "fake-album-0002"},
+    "played": "2026-10-15T08:30:00Z",
+    "thumbnails": [{"url": "https://example.invalid/fake-art-0004", "width": 60, "height": 60}]
+  }
+]
