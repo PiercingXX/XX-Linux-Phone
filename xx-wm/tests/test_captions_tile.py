@@ -276,6 +276,15 @@ class TestTileState:
         assert captions.tile_label('starting') == 'Starting…'
         assert captions.tile_label('no-model') == 'No model'
         assert captions.tile_label('error', 'boom') == 'boom'
+
+    def test_dbus_errors_read_as_text_not_glib_wrappers(self):
+        unknown = Exception('g-dbus-error-quark: GDBus.Error:org.freedesktop.'
+                            'DBus.Error.ServiceUnknown: The name is not activatable (2)')
+        assert captions.error_text(unknown) == 'Unavailable'
+        failed = Exception('g-dbus-error-quark: GDBus.Error:io.piercingxx.'
+                           'Captions1.Error.NoAudio: No audio source')
+        assert captions.error_text(failed) == 'No audio source'
+        assert captions.error_text(RuntimeError('boom')) == 'boom'
         assert captions.tile_label('error', '') == 'Error'
         for state in captions.TILE_STATES:
             if state != 'error':

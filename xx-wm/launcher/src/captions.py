@@ -12,6 +12,7 @@ async off the GTK thread's back: replies unpack to a TUPLE of out-args
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -59,6 +60,23 @@ def tile_state(active: bool, starting: bool = False,
     if starting:
         return 'starting'
     return 'off'
+
+
+_UNREACHABLE = ('ServiceUnknown', 'NameHasNoOwner', 'NoReply', 'TimedOut',
+                'Disconnected')
+
+
+def error_text(exc: BaseException) -> str:
+    """Tile text for a failed call: the service's own message, without
+    GLib's 'g-dbus-error-quark: GDBus.Error:<name>:' wrapper, and
+    'Unavailable' when the service is not running or not answering."""
+    msg = str(exc)
+    m = re.search(r'GDBus\.Error:([\w.]+):?\s*(.*)', msg, re.S)
+    if not m:
+        return msg
+    if m.group(1).rsplit('.', 1)[-1] in _UNREACHABLE:
+        return 'Unavailable'
+    return m.group(2).strip() or 'Error'
 
 
 def tile_label(state: str, error: str | None = None) -> str:
@@ -320,7 +338,7 @@ class CaptionsController:
             params = start_params(PLAYBACK_SOURCE)
         except Exception as exc:
             self.starting = False
-            self.error = str(exc)
+            self.error = error_text(exc)
             self._fire()
             return
         from gi.repository import Gio
@@ -333,7 +351,7 @@ class CaptionsController:
                     conn, result, generation))
         except Exception as exc:
             self.starting = False
-            self.error = str(exc)
+            self.error = error_text(exc)
             self._fire()
 
     def _finish_start(self, conn, result, generation: int) -> None:
@@ -343,7 +361,7 @@ class CaptionsController:
             conn.call_finish(result)
         except Exception as exc:
             self.starting = False
-            self.error = str(exc)
+            self.error = error_text(exc)
             self._fire()
             return
         self.refresh()
@@ -362,7 +380,7 @@ class CaptionsController:
                 lambda conn, result: self._finish_stop(
                     conn, result, generation))
         except Exception as exc:
-            self.error = str(exc)
+            self.error = error_text(exc)
             self._fire()
 
     def _finish_stop(self, conn, result, generation: int) -> None:
@@ -371,7 +389,7 @@ class CaptionsController:
         try:
             conn.call_finish(result)
         except Exception as exc:
-            self.error = str(exc)
+            self.error = error_text(exc)
         self.refresh()
         self._fire()
 
@@ -399,7 +417,7 @@ class CaptionsController:
             if self.active:
                 self.starting = False
         except Exception as exc:
-            self.error = str(exc)
+            self.error = error_text(exc)
         self._fire()
 
     def _fire(self) -> None:
