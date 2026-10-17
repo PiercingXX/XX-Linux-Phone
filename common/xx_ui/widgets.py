@@ -70,6 +70,18 @@ def _fit_exact(text_label: Gtk.Label, text: str, chars: int) -> Gtk.Label:
     return text_label
 
 
+def fit_text(text_label: Gtk.Label, text: str, chars: int) -> Gtk.Label:
+    """Set text with an ellipsis only when it cannot fit ``chars``.
+
+    For labels whose text updates after build (hero numbers, empty
+    states, trailing times): short text never misfires an ellipsis on
+    fractional rounding; long text still truncates instead of widening
+    the window.
+    """
+    text_label.set_text(text)
+    return _fit_exact(text_label, text, chars)
+
+
 def _fit_button_text(button: Gtk.Button,
                      chars: int = _BUTTON_CHARS) -> Gtk.Button:
     child = button.get_child()

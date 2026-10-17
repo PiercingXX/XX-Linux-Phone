@@ -16,6 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "common"))
 
 import gi  # noqa: E402
 
@@ -111,7 +113,8 @@ def main() -> int:
     print("TEST_REASON:", reason)
     verdict2, _reason2 = rules_view.controller.test_number("+14155550100")
     print("TEST_STARRED:", verdict2)
-    print("ENFORCE_ACTIVE:", rules_view._mode_switch.get_active())
+    enforce_btn = rules_view._mode_seg.get_first_child()
+    print("ENFORCE_ACTIVE:", enforce_btn.has_css_class("seg-selected"))
 
     view.stack.set_visible_child_name("people")
     _pump(0.3)

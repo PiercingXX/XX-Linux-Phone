@@ -19,16 +19,17 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 
-from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, Gtk, Pango  # noqa: E402
 
-from xx_dialer import contacts_client, policy  # noqa: E402
+from xx_ui import widgets  # noqa: E402
+from xx_dialer import contacts_client, policy, t9  # noqa: E402
 from xx_dialer.store import Store  # noqa: E402
 
 MAX_MATCHES = 6
 MIN_SAVE_DIGITS = 3
 
 _KEY_LETTERS = {
-    "2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL",
+    "1": "VM", "2": "ABC", "3": "DEF", "4": "GHI", "5": "JKL",
     "6": "MNO", "7": "PQRS", "8": "TUV", "9": "WXYZ",
 }
 
@@ -85,7 +86,7 @@ class KeypadView:
         self.buffer = buffer or KeypadBuffer()
         self._suppress_click: set = set()
         self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                             spacing=6)
+                             spacing=4)
         self._toast = Adw.ToastOverlay()
         self._build()
         self.refresh()
@@ -107,26 +108,22 @@ class KeypadView:
             pass
 
     def _build(self) -> None:
-        entry_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                            spacing=6)
-        self._number = Gtk.Label(label="", xalign=0.5, hexpand=True)
-        self._number.set_ellipsize(Pango.EllipsizeMode.END)
+        self._header = widgets.page_header("Keypad")
+        self._root.append(self._header)
+
+        self._number = widgets.label("", "xx-hero", xalign=0.5)
         self._number.set_selectable(False)
         self._number.set_can_focus(False)
         self._number.set_focusable(False)
-        self._number.add_css_class("xx-number")
         paste = Gtk.GestureLongPress.new()
         paste.connect("pressed", self._on_paste_press)
         self._number.add_controller(paste)
-        entry_row.append(self._number)
-        self._delete = Gtk.Button(label="Delete")
-        self._delete.connect("clicked", self._on_delete_click)
-        clear_press = Gtk.GestureLongPress.new()
-        clear_press.connect("pressed", self._on_delete_long)
-        clear_press.connect("cancel", self._on_press_cancel)
-        self._delete.add_controller(clear_press)
-        entry_row.append(self._delete)
-        self._root.append(entry_row)
+        self._root.append(self._number)
+
+        self._match_card = widgets.card()
+        self._match_card.set_margin_start(20)
+        self._match_card.set_margin_end(20)
+        self._root.append(self._match_card)
 
         match_scroll = Gtk.ScrolledWindow()
         match_scroll.set_policy(Gtk.PolicyType.NEVER,
@@ -139,30 +136,20 @@ class KeypadView:
         self._root.append(match_scroll)
         self._match_scroll = match_scroll
 
-        grid = Gtk.Grid(column_spacing=6, row_spacing=6)
+        grid = Gtk.Grid(column_spacing=8, row_spacing=4)
         grid.set_column_homogeneous(True)
-        grid.set_row_homogeneous(True)
+        grid.set_hexpand(True)
+        grid.set_margin_start(20)
+        grid.set_margin_end(20)
         self._keys: dict[str, Gtk.Button] = {}
         for position, digit in enumerate(
                 ["1", "2", "3", "4", "5", "6", "7", "8", "9",
                  "*", "0", "#"]):
-            button = Gtk.Button()
-            letters = _KEY_LETTERS.get(digit, "")
-            if letters:
-                inner = Gtk.Label(
-                    label="<big>%s</big>\n<small>%s</small>"
-                    % (digit, letters),
-                    use_markup=True, justify=Gtk.Justification.CENTER)
-            else:
-                inner = Gtk.Label(
-                    label="<big>%s</big>" % digit, use_markup=True,
-                    justify=Gtk.Justification.CENTER)
-            inner.set_can_focus(False)
-            button.set_child(inner)
+            sub = "+" if digit == "0" else _KEY_LETTERS.get(digit, "")
+            button = widgets.keypad_key(digit, sub)
+            button.connect("clicked", self._on_key, digit)
             button.set_hexpand(True)
             button.set_vexpand(True)
-            button.add_css_class("xx-key")
-            button.connect("clicked", self._on_key, digit)
             if digit == "0":
                 press = Gtk.GestureLongPress.new()
                 press.connect("pressed", self._on_zero_long)
@@ -178,10 +165,22 @@ class KeypadView:
         grid.set_vexpand(True)
         self._root.append(grid)
 
-        self._call = Gtk.Button(label="Call")
-        self._call.add_css_class("suggested-action")
-        self._call.connect("clicked", self._on_call_click)
-        self._root.append(self._call)
+        call_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                           spacing=16)
+        call_row.set_halign(Gtk.Align.CENTER)
+        call_row.set_valign(Gtk.Align.CENTER)
+        self._call = widgets.call_button("Call", self._on_call_click)
+        self._call.add_css_class("xx-dialer-tight")
+        self._delete = widgets.icon_button(
+            "edit-clear-symbolic", self._on_delete_click)
+        self._delete.add_css_class("xx-dialer-tight")
+        clear_press = Gtk.GestureLongPress.new()
+        clear_press.connect("pressed", self._on_delete_long)
+        clear_press.connect("cancel", self._on_press_cancel)
+        self._delete.add_controller(clear_press)
+        call_row.append(self._call)
+        call_row.append(self._delete)
+        self._root.append(call_row)
         self._toast.set_child(self._root)
 
     # ---- keys -------------------------------------------------------------
@@ -223,7 +222,7 @@ class KeypadView:
             return
         self.place(number)
 
-    def _on_delete_click(self, _button: Gtk.Button) -> None:
+    def _on_delete_click(self, _button: Gtk.Button | None = None) -> None:
         if _button in self._suppress_click:
             self._suppress_click.discard(_button)
             return
@@ -264,7 +263,7 @@ class KeypadView:
         except Exception:
             self._notice("Clipboard is empty.")
 
-    def _on_call_click(self, _button: Gtk.Button) -> None:
+    def _on_call_click(self, _button: Gtk.Button | None = None) -> None:
         if not self.buffer.can_call:
             return
         self.place(dial_target(self.buffer.digits))
@@ -305,24 +304,29 @@ class KeypadView:
         return [(uid, number, name) for uid, number, name, _hit in hits]
 
     def refresh(self) -> None:
-        self._number.set_text(self.buffer.digits or "Enter number")
+        widgets.fit_text(
+            self._number, self.buffer.digits or "Enter number", 12)
         self._call.set_sensitive(self.buffer.can_call)
+        hits = self.match_rows()
+        digit_count = sum(ch.isdigit() for ch in self.buffer.digits)
+        saveable = dial_target(self.buffer.digits) \
+            if digit_count >= MIN_SAVE_DIGITS else ""
+        self._render_card(hits[0] if hits else None, saveable)
         while True:
             row = self._matches.get_row_at_index(0)
             if row is None:
                 break
             self._matches.remove(row)
-        hits = self.match_rows()
-        for uid, number, name in hits:
+        for uid, number, name in hits[1:]:
             button = Gtk.Button()
-            inner = Gtk.Label(
-                label="<b>%s</b>\n%s" % (
-                    GLib.markup_escape_text(name or number),
-                    GLib.markup_escape_text(number)),
-                use_markup=True, xalign=0.0,
-                ellipsize=Pango.EllipsizeMode.END)
-            inner.set_can_focus(False)
-            button.set_child(inner)
+            button.add_css_class("xx-btn")
+            button.add_css_class("xx-dialer-tight")
+            shown = "%s · %s" % (name, number) if name else number
+            text = Gtk.Label(label=shown, xalign=0.0)
+            text.add_css_class("xx-title")
+            text.set_ellipsize(Pango.EllipsizeMode.END)
+            text.set_valign(Gtk.Align.CENTER)
+            button.set_child(text)
 
             def _picked(_btn, picked=number) -> None:
                 self.buffer.set(picked)
@@ -330,15 +334,54 @@ class KeypadView:
 
             button.connect("clicked", _picked)
             self._matches.append(button)
-        digit_count = sum(ch.isdigit() for ch in self.buffer.digits)
-        if not hits and digit_count >= MIN_SAVE_DIGITS:
-            number = dial_target(self.buffer.digits)
-            save = Gtk.Button(
-                label="Save %s to contacts" % number)
-            save.connect("clicked", self._on_save, number)
-            self._matches.append(save)
-        self._match_scroll.set_visible(
-            bool(hits) or digit_count >= MIN_SAVE_DIGITS)
+        self._match_scroll.set_visible(bool(hits[1:]))
+
+    def _render_card(self, top: tuple | None, saveable: str) -> None:
+        while True:
+            child = self._match_card.get_first_child()
+            if child is None:
+                break
+            self._match_card.remove(child)
+        if top is None and not saveable:
+            self._match_card.set_visible(False)
+            return
+        self._match_card.set_visible(True)
+        number = top[1] if top is not None else saveable
+        name = top[2] if top is not None else ""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                      spacing=12)
+        row.set_valign(Gtk.Align.CENTER)
+        row.append(widgets.avatar(t9.initials(name) if name else "",
+                                  40, dashed=not name))
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        text.set_hexpand(True)
+        text.set_valign(Gtk.Align.CENTER)
+        primary = Gtk.Label(label=name or number, xalign=0.0)
+        primary.add_css_class("xx-title")
+        primary.set_ellipsize(Pango.EllipsizeMode.END)
+        secondary = Gtk.Label(label=number, xalign=0.0)
+        secondary.add_css_class("xx-secondary")
+        secondary.set_ellipsize(Pango.EllipsizeMode.END)
+        text.append(primary)
+        text.append(secondary)
+        row.append(text)
+        self._match_card.append(row)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                          spacing=8)
+        actions.set_halign(Gtk.Align.CENTER)
+        save = widgets.caps_button("+ Save")
+        save.connect("clicked", self._on_save, number)
+        actions.append(save)
+        text_btn = widgets.caps_button("Text this number")
+        text_btn.connect("clicked", self._on_text, number)
+        actions.append(text_btn)
+        self._match_card.append(actions)
+
+    def _on_text(self, _button: Gtk.Button, number: str) -> None:
+        try:
+            Gio.AppInfo.launch_default_for_uri("sms:%s" % number, None)
+        except Exception:
+            self._notice("No messaging app is available.")
 
     def _on_save(self, _button: Gtk.Button, number: str) -> None:
         client = self.deps.contacts

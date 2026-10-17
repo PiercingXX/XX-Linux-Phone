@@ -16,6 +16,8 @@ from pathlib import Path
 
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
 sys.path.insert(0, SRC)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "common"))
 
 import gi  # noqa: E402
 
@@ -26,10 +28,11 @@ from gi.repository import Adw, Gio, GLib  # noqa: E402
 
 Adw.init()
 
+import xx_ui  # noqa: E402
+
 from xx_dialer.main import (  # noqa: E402
     APP_ID,
     DialerDeps,
-    apply_shell_theme,
     build_dialer_view,
 )
 from xx_dialer.service import BUS_NAME, INTERFACE, OBJECT_PATH  # noqa: E402
@@ -102,7 +105,7 @@ def main() -> int:
             window.set_title("XX Dialer")
             window.set_default_size(360, 720)
             window.set_content(view.widget)
-            apply_shell_theme()
+            xx_ui.apply(window)
             window.present()
 
         app.connect("activate", _on_activate)

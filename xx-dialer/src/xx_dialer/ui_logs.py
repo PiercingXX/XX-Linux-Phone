@@ -15,8 +15,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_dialer import applog  # noqa: E402
 
 
@@ -25,6 +26,7 @@ class LogsDeps:
     db_file: Path
     home: Path | None = None
     notice: object = None
+    navigate: object = None
 
 
 class LogsController:
@@ -61,6 +63,8 @@ class LogsView:
 
     def __init__(self, controller: LogsController) -> None:
         self.controller = controller
+        navigate = getattr(controller._deps, "navigate", None)
+        self._navigate = navigate if callable(navigate) else None
         self._root: Gtk.Widget | None = None
         self._selected: str | None = None
         self._build()
@@ -71,51 +75,48 @@ class LogsView:
         assert self._root is not None
         return self._root
 
-    def _section(self, title: str) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        label = Gtk.Label(label=title, xalign=0.0)
-        label.add_css_class("title-4")
-        box.append(label)
-        assert self._body is not None
-        self._body.append(box)
-        return box
+    def _go_recents(self) -> None:
+        if self._navigate is not None:
+            self._navigate("recents")
 
     def _build(self) -> None:
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_vexpand(True)
+        if self._navigate is not None:
+            header = widgets.compact_header(self._go_recents, "Logs")
+        else:
+            header = widgets.page_header("Logs")
         self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                             spacing=10)
-        scroll.set_child(self._body)
+                             spacing=8)
+        self._body.add_css_class("xx-page-body")
 
-        files = self._section("Log files")
-        note = Gtk.Label(label="Phone numbers are masked.", xalign=0.0)
-        note.add_css_class("xx-muted")
-        note.set_wrap(True)
-        files.append(note)
+        self._body.append(widgets.section_label("Log files"))
+        note = widgets.wrap_label("Phone numbers are masked.")
+        self._body.append(note)
         self._file_list = Gtk.ListBox()
         self._file_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        files.append(self._file_list)
+        self._body.append(self._file_list)
         brow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._refresh_button = Gtk.Button(label="Refresh")
+        self._refresh_button = widgets.outline_button("Refresh")
+        self._refresh_button.set_hexpand(True)
         self._refresh_button.connect("clicked", self._on_refresh)
         brow.append(self._refresh_button)
-        self._clear_button = Gtk.Button(label="Clear logs")
+        self._clear_button = widgets.outline_button("Clear logs")
+        self._clear_button.set_hexpand(True)
         self._clear_button.connect("clicked", self._on_clear)
         brow.append(self._clear_button)
-        files.append(brow)
+        self._body.append(brow)
 
-        view = self._section("Preview")
+        self._body.append(widgets.section_label("Preview"))
         self._preview_scroll = Gtk.ScrolledWindow()
         self._preview_scroll.set_min_content_height(240)
         self._preview = Gtk.TextView()
         self._preview.set_editable(False)
         self._preview.set_can_focus(False)
         self._preview.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._preview.add_css_class("xx-muted")
+        self._preview.add_css_class("xx-entry")
         self._preview_scroll.set_child(self._preview)
-        view.append(self._preview_scroll)
+        self._body.append(self._preview_scroll)
 
-        self._root = scroll
+        self._root = widgets.page(header, self._body)
 
     def refresh(self) -> None:
         while True:
@@ -128,12 +129,16 @@ class LogsView:
         except Exception:
             files = []
         if not files:
-            label = Gtk.Label(label="No log files yet.", xalign=0.0)
-            label.add_css_class("xx-muted")
+            label = widgets.label("No log files yet.", "xx-secondary")
             self._file_list.append(label)
         for name, size, _mtime in files:
-            button = Gtk.Button(label="%s (%d bytes)" % (name, size))
-            button.set_halign(Gtk.Align.FILL)
+            button = Gtk.Button()
+            button.add_css_class("xx-menu-row")
+            text = Gtk.Label(label="%s (%d bytes)" % (name, size),
+                             xalign=0.0)
+            text.add_css_class("xx-title")
+            text.set_ellipsize(Pango.EllipsizeMode.END)
+            button.set_child(text)
             button.connect("clicked", self._on_pick, name)
             self._file_list.append(button)
             if self._selected is None:

@@ -1,0 +1,18 @@
+/* xx-dialer app-specific CSS. Spacing only: every color comes from the
+   shared xx_ui stylesheet, which is installed first and wins ties by
+   order. One utility lives here: trim the theme's vertical button
+   padding (44 px touch targets intact) where a full keypad house (hero
+   + match card + five matches + keys + call row) must fit the 360x720
+   phone canvas. */
+.xx-dialer-tight {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Recents filter chips: four across must fit the 320 px content width,
+   so trim the shared chip side padding here (scoped: other lanes keep
+   the roomier shared chips). */
+.xx-dialer-chips .xx-chip {
+  padding-left: 10px;
+  padding-right: 10px;
+}

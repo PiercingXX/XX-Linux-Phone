@@ -24,6 +24,7 @@ gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, Gio, GObject, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_dialer import policy, recents, t9  # noqa: E402
 from xx_dialer.store import BLOCKED_GROUP, BIZ_TIER, Store  # noqa: E402
 
@@ -288,25 +289,23 @@ class PeopleView:
     def __init__(self, controller: PeopleController) -> None:
         self.controller = controller
         self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                             spacing=6)
-        self._root.set_margin_start(12)
-        self._root.set_margin_end(12)
-        self._root.set_margin_top(8)
-        self._root.set_margin_bottom(8)
+                             spacing=0)
         self._build()
         self.refresh()
 
     @property
     def widget(self) -> Gtk.Widget:
-        return self._scroll
+        return self._root
 
     def _build(self) -> None:
-        self._scroll = Gtk.ScrolledWindow()
-        self._scroll.set_vexpand(True)
-        self._scroll.set_child(self._root)
-        self._empty = Gtk.Label(label="", xalign=0.5)
-        self._empty.add_css_class("xx-muted")
-        self._empty.set_wrap(True)
+        self._header = widgets.page_header("People")
+        self._caption = widgets.caption("")
+        self._header.append(self._caption)
+        self._root.append(self._header)
+        self._empty = widgets.label("", "xx-empty", xalign=0.5)
+        self._empty.set_halign(Gtk.Align.CENTER)
+        self._empty.set_valign(Gtk.Align.CENTER)
+        self._empty.set_vexpand(True)
         self._root.append(self._empty)
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._on_setup)
@@ -316,12 +315,18 @@ class PeopleView:
         self._list = Gtk.ListView(model=selection, factory=factory)
         self._list.set_single_click_activate(True)
         self._list.connect("activate", self._on_activate)
-        self._root.append(self._list)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER,
+                          Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_child(self._list)
+        self._root.append(scroll)
 
     def refresh(self) -> None:
         snapshot = self.controller.load()
         while self._store.get_n_items():
             self._store.remove(0)
+        total = 0
         for title, people in snapshot.sections:
             if not people:
                 continue
@@ -337,49 +342,94 @@ class PeopleView:
                 item.number = person.primary
                 item.meta = person_marks(person)
                 self._store.append(item)
+                total += 1
+        self._caption.set_text("%d CONTACT%s"
+                               % (total, "" if total == 1 else "S"))
         self._empty.set_visible(self._store.get_n_items() == 0)
         if self._store.get_n_items() == 0:
-            self._empty.set_text(snapshot.empty_reason or
-                                 "No contacts yet.")
+            widgets.fit_text(
+                self._empty,
+                snapshot.empty_reason or "No contacts yet.", 32)
 
     # ---- factory ----------------------------------------------------------
 
     def _on_setup(self, _factory, list_item) -> None:
-        root = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                       spacing=8)
-        avatar = Gtk.Label(label="", xalign=0.5)
-        avatar.set_size_request(40, 40)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                       spacing=0)
+        root.add_css_class("xx-row")
+        section = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                          spacing=0)
+        section.set_valign(Gtk.Align.CENTER)
+        section_title = Gtk.Label(label="", xalign=0.0)
+        section_title.add_css_class("xx-caption")
+        section_title.set_hexpand(True)
+        section_title.set_ellipsize(Pango.EllipsizeMode.END)
+        section.append(section_title)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                      spacing=12)
+        row.set_valign(Gtk.Align.CENTER)
+        disc = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                       spacing=0)
+        disc.set_valign(Gtk.Align.CENTER)
         name = Gtk.Label(label="", xalign=0.0, hexpand=True)
+        name.add_css_class("xx-title")
         name.set_ellipsize(Pango.EllipsizeMode.END)
-        meta = Gtk.Label(label="", xalign=1.0)
-        meta.add_css_class("xx-muted")
-        root.append(avatar)
-        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        text.append(name)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        text.set_hexpand(True)
+        text.set_valign(Gtk.Align.CENTER)
         sub = Gtk.Label(label="", xalign=0.0)
-        sub.add_css_class("xx-muted")
+        sub.add_css_class("xx-secondary")
         sub.set_ellipsize(Pango.EllipsizeMode.END)
+        text.append(name)
         text.append(sub)
-        root.append(text)
-        root.append(meta)
+        meta = Gtk.Label(label="", xalign=1.0)
+        meta.add_css_class("xx-time")
+        meta.set_ellipsize(Pango.EllipsizeMode.END)
+        row.append(disc)
+        row.append(text)
+        row.append(meta)
+        gutter = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=0)
+        gutter.set_margin_start(20)
+        gutter.set_margin_end(20)
+        gutter.append(section)
+        gutter.append(row)
+        root.append(gutter)
         list_item.set_child(root)
-        list_item.xx_parts = (name, sub, meta, avatar)
+        list_item.xx_parts = (root, section, section_title,
+                              row, disc, name, sub, meta)
 
     def _on_bind(self, _factory, list_item) -> None:
         item = list_item.get_item()
-        name, sub, meta, avatar = list_item.xx_parts
-        if item.kind == "header":
-            name.set_text(item.title)
-            sub.set_text("")
-            meta.set_text("")
-            avatar.set_text("")
-            list_item.get_child().person_uid = None
+        (root, section, section_title,
+         row, disc, name, sub, meta) = list_item.xx_parts
+        total = self._store.get_n_items()
+        try:
+            last = list_item.get_position() == total - 1
+        except Exception:
+            last = False
+        if last:
+            root.add_css_class("last")
         else:
-            name.set_text(item.title)
-            sub.set_text(item.number)
-            meta.set_text(item.meta)
-            avatar.set_text(t9.initials(item.title))
-            list_item.get_child().person_uid = item.uid
+            root.remove_css_class("last")
+        if item.kind == "header":
+            section.set_visible(True)
+            row.set_visible(False)
+            section_title.set_text(item.title.upper())
+            list_item.get_child().person_uid = None
+            return
+        section.set_visible(False)
+        row.set_visible(True)
+        while True:
+            child = disc.get_first_child()
+            if child is None:
+                break
+            disc.remove(child)
+        disc.append(widgets.avatar(t9.initials(item.title), 40))
+        name.set_text(item.title)
+        sub.set_text(item.number)
+        widgets.fit_text(meta, item.meta, 12)
+        list_item.get_child().person_uid = item.uid
 
     def _on_activate(self, _view, position: int) -> None:
         item = self._store.get_item(position)
@@ -393,37 +443,37 @@ class PeopleView:
 
     def _open_sheet(self, person: Person, anchor: Gtk.Widget) -> None:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
-        name = Gtk.Label(label=person.display_name or person.primary,
-                         xalign=0.0)
+        box.set_margin_start(20)
+        box.set_margin_end(20)
+        box.set_margin_top(20)
+        box.set_margin_bottom(20)
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                       spacing=12)
+        head.set_valign(Gtk.Align.CENTER)
+        head.append(widgets.avatar(
+            t9.initials(person.display_name or person.primary), 64))
+        title = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        title.set_hexpand(True)
+        title.set_valign(Gtk.Align.CENTER)
+        name = Gtk.Label(
+            label=person.display_name or person.primary, xalign=0.0)
+        name.add_css_class("xx-title")
+        name.set_ellipsize(Pango.EllipsizeMode.END)
         numbers = Gtk.Label(
             label="\n".join(person.numbers) or "No numbers",
             xalign=0.0)
-        numbers.add_css_class("xx-muted")
+        numbers.add_css_class("xx-secondary")
         numbers.set_ellipsize(Pango.EllipsizeMode.END)
-        box.append(name)
-        box.append(numbers)
-        star = Gtk.Switch()
-        star.set_can_focus(False)
-        star.set_active(person.starred)
-        business = Gtk.Switch()
-        business.set_can_focus(False)
-        business.set_active(person.business)
-        blocked = Gtk.Switch()
-        blocked.set_can_focus(False)
-        blocked.set_active(person.blocked)
+        title.append(name)
+        title.append(numbers)
+        head.append(title)
+        box.append(head)
+        star = widgets.make_switch(person.starred)
+        business = widgets.make_switch(person.business)
+        blocked = widgets.make_switch(person.blocked)
         for switch, label in ((star, "Starred"), (business, "Business"),
                               (blocked, "Blocked")):
-            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                           spacing=8)
-            text = Gtk.Label(label=label, xalign=0.0, hexpand=True)
-            text.set_ellipsize(Pango.EllipsizeMode.END)
-            line.append(text)
-            line.append(switch)
-            box.append(line)
+            box.append(widgets.setting_row(label, trailing=switch))
 
         star.connect("notify::active", self._on_sheet_star, person)
         business.connect("notify::active", self._on_sheet_business,
@@ -432,10 +482,12 @@ class PeopleView:
                         person)
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                           spacing=8)
-        call = Gtk.Button(label="Call")
+        call = widgets.outline_button("Call")
+        call.set_hexpand(True)
         call.connect("clicked",
                      lambda _btn: self.controller.call(person))
-        message = Gtk.Button(label="Message")
+        message = widgets.outline_button("Message")
+        message.set_hexpand(True)
         message.connect("clicked",
                         lambda _btn: self.controller.message(person))
         actions.append(call)
@@ -448,6 +500,7 @@ class PeopleView:
         popover.set_pointing_to(point)
         popover.set_child(box)
         popover.popup()
+        return popover
 
     def _on_sheet_star(self, switch: Gtk.Switch, _spec,
                        person: Person) -> None:

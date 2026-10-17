@@ -22,14 +22,15 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_dialer import config as app_config  # noqa: E402
 from xx_dialer import rules, setup as setup_probes  # noqa: E402
 from xx_dialer.store import Store  # noqa: E402
 
-GLYPH_OK = "ok"
-GLYPH_WARN = "!"
+GLYPH_OK = "object-select-symbolic"
+GLYPH_WARN = "dialog-warning-symbolic"
 
 
 @dataclass
@@ -40,6 +41,7 @@ class SetupDeps:
     fetch_names: object = None
     fetch_modems: object = None
     test_ring: object = None
+    navigate: object = None
 
 
 @dataclass
@@ -145,71 +147,79 @@ class SetupView:
 
     def __init__(self, controller: SetupController) -> None:
         self.controller = controller
+        navigate = getattr(controller._deps, "navigate", None)
+        self._navigate = navigate if callable(navigate) else None
         self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                             spacing=10)
-        self._root.set_margin_start(12)
-        self._root.set_margin_end(12)
-        self._root.set_margin_top(8)
-        self._root.set_margin_bottom(8)
+                             spacing=8)
         self._build()
         self.refresh()
         self.recheck()
 
     @property
     def widget(self) -> Gtk.Widget:
-        return self._scroll
+        return self._page
+
+    def _go_recents(self) -> None:
+        if self._navigate is not None:
+            self._navigate("recents")
 
     def _build(self) -> None:
-        self._scroll = Gtk.ScrolledWindow()
-        self._scroll.set_vexpand(True)
-        self._scroll.set_child(self._root)
-        intro = Gtk.Label(
-            label="Each step shows its actual state. Finish starts a "
-                  "week of watching; screening is offered after, "
-                  "never switched on.",
-            xalign=0.0)
-        intro.set_wrap(True)
-        intro.add_css_class("xx-muted")
-        self._root.append(intro)
-        self._rows: dict[str, tuple[Gtk.Label, Gtk.Label]] = {}
+        if self._navigate is not None:
+            header = widgets.compact_header(self._go_recents, "Setup")
+        else:
+            header = widgets.page_header("Setup")
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                       spacing=8)
+        body.add_css_class("xx-page-body")
+        intro = widgets.wrap_label(
+            "Each step shows its actual state. Finish starts a week "
+            "of watching; screening is offered after, never switched "
+            "on.")
+        body.append(intro)
+        self._rows: dict[str, tuple[Gtk.Image, Gtk.Label]] = {}
         for _key, title in self.ROWS:
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                          spacing=8)
-            glyph = Gtk.Label(label="...", xalign=0.5)
-            glyph.set_size_request(28, -1)
+                          spacing=12)
+            box.set_valign(Gtk.Align.CENTER)
+            glyph = widgets.icon_image("dialog-warning-symbolic")
+            glyph.set_valign(Gtk.Align.CENTER)
             text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                           spacing=0)
-            head = Gtk.Label(label=title, xalign=0.0)
-            detail = Gtk.Label(label="Checking...", xalign=0.0)
-            detail.add_css_class("xx-muted")
-            detail.set_wrap(True)
-            detail.set_ellipsize(Pango.EllipsizeMode.END)
+                           spacing=2)
+            text.set_hexpand(True)
+            text.set_valign(Gtk.Align.CENTER)
+            head = widgets.label(title, "xx-title")
+            detail = widgets.wrap_label("Checking...")
             text.append(head)
             text.append(detail)
             box.append(glyph)
             box.append(text)
-            self._root.append(box)
+            body.append(box)
             self._rows[_key] = (glyph, detail)
         brow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._recheck_button = Gtk.Button(label="Recheck")
+        self._recheck_button = widgets.outline_button("Recheck")
+        self._recheck_button.set_hexpand(True)
         self._recheck_button.connect("clicked", self._on_recheck)
-        self._ring_button = Gtk.Button(label="Send test ring")
+        self._ring_button = widgets.outline_button("Test ring")
+        self._ring_button.set_hexpand(True)
         self._ring_button.connect("clicked", self._on_test_ring)
         brow.append(self._recheck_button)
         brow.append(self._ring_button)
-        self._root.append(brow)
-        self._observe_label = Gtk.Label(label="", xalign=0.0)
-        self._observe_label.set_wrap(True)
-        self._observe_label.add_css_class("xx-muted")
-        self._root.append(self._observe_label)
+        body.append(brow)
+        self._observe_label = widgets.wrap_label("")
+        body.append(self._observe_label)
         frow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._finish_button = Gtk.Button(label="Finish: watch for a week")
+        self._finish_button = widgets.outline_button(
+            "Finish: watch for a week")
+        self._finish_button.set_hexpand(True)
         self._finish_button.connect("clicked", self._on_finish)
-        self._enforce_button = Gtk.Button(label="Start screening now")
+        self._enforce_button = widgets.primary_button(
+            "Start screening now")
+        self._enforce_button.set_hexpand(True)
         self._enforce_button.connect("clicked", self._on_enforce)
         frow.append(self._finish_button)
         frow.append(self._enforce_button)
-        self._root.append(frow)
+        body.append(frow)
+        self._page = widgets.page(header, body)
 
     # ---- refresh ----------------------------------------------------------
 
@@ -220,7 +230,8 @@ class SetupView:
         for key, probe in ((key, getattr(snapshot, key))
                            for key, _title in self.ROWS):
             glyph, detail = self._rows[key]
-            glyph.set_text(GLYPH_OK if probe.ok else GLYPH_WARN)
+            glyph.set_from_icon_name(
+                GLYPH_OK if probe.ok else GLYPH_WARN)
             detail.set_text(probe.detail)
         if snapshot.enforcing:
             self._observe_label.set_text("Screening is on.")
@@ -243,10 +254,10 @@ class SetupView:
 
         threading.Thread(target=_work, daemon=True).start()
 
-    def _on_recheck(self, _button: Gtk.Button) -> None:
+    def _on_recheck(self, _button: Gtk.Button | None = None) -> None:
         self.recheck()
 
-    def _on_finish(self, _button: Gtk.Button) -> None:
+    def _on_finish(self, _button: Gtk.Button | None = None) -> None:
         def _work() -> None:
             try:
                 snapshot = self.controller.finish()
@@ -256,7 +267,7 @@ class SetupView:
 
         threading.Thread(target=_work, daemon=True).start()
 
-    def _on_enforce(self, _button: Gtk.Button) -> None:
+    def _on_enforce(self, _button: Gtk.Button | None = None) -> None:
         dialog = Adw.AlertDialog.new(
             "Start screening?",
             "Unknown calls outside their window stay silent and "
@@ -286,7 +297,7 @@ class SetupView:
         if isinstance(parent, Gtk.Window):
             dialog.present(parent)
 
-    def _on_test_ring(self, _button: Gtk.Button) -> None:
+    def _on_test_ring(self, _button: Gtk.Button | None = None) -> None:
         self._ring_button.set_sensitive(False)
 
         def _done(ok: bool, detail: str) -> None:
@@ -298,9 +309,10 @@ class SetupView:
                 glyph, text = self._rows["notify"]
                 if ok:
                     text.set_text("Test ring sent.")
+                    glyph.set_from_icon_name(GLYPH_OK)
                 else:
                     text.set_text("Test ring failed: %s" % detail)
-                    glyph.set_text(GLYPH_WARN)
+                    glyph.set_from_icon_name(GLYPH_WARN)
                 return False
 
             GLib.idle_add(_show)

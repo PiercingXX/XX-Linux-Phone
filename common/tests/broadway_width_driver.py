@@ -97,6 +97,7 @@ def main() -> None:
     dialog.append(widgets.deferred_entry(LONG))
     dialog.append(widgets.wrap_label(LONG, 'xx-body'))
     dialog.append(widgets.wrap_label(LONG))
+    dialog.append(widgets.fit_text(Gtk.Label(), LONG, 12))
     rows.append(dialog)
     body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
     body.append(widgets.label(LONG, 'xx-title'))

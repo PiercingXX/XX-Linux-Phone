@@ -23,18 +23,19 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_dialer import config as app_config  # noqa: E402
 from xx_dialer import importers, masks, policy, rules  # noqa: E402
 from xx_dialer.service import PolicyService  # noqa: E402
 from xx_dialer.store import BLOCKED_GROUP, PatternRow, Store  # noqa: E402
 
-HIDDEN_OPTIONS = ("Treat as unknown", "Silence", "Block")
+HIDDEN_OPTIONS = ("Unknown", "Silence", "Block")
 HIDDEN_VALUES = ("unknown", "silence", "block")
 
-NOTIF_OPTIONS = ("Right away", "Daily summary", "Never")
+NOTIF_OPTIONS = ("At once", "Daily", "Never")
 NOTIF_VALUES = ("immediate", "daily", "never")
 
-BYPASS_OPTIONS = ("30 min", "2 h", "8 h")
+BYPASS_OPTIONS = (("30 min", 30), ("2 h", 120), ("8 h", 480))
 
 TONE_KEYS = (("unknown_tone", "Unknown callers"),
              ("default_tone", "Default"))
@@ -298,18 +299,14 @@ class RulesView:
         self._suppress = False
         self._snapshot = controller.load()
         self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                             spacing=10)
-        self._root.set_margin_start(12)
-        self._root.set_margin_end(12)
-        self._root.set_margin_top(8)
-        self._root.set_margin_bottom(8)
+                             spacing=0)
         self._build()
         self.refresh()
         GLib.timeout_add(15_000, self._on_tick)
 
     @property
     def widget(self) -> Gtk.Widget:
-        return self._scroll
+        return self._page
 
     def _on_tick(self) -> bool:
         try:
@@ -321,82 +318,116 @@ class RulesView:
     # ---- construction ---------------------------------------------------
 
     def _section(self, title: str) -> Gtk.Box:
-        label = Gtk.Label(label=title, xalign=0.0)
-        label.add_css_class("xx-muted")
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.append(label)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.add_css_class("xx-page-body")
+        box.append(widgets.section_label(title))
         self._body.append(box)
         return box
 
     def _build(self) -> None:
-        self._scroll = Gtk.ScrolledWindow()
-        self._scroll.set_vexpand(True)
         self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                             spacing=10)
-        self._scroll.set_child(self._body)
+                             spacing=4)
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                       spacing=8)
+        head.set_valign(Gtk.Align.CENTER)
+        title = widgets.label("Rules", "xx-display")
+        title.set_hexpand(True)
+        title.set_valign(Gtk.Align.CENTER)
+        head.append(title)
+        self._mode_seg = widgets.segmented([
+            ("Enforce", False, self._on_enforce_pick),
+            ("Observe", True, self._on_observe_pick),
+        ])
+        self._mode_seg.set_valign(Gtk.Align.CENTER)
+        head.append(self._mode_seg)
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=0)
+        header.add_css_class("xx-page-body")
+        header.append(head)
+        self._mode_caption = widgets.caption("")
+        header.append(self._mode_caption)
+        self._offer_button = widgets.outline_button(
+            "Start screening now", self._on_offer)
+        header.append(self._offer_button)
 
-        mode = self._section("Screening")
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._mode_label = Gtk.Label(label="", xalign=0.0, hexpand=True)
-        self._mode_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self._mode_switch = Gtk.Switch()
-        self._mode_switch.set_can_focus(False)
-        self._mode_switch.connect("notify::active", self._on_mode_flip)
-        row.append(self._mode_label)
-        row.append(self._mode_switch)
-        mode.append(row)
-        self._mode_banner = Gtk.Label(label="", xalign=0.0)
-        self._mode_banner.add_css_class("xx-muted")
-        self._mode_banner.set_wrap(True)
-        mode.append(self._mode_banner)
-        self._offer_button = Gtk.Button(label="Start screening now")
-        self._offer_button.connect("clicked", self._on_offer)
-        mode.append(self._offer_button)
+        expect_card = widgets.card()
+        expect_card.set_margin_start(20)
+        expect_card.set_margin_end(20)
+        expect_card.append(widgets.label(
+            "Expecting a call", "xx-title"))
+        expect_card.append(widgets.wrap_label(
+            "Everyone rings for a while, unknown too"))
+        self._dur_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._dur_row.set_halign(Gtk.Align.CENTER)
+        self._dur_buttons: list[Gtk.Button] = []
+        for label, minutes in BYPASS_OPTIONS:
+            button = widgets.outline_button(label)
+            button.connect("clicked", self._on_expect, minutes)
+            button.set_hexpand(True)
+            self._dur_row.append(button)
+            self._dur_buttons.append(button)
+        expect_card.append(self._dur_row)
+        active_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._expect_countdown = widgets.label("", "xx-secondary")
+        self._expect_countdown.set_hexpand(True)
+        active_row.append(self._expect_countdown)
+        self._stop_button = widgets.outline_button(
+            "Stop expecting", self._on_stop_expect)
+        active_row.append(self._stop_button)
+        self._active_row = active_row
+        expect_card.append(active_row)
+        self._body.append(expect_card)
 
-        expect = self._section("Expecting a call")
-        erow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._expect_button = Gtk.Button(label=rules.IDLE_LABEL)
-        self._expect_button.connect("clicked", self._on_expect)
-        self._expect_countdown = Gtk.Label(label="", xalign=0.0,
-                                           hexpand=True)
-        self._expect_countdown.add_css_class("xx-muted")
-        self._expect_countdown.set_ellipsize(Pango.EllipsizeMode.END)
-        erow.append(self._expect_button)
-        erow.append(self._expect_countdown)
-        expect.append(erow)
-        drow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        drow.append(Gtk.Label(label="Lasts", xalign=0.0))
-        self._bypass_drop = Gtk.DropDown.new_from_strings(
-            list(BYPASS_OPTIONS))
-        self._bypass_drop.connect("notify::selected", self._on_bypass_pick)
-        drow.append(self._bypass_drop)
-        expect.append(drow)
-
-        preced = self._section("Decided in this order")
+        who = self._section("Who gets through")
         self._preced_list = Gtk.ListBox()
         self._preced_list.set_selection_mode(Gtk.SelectionMode.NONE)
-        preced.append(self._preced_list)
+        who.append(self._preced_list)
 
-        windows = self._section("Windows")
-        self._win_unknown = Gtk.Button(label="")
+        windows = self._section("Ring windows")
+        self._win_unknown, self._win_unknown_value = self._window_button(
+            "Unknown")
         self._win_unknown.connect("clicked", self._on_edit_window,
-                                 "unknown_window")
-        self._win_business = Gtk.Button(label="")
+                                  "unknown_window")
+        self._win_business, self._win_business_value = \
+            self._window_button("Business")
         self._win_business.connect("clicked", self._on_edit_window,
-                                  "business_window")
+                                   "business_window")
         windows.append(self._win_unknown)
         windows.append(self._win_business)
+
+        pol = self._section("How to handle")
+        pol.append(widgets.setting_row(
+            "Repeat caller rings",
+            "Second call within 15 min gets through",
+            trailing=self._repeat_switch_new()))
+        hidden = self._section("Hidden callers")
+        self._hidden_seg = widgets.segmented([
+            (label, False, self._on_hidden_seg(value))
+            for label, value in zip(HIDDEN_OPTIONS, HIDDEN_VALUES)
+        ])
+        hidden.append(self._hidden_seg)
+        silenced = self._section("Silenced calls")
+        self._notif_seg = widgets.segmented([
+            (label, False, self._on_notif_seg(value))
+            for label, value in zip(NOTIF_OPTIONS, NOTIF_VALUES)
+        ])
+        silenced.append(self._notif_seg)
 
         tone = self._section("Ringtones")
         self._tone_rows: dict[str, Gtk.Button] = {}
         for key, title in TONE_KEYS:
             brow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
+            brow.set_valign(Gtk.Align.CENTER)
             lab = Gtk.Label(label=title, xalign=0.0, hexpand=True)
+            lab.add_css_class("xx-title")
             lab.set_ellipsize(Pango.EllipsizeMode.END)
-            pick = Gtk.Button(label="Choose")
+            lab.set_valign(Gtk.Align.CENTER)
+            pick = widgets.outline_button("Choose")
             pick.connect("clicked", self._on_pick_tone, key)
-            clear = Gtk.Button(label="Clear")
+            clear = widgets.outline_button("Clear")
             clear.connect("clicked", self._on_clear_tone, key)
             self._tone_rows[key] = pick
             brow.append(lab)
@@ -404,49 +435,24 @@ class RulesView:
             brow.append(clear)
             tone.append(brow)
 
-        pol = self._section("How to handle")
-        hrow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        hrow.append(Gtk.Label(label="Hidden callers", xalign=0.0))
-        self._hidden_drop = Gtk.DropDown.new_from_strings(
-            list(HIDDEN_OPTIONS))
-        self._hidden_drop.connect("notify::selected", self._on_hidden_pick)
-        hrow.append(self._hidden_drop)
-        pol.append(hrow)
-        rrow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._repeat_label = Gtk.Label(label="Repeat callers ring through",
-                                      xalign=0.0, hexpand=True)
-        self._repeat_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self._repeat_switch = Gtk.Switch()
-        self._repeat_switch.set_can_focus(False)
-        self._repeat_switch.connect("notify::active", self._on_repeat_flip)
-        rrow.append(self._repeat_label)
-        rrow.append(self._repeat_switch)
-        pol.append(rrow)
-        nrow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        nrow.append(Gtk.Label(label="Silenced calls", xalign=0.0))
-        self._notif_drop = Gtk.DropDown.new_from_strings(
-            list(NOTIF_OPTIONS))
-        self._notif_drop.connect("notify::selected", self._on_notif_pick)
-        nrow.append(self._notif_drop)
-        pol.append(nrow)
-
         pat = self._section("Number patterns")
         self._pattern_list = Gtk.ListBox()
         self._pattern_list.set_selection_mode(Gtk.SelectionMode.NONE)
         pat.append(self._pattern_list)
         prow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._add_pattern = Gtk.Button(label="Add pattern")
+        self._add_pattern = widgets.outline_button("Add pattern")
+        self._add_pattern.set_hexpand(True)
         self._add_pattern.connect("clicked", self._on_add_pattern)
-        self._neighbor_button = Gtk.Button(label="")
+        self._neighbor_button = widgets.outline_button("")
+        self._neighbor_button.set_hexpand(True)
         self._neighbor_button.connect("clicked", self._on_neighbor)
         prow.append(self._add_pattern)
         prow.append(self._neighbor_button)
         pat.append(prow)
-        irow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._import_button = Gtk.Button(label="Import blocklist file")
+        self._import_button = widgets.outline_button(
+            "Import blocklist file")
         self._import_button.connect("clicked", self._on_import_blocklist)
-        pat.append(irow)
-        irow.append(self._import_button)
+        pat.append(self._import_button)
 
         blocked = self._section("Blocked numbers")
         self._blocked_list = Gtk.ListBox()
@@ -455,8 +461,7 @@ class RulesView:
 
         test = self._section("Test a number")
         trow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._test_entry = Gtk.Entry()
-        self._test_entry.set_placeholder_text("Number to test")
+        self._test_entry = widgets.text_entry("Number to test")
         self._test_entry.set_hexpand(True)
         self._test_entry.set_can_focus(False)
         click = Gtk.GestureClick.new()
@@ -464,75 +469,124 @@ class RulesView:
         click.connect("pressed", self._on_test_entry_click)
         self._test_entry.add_controller(click)
         self._test_entry.connect("activate", self._on_test_go)
-        self._test_go = Gtk.Button(label="Check")
+        self._test_go = widgets.outline_button("Check")
         self._test_go.connect("clicked", self._on_test_go)
         trow.append(self._test_entry)
         trow.append(self._test_go)
         test.append(trow)
-        self._test_verdict = Gtk.Label(label="", xalign=0.0)
-        self._test_verdict.set_wrap(True)
-        self._test_reason = Gtk.Label(label="", xalign=0.0)
-        self._test_reason.add_css_class("xx-muted")
-        self._test_reason.set_wrap(True)
+        self._test_verdict = widgets.wrap_label("", "xx-title")
+        self._test_reason = widgets.wrap_label("")
         test.append(self._test_verdict)
         test.append(self._test_reason)
 
         week = self._section("This week")
-        self._tally_label = Gtk.Label(label="", xalign=0.0)
-        self._tally_label.set_wrap(True)
+        self._tally_label = widgets.wrap_label("")
         week.append(self._tally_label)
 
         log = self._section("Screening log")
         self._log_list = Gtk.ListBox()
         self._log_list.set_selection_mode(Gtk.SelectionMode.NONE)
         log.append(self._log_list)
-        self._clear_log = Gtk.Button(label="Clear screening log")
+        self._clear_log = widgets.outline_button("Clear screening log")
         self._clear_log.connect("clicked", self._on_clear_log)
         log.append(self._clear_log)
 
+        self._page = widgets.page(header, self._body)
+
+    @staticmethod
+    def _window_button(title: str) -> tuple[Gtk.Button, Gtk.Label]:
+        button = Gtk.Button()
+        button.add_css_class("xx-btn")
+        button.add_css_class("xx-btn-outline")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_hexpand(True)
+        head = Gtk.Label(label=title, xalign=0.0)
+        head.add_css_class("xx-title")
+        head.set_ellipsize(Pango.EllipsizeMode.END)
+        value = Gtk.Label(label="", xalign=0.0)
+        value.add_css_class("xx-secondary")
+        value.set_wrap(True)
+        value.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        box.append(head)
+        box.append(value)
+        button.set_child(box)
+        return button, value
+
+    def _repeat_switch_new(self) -> Gtk.Switch:
+        self._repeat_switch = widgets.make_switch()
+        self._repeat_switch.connect("notify::active",
+                                    self._on_repeat_flip)
+        return self._repeat_switch
+
+    def _on_hidden_seg(self, value: str):
+        def _picked() -> None:
+            if self._suppress:
+                return
+            try:
+                self.controller.set_hidden_policy(value)
+            except ValueError:
+                pass
+            self.refresh()
+
+        return _picked
+
+    def _on_notif_seg(self, value: str):
+        def _picked() -> None:
+            if self._suppress:
+                return
+            try:
+                self.controller.set_notif_policy(value)
+            except ValueError:
+                pass
+            self.refresh()
+
+        return _picked
+
     # ---- refresh ----------------------------------------------------------
+
+    @staticmethod
+    def _select_seg(seg: Gtk.Box, selected: int) -> None:
+        child = seg.get_first_child()
+        index = 0
+        while child is not None:
+            if index == selected:
+                child.add_css_class("seg-selected")
+            else:
+                child.remove_css_class("seg-selected")
+            child = child.get_next_sibling()
+            index += 1
 
     def refresh(self) -> None:
         self._snapshot = self.controller.load()
         snap = self._snapshot
         self._suppress = True
         try:
-            self._mode_switch.set_active(snap.enforcing)
+            self._select_seg(self._mode_seg, 0 if snap.enforcing else 1)
+            self._select_seg(self._hidden_seg,
+                             HIDDEN_VALUES.index(snap.hidden_policy))
+            self._select_seg(self._notif_seg,
+                             NOTIF_VALUES.index(snap.notif_policy))
+            self._repeat_switch.set_active(snap.repeat)
+        except ValueError:
+            pass
         finally:
             self._suppress = False
-        self._mode_label.set_text("Screening calls"
-                                  if snap.enforcing else "Watching only")
-        self._mode_banner.set_text(
-            "Silenced and blocked calls still ring; decisions are logged."
-            if not snap.enforcing else
-            "Unknown calls outside their window stay silent; "
-            "blocked callers are hung up by the shell.")
+        screened = snap.tallies.get("total", 0)
+        self._mode_caption.set_text(
+            "%s · %d SCREENED THIS WEEK"
+            % ("ENFORCING" if snap.enforcing else "OBSERVING", screened))
         self._offer_button.set_visible(snap.offer and not snap.enforcing)
         self._render_bypass()
         self._render_precedence(snap)
-        self._win_unknown.set_label("Unknown %s"
-                                    % rules.window_line(snap.unknown))
-        self._win_business.set_label("Business %s"
-                                     % rules.window_line(snap.business))
+        self._win_unknown_value.set_text(
+            rules.window_line(snap.unknown))
+        self._win_business_value.set_text(
+            rules.window_line(snap.business))
         for key, _title in TONE_KEYS:
             current = snap.unknown_tone if key == "unknown_tone" \
                 else snap.default_tone
             self._tone_rows[key].set_label(
                 "Set" if not current else current.split("/")[-1])
-        self._suppress = True
-        try:
-            self._hidden_drop.set_selected(
-                HIDDEN_VALUES.index(snap.hidden_policy))
-            self._repeat_switch.set_active(snap.repeat)
-            self._notif_drop.set_selected(
-                NOTIF_VALUES.index(snap.notif_policy))
-            self._bypass_drop.set_selected(
-                [30, 120, 480].index(snap.bypass_minutes)
-                if snap.bypass_minutes in (30, 120, 480) else 1)
-        except ValueError:
-            pass
-        finally:
-            self._suppress = False
         self._render_patterns(snap)
         self._render_blocked(snap)
         self._render_tallies(snap)
@@ -542,11 +596,11 @@ class RulesView:
         snap = self._snapshot
         now_ms = int(time.time() * 1000)
         active = rules.bypass_active_ms(snap.bypass_until_ms, now_ms)
-        self._expect_button.set_label(
-            "Stop expecting" if active else rules.IDLE_LABEL)
-        self._expect_countdown.set_text(
-            rules.countdown_label(snap.bypass_until_ms, now_ms)
-            if active else "")
+        self._dur_row.set_visible(not active)
+        self._active_row.set_visible(active)
+        if active:
+            self._expect_countdown.set_text(
+                rules.countdown_label(snap.bypass_until_ms, now_ms))
 
     def _render_precedence(self, snap: RulesSnapshot) -> None:
         while True:
@@ -558,14 +612,26 @@ class RulesView:
                 snap.unknown, snap.business,
                 policy.StirAction.BLOCK,
                 policy.HiddenCallerPolicy(snap.hidden_policy), snap.repeat):
-            label = Gtk.Label(
-                label="%d. %s — %s%s" % (
-                    entry.n, entry.condition, entry.verdict,
-                    " (%s)" % entry.tone if entry.tone else ""),
+            line = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                           spacing=0)
+            line.add_css_class("xx-row")
+            head = Gtk.Label(
+                label="%d. %s" % (entry.n, entry.condition), xalign=0.0)
+            head.add_css_class("xx-title")
+            head.set_wrap(True)
+            head.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            tail = Gtk.Label(
+                label="%s%s" % (entry.verdict,
+                                " (%s)" % entry.tone if entry.tone else ""),
                 xalign=0.0)
-            label.set_wrap(True)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            self._preced_list.append(label)
+            tail.add_css_class("xx-secondary")
+            tail.set_wrap(True)
+            tail.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            if entry.verdict == "Block":
+                tail.add_css_class("xx-danger-text")
+            line.append(head)
+            line.append(tail)
+            self._preced_list.append(line)
 
     def _render_patterns(self, snap: RulesSnapshot) -> None:
         while True:
@@ -585,13 +651,17 @@ class RulesView:
         for prow in snap.patterns:
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
+            line.add_css_class("xx-row")
+            line.set_valign(Gtk.Align.CENTER)
             draft = masks.Draft(prow.e164_prefix, prow.wildcards)
             text = Gtk.Label(label="%s — %s" % (
                 masks.preview(draft),
                 "blocks" if prow.action == "block" else "silences"),
                 xalign=0.0, hexpand=True)
+            text.add_css_class("xx-title")
             text.set_ellipsize(Pango.EllipsizeMode.END)
-            delete = Gtk.Button(label="Delete")
+            text.set_valign(Gtk.Align.CENTER)
+            delete = widgets.outline_button("Delete")
             delete.connect("clicked", self._on_delete_pattern,
                            prow.row_id)
             line.append(text)
@@ -612,9 +682,13 @@ class RulesView:
         for number in sorted(snap.blocked):
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
+            line.add_css_class("xx-row")
+            line.set_valign(Gtk.Align.CENTER)
             text = Gtk.Label(label=number, xalign=0.0, hexpand=True)
+            text.add_css_class("xx-title")
             text.set_ellipsize(Pango.EllipsizeMode.END)
-            remove = Gtk.Button(label="Unblock")
+            text.set_valign(Gtk.Align.CENTER)
+            remove = widgets.outline_button("Unblock")
             remove.connect("clicked", self._on_unblock, number)
             line.append(text)
             line.append(remove)
@@ -646,28 +720,41 @@ class RulesView:
             self._log_list.append(note)
             return
         for entry in snap.log:
-            glyph = {"Block": "X", "Silence": ">", "Ring": "ok"}.get(
-                entry.verdict, "?")
-            label = Gtk.Label(
-                label="%s %s — %s" % (glyph, entry.e164 or "hidden",
-                                      entry.reason or entry.verdict),
+            glyph = {"Block": "Blocked", "Silence": "Silenced",
+                     "Ring": "Rang"}.get(entry.verdict, entry.verdict)
+            line = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                           spacing=0)
+            line.add_css_class("xx-row")
+            head = Gtk.Label(
+                label="%s · %s" % (glyph, entry.e164 or "hidden"),
                 xalign=0.0)
-            label.set_wrap(True)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            self._log_list.append(label)
+            head.add_css_class("xx-title")
+            head.set_ellipsize(Pango.EllipsizeMode.END)
+            if entry.verdict == "Block":
+                head.add_css_class("xx-danger-text")
+            tail = Gtk.Label(
+                label=entry.reason or entry.verdict, xalign=0.0)
+            tail.add_css_class("xx-secondary")
+            tail.set_wrap(True)
+            tail.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            line.append(head)
+            line.append(tail)
+            self._log_list.append(line)
 
     # ---- mode + bypass ------------------------------------------------------
 
-    def _on_mode_flip(self, switch: Gtk.Switch, _spec) -> None:
-        if self._suppress:
+    def _on_enforce_pick(self) -> None:
+        if self._suppress or self._snapshot.enforcing:
             return
-        if switch.get_active():
-            self._confirm_enforce(switch)
-        else:
-            self.controller.set_enforcing(False)
-            self.refresh()
+        self._confirm_enforce()
 
-    def _confirm_enforce(self, switch: Gtk.Switch) -> None:
+    def _on_observe_pick(self) -> None:
+        if self._suppress or not self._snapshot.enforcing:
+            return
+        self.controller.set_enforcing(False)
+        self.refresh()
+
+    def _confirm_enforce(self) -> None:
         dialog = Adw.AlertDialog.new(
             "Start screening?",
             "Unknown calls outside their window stay silent and "
@@ -691,26 +778,15 @@ class RulesView:
         else:
             _done(dialog, "cancel")
 
-    def _on_offer(self, _button: Gtk.Button) -> None:
-        self._confirm_enforce(self._mode_switch)
+    def _on_offer(self, _button: Gtk.Button | None = None) -> None:
+        self._confirm_enforce()
 
-    def _on_expect(self, _button: Gtk.Button) -> None:
-        now_ms = int(time.time() * 1000)
-        if rules.bypass_active_ms(self._snapshot.bypass_until_ms, now_ms):
-            self.controller.stop_bypass()
-        else:
-            index = self._bypass_drop.get_selected()
-            minutes = (30, 120, 480)[index] \
-                if index in (0, 1, 2) else 120
-            self.controller.arm_bypass(minutes)
+    def _on_expect(self, _button: Gtk.Button, minutes: int) -> None:
+        self.controller.arm_bypass(int(minutes))
         self.refresh()
 
-    def _on_bypass_pick(self, dropdown: Gtk.DropDown, _spec) -> None:
-        if self._suppress:
-            return
-        index = dropdown.get_selected()
-        minutes = (30, 120, 480)[index] if index in (0, 1, 2) else 120
-        self.controller.set_bypass_minutes(minutes)
+    def _on_stop_expect(self, _button: Gtk.Button | None = None) -> None:
+        self.controller.stop_bypass()
         self.refresh()
 
     # ---- windows ------------------------------------------------------------
@@ -737,9 +813,19 @@ class RulesView:
         day_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                           spacing=4)
         toggles: list[Gtk.ToggleButton] = []
+
+        def _sync_chip(toggle: Gtk.ToggleButton) -> None:
+            if toggle.get_active():
+                toggle.add_css_class("selected")
+            else:
+                toggle.remove_css_class("selected")
+
         for i, name in enumerate(rules.DAY_LABELS):
             toggle = Gtk.ToggleButton(label=name)
+            toggle.add_css_class("xx-chip")
             toggle.set_active(bool(current.days_mask & rules.day_bit(i)))
+            _sync_chip(toggle)
+            toggle.connect("toggled", _sync_chip)
             day_row.append(toggle)
             toggles.append(toggle)
         box.append(day_row)
@@ -782,32 +868,10 @@ class RulesView:
 
     # ---- policies -------------------------------------------------------------
 
-    def _on_hidden_pick(self, dropdown: Gtk.DropDown, _spec) -> None:
-        if self._suppress:
-            return
-        index = dropdown.get_selected()
-        try:
-            self.controller.set_hidden_policy(
-                HIDDEN_VALUES[index] if index in (0, 1, 2) else "unknown")
-        except (ValueError, IndexError):
-            pass
-        self.refresh()
-
     def _on_repeat_flip(self, switch: Gtk.Switch, _spec) -> None:
         if self._suppress:
             return
         self.controller.set_repeat(switch.get_active())
-        self.refresh()
-
-    def _on_notif_pick(self, dropdown: Gtk.DropDown, _spec) -> None:
-        if self._suppress:
-            return
-        index = dropdown.get_selected()
-        try:
-            self.controller.set_notif_policy(
-                NOTIF_VALUES[index] if index in (0, 1, 2) else "immediate")
-        except (ValueError, IndexError):
-            pass
         self.refresh()
 
     # ---- tones ------------------------------------------------------------------
@@ -838,15 +902,28 @@ class RulesView:
 
     def _on_add_pattern(self, _button: Gtk.Button) -> None:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        entry = Gtk.Entry()
-        entry.set_placeholder_text("Sample number, e.g. +1 425-555-0100")
+        entry = widgets.text_entry("Sample number, e.g. +1 425-555-0100")
         entry.set_can_focus(False)
         scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 0, 6, 1)
         scale.set_value(4)
-        action = Gtk.DropDown.new_from_strings(("Block", "Silence"))
+        picked = ["block"]
+
+        def _pick_block() -> None:
+            picked[0] = "block"
+            self._select_seg(action, 0)
+
+        def _pick_silence() -> None:
+            picked[0] = "silence"
+            self._select_seg(action, 1)
+
+        action = widgets.segmented([
+            ("Block", True, _pick_block),
+            ("Silence", False, _pick_silence),
+        ])
         preview = Gtk.Label(label="", xalign=0.0)
-        preview.add_css_class("xx-muted")
+        preview.add_css_class("xx-secondary")
+        preview.set_ellipsize(Pango.EllipsizeMode.END)
 
         def _paint(*_args) -> None:
             digits = masks.digits_of(entry.get_text())
@@ -877,10 +954,9 @@ class RulesView:
             if draft is None:
                 self.controller._notice("Type a number first.")
                 return
-            picked = "block" if action.get_selected() == 0 else "silence"
             try:
                 self.controller.add_pattern(draft.prefix,
-                                            draft.wildcards, picked)
+                                            draft.wildcards, picked[0])
             except ValueError:
                 self.controller._notice("That pattern is not valid.")
                 return
@@ -904,8 +980,7 @@ class RulesView:
             self.refresh()
             return
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        entry = Gtk.Entry()
-        entry.set_placeholder_text("Your own number")
+        entry = widgets.text_entry("Your own number")
         entry.set_can_focus(False)
         box.append(entry)
         dialog = Adw.AlertDialog.new(

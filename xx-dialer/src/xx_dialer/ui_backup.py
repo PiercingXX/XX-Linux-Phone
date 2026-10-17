@@ -17,8 +17,9 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import GLib, Gtk, Pango  # noqa: E402
+from gi.repository import GLib, Gtk  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_dialer import (  # noqa: E402
     applog,
     codecs,
@@ -36,6 +37,7 @@ class BackupDeps:
     db_file: Path
     home: Path | None = None
     notice: object = None
+    navigate: object = None
 
 
 class BackupController:
@@ -120,6 +122,8 @@ class BackupView:
 
     def __init__(self, controller: BackupController) -> None:
         self.controller = controller
+        navigate = getattr(controller._deps, "navigate", None)
+        self._navigate = navigate if callable(navigate) else None
         self._root: Gtk.Widget | None = None
         self._build()
         self.refresh()
@@ -129,55 +133,47 @@ class BackupView:
         assert self._root is not None
         return self._root
 
-    def _section(self, title: str) -> Gtk.Box:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        label = Gtk.Label(label=title, xalign=0.0)
-        label.add_css_class("title-4")
-        box.append(label)
-        assert self._body is not None
-        self._body.append(box)
-        return box
+    def _go_recents(self) -> None:
+        if self._navigate is not None:
+            self._navigate("recents")
+
+    def _status(self, text: str = "") -> Gtk.Label:
+        return widgets.wrap_label(text)
 
     def _build(self) -> None:
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_vexpand(True)
+        if self._navigate is not None:
+            header = widgets.compact_header(
+                self._go_recents, "Import & export")
+        else:
+            header = widgets.page_header("Import & export")
         self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                             spacing=10)
-        scroll.set_child(self._body)
+                             spacing=8)
+        self._body.add_css_class("xx-page-body")
 
-        export = self._section("Export")
-        self._export_status = Gtk.Label(label="", xalign=0.0)
-        self._export_status.add_css_class("xx-muted")
-        self._export_status.set_wrap(True)
-        self._export_status.set_ellipsize(Pango.EllipsizeMode.END)
-        export.append(self._export_status)
-        self._export_policy = Gtk.Button(label="Export ring policy")
+        self._body.append(widgets.section_label("Export"))
+        self._export_status = self._status()
+        self._body.append(self._export_status)
+        self._export_policy = widgets.outline_button("Export ring policy")
         self._export_policy.connect("clicked", self._on_export_policy)
-        export.append(self._export_policy)
-        self._export_calllog = Gtk.Button(label="Export call log")
+        self._body.append(self._export_policy)
+        self._export_calllog = widgets.outline_button("Export call log")
         self._export_calllog.connect("clicked", self._on_export_calllog)
-        export.append(self._export_calllog)
+        self._body.append(self._export_calllog)
 
-        import_section = self._section("Import")
-        note = Gtk.Label(
-            label="Imported policy always starts in observe mode.",
-            xalign=0.0)
-        note.add_css_class("xx-muted")
-        note.set_wrap(True)
-        import_section.append(note)
-        self._import_status = Gtk.Label(label="", xalign=0.0)
-        self._import_status.add_css_class("xx-muted")
-        self._import_status.set_wrap(True)
-        self._import_status.set_ellipsize(Pango.EllipsizeMode.END)
-        import_section.append(self._import_status)
-        self._import_policy = Gtk.Button(label="Import ring policy")
+        self._body.append(widgets.section_label("Import"))
+        note = self._status(
+            "Imported policy always starts in observe mode.")
+        self._body.append(note)
+        self._import_status = self._status()
+        self._body.append(self._import_status)
+        self._import_policy = widgets.outline_button("Import ring policy")
         self._import_policy.connect("clicked", self._on_import_policy)
-        import_section.append(self._import_policy)
-        self._import_calllog = Gtk.Button(label="Import call log")
+        self._body.append(self._import_policy)
+        self._import_calllog = widgets.outline_button("Import call log")
         self._import_calllog.connect("clicked", self._on_import_calllog)
-        import_section.append(self._import_calllog)
+        self._body.append(self._import_calllog)
 
-        self._root = scroll
+        self._root = widgets.page(header, self._body)
 
     def refresh(self) -> None:
         try:

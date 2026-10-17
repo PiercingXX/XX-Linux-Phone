@@ -7,9 +7,14 @@ nothing on that path imports Gtk/Adw — those imports live inside the
 GUI functions below. ``--service --check-imports`` verifies that
 without starting the service (used by the test suite).
 
-``build_dialer_view`` assembles the real main window content (Recents +
-Keypad) over explicit deps without needing an application instance, so
-the Broadway smoke test can build it against a seeded store.
+Styling comes from the shared ``xx_ui`` design system: ``run_gui``
+calls ``xx_ui.apply`` once at startup (which also watches the shell
+config for live theme switches). This module holds no theme reader
+and no CSS of its own.
+
+``build_dialer_view`` assembles the real main window content over
+explicit deps without needing an application instance, so the
+Broadway smoke test can build it against a seeded store.
 """
 from __future__ import annotations
 
@@ -19,6 +24,9 @@ from pathlib import Path
 
 APP_ID = "io.piercingxx.XXDialer"
 
+TAB_PAGES = (("recents", "Recents"), ("keypad", "Keypad"),
+             ("people", "People"), ("rules", "Rules"))
+
 
 @dataclass
 class DialerDeps:
@@ -26,48 +34,6 @@ class DialerDeps:
     home: Path | None = None
     voice: object = None
     contacts: object = None
-
-
-def apply_shell_theme() -> None:
-    import gi
-
-    gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
-
-    from gi.repository import Gdk, Gtk  # noqa: E402
-
-    from xx_dialer import theme as xx_theme
-
-    display = Gdk.Display.get_default()
-    if display is None:
-        return
-    shell_theme = xx_theme.load_shell_theme()
-    provider = Gtk.CssProvider()
-    provider.load_from_data(xx_theme.theme_css(shell_theme)
-                            + _dialer_css(shell_theme))
-    Gtk.StyleContext.add_provider_for_display(
-        display,
-        provider,
-        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-    )
-
-
-def _dialer_css(shell_theme) -> str:
-    """List and keypad paint from the preset: no white lists in dark."""
-    background = shell_theme.background
-    foreground = shell_theme.foreground
-    muted = shell_theme.muted
-    family = shell_theme.font_family
-    return (
-        "listview, listview row, listbox, listbox row"
-        " { background-color: %s; color: %s; }\n"
-        ".xx-number { color: %s; font-family: %s;"
-        " font-size: 28pt; }\n"
-        ".xx-key { padding: 10px 4px; }\n"
-        ".xx-chip { padding: 4px 10px; }\n"
-        ".xx-muted { color: %s; font-family: %s; }\n"
-        % (background, foreground, foreground, family, muted, family)
-    )
 
 
 def build_dialer_view(deps: DialerDeps):
@@ -133,6 +99,7 @@ def build_dialer_view(deps: DialerDeps):
             with Store(db_file):
                 pass
             from xx_dialer import policy as _policy
+
             region = _policy.region_of(app_config.load(home))
             candidate = contacts_client.ContactsClient(
                 Store(db_file), default_region=region)
@@ -140,55 +107,62 @@ def build_dialer_view(deps: DialerDeps):
                 client = candidate
         except Exception:
             client = None
+    view_holder: dict = {}
+
+    def _go(name: str) -> None:
+        target = view_holder.get("view")
+        if target is not None:
+            target.show_page(name)
+
     recents_deps = ui_recents.RecentsDeps(
         db_file=db_file, home=home, voice=voice, contacts=client,
-        notice=_notice)
+        notice=_notice, navigate=_go)
     recents_controller = ui_recents.RecentsController(recents_deps)
     recents_view = ui_recents.build_recents(recents_controller)
     keypad_view = ui_keypad.build_keypad(
         ui_keypad.KeypadDeps(db_file=db_file, home=home, voice=voice,
                              contacts=client, notice=_notice))
 
-    header = Adw.HeaderBar()
-    header.set_show_start_title_buttons(False)
-    header.set_show_end_title_buttons(False)
-    header.set_title_widget(Gtk.Label(label="XX Dialer"))
-    stack = Adw.ViewStack()
-    recents_page = stack.add_titled(recents_view.widget, "recents",
-                                   "Recents")
+    stack = Gtk.Stack()
+    stack.add_named(recents_view.widget, "recents")
     if "keypad" not in hidden:
-        stack.add_titled(keypad_view.widget, "keypad", "Keypad")
+        stack.add_named(keypad_view.widget, "keypad")
     people_view = ui_people.build_people(
         ui_people.PeopleDeps(db_file=db_file, home=home, voice=voice,
                              contacts=client, notice=_notice))
     if "people" not in hidden:
-        stack.add_titled(people_view.widget, "people", "People")
+        stack.add_named(people_view.widget, "people")
     rules_view = ui_rules.build_rules(
         ui_rules.RulesDeps(db_file=db_file, home=home, notice=_notice,
                            contacts=client))
-    stack.add_titled(rules_view.widget, "rules", "Rules")
+    stack.add_named(rules_view.widget, "rules")
     setup_view = ui_setup.build_setup(
-        ui_setup.SetupDeps(db_file=db_file, home=home, notice=_notice))
-    stack.add_titled(setup_view.widget, "setup", "Setup")
+        ui_setup.SetupDeps(db_file=db_file, home=home, notice=_notice,
+                           navigate=_go))
+    stack.add_named(setup_view.widget, "setup")
     backup_view = ui_backup.build_backup(
-        ui_backup.BackupDeps(db_file=db_file, home=home, notice=_notice))
-    stack.add_titled(backup_view.widget, "backup", "Backup")
+        ui_backup.BackupDeps(db_file=db_file, home=home, notice=_notice,
+                             navigate=_go))
+    stack.add_named(backup_view.widget, "backup")
     logs_view = ui_logs.build_logs(
-        ui_logs.LogsDeps(db_file=db_file, home=home, notice=_notice))
-    stack.add_titled(logs_view.widget, "logs", "Logs")
-    switcher = Adw.ViewSwitcherBar()
-    switcher.set_stack(stack)
-    toolbar = Adw.ToolbarView()
-    toolbar.add_top_bar(header)
-    toolbar.set_content(stack)
-    toolbar.add_bottom_bar(switcher)
-    toast.set_child(toolbar)
+        ui_logs.LogsDeps(db_file=db_file, home=home, notice=_notice,
+                         navigate=_go))
+    stack.add_named(logs_view.widget, "logs")
 
-    view = DialerView(toast, stack, recents_page, recents_controller,
+    tabs = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+    body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+    stack.set_vexpand(True)
+    body.append(stack)
+    body.append(tabs)
+    toast.set_child(body)
+
+    view = DialerView(toast, stack, tabs, recents_controller,
                       recents_view, keypad_view, voice, db_file,
                       people_view, rules_view, setup_view,
                       backup_view, logs_view)
-    stack.connect("notify::visible-child", view._on_page_shown)
+    view_holder["view"] = view
+    stack.connect("notify::visible-child-name", view._on_page_shown)
+    view.show_page("recents")
     view.refresh_all()
     if voice is not None:
         _watch_calls(voice, view)
@@ -233,13 +207,13 @@ def _watch_calls(voice, view) -> None:
 class DialerView:
     """Live handles over the assembled main window content."""
 
-    def __init__(self, widget, stack, recents_page,
+    def __init__(self, widget, stack, tabs,
                  recents_controller, recents_view, keypad_view,
                  voice, db_file, people_view=None, rules_view=None,
                  setup_view=None, backup_view=None, logs_view=None) -> None:
         self.widget = widget
         self.stack = stack
-        self._recents_page = recents_page
+        self._tabs = tabs
         self.recents = recents_controller
         self.recents_view = recents_view
         self.keypad = keypad_view
@@ -255,6 +229,40 @@ class DialerView:
         if self.stack.get_visible_child_name() == "recents":
             self.recents.mark_viewed()
             self.refresh_all()
+        self._render_tabs()
+
+    def show_page(self, name: str) -> None:
+        try:
+            if self.stack.get_child_by_name(name) is None:
+                return
+            self.stack.set_visible_child_name(name)
+        except Exception:
+            pass
+        self._render_tabs()
+
+    def _render_tabs(self) -> None:
+        from xx_ui import widgets  # noqa: E402
+
+        try:
+            active = self.stack.get_visible_child_name()
+        except Exception:
+            active = "recents"
+        while True:
+            child = self._tabs.get_first_child()
+            if child is None:
+                break
+            self._tabs.remove(child)
+        items = []
+        for name, title in TAB_PAGES:
+            try:
+                if self.stack.get_child_by_name(name) is None:
+                    continue
+            except Exception:
+                continue
+            items.append(("", title, name == active,
+                          lambda name=name: self.show_page(name)))
+        if items:
+            self._tabs.append(widgets.bottom_tabs(items))
 
     def refresh_all(self) -> None:
         try:
@@ -273,11 +281,6 @@ class DialerView:
                 page.refresh()
             except Exception:
                 pass
-        try:
-            self._recents_page.set_badge_number(self.recents.unread)
-        except Exception:
-            pass
-
     def prefill(self, number: str) -> None:
         try:
             self.keypad.set_digits(number)
@@ -287,6 +290,30 @@ class DialerView:
             self.stack.set_visible_child_name("keypad")
         except Exception:
             pass
+
+def _apply_app_css() -> None:
+    """Install the one small app-specific stylesheet (spacing only)."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+
+    from gi.repository import Gdk, Gtk  # noqa: E402
+
+    display = Gdk.Display.get_default()
+    if display is None:
+        return
+    try:
+        css = (Path(__file__).with_name("dialer.css")).read_bytes()
+    except OSError:
+        return
+    provider = Gtk.CssProvider()
+    provider.load_from_data(css)
+    Gtk.StyleContext.add_provider_for_display(
+        display,
+        provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+    )
+
 
 def run_gui(args: list[str]) -> int:
     import gi
@@ -307,13 +334,18 @@ def run_gui(args: list[str]) -> int:
             self._view: DialerView | None = None
 
         def do_activate(self) -> None:
+            import xx_ui  # noqa: E402
+
             window = Adw.ApplicationWindow(application=self)
             window.set_title("XX Dialer")
+            window.set_decorated(False)
             window.set_default_size(360, 720)
+            xx_ui.apply(window)
+            _apply_app_css()
             deps = DialerDeps(db_file=db_path(), home=Path.home())
             self._view = build_dialer_view(deps)
+            window.dialer_view = self._view
             window.set_content(self._view.widget)
-            apply_shell_theme()
             window.present()
 
         def do_open(self, files, _hint) -> None:

@@ -15,11 +15,16 @@ Python modules later lanes build on — `policy` (ring-policy engine),
 
 ## Run from the checkout
 
+Styling comes from the shared `xx_ui` design system in `common/`
+(install it first so `import xx_ui` resolves, or put it on the path
+when running from source):
+
 ```sh
-PYTHONPATH=src python3 -m xx_dialer
+PYTHONPATH=src:../common python3 -m xx_dialer
 ```
 
-Installed (after `meson setup build && meson install`):
+Installed (after `meson setup build && meson install` — install
+`common/` first, `meson.build` requires its `xx_ui` package):
 
 ```sh
 xx-dialer

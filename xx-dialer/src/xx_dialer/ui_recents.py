@@ -22,6 +22,7 @@ gi.require_version("Gdk", "4.0")
 
 from gi.repository import Gdk, Gio, GObject, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from xx_dialer import contacts_client, policy, recents  # noqa: E402
 from xx_dialer.store import (  # noqa: E402
     CALL_TYPE_INCOMING,
@@ -41,6 +42,18 @@ class RecentsDeps:
     copy_text: object = None
     notice: object = None
     now_ms: object = None
+    navigate: object = None
+
+
+GLYPH_ICONS = {
+    recents.GLYPH_RING: "call-incoming-symbolic",
+    recents.GLYPH_SILENCED: "notifications-disabled-symbolic",
+    recents.GLYPH_BLOCKED: "call-stop-symbolic",
+    recents.GLYPH_NONE: "phone-symbolic",
+}
+
+OVERFLOW_PAGES = (("Setup", "setup"), ("Import & export", "backup"),
+                  ("Logs", "logs"))
 
 
 def _default_launch_sms(uri: str) -> None:
@@ -431,6 +444,8 @@ class RecentsView:
         self.controller = controller
         self._store = Gio.ListStore(item_type=RecentItem)
         self._suppress_activate = False
+        navigate = getattr(controller._deps, "navigate", None)
+        self._navigate = navigate if callable(navigate) else None
         self._root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                              spacing=0)
         self._build()
@@ -440,42 +455,57 @@ class RecentsView:
     def widget(self) -> Gtk.Widget:
         return self._root
 
+    def _pad(self, widget: Gtk.Widget) -> Gtk.Widget:
+        widget.add_css_class("xx-page-body")
+        return widget
+
     def _build(self) -> None:
-        strip_label = Gtk.Label(label="Favorites", xalign=0.0)
-        strip_label.add_css_class("xx-muted")
+        self._header = widgets.page_header(
+            "Recents",
+            overflow_cb=self._open_overflow
+            if self._navigate is not None else None)
+        self._caption = widgets.caption("")
+        self._header.append(self._caption)
+        self._root.append(self._header)
+
+        self._chips_wrap = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._pad(self._chips_wrap)
+        chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                        spacing=8)
+        chips.add_css_class("xx-dialer-chips")
+        chips_scroll = Gtk.ScrolledWindow()
+        chips_scroll.set_policy(Gtk.PolicyType.AUTOMATIC,
+                                Gtk.PolicyType.NEVER)
+        chips_scroll.set_min_content_width(0)
+        chips_scroll.set_child(chips)
+        self._chips_wrap.append(chips_scroll)
+        self._chips_box = chips
+        self._chip_buttons: list[tuple[str, Gtk.Button]] = []
+        self._root.append(self._chips_wrap)
+
         self._star_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                                 spacing=6)
+                                 spacing=8)
         star_scroll = Gtk.ScrolledWindow()
         star_scroll.set_policy(Gtk.PolicyType.AUTOMATIC,
                                Gtk.PolicyType.NEVER)
+        star_scroll.set_min_content_width(0)
         star_scroll.set_child(self._star_bar)
-        star_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                           spacing=2)
-        star_box.append(strip_label)
-        star_box.append(star_scroll)
-        self._star_wrap = star_box
-        self._root.append(star_box)
-
-        chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                        spacing=6)
-        chips.set_halign(Gtk.Align.CENTER)
-        self._chip_buttons: dict[str, Gtk.ToggleButton] = {}
-        for name in RecentsController.FILTERS:
-            button = Gtk.ToggleButton(label=name.capitalize())
-            button.add_css_class("xx-chip")
-            if name == recents.FILTER_ALL:
-                button.set_active(True)
-            button.connect("toggled", self._on_chip, name)
-            self._chip_buttons[name] = button
-            chips.append(button)
-        self._root.append(chips)
-
-        self._banner = Gtk.Label(label="", xalign=0.5)
-        self._banner.add_css_class("xx-muted")
-        self._root.append(self._banner)
+        self._star_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                  spacing=2)
+        self._pad(self._star_wrap)
+        self._star_wrap.append(widgets.caption("Starred"))
+        self._star_wrap.append(star_scroll)
+        self._root.append(self._star_wrap)
 
         self._deep_note = Gtk.Button(label="")
+        self._deep_note.add_css_class("xx-btn")
+        self._deep_note.add_css_class("xx-btn-text")
+        deep_label = self._deep_note.get_child()
+        if isinstance(deep_label, Gtk.Label):
+            deep_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._deep_note.connect("clicked", self._on_clear_deep)
+        self._pad(self._deep_note)
         self._root.append(self._deep_note)
 
         factory = Gtk.SignalListItemFactory()
@@ -489,76 +519,167 @@ class RecentsView:
         long_press.connect("pressed", self._on_long_press)
         self._list.add_controller(long_press)
         scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER,
+                          Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
         scroll.set_child(self._list)
         self._root.append(scroll)
 
-        self._empty = Gtk.Label(label="No calls yet.")
-        self._empty.add_css_class("xx-muted")
+        self._empty = widgets.label("No calls yet.", "xx-empty",
+                                    xalign=0.5)
+        self._empty.set_halign(Gtk.Align.CENTER)
+        self._empty.set_valign(Gtk.Align.CENTER)
+        self._empty.set_vexpand(True)
         self._root.append(self._empty)
+
+    def _overflow_anchor(self) -> Gtk.Widget:
+        top = self._header.get_first_child()
+        if top is not None:
+            last = top.get_last_child()
+            if last is not None:
+                return last
+        return self._header
+
+    def _open_overflow(self) -> None:
+        if self._navigate is None:
+            return
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        popover = Gtk.Popover()
+        popover.set_parent(self._overflow_anchor())
+        point = Gdk.Rectangle()
+        point.x, point.y, point.width, point.height = 0, 0, 1, 1
+        popover.set_pointing_to(point)
+        popover.set_child(box)
+        for title, name in OVERFLOW_PAGES:
+            button = widgets.menu_row(title)
+            button.connect(
+                "clicked", self._on_overflow_go, popover, name)
+            box.append(button)
+        popover.popup()
+
+    def _on_overflow_go(self, _button: Gtk.Button,
+                        popover: Gtk.Popover, name: str) -> None:
+        popover.popdown()
+        if self._navigate is not None:
+            self._navigate(name)
 
     # ---- factory ----------------------------------------------------------
 
+    @staticmethod
+    def _row_label(text: str, cls: str, xalign: float = 0.0,
+                   cap: int | None = None) -> Gtk.Label:
+        label = Gtk.Label(label="", xalign=xalign)
+        label.add_css_class(cls)
+        if cap is None:
+            label.set_text(text)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+        else:
+            widgets.fit_text(label, text, cap)
+        return label
+
     def _on_setup(self, _factory, list_item) -> None:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                       spacing=2)
+                       spacing=0)
+        root.add_css_class("xx-row")
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                        spacing=2)
+        inner.set_margin_start(20)
+        inner.set_margin_end(20)
+        root.append(inner)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                         spacing=6)
-        arrow = Gtk.Label(label="▸", xalign=0.0)
-        title = Gtk.Label(label="", xalign=0.0, hexpand=True)
-        title.set_ellipsize(Pango.EllipsizeMode.END)
-        count = Gtk.Label(label="", xalign=1.0)
-        count.add_css_class("xx-muted")
+                         spacing=12)
+        header.set_valign(Gtk.Align.CENTER)
+        arrow = widgets.icon_image("go-next-symbolic")
+        arrow.set_valign(Gtk.Align.CENTER)
+        title = self._row_label("", "xx-title")
+        title.set_hexpand(True)
+        title.set_valign(Gtk.Align.CENTER)
+        count = self._row_label("", "xx-time", xalign=1.0, cap=8)
+        count.set_valign(Gtk.Align.CENTER)
         header.append(arrow)
         header.append(title)
         header.append(count)
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                      spacing=6)
-        name = Gtk.Label(label="", xalign=0.0, hexpand=True)
-        name.set_ellipsize(Pango.EllipsizeMode.END)
-        when = Gtk.Label(label="", xalign=1.0)
-        when.add_css_class("xx-muted")
-        top.append(name)
-        top.append(when)
-        sub = Gtk.Label(label="", xalign=0.0)
-        sub.add_css_class("xx-muted")
-        sub.set_ellipsize(Pango.EllipsizeMode.END)
-        verdict = Gtk.Label(label="", xalign=0.0)
-        verdict.add_css_class("xx-muted")
-        verdict.set_wrap(True)
-        root.append(header)
-        root.append(top)
-        root.append(sub)
-        root.append(verdict)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                      spacing=12)
+        row.set_valign(Gtk.Align.CENTER)
+        glyph = widgets.icon_image("phone-symbolic")
+        glyph.set_valign(Gtk.Align.CENTER)
+        middle = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=2)
+        middle.set_hexpand(True)
+        middle.set_valign(Gtk.Align.CENTER)
+        name = self._row_label("", "xx-title")
+        sub = self._row_label("", "xx-secondary")
+        verdict = widgets.wrap_label("")
+        middle.append(name)
+        middle.append(sub)
+        middle.append(verdict)
+        when = self._row_label("", "xx-time", xalign=1.0, cap=12)
+        when.set_valign(Gtk.Align.START)
+        row.append(glyph)
+        row.append(middle)
+        row.append(when)
+        inner.append(header)
+        inner.append(row)
         list_item.set_child(root)
         list_item.xx_parts = (root, header, arrow, title, count,
-                              top, name, when, sub, verdict)
+                              row, glyph, name, when, sub, verdict)
+
+    def _row_icon(self, call) -> tuple[str, bool]:
+        if call.outgoing:
+            return ("call-outgoing-symbolic", False)
+        if call.missed:
+            return ("call-missed-symbolic", True)
+        if call.glyph == recents.GLYPH_BLOCKED:
+            return (GLYPH_ICONS[call.glyph], True)
+        return (GLYPH_ICONS.get(call.glyph,
+                                GLYPH_ICONS[recents.GLYPH_NONE]), False)
 
     def _on_bind(self, _factory, list_item) -> None:
         item = list_item.get_item()
         parts = list_item.xx_parts
         (root, header, arrow, title, count,
-         top, name, when, sub, verdict) = parts
+         row, glyph, name, when, sub, verdict) = parts
+        total = self._store.get_n_items()
+        try:
+            last = list_item.get_position() == total - 1
+        except Exception:
+            last = False
+        if last:
+            root.add_css_class("last")
+        else:
+            root.remove_css_class("last")
         is_header = item.kind == "header"
         header.set_visible(is_header)
-        top.set_visible(not is_header)
-        sub.set_visible(not is_header)
+        row.set_visible(not is_header)
         verdict.set_visible(not is_header
                             and bool(item.verdict))
         if is_header:
-            arrow.set_text("▾" if item.expanded else "▸")
+            arrow.set_from_icon_name(
+                "go-down-symbolic" if item.expanded
+                else "go-next-symbolic")
             title.set_text(item.title or item.number)
-            count.set_text("×%d" % item.count)
+            widgets.fit_text(count, "×%d" % item.count, 8)
             root.recent_key = "header:%s" % item.identity
-        else:
-            name.set_text(item.title)
-            when.set_text(item.when)
-            chip_line = item.chip
-            if item.meta:
-                chip_line = "%s · %s" % (item.chip, item.meta)
-            sub.set_text(chip_line)
-            verdict.set_text(item.verdict)
-            root.recent_key = "row:%d" % item.row_id
+            return
+        call = self.controller.find(int(item.row_id))
+        icon_name, danger = ("phone-symbolic", False)
+        if call is not None:
+            icon_name, danger = self._row_icon(call)
+        glyph.set_from_icon_name(icon_name)
+        for widget in (sub, verdict, glyph):
+            if danger:
+                widget.add_css_class("xx-danger-text")
+            else:
+                widget.remove_css_class("xx-danger-text")
+        name.set_text(item.title)
+        widgets.fit_text(when, item.when, 12)
+        chip_line = item.chip
+        if item.meta:
+            chip_line = "%s · %s" % (item.chip, item.meta)
+        sub.set_text(chip_line)
+        verdict.set_text(item.verdict)
+        root.recent_key = "row:%d" % item.row_id
 
     # ---- gestures -----------------------------------------------------------
 
@@ -617,8 +738,7 @@ class RecentsView:
         popover.set_pointing_to(point)
         popover.set_child(box)
         for label, action in _menu_buttons(call, self.controller):
-            button = Gtk.Button(label=label)
-            button.set_halign(Gtk.Align.FILL)
+            button = widgets.menu_row(label)
 
             def _clicked(_btn, step=action) -> None:
                 popover.popdown()
@@ -628,15 +748,9 @@ class RecentsView:
             button.connect("clicked", _clicked)
             box.append(button)
         popover.popup()
+        return popover
 
-    def _on_chip(self, button: Gtk.ToggleButton, name: str) -> None:
-        if not button.get_active():
-            if self.controller.filter_name == name:
-                button.set_active(True)
-            return
-        for other_name, other in self._chip_buttons.items():
-            if other_name != name and other.get_active():
-                other.set_active(False)
+    def _on_filter(self, name: str) -> None:
         self.controller.filter_name = name
         if name == recents.FILTER_MISSED:
             self.controller.mark_viewed()
@@ -660,7 +774,25 @@ class RecentsView:
             self._store.append(item)
         self._render_chrome()
 
+    def _on_filter_clicked(self, _button: Gtk.Button, name: str) -> None:
+        self._on_filter(name)
+
     def _render_chrome(self) -> None:
+        current = self.controller.filter_name
+        while True:
+            child = self._chips_box.get_first_child()
+            if child is None:
+                break
+            self._chips_box.remove(child)
+        self._chip_buttons = []
+        for name in RecentsController.FILTERS:
+            button = Gtk.Button.new_with_label(name.upper())
+            button.add_css_class("xx-chip")
+            if name == current:
+                button.add_css_class("selected")
+            button.connect("clicked", self._on_filter_clicked, name)
+            self._chips_box.append(button)
+            self._chip_buttons.append((name, button))
         while True:
             child = self._star_bar.get_first_child()
             if child is None:
@@ -671,15 +803,26 @@ class RecentsView:
         for uid, name, e164 in starred:
             from xx_dialer import t9
 
-            label = "%s\n%s" % (t9.initials(name or e164), name or e164)
-            button = Gtk.Button(label=label)
+            button = Gtk.Button()
+            cell = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                           spacing=8)
+            cell.set_valign(Gtk.Align.CENTER)
+            cell.append(widgets.avatar(
+                t9.initials(name or e164), 32))
+            text = self._row_label(name or e164, "xx-title")
+            cell.append(text)
+            button.set_child(cell)
             button.set_tooltip_text(name or e164)
             button.connect("clicked", self._on_star, e164)
             self._star_bar.append(button)
         unread = self.controller.unread
-        self._banner.set_text(
-            recents.missed_title(unread) if unread else "")
-        self._banner.set_visible(bool(unread))
+        if unread:
+            self._caption.set_text(
+                recents.missed_title(unread).upper())
+        else:
+            total = len(self.controller.merged)
+            self._caption.set_text(
+                "%d CALL%s" % (total, "" if total == 1 else "S"))
         deeplink = self.controller.deeplink
         self._deep_note.set_visible(deeplink is not None)
         if deeplink is not None:
@@ -690,9 +833,10 @@ class RecentsView:
         self._empty.set_visible(empty)
         if empty:
             if self.controller.merged:
-                self._empty.set_text("No calls match this filter.")
+                widgets.fit_text(
+                    self._empty, "No calls match this filter.", 32)
             else:
-                self._empty.set_text("No calls yet.")
+                widgets.fit_text(self._empty, "No calls yet.", 32)
 
 
 def build_recents(controller: RecentsController) -> RecentsView:
