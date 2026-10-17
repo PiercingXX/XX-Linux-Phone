@@ -1,7 +1,7 @@
 """Received-file history: small atomic JSON log under the state dir.
 
-Pure stdlib, no GTK/Gio: the share window renders these rows in a
-Gtk.ListView and the service appends on delivery. Bounded (latest 100)
+Pure stdlib, no GTK/Gio: the share window renders these rows as
+ListRows and the service appends on delivery. Bounded (latest 100)
 so a busy receiver cannot grow the file without limit.
 """
 from __future__ import annotations

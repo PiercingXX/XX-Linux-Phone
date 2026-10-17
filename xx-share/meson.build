@@ -6,6 +6,16 @@ project(
 
 python = import('python').find_installation('python3')
 
+# The UI is built on the shared xx_ui design system: install common/
+# first so `import xx_ui` resolves at runtime.
+xx_ui_check = run_command(
+  python, '-c', 'import xx_ui',
+  check: false,
+)
+if xx_ui_check.returncode() != 0
+  error('xx_ui not found for python. Install common/ first (common/meson.build).')
+endif
+
 prefix     = get_option('prefix')
 bindir     = join_paths(prefix, get_option('bindir'))
 libexecdir = join_paths(prefix, get_option('libexecdir'))

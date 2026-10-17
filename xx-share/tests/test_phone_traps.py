@@ -15,16 +15,17 @@ def test_no_application_get_display():
             assert "Display.get_default()" in line, line
 
 
-def test_display_level_theming():
-    assert "add_provider_for_display" in UI
-    assert "Gdk.Display.get_default()" in UI
+def test_theming_owned_by_xx_ui():
+    assert "xx_ui.apply" in UI
+    assert "add_provider_for_display" not in UI
+    assert "Gdk.Display.get_default()" not in UI
 
 
-def test_lists_follow_theme():
-    css = UI[UI.index("def theme_css"):]
-    for token in ("listview", "background-color"):
-        assert token in css
-    assert "listview" in css and "surface" in css
+def test_no_local_theme_css():
+    for token in ("def theme_css", "effective_theme", "THEME_PRESETS",
+                  "ThemePreset"):
+        assert token not in UI, token
+    assert "from xx_ui import widgets" in UI
 
 
 def test_no_entry_autofocus_at_startup():
@@ -34,16 +35,21 @@ def test_no_entry_autofocus_at_startup():
     assert "self.send_button.grab_focus()" in UI
 
 
-def test_no_minimize_maximize_buttons():
-    assert "set_show_start_title_buttons(False)" in UI
-    assert "set_show_end_title_buttons(False)" in UI
-    assert '":close"' in UI
+def test_no_titlebar_chrome():
+    for guilty in ("HeaderBar", "ToolbarView", "ActionRow",
+                   "show_start_title_buttons", "show_end_title_buttons"):
+        assert guilty not in UI, guilty
+    assert "set_decorated(False)" in UI
 
 
-def test_long_lists_use_list_view():
-    assert "Gtk.ListView" in UI
-    assert "Gtk.SignalListItemFactory" in UI
-    assert "Gtk.SingleSelection" in UI
+def test_lists_use_xx_ui_builders():
+    for token in ("widgets.page_header", "widgets.list_row",
+                  "widgets.bottom_tabs", "widgets.setting_row",
+                  "widgets.empty_state"):
+        assert token in UI, token
+    for gone in ("Gtk.ListView", "Gtk.SignalListItemFactory",
+                 "Gtk.SingleSelection", "Gtk.StringList", "Gtk.ListBox"):
+        assert gone not in UI, gone
 
 
 def test_file_picker_uses_modern_dialog():
@@ -54,8 +60,8 @@ def test_file_picker_uses_modern_dialog():
 
 
 def test_share_window_scope_present():
-    for token in ("Cancel", "cancel_send", "Clear history", "history_list",
-                  "Favorite selected", "Auto-accept", "auto-off",
+    for token in ("Cancel", "cancel_send", "Clear history", "history_box",
+                  "Favorite selected", "Auto-accept", "Auto-off",
                   "Receiver PIN", "TransferDone", "IncomingRequest"):
         assert token in UI, token
 

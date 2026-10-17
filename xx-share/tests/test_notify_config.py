@@ -33,8 +33,8 @@ def test_actions_roundtrip():
     assert action_for(1, "nope") is None
 
 
-def test_config_roundtrip_and_theme(isolated_home):
-    from config import ShareConfig, shell_theme_key
+def test_config_roundtrip(isolated_home):
+    from config import ShareConfig
 
     config = ShareConfig(isolated_home / ".config" / "xx-share")
     config.data["alias"] = "pocket"
@@ -44,11 +44,6 @@ def test_config_roundtrip_and_theme(isolated_home):
     assert again.data["alias"] == "pocket"
     assert again.data["max_transfer_mb"] == 500
     assert again.max_transfer_bytes == 500 * 1024 * 1024
-    assert shell_theme_key(isolated_home / "missing.json") == "amoled"
-    config.data["theme"] = "paper"
-    assert config.effective_theme().key == "paper"
-    config.data["theme"] = "bogus"
-    assert config.effective_theme().key == "amoled"
 
 
 def test_cert_fingerprint_matches_der(cert_pair):

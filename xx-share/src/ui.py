@@ -1,197 +1,227 @@
-"""xx-share GTK4/libadwaita UI: devices, files, progress, settings.
+"""xx-share GTK4 UI in the XX design language.
 
-Text-first, phone-narrow (360px): no icons, every color from the active
-ThemePreset, long labels ellipsize. Network work runs on worker threads
-with results posted back via GLib.idle_add; the main loop never blocks.
-Long lists (nearby devices, received history) use Gtk.ListView; the
-short chosen-files list stays a ListBox.
+Four tabs (Share, History, Favorites, Settings) built only from
+``xx_ui.widgets`` builders: PageHeader titles, ListRows with avatars
+and hairlines, SettingRows with the inverted switch, one inverted
+primary Send button. No titlebar chrome, no app-owned theme CSS.
+Network work runs on worker threads with results posted back via
+GLib.idle_add; the main loop never blocks.
 """
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+import xx_ui
+from xx_ui import widgets
+
 from config import VISIBILITY_ALWAYS, ShareConfig
-from favorites import auto_accept_enabled, is_favorite, set_auto_accept, set_favorite
-from notify import format_size
+from favorites import (
+    auto_accept_enabled,
+    favorites_list,
+    is_favorite,
+    set_auto_accept,
+    set_favorite,
+)
+from notify import ACTION_ACCEPT, ACTION_DECLINE, format_size
 
 
-def theme_css(background: str, foreground: str, muted: str, accent: str,
-              surface: str, border: str) -> bytes:
-    return (
-        f"window {{ background-color: {background}; color: {foreground}; }} "
-        f"scrolledwindow, viewport, stack {{ background-color: {background}; }} "
-        f"listview, listview > row, list, list > row {{ "
-        f"background-color: {surface}; color: {foreground}; }} "
-        f"listview > row:selected, list > row:selected {{ "
-        f"background-color: {border}; color: {foreground}; }} "
-        f".xx-muted {{ color: {muted}; }} "
-        f".xx-accent {{ color: {accent}; }} "
-        f"entry {{ background-color: {surface}; color: {foreground}; "
-        f"border-color: {border}; }}"
-    ).encode("utf-8")
+def _initials(name: str) -> str:
+    parts = [piece for piece in str(name).split() if piece[:1].isalnum()]
+    if not parts:
+        return "?"
+    return "".join(piece[0].upper() for piece in parts[:2])
 
 
-def apply_theme(window: object, config: ShareConfig) -> None:
-    from gi.repository import Gdk, Gtk
-
-    preset = config.effective_theme()
-    provider = Gtk.CssProvider()
-    provider.load_from_data(theme_css(
-        preset.background, preset.foreground, preset.muted,
-        preset.accent, preset.surface, preset.border))
-    display = Gdk.Display.get_default()
-    if display is not None:
-        Gtk.StyleContext.add_provider_for_display(
-            display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-
-
-def ellipsize(label: object) -> None:
-    from gi.repository import Pango
-
-    label.set_ellipsize(Pango.EllipsizeMode.END)  # type: ignore[union-attr]
-    label.set_max_width_chars(32)  # type: ignore[union-attr]
-
-
-def peer_label(peer: dict) -> str:
-    alias = str(peer.get("alias", ""))
+def _peer_sub(peer: dict) -> str:
+    kind = str(peer.get("device_type", "") or "").title() or "Device"
     addr = str(peer.get("addr", ""))
-    fp = str(peer.get("fingerprint", ""))
-    short = f" ·{fp[:8]}" if fp else ""
-    return f"{alias} ({addr}){short}"
+    return f"{kind} · {addr}" if addr else kind
 
 
-def history_label(entry: dict) -> str:
-    name = str(entry.get("file_name", "file"))
-    sender = str(entry.get("sender_alias", ""))
-    size = entry.get("size", 0)
+def _history_date(entry: dict) -> str:
     try:
-        text = f"{name} ({format_size(int(size))})"
+        moment = time.localtime(float(entry.get("received_at", 0)))
     except (TypeError, ValueError):
-        text = name
-    return f"{text} — {sender}" if sender else text
+        return ""
+    return time.strftime("%m-%d", moment)
 
 
 class ShareWindow:
     def __init__(self, app: object, service: object, initial_files: list[str]) -> None:
-        from gi.repository import Adw, Gtk
+        from gi.repository import Gtk
 
         self.service = service
         self.config: ShareConfig = service.config  # type: ignore[union-attr]
         self.files: list[str] = [item for item in initial_files
                                  if Path(item).is_file()]
-        self.window = Adw.ApplicationWindow(application=app, title="xx-share")
-        self.window.set_default_size(360, 640)
-        apply_theme(self.window, self.config)
-
-        header = Adw.HeaderBar()
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        header.set_decoration_layout(":close")
-
-        self.peer_strings = Gtk.StringList()
-        peer_factory = Gtk.SignalListItemFactory()
-        peer_factory.connect("setup", self._on_peer_setup)
-        peer_factory.connect("bind", self._on_peer_bind)
-        self.peer_selection = Gtk.SingleSelection(model=self.peer_strings)
-        self.device_list = Gtk.ListView(model=self.peer_selection,
-                                        factory=peer_factory)
-        self.device_list.set_show_separators(True)
         self._peers: list[dict] = []
-
-        self.history_strings = Gtk.StringList()
-        history_factory = Gtk.SignalListItemFactory()
-        history_factory.connect("setup", self._on_peer_setup)
-        history_factory.connect("bind", self._on_history_bind)
-        self.history_selection = Gtk.SingleSelection(model=self.history_strings)
-        self.history_selection.set_can_unselect(True)
-        self.history_list = Gtk.ListView(model=self.history_selection,
-                                         factory=history_factory)
-        self.history_list.set_show_separators(True)
         self._history: list[dict] = []
-
-        self.file_box = Gtk.ListBox()
-        self.file_box.set_selection_mode(Gtk.SelectionMode.NONE)
-        self.progress_label = Gtk.Label(label="No files chosen")
-        ellipsize(self.progress_label)
-
-        add_button = Gtk.Button(label="Add files")
-        add_button.connect("clicked", self._on_add_files)
-        self.send_button = Gtk.Button(label="Send")
-        self.send_button.connect("clicked", self._on_send)
-        self.cancel_button = Gtk.Button(label="Cancel")
-        self.cancel_button.connect("clicked", self._on_cancel)
-        self.cancel_button.set_sensitive(False)
+        self.selected_fp = ""
         self.current_transfer: str | None = None
+        self._tab = "share"
+        self._incoming_dialog: object | None = None
 
-        self.visible_switch = Gtk.Switch()
-        self.visible_switch.set_active(bool(self.config.data.get("visible")))
-        self.visible_switch.connect("notify::active", self._on_visible_toggled)
-        self.visible_note = Gtk.Label(label=self._visibility_note())
-        self.visible_note.add_css_class("xx-muted")
-        ellipsize(self.visible_note)
+        xx_ui.apply(app)
 
-        self.always_switch = Gtk.Switch()
-        self.always_switch.set_active(
-            self.config.data.get("visibility_mode") == VISIBILITY_ALWAYS)
-        self.always_switch.connect("notify::active", self._on_always_toggled)
+        self.window = Gtk.ApplicationWindow(application=app, title="xx-share")
+        self.window.set_decorated(False)
+        self.window.set_default_size(360, 720)
 
-        self.auto_accept_switch = Gtk.Switch()
-        self.auto_accept_switch.set_active(auto_accept_enabled(self.config))
-        self.auto_accept_switch.connect("notify::active",
-                                        self._on_auto_accept_toggled)
-        self.favorite_button = Gtk.Button(label="Favorite selected device")
-        self.favorite_button.connect("clicked", self._on_favorite)
+        self.share_header = widgets.page_header(
+            "Share", self._visibility_caption(),
+            actions=[("Add", self._on_add_files)],
+            overflow_cb=self._open_share_menu)
+        self.share_caption = self.share_header.get_last_child()
+        share_body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        share_body.append(widgets.section_label("Nearby devices"))
+        self.device_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        share_body.append(self.device_box)
+        share_body.append(widgets.section_label("Files"))
+        self.file_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        share_body.append(self.file_box)
+        self.send_pin = widgets.text_entry("Receiver PIN (if they show one)")
+        share_body.append(self.send_pin)
+        send_row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 12)
+        self.send_button = widgets.primary_button("Send", self._on_send)
+        self.send_button.set_hexpand(True)
+        self.cancel_button = widgets.outline_button("Cancel", self._on_cancel)
+        self.cancel_button.set_sensitive(False)
+        send_row.append(self.send_button)
+        send_row.append(self.cancel_button)
+        share_body.append(send_row)
+        self.progress_bar = Gtk.ProgressBar()
+        self.progress_bar.set_visible(False)
+        self.progress_bar.set_margin_top(12)
+        share_body.append(self.progress_bar)
+        self.status_label = widgets.label("", "xx-secondary")
+        share_body.append(self.status_label)
+        share_page = widgets.page(self.share_header, share_body)
 
-        visible_row = Adw.ActionRow(title="Visible to nearby devices")
-        visible_row.add_suffix(self.visible_switch)
-        always_row = Adw.ActionRow(title="Keep visible (no auto-off)")
-        always_row.add_suffix(self.always_switch)
-        auto_row = Adw.ActionRow(title="Auto-accept favorites")
-        auto_row.add_suffix(self.auto_accept_switch)
+        self.history_header = widgets.page_header(
+            "History", "Empty", actions=[("Clear", self._on_clear_history)])
+        self.history_caption = self.history_header.get_last_child()
+        self.history_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        history_page = widgets.page(self.history_header, self.history_box)
 
-        layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        layout.set_margin_start(12)
-        layout.set_margin_end(12)
-        layout.set_margin_top(12)
-        layout.set_margin_bottom(12)
-        layout.append(visible_row)
-        layout.append(self.visible_note)
-        layout.append(always_row)
-        layout.append(Gtk.Label(label="Nearby devices"))
-        layout.append(self.device_list)
-        layout.append(self.favorite_button)
-        layout.append(Gtk.Label(label="Files"))
-        layout.append(self.file_box)
-        layout.append(self.progress_label)
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        buttons.append(add_button)
-        buttons.append(self.send_button)
-        buttons.append(self.cancel_button)
-        layout.append(buttons)
-        layout.append(self._settings_group())
-        layout.append(auto_row)
-        layout.append(Gtk.Label(label="Received"))
-        layout.append(self.history_list)
-        clear_button = Gtk.Button(label="Clear history")
-        clear_button.connect("clicked", self._on_clear_history)
-        layout.append(clear_button)
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_child(layout)
-        view = Adw.ToolbarView()
-        view.add_top_bar(header)
-        view.set_content(scroll)
-        self.window.set_content(view)
+        self.favorites_header = widgets.page_header("Favorites", "Empty")
+        self.favorites_caption = self.favorites_header.get_last_child()
+        self.favorites_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        favorites_page = widgets.page(self.favorites_header,
+                                      self.favorites_box)
+
+        settings_header = widgets.compact_header(
+            lambda: self._show_tab("share"), "Settings")
+        settings_body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        settings_body.append(widgets.section_label("Device name"))
+        self.alias_entry = widgets.text_entry("Device name")
+        self.alias_entry.set_text(str(self.config.data.get("alias", "")))
+        self.alias_entry.connect("changed", self._on_alias_changed)
+        settings_body.append(self.alias_entry)
+        settings_body.append(widgets.section_label("Receive PIN"))
+        self.pin_entry = widgets.text_entry("Empty = no PIN")
+        self.pin_entry.set_text(str(self.config.data.get("require_pin", "")))
+        self.pin_entry.connect("changed", self._on_pin_changed)
+        settings_body.append(self.pin_entry)
+        settings_body.append(widgets.section_label("Visibility"))
+        self.visible_switch = widgets.make_switch(
+            bool(self.config.data.get("visible")),
+            self._on_visible_switched)
+        settings_body.append(widgets.setting_row(
+            "Visible to nearby devices", "", self.visible_switch))
+        self.always_switch = widgets.make_switch(
+            self.config.data.get("visibility_mode") == VISIBILITY_ALWAYS,
+            self._on_always_switched)
+        settings_body.append(widgets.setting_row(
+            "Keep visible", "Auto-off after 10 min", self.always_switch,
+            last=True))
+        settings_body.append(widgets.section_label("Receiving"))
+        self.auto_accept_switch = widgets.make_switch(
+            auto_accept_enabled(self.config), self._on_auto_accept_switched)
+        settings_body.append(widgets.setting_row(
+            "Auto-accept favorites", "Favorites skip the prompt",
+            self.auto_accept_switch, last=True))
+        settings_page = widgets.page(settings_header, settings_body)
+
+        self.stack = Gtk.Stack()
+        self.stack.add_named(share_page, "share")
+        self.stack.add_named(history_page, "history")
+        self.stack.add_named(favorites_page, "favorites")
+        self.stack.add_named(settings_page, "settings")
+        self.stack.set_visible_child_name("share")
+
+        root = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        root.append(self.stack)
+        self.tabs_slot = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        root.append(self.tabs_slot)
+        self._render_tabs()
+        self.window.set_child(root)
         previous = getattr(service, "on_signal", None)
         service.on_signal = self._chain_signal(previous)  # type: ignore[union-attr]
         self.refresh_files()
         self.refresh_devices()
         self.refresh_history()
+        self.refresh_favorites()
         self.send_button.grab_focus()
+
+    def _visibility_caption(self) -> str:
+        if not self.config.data.get("visible"):
+            return "Hidden"
+        if self.config.data.get("visibility_mode") == VISIBILITY_ALWAYS:
+            return "Visible"
+        return "Visible · 10 min"
+
+    def _refresh_chrome(self) -> None:
+        self.share_caption.set_text(self._visibility_caption().upper())  # type: ignore[union-attr]
+        count = len(self._history)
+        self.history_caption.set_text(  # type: ignore[union-attr]
+            f"{count} file{'s' if count != 1 else ''}".upper() if count else "Empty")
+        favorites = favorites_list(self.config)
+        self.favorites_caption.set_text(  # type: ignore[union-attr]
+            f"{len(favorites)} device{'s' if len(favorites) != 1 else ''}".upper()
+            if favorites else "Empty")
+
+    def _tabs(self) -> list:
+        return [("", "Share", self._tab == "share",
+                 lambda: self._show_tab("share")),
+                ("", "History", self._tab == "history",
+                 lambda: self._show_tab("history")),
+                ("", "Favorites", self._tab == "favorites",
+                 lambda: self._show_tab("favorites"))]
+
+    def _render_tabs(self) -> None:
+        while True:
+            child = self.tabs_slot.get_first_child()  # type: ignore[union-attr]
+            if child is None:
+                break
+            self.tabs_slot.remove(child)  # type: ignore[union-attr]
+        self.tabs_slot.append(widgets.bottom_tabs(self._tabs()))  # type: ignore[union-attr]
+
+    def _show_tab(self, name: str) -> None:
+        self._tab = name
+        self.stack.set_visible_child_name(name)  # type: ignore[union-attr]
+        self._render_tabs()
+
+    def _open_share_menu(self) -> None:
+        from gi.repository import Gtk
+
+        top = self.share_header.get_first_child()
+        anchor = top.get_last_child() if top is not None else None
+        popover = Gtk.Popover()
+        menu = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        menu.append(widgets.menu_row(
+            "Favorite selected device", self._on_favorite))
+        menu.append(widgets.menu_row(
+            "Settings", lambda: self._show_tab("settings")))
+        menu.append(widgets.menu_row("Clear history", self._on_clear_history))
+        popover.set_child(menu)
+        if anchor is not None:
+            popover.set_parent(anchor)
+        popover.popup()
 
     def _chain_signal(self, previous: object) -> object:
         def chained(name: str, args: tuple) -> None:
@@ -204,57 +234,8 @@ class ShareWindow:
 
         return chained
 
-    def _visibility_note(self) -> str:
-        if self.config.data.get("visibility_mode") == VISIBILITY_ALWAYS:
-            return "Visible to nearby devices"
-        return "Visible (auto-off after 10 min)"
-
-    def _settings_group(self) -> object:
-        from gi.repository import Adw, Gtk
-
-        alias = Gtk.Entry(text=str(self.config.data.get("alias", "")))
-        alias.set_placeholder_text("Device name")
-        alias.connect("changed", self._on_alias_changed)
-        pin = Gtk.Entry(text=str(self.config.data.get("require_pin", "")))
-        pin.set_placeholder_text("Receive PIN (empty = none)")
-        pin.connect("changed", self._on_pin_changed)
-        self.send_pin = Gtk.Entry()
-        self.send_pin.set_placeholder_text("Receiver PIN (if they show one)")
-        group = Adw.PreferencesGroup(title="Settings")
-        group.add(Adw.ActionRow(title="Device name"))
-        group.add(alias)
-        group.add(Adw.ActionRow(title="Receive PIN"))
-        group.add(pin)
-        group.add(Adw.ActionRow(title="Send PIN"))
-        group.add(self.send_pin)
-        return group
-
     def present(self) -> None:
         self.window.present()  # type: ignore[union-attr]
-
-    def refresh_files(self) -> None:
-        from gi.repository import Gtk
-
-        while True:
-            row = self.file_box.get_first_child()  # type: ignore[union-attr]
-            if row is None:
-                break
-            self.file_box.remove(row)  # type: ignore[union-attr]
-        for path in self.files:
-            try:
-                size = Path(path).stat().st_size
-            except OSError:
-                continue
-            label = Gtk.Label(label=f"{Path(path).name} ({format_size(size)})")
-            ellipsize(label)
-            label.set_xalign(0.0)
-            self.file_box.append(label)  # type: ignore[union-attr]
-        self.progress_label.set_text(  # type: ignore[union-attr]
-            f"{len(self.files)} file(s) chosen" if self.files else "No files chosen")
-
-    def _peer_dicts(self) -> list[dict]:
-        peers = self.service.list_peers()  # type: ignore[union-attr]
-        return [dict(item) for item in peers]
 
     def set_backend(self, service: object) -> None:
         previous = getattr(service, "on_signal", None)
@@ -263,6 +244,43 @@ class ShareWindow:
         self.config = service.config  # type: ignore[union-attr]
         self.refresh_devices()
         self.refresh_history()
+        self.refresh_favorites()
+
+    @staticmethod
+    def _clear_box(box: object) -> None:
+        while True:
+            row = box.get_first_child()  # type: ignore[union-attr]
+            if row is None:
+                break
+            box.remove(row)  # type: ignore[union-attr]
+
+    def refresh_files(self) -> None:
+        self._clear_box(self.file_box)
+        if not self.files:
+            self.file_box.append(widgets.empty_state("No files chosen yet."))
+        for index, path in enumerate(self.files):
+            try:
+                size = Path(path).stat().st_size
+            except OSError:
+                continue
+            remove = widgets.icon_button(
+                "window-close-symbolic",
+                lambda _path=path: self._remove_file(_path))
+            self.file_box.append(widgets.list_row(
+                Path(path).name, format_size(size), trailing=remove,
+                last=index == len(self.files) - 1))
+        self.status_label.set_text(  # type: ignore[union-attr]
+            f"{len(self.files)} file{'s' if len(self.files) != 1 else ''} chosen"
+            if self.files else "")
+
+    def _remove_file(self, path: str) -> None:
+        if path in self.files:
+            self.files.remove(path)
+        self.refresh_files()
+
+    def _peer_dicts(self) -> list[dict]:
+        peers = self.service.list_peers()  # type: ignore[union-attr]
+        return [dict(item) for item in peers]
 
     def refresh_devices(self) -> None:
         list_async = getattr(self.service, "list_peers_async", None)
@@ -291,14 +309,30 @@ class ShareWindow:
         GLib.idle_add(render)
 
     def _render_peers(self) -> None:
-        while self.peer_strings.get_n_items():
-            self.peer_strings.remove(0)
+        from gi.repository import Gtk
+
+        self._clear_box(self.device_box)
         if not self._peers:
-            self.peer_strings.append("No devices nearby yet")
+            self.device_box.append(
+                widgets.empty_state("No devices nearby yet."))
             return
-        for peer in self._peers:
-            mark = " *" if is_favorite(self.config, peer.get("fingerprint", "")) else ""
-            self.peer_strings.append(peer_label(peer) + mark)
+        for index, peer in enumerate(self._peers):
+            fingerprint = str(peer.get("fingerprint", ""))
+            trailing = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+            if is_favorite(self.config, fingerprint):
+                trailing.append(widgets.icon_image("starred-symbolic"))
+            if fingerprint and fingerprint == self.selected_fp:
+                trailing.append(widgets.icon_image("object-select-symbolic"))
+            self.device_box.append(widgets.list_row(
+                str(peer.get("alias", "")), _peer_sub(peer),
+                leading=widgets.avatar(_initials(str(peer.get("alias", ""))), 40),
+                trailing=trailing,
+                on_activate=lambda _fp=fingerprint: self._select_peer(_fp),
+                last=index == len(self._peers) - 1))
+
+    def _select_peer(self, fingerprint: str) -> None:
+        self.selected_fp = fingerprint
+        self._render_peers()
 
     def refresh_history(self) -> None:
         try:
@@ -306,39 +340,55 @@ class ShareWindow:
         except Exception as error:
             logger.warning("refresh history failed: %s", error)
             self._history = []
-        while self.history_strings.get_n_items():
-            self.history_strings.remove(0)
-        for entry in self._history:
-            self.history_strings.append(history_label(entry))
+        self._clear_box(self.history_box)
+        if not self._history:
+            self.history_box.append(
+                widgets.empty_state("Nothing received yet."))
+        for index, entry in enumerate(self._history):
+            sender = str(entry.get("sender_alias", ""))
+            try:
+                size = format_size(int(entry.get("size", 0)))
+            except (TypeError, ValueError):
+                size = ""
+            self.history_box.append(widgets.list_row(
+                str(entry.get("file_name", "file")),
+                f"{sender} · {size}" if sender else size,
+                meta=_history_date(entry),
+                leading=widgets.avatar(_initials(sender or "?"), 40),
+                last=index == len(self._history) - 1))
+        self._refresh_chrome()
 
-    def _on_peer_setup(self, _factory: object, list_item: object) -> None:
-        from gi.repository import Gtk
+    def refresh_favorites(self) -> None:
+        self._clear_box(self.favorites_box)
+        favorites = favorites_list(self.config)
+        if not favorites:
+            self.favorites_box.append(
+                widgets.empty_state("No favorites yet."))
+        nearby = {str(peer.get("fingerprint", "")).lower(): peer
+                  for peer in self._peers}
+        for index, fingerprint in enumerate(favorites):
+            peer = nearby.get(fingerprint.lower(), {})
+            alias = str(peer.get("alias", "")) or "Unknown device"
+            addr = str(peer.get("addr", "")) or "Not nearby"
+            remove = widgets.icon_button(
+                "window-close-symbolic",
+                lambda _fp=fingerprint: self._unfavorite(_fp))
+            self.favorites_box.append(widgets.list_row(
+                alias, f"{fingerprint[:8]} · {addr}",
+                leading=widgets.avatar(_initials(alias), 40),
+                trailing=remove,
+                last=index == len(favorites) - 1))
+        self._refresh_chrome()
 
-        label = Gtk.Label(xalign=0.0)
-        ellipsize(label)
-        list_item.set_child(label)  # type: ignore[union-attr]
-
-    def _on_peer_bind(self, _factory: object, list_item: object) -> None:
-        item = list_item.get_item()  # type: ignore[union-attr]
-        label = list_item.get_child()  # type: ignore[union-attr]
-        text = item.get_string() if item is not None else ""
-        label.set_text(text)  # type: ignore[union-attr]
-
-    def _on_history_bind(self, _factory: object, list_item: object) -> None:
-        item = list_item.get_item()  # type: ignore[union-attr]
-        label = list_item.get_child()  # type: ignore[union-attr]
-        text = item.get_string() if item is not None else ""
-        label.set_text(text)  # type: ignore[union-attr]
+    def _unfavorite(self, fingerprint: str) -> None:
+        set_favorite(self.config, fingerprint, False)
+        self.refresh_favorites()
+        self._render_peers()
 
     def _selected_peer(self) -> dict | None:
-        if not self._peers:
-            return None
-        try:
-            index = int(self.peer_selection.get_selected())  # type: ignore[union-attr]
-        except (TypeError, ValueError):
-            return None
-        if 0 <= index < len(self._peers):
-            return self._peers[index]
+        for peer in self._peers:
+            if str(peer.get("fingerprint", "")) == self.selected_fp:
+                return peer
         return None
 
     def _on_alias_changed(self, entry: object) -> None:
@@ -351,49 +401,110 @@ class ShareWindow:
         self.config.data["require_pin"] = text.strip()
         self.config.save()
 
-    def _on_auto_accept_toggled(self, switch: object, _param: object) -> None:
-        set_auto_accept(self.config, bool(switch.get_active()))  # type: ignore[union-attr]
-
-    def _on_always_toggled(self, switch: object, _param: object) -> None:
+    def _on_visible_switched(self, active: bool) -> None:
         from gi.repository import GLib
 
-        active = bool(switch.get_active())  # type: ignore[union-attr]
+        def work() -> None:
+            from netif import allowed_bind_addrs
+
+            addrs = allowed_bind_addrs()
+            GLib.idle_add(self._apply_visibility, active, addrs)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_visibility(self, active: bool, addrs: list[str]) -> bool:
+        self.service.set_visible(active, addrs)  # type: ignore[union-attr]
+        self._refresh_chrome()
+        self.refresh_devices()
+        return False
+
+    def _on_always_switched(self, active: bool) -> None:
+        from gi.repository import GLib
+
         self.config.data["visibility_mode"] = (
             VISIBILITY_ALWAYS if active else "auto-10min")
         self.config.save()
-        GLib.idle_add(self._idle_visibility_note)
+        GLib.idle_add(lambda: self._refresh_chrome() or False)
 
-    def _idle_visibility_note(self) -> bool:
-        self.visible_note.set_text(self._visibility_note())  # type: ignore[union-attr]
-        return False
+    def _on_auto_accept_switched(self, active: bool) -> None:
+        set_auto_accept(self.config, active)
 
-    def _on_favorite(self, _button: object) -> None:
-        from gi.repository import GLib
-
+    def _on_favorite(self) -> None:
         peer = self._selected_peer()
         if peer is None:
             return
         fingerprint = str(peer.get("fingerprint", ""))
         set_favorite(self.config, fingerprint,
                      not is_favorite(self.config, fingerprint))
-        GLib.idle_add(self._idle_refresh_devices)
+        self.refresh_favorites()
+        self._render_peers()
 
-    def _idle_refresh_devices(self) -> bool:
-        self.refresh_devices()
-        return False
-
-    def _on_clear_history(self, _button: object) -> None:
-        from gi.repository import GLib
-
+    def _on_clear_history(self) -> None:
         try:
             self.service.history.clear()  # type: ignore[union-attr]
         except Exception as error:
             logger.warning("clear history failed: %s", error)
-        GLib.idle_add(self._idle_refresh_history)
-
-    def _idle_refresh_history(self) -> bool:
         self.refresh_history()
-        return False
+
+    def show_incoming(self, session_id: str, alias: str,
+                      names: list[str], total: int) -> None:
+        from gi.repository import Gtk
+
+        self._close_incoming()
+        content = widgets.dialog_box("Incoming files")
+        content.append(widgets.label(alias, "xx-title"))
+        for name in names[:3]:
+            content.append(widgets.label(name, "xx-secondary"))
+        if len(names) > 3:
+            content.append(widgets.caption(f"+{len(names) - 3} more"))
+        content.append(widgets.caption(format_size(total)))
+        pin = str(self.config.data.get("require_pin", ""))
+        if pin:
+            content.append(widgets.caption(f"Your PIN {pin}"))
+        buttons = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+        decline = widgets.outline_button(
+            "Decline",
+            lambda: self._resolve_incoming(session_id, ACTION_DECLINE))
+        decline.set_hexpand(True)
+        accept = widgets.primary_button(
+            "Accept",
+            lambda: self._resolve_incoming(session_id, ACTION_ACCEPT))
+        accept.set_hexpand(True)
+        buttons.append(decline)
+        buttons.append(accept)
+        content.append(buttons)
+        dialog = Gtk.Window(transient_for=self.window, modal=True)
+        dialog.set_decorated(False)
+        dialog.set_default_size(360, 720)
+        outer = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        outer.add_css_class("xx-page-body")
+        top_gap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        top_gap.set_vexpand(True)
+        outer.append(top_gap)
+        outer.append(content)
+        bottom_gap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        bottom_gap.set_vexpand(True)
+        outer.append(bottom_gap)
+        dialog.set_child(outer)
+        dialog.present()
+        self._incoming_dialog = dialog
+
+    def _close_incoming(self) -> None:
+        dialog, self._incoming_dialog = self._incoming_dialog, None
+        if dialog is not None:
+            try:
+                dialog.close()  # type: ignore[union-attr]
+            except Exception as error:
+                logger.warning("incoming close failed: %s", error)
+
+    def _resolve_incoming(self, session_id: str, action: str) -> None:
+        self._close_incoming()
+        resolve = getattr(self.service, "_resolve", None)
+        if callable(resolve):
+            try:
+                resolve(session_id, action)
+            except Exception as error:
+                logger.warning("incoming resolve failed: %s", error)
 
     def _on_bus_signal(self, name: str, args: tuple) -> None:
         from gi.repository import GLib
@@ -410,35 +521,30 @@ class ShareWindow:
             if not self.current_transfer or transfer_id == self.current_transfer:
                 GLib.idle_add(self._idle_done, message or "Send finished", ok)
         elif name == "IncomingRequest":
-            GLib.idle_add(self._idle_refresh_history)
+            session_id = str(args[0]) if args else ""
+            alias = str(args[1]) if len(args) > 1 else ""
+            names = [str(item) for item in args[3]] if len(args) > 3 else []
+            total = int(args[4]) if len(args) > 4 else 0
+            GLib.idle_add(self._idle_incoming, session_id, alias, names, total)
+
+    def _idle_incoming(self, session_id: str, alias: str,
+                       names: list[str], total: int) -> bool:
+        self.show_incoming(session_id, alias, names, total)
+        self.refresh_history()
+        return False
 
     def _idle_bus_progress(self, transfer_id: str, sent: int, total: int) -> bool:
         if self.current_transfer and transfer_id != self.current_transfer:
             return False
-        self.progress_label.set_text(  # type: ignore[union-attr]
+        self.progress_bar.set_visible(True)  # type: ignore[union-attr]
+        if total > 0:
+            self.progress_bar.set_fraction(  # type: ignore[union-attr]
+                max(0.0, min(1.0, sent / total)))
+        self.status_label.set_text(  # type: ignore[union-attr]
             f"{format_size(sent)} / {format_size(total)}")
         return False
 
-    def _on_visible_toggled(self, switch: object, _param: object) -> None:
-        from gi.repository import GLib
-
-        active = switch.get_active()  # type: ignore[union-attr]
-
-        def work() -> None:
-            from netif import allowed_bind_addrs
-
-            addrs = allowed_bind_addrs()
-            GLib.idle_add(self._apply_visibility, active, addrs)
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _apply_visibility(self, active: bool, addrs: list[str]) -> bool:
-        self.service.set_visible(active, addrs)  # type: ignore[union-attr]
-        self.visible_note.set_text(self._visibility_note())  # type: ignore[union-attr]
-        self.refresh_devices()
-        return False
-
-    def _on_add_files(self, _button: object) -> None:
+    def _on_add_files(self) -> None:
         from gi.repository import Gtk
 
         dialog = Gtk.FileDialog(title="Choose files to send")
@@ -459,19 +565,22 @@ class ShareWindow:
         self.refresh_files()
         return False
 
-    def _on_send(self, _button: object) -> None:
+    def _on_send(self) -> None:
         from gi.repository import GLib
 
         peer = self._selected_peer()
         if peer is None:
-            self.progress_label.set_text("Choose a device first")  # type: ignore[union-attr]
+            self.status_label.set_text("Choose a device first")  # type: ignore[union-attr]
             return
         if not self.files:
-            self.progress_label.set_text("Add files first")  # type: ignore[union-attr]
+            self.status_label.set_text("Add files first")  # type: ignore[union-attr]
             return
         files = list(self.files)
         pin_text = self.send_pin.get_text().strip()
-        self.progress_label.set_text(f"Sending to {peer.get('alias', '')}…")  # type: ignore[union-attr]
+        self.status_label.set_text(  # type: ignore[union-attr]
+            f"Sending to {peer.get('alias', '')}…")
+        self.progress_bar.set_visible(True)  # type: ignore[union-attr]
+        self.progress_bar.set_fraction(0.0)  # type: ignore[union-attr]
         self.cancel_button.set_sensitive(True)  # type: ignore[union-attr]
 
         def on_done(ok: bool, message: str) -> None:
@@ -499,7 +608,7 @@ class ShareWindow:
         except Exception as error:
             GLib.idle_add(self._idle_done, f"Send failed: {error}", False)
 
-    def _on_cancel(self, _button: object) -> None:
+    def _on_cancel(self) -> None:
         transfer_id = self.current_transfer
         if not transfer_id:
             return
@@ -509,7 +618,8 @@ class ShareWindow:
             logger.warning("cancel send failed: %s", error)
 
     def _idle_done(self, message: str, _ok: bool) -> bool:
-        self.progress_label.set_text(message)  # type: ignore[union-attr]
+        self.status_label.set_text(message)  # type: ignore[union-attr]
+        self.progress_bar.set_visible(False)  # type: ignore[union-attr]
         self.cancel_button.set_sensitive(False)  # type: ignore[union-attr]
         self.current_transfer = None
         return False

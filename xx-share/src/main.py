@@ -17,6 +17,20 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_deps() -> None:
+    try:
+        import xx_ui  # noqa: F401
+        return
+    except ImportError:
+        pass
+    common = Path(__file__).resolve().parent.parent.parent / "common"
+    if (common / "xx_ui" / "__init__.py").exists():
+        sys.path.insert(0, str(common))
+
+
+_ensure_deps()
+
 APP_ID = "io.piercingxx.XXShare"
 
 
