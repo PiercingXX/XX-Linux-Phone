@@ -176,6 +176,8 @@ ALLOW = {
         'status_line_async worker.',
     ('update_checker.py', 'count_updates'):
         'update-check worker thread.',
+    ('weather.py', '_geoclue_fix_sync'):
+        'weather auto-fix worker thread (weather-locate); bounded GeoClue calls.',
     ('wayland_bindings.py', 'generate_protocol_bindings'):
         'xx-wm-wayland-bindings worker; cached per pywayland version.',
     ('window.py', '_work'):

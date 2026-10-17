@@ -580,6 +580,7 @@ class ShellWindow(Adw.ApplicationWindow):
                  if entry.app_id == app_id), None),
             on_launch=self.drop_to_background,
             on_open_page=self.open_app_page,
+            on_muted=self._mute_app_notifications,
         )
 
         # Flat search with the text after the icon, like xx_ui's search_bar
@@ -2002,6 +2003,28 @@ class ShellWindow(Adw.ApplicationWindow):
         """Open the existing per-app settings page for an App info button."""
         from app_item_actions import open_app_page
         return open_app_page(self, page, entry)
+
+    def _mute_app_notifications(self, app_id: str) -> None:
+        """Disable-for… also clears the app's live notifications: the
+        shade drops its rows silently, then the daemon reports each one
+        closed (NotificationClosed reason 3) to the sending app."""
+        shade = getattr(self, '_shade', None)
+        if shade is None:
+            return
+        try:
+            ids = shade.close_app_notifications(app_id)
+        except Exception:
+            return
+        if not ids:
+            return
+        daemon = getattr(self.get_application(), '_notif_daemon', None)
+        if daemon is None:
+            return
+        for notif_id in ids:
+            try:
+                daemon.close_for_mute(notif_id)
+            except Exception:
+                pass
 
     # -- home edit mode (home_page.py) -----------------------------------------
 

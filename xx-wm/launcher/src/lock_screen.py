@@ -1310,8 +1310,11 @@ class LockScreen(Gtk.Window):
         GLib.timeout_add(380, lambda: self.dots_label.remove_css_class('shake') or False)
 
     def _refresh_clock(self) -> None:
+        from clock_format import format_clock, resolve_24h
+
         now = datetime.now()
-        self.clock_label.set_text(now.strftime('%H:%M'))
+        self.clock_label.set_text(
+            format_clock(now, resolve_24h(self._config)))
         self.date_label.set_text(now.strftime('%A, %d %b').replace(' 0', ' '))
 
     def _tick_clock(self) -> bool:

@@ -124,6 +124,9 @@ def export_backup(config) -> dict:
         'app_limit_ignored': config.data.get('app_limit_ignored', {}),
         'weather_lat': config.data.get('weather_lat'),
         'weather_lon': config.data.get('weather_lon'),
+        'weather_temp_unit': config.weather_temp_unit,
+        'weather_auto_location': config.weather_auto_location,
+        'clock_24h': config.clock_24h,
     }
     for key in _BOOL_KEYS:
         backup[key] = bool(config.data.get(key, False))
@@ -267,6 +270,19 @@ def validate_backup(payload: dict) -> tuple[bool, str | None]:
             except (TypeError, ValueError):
                 return False, f'{key} must be a number or null'
 
+    if payload.get('weather_temp_unit', 'fahrenheit') not in (
+            'fahrenheit', 'celsius'):
+        return False, 'weather_temp_unit must be fahrenheit/celsius'
+
+    if 'clock_24h' in payload and not (
+            payload['clock_24h'] is None
+            or isinstance(payload['clock_24h'], bool)):
+        return False, 'clock_24h must be a boolean or null'
+
+    if 'weather_auto_location' in payload and not isinstance(
+            payload['weather_auto_location'], bool):
+        return False, 'weather_auto_location must be a boolean'
+
     gestures = payload.get('gestures', {})
     if not isinstance(gestures, dict):
         return False, 'gestures must be a dict'
@@ -325,6 +341,14 @@ def restore_backup(config, payload: dict) -> bool:
     for key in ('weather_lat', 'weather_lon'):
         if key in payload:
             data[key] = payload[key]
+    if payload.get('weather_temp_unit') in ('fahrenheit', 'celsius'):
+        data['weather_temp_unit'] = payload['weather_temp_unit']
+    if 'clock_24h' in payload and (
+            payload['clock_24h'] is None
+            or isinstance(payload['clock_24h'], bool)):
+        data['clock_24h'] = payload['clock_24h']
+    if isinstance(payload.get('weather_auto_location'), bool):
+        data['weather_auto_location'] = payload['weather_auto_location']
     if 'text_size_scale' in payload:
         data['text_size_scale'] = max(0.5, min(2.0, float(payload['text_size_scale'])))
     if 'auto_lock_timeout' in payload:

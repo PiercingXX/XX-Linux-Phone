@@ -95,15 +95,34 @@ DEFAULT_CONFIG = {
     'widgets': {
         'time': {'enabled': True, 'order': 1, 'tap': 'default'},
         'date': {'enabled': True, 'order': 2, 'tap': 'default'},
-        'weather': {'enabled': True, 'order': 3, 'tap': 'refresh'},
+        'weather': {'enabled': True, 'order': 3, 'tap': 'default'},
         'battery': {'enabled': True, 'order': 4, 'tap': 'default'},
     },
     'weather_lat': None,
     'weather_lon': None,
     'weather_location': '',
+    'weather_temp_unit': 'fahrenheit',
+    'weather_auto_location': True,
+    'clock_24h': None,
     'xxdb_enabled': False,
     'xxdb_persistent': False,
 }
+
+_WEATHER_TEMP_UNITS = ('fahrenheit', 'celsius')
+
+
+def same_app_id(first: object, second: object) -> bool:
+    """True when two app ids name the same app: trailing `.desktop` and
+    case are ignored (drawer ids carry the suffix, notification
+    desktop-entry hints usually do not). Pure."""
+    if not first or not second:
+        return False
+
+    def _norm(value: object) -> str:
+        text = str(value)
+        return (text[:-8] if text.endswith('.desktop') else text).casefold()
+
+    return _norm(first) == _norm(second)
 
 # Free-form string keys (docs/config.md); a container value here would
 # crash set_text() consumers when the settings page is built.
@@ -551,11 +570,66 @@ class ShellConfig:
         if now is None:
             import time
             now = time.time()
-        wanted = self._norm_app_id(app_id).casefold()
         return any(
-            until > now and self._norm_app_id(key).casefold() == wanted
+            until > now and same_app_id(key, app_id)
             for key, until in self.muted_apps.items()
         )
+
+    def muted_until(self, app_id: str, now: float | None = None) -> float | None:
+        """Mute deadline for an app id (matched like is_app_muted), or None
+        when it is not currently muted. Powers the app-menu subtitle."""
+        if not app_id:
+            return None
+        if now is None:
+            import time
+            now = time.time()
+        for key, until in self.muted_apps.items():
+            if until > now and same_app_id(key, app_id):
+                return until
+        return None
+
+    def get(self, key: str, default: object = None) -> object:
+        """Format-agnostic read for settings surfaces: the stored value or
+        `default` when the key is absent."""
+        return self.data.get(key, default)
+
+    @property
+    def weather_temp_unit(self) -> str:
+        """Open-Meteo temperature unit (docs/config.md): `fahrenheit`
+        unless explicitly `celsius`; corrupt values fail soft to default."""
+        value = self.data.get('weather_temp_unit',
+                              DEFAULT_CONFIG['weather_temp_unit'])
+        return value if value in _WEATHER_TEMP_UNITS else 'fahrenheit'
+
+    def set_weather_temp_unit(self, unit: str) -> None:
+        if unit in _WEATHER_TEMP_UNITS:
+            self.data['weather_temp_unit'] = unit
+            self.save()
+
+    @property
+    def weather_auto_location(self) -> bool:
+        """Coarse GeoClue fix when no manual coordinates are set. On by
+        default; corrupt values fail open to enabled."""
+        value = self.data.get('weather_auto_location',
+                              DEFAULT_CONFIG['weather_auto_location'])
+        return value if isinstance(value, bool) else True
+
+    def set_weather_auto_location(self, enabled: bool) -> None:
+        self.data['weather_auto_location'] = bool(enabled)
+        self.save()
+
+    @property
+    def clock_24h(self) -> bool | None:
+        """Clock hour mode: True (24h) / False (12h, no AM/PM) / None to
+        follow `org.gnome.desktop.interface clock-format`. Corrupt values
+        fail soft to None (follow system)."""
+        value = self.data.get('clock_24h', DEFAULT_CONFIG['clock_24h'])
+        return value if isinstance(value, bool) else None
+
+    def set_clock_24h(self, value: bool | None) -> None:
+        if value is None or isinstance(value, bool):
+            self.data['clock_24h'] = value
+            self.save()
 
     @property
     def lock_screen_notifications(self) -> str:
@@ -716,10 +790,6 @@ class ShellConfig:
             ignored[app_id] = str(day)
         self.data['app_limit_ignored'] = ignored
         self.save()
-
-    def get(self, key: str, default=None):
-        """Cross-lane read helper: config value with a fallback default."""
-        return self.data.get(key, default)
 
     @property
     def home_to_recents(self) -> bool:

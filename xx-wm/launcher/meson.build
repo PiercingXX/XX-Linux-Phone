@@ -55,6 +55,7 @@ install_data(
     'src/call_wiring.py',
     'src/captions.py',
     'src/capture.py',
+    'src/clock_format.py',
     'src/capture_stitch.py',
     'src/config.py',
     'src/contacts.py',

@@ -16,8 +16,9 @@ shade then dismisses the notification (resident rows stay).
 
 `muted_apps: {app_id: until_epoch}` in the shell config discards an
 app's notifications for 1/2/4/8 hours (see "Disable for…" in
-`../design.md`): no banner, no sound, nothing in the shade. The mute
-expires silently.
+`../design.md`): no banner, no sound, nothing in the shade. Muting also
+clears the app's live notifications (`NotificationClosed` reason 3, as if
+the app closed them itself). The mute expires silently.
 
 ## Action targets: reaching an exited service
 

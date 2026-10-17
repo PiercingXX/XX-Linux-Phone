@@ -26,7 +26,26 @@ if _LAYER_SHELL:
 from quick_actions import QuickActionsPanel
 from media_controls import MediaCard
 from privacy_monitor import detail_text, format_indicator
-from config import DANGER_RED, ShellConfig, ThemePreset
+from config import DANGER_RED, ShellConfig, ThemePreset, same_app_id
+
+
+def notifs_for_app(notifications: object, app_id: str) -> list[int]:
+    """Ids of live notifications owned by an app id: the desktop-entry
+    hint first, then the sender name, both `.desktop`- and
+    case-insensitive like the mute check in main.py. Pure."""
+    if not app_id:
+        return []
+    ids: list[int] = []
+    for notif in notifications or ():
+        try:
+            entry = getattr(notif, 'desktop_entry', '') or ''
+            name = getattr(notif, 'app_name', '') or ''
+            nid = int(getattr(notif, 'id'))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if same_app_id(entry, app_id) or same_app_id(name, app_id):
+            ids.append(nid)
+    return ids
 
 _NOTIF_IFACE = 'org.freedesktop.Notifications'
 _NOTIF_PATH = '/org/freedesktop/Notifications'
@@ -859,6 +878,15 @@ class NotificationShade(Gtk.Window):
         self._rebuild_list()
         if notify_daemon:
             self._notify_daemon_of_dismissal(notif_id)
+
+    def close_app_notifications(self, app_id: str) -> list[int]:
+        """Drop every live row owned by an app id (the Disable-for… mute
+        path). Rows vanish silently here; the daemon close with reason 3
+        stays the caller's job so each sender hears exactly one signal."""
+        ids = notifs_for_app(self._notifications, app_id)
+        for notif_id in ids:
+            self.dismiss(notif_id, notify_daemon=False)
+        return ids
 
     def _notify_daemon_of_dismissal(self, notif_id: int) -> None:
         """Report a user dismissal back to the sending app (reason 2).

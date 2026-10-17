@@ -265,7 +265,16 @@ class HomePage:
         if isinstance(tap, dict) and tap.get('app'):
             win._launch_app_id(str(tap['app']))
             return
-        if tap == 'refresh' or (key == 'weather' and tap == 'default'):
+        if key == 'weather':
+            if tap == 'refresh':
+                win._refresh_weather(force=True)
+                return
+            if tap == 'default':
+                win._refresh_weather()
+                self._open_weather_app()
+                return
+            return
+        if tap == 'refresh':
             win._refresh_weather(force=True)
             return
         if tap != 'default':
@@ -276,6 +285,26 @@ class HomePage:
             win._launch_first_matching('calendar')
         elif key == 'battery':
             _open_settings(win)
+
+    def _open_weather_app(self) -> None:
+        """Default weather tap: an installed weather app, else a web
+        search for "weather". The refresh already runs in the background."""
+        win = self._win
+        try:
+            entries = list(win.app_index.entries)
+        except (AttributeError, TypeError):
+            entries = []
+        for entry in entries:
+            app_id = str(getattr(entry, 'app_id', ''))
+            if app_id.removesuffix('.desktop').casefold() == (
+                    'org.gnome.weather'):
+                win._launch_entry(entry)
+                return
+        for entry in entries:
+            if 'weather' in str(getattr(entry, 'name', '')).casefold():
+                win._launch_entry(entry)
+                return
+        win._open_web_search('weather')
 
     def _launch_first_matching(self, needle: str) -> None:
         win = self._win
@@ -314,9 +343,12 @@ class HomePage:
         win._weather.refresh(_apply, force=force)
 
     def _refresh_clock(self) -> None:
+        from clock_format import format_clock, resolve_24h
+
         win = self._win
         now = datetime.now()
-        win.clock_label.set_text(now.strftime('%H:%M'))
+        win.clock_label.set_text(
+            format_clock(now, resolve_24h(win.config)))
         win.date_label.set_text(now.strftime('%a, %b %d').replace(' 0', ' '))
 
     def _tick_clock(self) -> bool:

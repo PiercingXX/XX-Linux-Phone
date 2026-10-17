@@ -20,6 +20,27 @@ from config import ShellConfig
 
 _DISABLE_DURATIONS = [('1 hour', 1), ('2 hours', 2), ('4 hours', 4), ('8 hours', 8)]
 
+
+def muted_menu_subtitle(config: ShellConfig, app_id: str | None,
+                        now: float | None = None) -> str | None:
+    """`Muted until HH:MM` for a currently muted app, else None. Pure
+    apart from the clock-format read, which never raises."""
+    if not app_id:
+        return None
+    try:
+        until = config.muted_until(app_id, now=now)
+    except (AttributeError, TypeError):
+        return None
+    if until is None:
+        return None
+    from datetime import datetime
+    from clock_format import format_clock, resolve_24h
+    try:
+        use_24h = resolve_24h(config)
+    except Exception:
+        use_24h = True
+    return f'Muted until {format_clock(datetime.fromtimestamp(until), use_24h)}'
+
 # Phone-narrow popover cap: the shell runs at 320–360 px, so menu text must
 # never size the popover past the screen. Item labels wrap (WORD_CHAR still
 # breaks dot-chains like long app ids); titles stay one line and ellipsize.
@@ -110,7 +131,8 @@ class AppItemActions:
                  on_keyboard: Callable[[bool], None] | None = None,
                  real_name_fn: Callable[[str], str | None] | None = None,
                  on_launch: Callable[[], None] | None = None,
-                 on_open_page=None) -> None:
+                 on_open_page=None,
+                 on_muted: Callable[[str], None] | None = None) -> None:
         self._config = config
         self._on_changed = on_changed
         self._on_status = on_status
@@ -120,6 +142,7 @@ class AppItemActions:
         self._real_name_fn = real_name_fn
         self._on_launch = on_launch
         self._on_open_page = on_open_page
+        self._on_muted = on_muted
 
     def _real_name(self, app_id: str) -> str | None:
         """The app's current desktop Name, for blank-rename resets."""
@@ -189,7 +212,8 @@ class AppItemActions:
         label.set_max_width_chars(_MENU_TEXT_WIDTH)
 
     def _action_list(self, actions: list[tuple[str, Callable[[], None]]],
-                     title: str | None = None) -> Gtk.Widget:
+                     title: str | None = None,
+                     subtitle: str | None = None) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.add_css_class('xx-dialog')
         if title:
@@ -197,6 +221,11 @@ class AppItemActions:
             heading.add_css_class('xx-dialog-title')
             self._cap_title(heading)
             box.append(heading)
+        if subtitle:
+            sub = Gtk.Label(label=subtitle, xalign=0)
+            sub.add_css_class('xx-secondary')
+            self._cap_item_label(sub)
+            box.append(sub)
         self._popover_ref: Gtk.Popover | None = None
 
         def _run(callback: Callable[[], None]) -> None:
@@ -215,8 +244,9 @@ class AppItemActions:
         return box
 
     def _show_action_menu(self, anchor: Gtk.Widget, title: str | None,
-                          actions: list[tuple[str, Callable[[], None]]]) -> None:
-        content = self._action_list(actions, title)
+                          actions: list[tuple[str, Callable[[], None]]],
+                          subtitle: str | None = None) -> None:
+        content = self._action_list(actions, title, subtitle)
         self._popover_ref = self._show_popover(anchor, content)
 
     def _entry_dialog_content(self, title: str, initial: str,
@@ -350,7 +380,8 @@ class AppItemActions:
         display = self._config.label_for(entry.app_id, entry.name)
         self._show_action_menu(
             anchor, display,
-            self._build_app_menu_actions(anchor, entry, hidden_view))
+            self._build_app_menu_actions(anchor, entry, hidden_view),
+            subtitle=muted_menu_subtitle(self._config, entry.app_id))
 
     def info_page_items(self, entry: AppEntry) -> list[tuple[str, str]]:
         """(button label, page key) for the App info popover: the existing
@@ -601,10 +632,16 @@ class AppItemActions:
             f'{entry.name} pauses while Focus is on.' if focused
             else f'{entry.name} removed from Focus.')
 
+    def _mute_app(self, app_id: str, name: str, hours: int, label: str) -> None:
+        """Mute an app, then drop its live notifications through on_muted."""
+        self._config.set_app_muted(app_id, time.time() + hours * 3600)
+        self._on_status(f'{name} notifications off for {label}.')
+        if self._on_muted is not None:
+            self._on_muted(app_id)
+
     def _show_disable_for(self, anchor: Gtk.Widget, app_id: str, name: str) -> None:
         def _mute(hours: int, label: str) -> None:
-            self._config.set_app_muted(app_id, time.time() + hours * 3600)
-            self._on_status(f'{name} notifications off for {label}.')
+            self._mute_app(app_id, name, hours, label)
 
         actions = [(label, lambda h=hours, lb=label: _mute(h, lb))
                    for label, hours in _DISABLE_DURATIONS]
@@ -638,7 +675,9 @@ class AppItemActions:
         actions.append(('Sort A–Z', lambda: self.sort_folder_members(slot_index)))
         actions.append(('Rearrange…', lambda: self._show_folder_reorder(anchor, slot_index)))
         actions.append(('Remove from folder', lambda: self._remove_member(slot_index, member_index)))
-        self._show_action_menu(anchor, label, actions)
+        self._show_action_menu(
+            anchor, label, actions,
+            subtitle=muted_menu_subtitle(self._config, app_id))
 
     def _show_member_info(self, anchor: Gtk.Widget, member: dict) -> None:
         lines = [member.get('label', '')]

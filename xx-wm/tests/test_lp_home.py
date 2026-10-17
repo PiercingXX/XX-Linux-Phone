@@ -381,7 +381,7 @@ class TestSlotMenu:
         captured = {}
         win = _home_win(config)
         win.item_actions = types.SimpleNamespace(
-            _show_action_menu=lambda a, t, acts: captured.update(
+            _show_action_menu=lambda a, t, acts, **_k: captured.update(
                 anchor=a, title=t, actions=acts),
             _show_entry_dialog=lambda *a, **k: captured.update(
                 entry=(a, k)),
@@ -536,7 +536,7 @@ class TestAddToHome:
         config = ShellConfig()
         act = self._actions(config)
         captured = {}
-        act._show_action_menu = lambda a, t, acts: captured.update(
+        act._show_action_menu = lambda a, t, acts, **_k: captured.update(
             actions=acts)
         act.show_app_menu(object(), _entry('photos.desktop', 'Photos'))
         assert 'Add to Home' in [label for label, _cb in captured['actions']]
@@ -549,7 +549,7 @@ class TestAddToHome:
         ])
         act = self._actions(config)
         captured = {}
-        act._show_action_menu = lambda a, t, acts: captured.update(
+        act._show_action_menu = lambda a, t, acts, **_k: captured.update(
             actions=acts)
         act.show_member_menu(object(), 0, 0)
         assert 'Add to Home' in [label for label, _cb in captured['actions']]
@@ -562,7 +562,7 @@ class TestAddToHome:
         ])
         act = self._actions(config)
         captured = {}
-        act._show_action_menu = lambda a, t, acts: captured.update(
+        act._show_action_menu = lambda a, t, acts, **_k: captured.update(
             actions=acts)
         act.show_member_menu(object(), 0, 0)
         add = dict(captured['actions'])['Add to Home']
@@ -606,7 +606,7 @@ class TestRenameTriad:
         propagated = []
         win = _home_win(config)
         win.item_actions = types.SimpleNamespace(
-            _show_action_menu=lambda a, t, acts: menu.update(actions=acts),
+            _show_action_menu=lambda a, t, acts, **_k: menu.update(actions=acts),
             _show_entry_dialog=lambda a, t, initial, label, commit, **k:
                 dialogs.append(commit),
             _rename_in_slots=lambda app_id, label: propagated.append(

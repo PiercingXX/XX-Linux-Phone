@@ -61,7 +61,7 @@ def _capture_menus(actions):
     """Record (title, [(label, callback)]) for every action menu shown."""
     menus = []
 
-    def _capture(_anchor, title, action_list):
+    def _capture(_anchor, title, action_list, **_kw):
         menus.append((title, list(action_list)))
 
     actions._show_action_menu = _capture

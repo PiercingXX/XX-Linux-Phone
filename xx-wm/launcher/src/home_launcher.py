@@ -144,6 +144,43 @@ def folder_row_markup(label: str) -> str:
             + ' <span size="52%" alpha="60%">›</span>')
 
 
+_HOME_ACCESSIBLE_LABEL = 'Home'
+_HOME_ACCESSIBLE_DESCRIPTION = 'Open app drawer. Open launcher settings.'
+
+
+def slot_accessible_label(label: str, index: int) -> str:
+    """Screen-reader label for an app slot: `Phone, home slot 3`."""
+    return f'{label}, home slot {index + 1}'
+
+
+def folder_accessible_label(label: str, count: int) -> str:
+    """Screen-reader label for a folder slot: `Folder Comms, 3 apps`."""
+    try:
+        total = int(count)
+    except (TypeError, ValueError):
+        total = 0
+    noun = 'app' if total == 1 else 'apps'
+    return f'Folder {label}, {total} {noun}'
+
+
+def _set_accessible(widget: Gtk.Widget, label: str | None = None,
+                    description: str | None = None) -> None:
+    """GTK4 screen-reader text via Gtk.Accessible.update_property.
+    Never raises: accessibility must not break the visible UI."""
+    try:
+        props, values = [], []
+        if label is not None:
+            props.append(Gtk.AccessibleProperty.LABEL)
+            values.append(label)
+        if description is not None:
+            props.append(Gtk.AccessibleProperty.DESCRIPTION)
+            values.append(description)
+        if props:
+            Gtk.Accessible.update_property(widget, props, values)
+    except Exception:
+        pass
+
+
 class HomeLauncher(Gtk.Box):
     """Vertical list of home slots; folders drop open inline under their slot."""
 
@@ -174,6 +211,10 @@ class HomeLauncher(Gtk.Box):
         self._open_folder_index: int | None = None
         self.edit_mode = False
         self._build()
+        # Swipe gestures have no screen-reader equivalent; the home list
+        # itself carries what opens the drawer and the launcher settings.
+        _set_accessible(self, label=_HOME_ACCESSIBLE_LABEL,
+                        description=_HOME_ACCESSIBLE_DESCRIPTION)
 
     def set_edit_mode(self, enabled: bool) -> None:
         if self.edit_mode == enabled:
@@ -220,9 +261,12 @@ class HomeLauncher(Gtk.Box):
         for idx, slot in enumerate(slots):
             slot_type = slot.get('type')
             if slot_type == 'app':
-                self.append(self._make_row(slot.get('label', ''),
-                                           lambda s=slot: self._on_launch_slot(s),
-                                           paused=self._is_paused(str(slot.get('app_id') or ''))))
+                self.append(self._make_row(
+                    slot.get('label', ''),
+                    lambda s=slot: self._on_launch_slot(s),
+                    paused=self._is_paused(str(slot.get('app_id') or '')),
+                    accessible_label=slot_accessible_label(
+                        slot.get('label', ''), idx)))
             elif slot_type == 'folder':
                 self.append(self._make_folder_row(slot, idx))
                 if idx == open_idx:
@@ -320,7 +364,8 @@ class HomeLauncher(Gtk.Box):
         return {'left': 0.0, 'right': 1.0}.get(self._get_alignment(), 0.5)
 
     def _make_row(self, label: str, on_tap: Callable[[], None],
-                  paused: bool = False) -> Gtk.Button:
+                  paused: bool = False,
+                  accessible_label: str | None = None) -> Gtk.Button:
         from gi.repository import Pango
         lbl = Gtk.Label(label=label + (' · paused' if paused else ''))
         # Fill the row and align the text, rather than centering a box sized
@@ -341,6 +386,8 @@ class HomeLauncher(Gtk.Box):
         btn.set_hexpand(True)
         btn.set_child(lbl)
         btn.connect('clicked', lambda _b: on_tap())
+        if accessible_label is not None:
+            _set_accessible(btn, label=accessible_label)
         return btn
 
     def _make_folder_row(self, slot: dict, idx: int) -> Gtk.Button:
@@ -360,6 +407,8 @@ class HomeLauncher(Gtk.Box):
         btn.set_hexpand(True)
         btn.set_child(row)
         btn.connect('clicked', lambda _b, i=idx, s=slot: self._toggle_folder(i, s))
+        _set_accessible(btn, label=folder_accessible_label(
+            slot.get('label', ''), len(slot.get('folder') or [])))
         return btn
 
     def _toggle_folder(self, idx: int, slot: dict) -> None:

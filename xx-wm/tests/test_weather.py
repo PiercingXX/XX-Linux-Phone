@@ -22,8 +22,8 @@ def config(tmp_path, monkeypatch):
 def _provider(config, tmp_path, now, fetch_result=None, fail=False):
     calls = []
 
-    def fetcher(lat, lon):
-        calls.append((lat, lon))
+    def fetcher(lat, lon, unit):
+        calls.append((lat, lon, unit))
         if fail:
             raise OSError('offline')
         return dict(fetch_result)
@@ -33,6 +33,7 @@ def _provider(config, tmp_path, now, fetch_result=None, fail=False):
         config,
         cache_path=tmp_path / 'weather.json',
         fetcher=fetcher,
+        location_provider=lambda: None,
         clock=lambda: state['now'],
         dispatch=lambda fn: fn(),
     )
@@ -55,11 +56,12 @@ def _refresh_sync(provider, force=False):
 
 class TestFormatting:
     def test_format(self):
-        assert format_current(17.6, 0) == '18° Clear'
-        assert format_current(-3.4, 71) == '-3° Snow'
+        assert format_current(17.6, 0) == '18°F Clear'
+        assert format_current(-3.4, 71) == '-3°F Snow'
+        assert format_current(22.0, 0, 'celsius') == '22°C Clear'
 
     def test_unknown_code_omits_text(self):
-        assert format_current(20.0, 42) == '20°'
+        assert format_current(20.0, 42) == '20°F'
         assert describe(61) == 'Rain'
 
 
@@ -68,28 +70,28 @@ class TestProvider:
         monkeypatch.setenv('HOME', str(tmp_path / 'home'))
         cfg = ShellConfig()
         provider = _provider(cfg, tmp_path, now=1000.0,
-                             fetch_result={'temp_c': 20.0, 'code': 0})
+                             fetch_result={'temp': 20.0, 'code': 0})
         assert _refresh_sync(provider) == PLACEHOLDER
         assert provider._test_calls == []
 
     def test_fetch_stores_cache_and_formats(self, config, tmp_path):
         provider = _provider(config, tmp_path, now=1000.0,
-                             fetch_result={'temp_c': 17.6, 'code': 0})
-        assert _refresh_sync(provider) == '18° Clear'
-        assert provider._test_calls == [(52.52, 13.4)]
-        assert provider.current_text() == '18° Clear'
+                             fetch_result={'temp': 17.6, 'code': 0})
+        assert _refresh_sync(provider) == '18°F Clear'
+        assert provider._test_calls == [(52.52, 13.4, 'fahrenheit')]
+        assert provider.current_text() == '18°F Clear'
 
     def test_fresh_cache_skips_fetch(self, config, tmp_path):
         provider = _provider(config, tmp_path, now=1000.0,
-                             fetch_result={'temp_c': 17.6, 'code': 0})
+                             fetch_result={'temp': 17.6, 'code': 0})
         _refresh_sync(provider)
         provider._test_state['now'] = 1000.0 + 14 * 60
-        assert _refresh_sync(provider) == '18° Clear'
+        assert _refresh_sync(provider) == '18°F Clear'
         assert len(provider._test_calls) == 1
 
     def test_stale_cache_refetches(self, config, tmp_path):
         provider = _provider(config, tmp_path, now=1000.0,
-                             fetch_result={'temp_c': 17.6, 'code': 0})
+                             fetch_result={'temp': 17.6, 'code': 0})
         _refresh_sync(provider)
         provider._test_state['now'] = 1000.0 + 16 * 60
         _refresh_sync(provider)
@@ -97,18 +99,18 @@ class TestProvider:
 
     def test_force_refetches_even_when_fresh(self, config, tmp_path):
         provider = _provider(config, tmp_path, now=1000.0,
-                             fetch_result={'temp_c': 17.6, 'code': 0})
+                             fetch_result={'temp': 17.6, 'code': 0})
         _refresh_sync(provider)
         _refresh_sync(provider, force=True)
         assert len(provider._test_calls) == 2
 
     def test_offline_keeps_cached_text(self, config, tmp_path):
         provider = _provider(config, tmp_path, now=1000.0,
-                             fetch_result={'temp_c': 17.6, 'code': 0})
+                             fetch_result={'temp': 17.6, 'code': 0})
         _refresh_sync(provider)
         provider._test_state['now'] = 1000.0 + 20 * 60
         provider._fetch = lambda lat, lon: (_ for _ in ()).throw(OSError('offline'))
-        assert _refresh_sync(provider) == '18° Clear'
+        assert _refresh_sync(provider) == '18°F Clear'
 
     def test_offline_no_cache_placeholder(self, config, tmp_path):
         provider = _provider(config, tmp_path, now=1000.0, fail=True)
@@ -117,6 +119,6 @@ class TestProvider:
     def test_corrupt_cache_placeholder(self, config, tmp_path):
         (tmp_path / 'weather.json').write_text('{not json')
         provider = _provider(config, tmp_path, now=1000.0,
-                             fetch_result={'temp_c': 1.0, 'code': 0})
+                             fetch_result={'temp': 1.0, 'code': 0})
         assert provider.current_text() == PLACEHOLDER
         assert not provider.cache_is_fresh()

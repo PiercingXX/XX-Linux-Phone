@@ -434,6 +434,13 @@ class NotificationDaemon:
         if self._bus:
             self._close_notification(self._bus, notif_id, _REASON_DISMISSED)
 
+    def close_for_mute(self, notif_id: int) -> None:
+        """Called when an app is muted: its live notification goes away
+        as if the app itself closed it (NotificationClosed reason 3),
+        not as a user dismissal (reason 2)."""
+        if self._bus:
+            self._close_notification(self._bus, notif_id, _REASON_CLOSED)
+
     def invoke_action(self, notif_id: int, action_key: str) -> None:
         """Called by the shade when the user taps a notification action."""
         if self._bus:
