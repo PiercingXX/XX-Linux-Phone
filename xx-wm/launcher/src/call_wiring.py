@@ -15,6 +15,29 @@ UNKNOWN_RING_REASONS = frozenset({
 })
 
 
+def display_number(number: str) -> str:
+    """User-facing form of a missed-call number (never raises).
+
+    Goes through the shared ``xx_phone`` display rule; the country
+    comes from the locale only (explicit empty operator strings), so
+    this never touches the modem bus from the main thread. Falls back
+    to the number as it came in.
+    """
+    raw = number if isinstance(number, str) else ''
+    if not raw.strip():
+        return ''
+    try:
+        import os as _os
+
+        import xx_phone as _xx_phone
+
+        shown = _xx_phone.display(
+            raw, _xx_phone.user_country("", "", _os.environ))
+    except Exception:
+        return raw
+    return shown or raw
+
+
 def ringer_tone_for(verdict: str, reason: str) -> str:
     """Sound file for a ringing verdict: the unknown-caller tone when
     the dialer's screening verdict says the caller is unknown but
@@ -307,7 +330,7 @@ class CallWiring:
             caller = display.get('caller') if isinstance(display, dict) else ''
         except Exception:
             caller = ''
-        summary = caller or number or 'Unknown call'
+        summary = caller or display_number(number) or 'Unknown call'
         body = 'Silenced: %s' % silence_reason_text(reason)
         try:
             win._call_notif_seq = int(getattr(win, '_call_notif_seq', 0)) + 1
@@ -320,11 +343,12 @@ class CallWiring:
         except Exception:
             handler = None
         if callable(handler):
-            handler(notif_id, 'Phone', summary, body, '', {})
+            handler(notif_id, 'Phone', summary, body,
+                    'io.piercingxx.XXDialer', {})
             return
         try:
             win._ensure_shade().add_notification(
-                notif_id, 'Phone', summary, body)
+                notif_id, 'Phone', summary, body, 'io.piercingxx.XXDialer')
         except Exception:
             pass
 

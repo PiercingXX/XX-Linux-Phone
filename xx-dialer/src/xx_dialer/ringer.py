@@ -178,18 +178,28 @@ class Notifier:
                    e164=(e164 or "").strip())
 
     def flush_daily_if_due(self, now_ms: int | None = None) -> bool:
-        """Post the stashed daily summary when its 24 h clock expired."""
+        """Post the stashed daily summary when its 24 h clock expired.
+
+        Entries the user already saw (at or before the Recents
+        watermark — including a Recents visit while this process was
+        restarted) are dropped, never re-posted.
+        """
         moment = now_ms if now_ms is not None else _now_ms()
         try:
             with Store(self._db_file) as store:
                 entries = store.read_digest()
                 if not entries:
                     return False
+                unseen = [entry for entry in entries
+                          if entry[0] > store.get_recents_viewed()]
+                if not unseen:
+                    store.clear_digest()
+                    return False
                 last_flush = store.get_digest_flushed_at()
                 if not recents.digest_due(moment, last_flush):
                     return False
-                newest = max(entries, key=lambda row: row[0])
-                count = len(entries)
+                newest = max(unseen, key=lambda row: row[0])
+                count = len(unseen)
                 store.clear_digest()
                 store.set_digest_flushed_at(moment)
         except Exception:
@@ -203,13 +213,18 @@ class Notifier:
 
     # ---- notification actions --------------------------------------------
 
-    def handle_action(self, key: str) -> None:
-        """Dispatch one FDN action key (``kind:number``). Never raises."""
+    def handle_action(self, key: str) -> bool:
+        """Dispatch one FDN action key (``kind:number``). Never raises.
+
+        True when the action ran; the caller marks the card's calls
+        seen on True, so a failed tap keeps its card up.
+        """
         try:
             kind, _, number = str(key).partition(":")
-            self._dispatch(_ACTION_ALIASES.get(kind.strip()), number.strip())
+            return bool(self._dispatch(
+                _ACTION_ALIASES.get(kind.strip()), number.strip()))
         except Exception:
-            pass
+            return False
 
     def _dispatch(self, kind: str | None, number: str) -> bool:
         """Run one canonical action; False when the key is unusable."""
@@ -253,15 +268,46 @@ class Notifier:
             kind = _ACTION_ALIASES.get(kind.strip())
             number = number.strip() or self.posted_number(notif_id)
             if self._already_acted(notif_id, str(action_key or "")):
+                self._acknowledge_posted(notif_id)
                 return True
             if not self._dispatch(kind, number):
                 return False
             self._mark_acted(notif_id, str(action_key or ""))
+            self._acknowledge_posted(notif_id)
             applog.write("cards", "action id=%d %s %s" % (
                 notif_id, kind, number), self._home)
             return True
         except Exception:
             return False
+
+    def note_notification_closed(self, server_id: object,
+                                 reason: object) -> None:
+        """A NotificationClosed on a posted card: reason 2 (dismissed)
+        marks the card's calls seen. Reason 1 (expired) keeps its shade
+        history row and marks nothing — expiry is not viewing. Unknown
+        ids do nothing. Never raises."""
+        try:
+            if int(reason) != 2:  # type: ignore[arg-type]
+                return
+            if not self.is_posted(server_id):
+                return
+            self._acknowledge_posted(int(server_id))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            pass
+
+    def _acknowledge_posted(self, server_id: int) -> None:
+        """Advance the seen watermark to when a posted card went up.
+
+        The card's own posted time covers exactly what the user saw:
+        newer calls stay unseen. Never raises.
+        """
+        try:
+            with Store(self._db_file) as store:
+                posted_at = store.notif_posted_at(server_id)
+                if posted_at > 0:
+                    recents.acknowledge(store, posted_at)
+        except Exception:
+            pass
 
     def note_posted(self, server_id: object, e164: str = "") -> bool:
         """Record a server id this service posted a card under."""
@@ -376,7 +422,8 @@ class Notifier:
             pass
 
     def _hints(self) -> dict:
-        hints = {ACTION_TARGET_HINT: action_target()}
+        hints = {ACTION_TARGET_HINT: action_target(),
+                 "desktop-entry": "io.piercingxx.XXDialer"}
         try:
             tone = app_config.load(self._home).get("default_tone") or ""
         except Exception:
@@ -474,6 +521,10 @@ class Notifier:
                 NOTIF_BUS, NOTIF_IFACE, "ActionInvoked", NOTIF_PATH,
                 None, gio.DBusSignalFlags.NONE,
                 self._on_action_signal, None)
+            bus.signal_subscribe(
+                NOTIF_BUS, NOTIF_IFACE, "NotificationClosed", NOTIF_PATH,
+                None, gio.DBusSignalFlags.NONE,
+                self._on_closed_signal, None)
         except Exception:
             return
         self._actions_watched = True
@@ -486,9 +537,22 @@ class Notifier:
             return
         try:
             seen_id = int(server_id)
+        except (TypeError, ValueError):
+            self.handle_action(str(key))
+            return
+        try:
             if self._already_acted(seen_id, str(key)):
                 return
             self._mark_acted(seen_id, str(key))
         except (TypeError, ValueError):
             pass
-        self.handle_action(str(key))
+        if self.handle_action(str(key)):
+            self._acknowledge_posted(seen_id)
+
+    def _on_closed_signal(self, _conn, _sender, _path, _iface, _signal,
+                          params, _user_data) -> None:
+        try:
+            server_id, reason = params.unpack()
+        except Exception:
+            return
+        self.note_notification_closed(server_id, reason)

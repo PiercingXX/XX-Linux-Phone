@@ -382,6 +382,115 @@ def batch_next(state: BatchState, now_ms: int) -> BatchSingle | BatchBatch:
     return BatchSingle(BatchState(last_post_ms=now_ms, count=1))
 
 
+@dataclass(frozen=True)
+class MissedRow:
+    """One unanswered call-log row: the Linux form of Android's
+    ``MissedCallDecision.Row`` (missed or unanswered-incoming type)."""
+
+    key: int
+    time_ms: int
+    number: str | None = None
+    cached_name: str | None = None
+
+
+@dataclass(frozen=True)
+class MissedSuppress:
+    """Nothing unseen: post nothing (stale ids are already seen)."""
+
+    stale_ids: list[int]
+
+
+@dataclass(frozen=True)
+class MissedPost:
+    """Post a card for ``count`` unseen calls. ``subject`` is the single
+    unseen row when ``count`` is 1 (None when the log could not be
+    read); ``covered`` is every unseen row, newest first; ``ack_up_to``
+    is the newest covered call's date, so acknowledging the card marks
+    every missed row at or before it as seen."""
+
+    count: int
+    subject: MissedRow | None
+    covered: list[MissedRow]
+    ack_up_to_ms: int
+    stale_ids: list[int]
+
+
+def decide_missed(pending: list[MissedRow] | None, viewed_at_ms: int,
+                  now_ms: int) -> MissedSuppress | MissedPost:
+    """Post only for calls the user has not seen yet.
+
+    Port of Android's ``MissedCallDecision.decide``: ``pending`` is the
+    call log's unanswered set (None when unreadable — fail open with
+    one plain card, since dropping a real missed call is worse than a
+    duplicate), ``viewed_at_ms`` is the last Recents visit or the
+    newest call an acknowledged card covered. A row at or before it is
+    seen. Cancel events never reach here: the service drops answered /
+    outgoing / unscreened calls before deciding.
+    """
+    if pending is None:
+        return MissedPost(count=1, subject=None, covered=[],
+                          ack_up_to_ms=now_ms, stale_ids=[])
+    ordered = sorted(pending, key=lambda row: row.time_ms, reverse=True)
+    unseen = [row for row in ordered if row.time_ms > viewed_at_ms]
+    stale_ids = [row.key for row in ordered
+                 if row.time_ms <= viewed_at_ms]
+    if not unseen:
+        return MissedSuppress(stale_ids=stale_ids)
+    count = len(unseen)
+    return MissedPost(
+        count=count,
+        subject=unseen[0] if count == 1 else None,
+        covered=unseen,
+        ack_up_to_ms=max(row.time_ms for row in unseen),
+        stale_ids=stale_ids,
+    )
+
+
+def next_viewed_at(current_ms: int, ack_up_to_ms: int) -> int:
+    """The watermark never moves backwards: an old card's ack must not
+    re-open newer calls."""
+    return max(int(current_ms), int(ack_up_to_ms))
+
+
+def pending_missed_rows(store, limit: int = 200) -> list[MissedRow]:
+    """The call log's unanswered set, newest first.
+
+    Imported rows keep their own MISSED type; NoteCall ingests every
+    incoming call as INCOMING, so an unanswered incoming (zero
+    duration) reads as missed. Outgoing and answered-duration rows
+    never pend.
+    """
+    rows = []
+    for row in store.recent_calls(limit=limit):
+        if row.call_type != CALL_TYPE_MISSED and not (
+                row.call_type == CALL_TYPE_INCOMING
+                and (row.duration or 0) <= 0):
+            continue
+        rows.append(MissedRow(key=row.row_id, time_ms=row.date,
+                             number=row.number,
+                             cached_name=row.cached_name))
+    return rows
+
+
+def acknowledge(store, ack_up_to_ms: int) -> int:
+    """Mark every missed row at or before ``ack_up_to_ms`` as seen.
+
+    Monotonic: advancing to an older card's coverage never re-opens
+    newer calls. No-op for non-positive marks. Returns the watermark.
+    """
+    try:
+        mark = int(ack_up_to_ms)
+    except (TypeError, ValueError):
+        return int(store.get_recents_viewed())
+    if mark <= 0:
+        return int(store.get_recents_viewed())
+    current = int(store.get_recents_viewed())
+    nxt = max(current, mark)
+    if nxt != current:
+        store.set_recents_viewed(nxt)
+    return nxt
+
+
 def missed_title(count: int) -> str:
     if count > 1:
         return "%d missed calls" % count

@@ -307,6 +307,7 @@ class PolicyService:
             if str(disposition or "").strip().lower() == "answered":
                 return
             from xx_dialer import policy as _policy
+            from xx_dialer import recents as _recents
 
             e164 = _policy.canonical_number(number, self._region())
             key = e164 or str(number or "").strip()
@@ -316,9 +317,15 @@ class PolicyService:
                 latest = store.latest_for(key)
             if latest is None or latest.verdict != "Silence":
                 return
+            moment = int(time.time() * 1000)
+            with Store(self._db_file) as store:
+                pending = _recents.pending_missed_rows(store)
+                viewed = store.get_recents_viewed()
+            if isinstance(_recents.decide_missed(pending, viewed, moment),
+                          _recents.MissedSuppress):
+                return
             self._notifier.screened(latest.e164 or e164, latest.verdict,
-                                    latest.reason,
-                                    at_ms=int(time.time() * 1000))
+                                    latest.reason, at_ms=moment)
         except Exception:
             pass
 

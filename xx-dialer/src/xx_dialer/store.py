@@ -759,6 +759,25 @@ class Store:
         row = cur.fetchone()
         return str(row["e164"] or "") if row is not None else ""
 
+    def notif_posted_at(self, server_id: int) -> int:
+        """When a posted card went up, or 0 when unknown.
+
+        Acknowledging a card advances the seen watermark to this, which
+        covers the card without touching calls that arrived after it.
+        """
+        try:
+            notif_id = int(server_id)
+        except (TypeError, ValueError):
+            return 0
+        cur = self._db.execute(
+            "SELECT postedAt FROM posted_notif WHERE serverId = ?",
+            (notif_id,))
+        row = cur.fetchone()
+        try:
+            return int(row["postedAt"]) if row is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
     # ---- emergency_marker ---------------------------------------------------
 
     def record_emergency(self, wall_ms: int, elapsed_ms: int,
