@@ -116,6 +116,7 @@ install_data(
     'src/sound.py',
     'src/system_settings.py',
     'src/system_status.py',
+    'src/tailscale.py',
     'src/thumbnail_store.py',
     'src/toplevel_manager.py',
     'src/update_checker.py',

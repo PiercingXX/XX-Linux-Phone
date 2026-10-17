@@ -217,6 +217,9 @@ def _get_airplane_state() -> bool | None:
 def format_tile_state(key: str, active: bool, detail: str | None = None) -> str:
     """Second-line text under a tile label: the connected SSID / BT device
     while on, plain On/Off otherwise."""
+    if key == 'tailscale' and detail:
+        # 'Sign in' / 'No permission' read better than a bare Off
+        return detail
     if not active:
         return 'Off'
     if key in ('wifi', 'bt') and detail:
@@ -230,6 +233,7 @@ _TILE_SETTINGS_SECTIONS = {
     'data': 'mobile',
     'airplane': 'mobile',
     'night': 'display',
+    'tailscale': 'services',
 }
 
 
@@ -333,6 +337,8 @@ def _query_tile_details() -> dict[str, str]:
         name = None
     if name:
         details['bt'] = name
+    if _TS_LAST is not None:
+        details['tailscale'] = _TS_LAST.detail
     return details
 
 
@@ -811,6 +817,15 @@ def _set_night_state(value: bool) -> None:
         pass
 
 
+def _tailscale_available() -> bool:
+    """True when the tailscale CLI is installed; without it the tile hides."""
+    try:
+        import tailscale
+        return tailscale.available()
+    except Exception:
+        return False
+
+
 def _captions_installed() -> bool:
     """True when xx-captions is installed; without it the Captions tile
     hides entirely instead of offering a dead toggle."""
@@ -861,6 +876,20 @@ def _open_captions_overlay() -> None:
         pass
 
 
+# Last Tailscale status read by the tile-state worker; the detail query in
+# the same refresh reuses it instead of running the CLI twice.
+_TS_LAST = None
+
+
+def _get_tailscale_state() -> bool | None:
+    global _TS_LAST
+    import tailscale
+    _TS_LAST = tailscale.status()
+    if _TS_LAST.state == tailscale.UNAVAILABLE:
+        return None
+    return _TS_LAST.state == tailscale.RUNNING
+
+
 def _get_saver_state() -> bool | None:
     """Battery-saver tile state: the standby controller's effective saver
     (manual toggle or automatic low-battery). Reached through the
@@ -895,6 +924,7 @@ _TILES: list[_TileDef] = [
     _TileDef('location', 'Location', lambda: None,                        lambda _v: None,                         2),
     _TileDef('hotspot',  'Hotspot',  _get_hotspot_state,                  _toggle_hotspot,                         2),
     _TileDef('night',    'Night',    _get_night_state,                    _set_night_state,                        2),
+    _TileDef('tailscale', 'Tailscale', _get_tailscale_state,              lambda _v: None,                         2),
 ]
 
 
@@ -909,13 +939,15 @@ class QuickActionsPanel(Gtk.Box):
                  focus_state: object | None = None,
                  hud: object | None = None,
                  config: ShellConfig | None = None,
-                 on_open_settings: object | None = None) -> None:
+                 on_open_settings: object | None = None,
+                 on_open_uri: object | None = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add_css_class('qa-panel')
 
         self._dnd = dnd_state
         self._focus = focus_state
         self._on_open_settings = on_open_settings
+        self._on_open_uri = on_open_uri
         # Volume/brightness HUD overlay (plan T3/T4). Optional: when absent the
         # sliders still adjust brightness/volume, just without an on-screen
         # indicator (silent absence — see _show_brightness_hud).
@@ -1039,6 +1071,10 @@ class QuickActionsPanel(Gtk.Box):
             if tile.key == 'night' and not self._cached_gate(
                     'night', _night_light_available):
                 continue
+            if tile.key == 'tailscale':
+                if not self._cached_gate('tailscale', _tailscale_available):
+                    continue
+                tile = tile._replace(set_state=self._set_tailscale)
             if tile.key == 'location':
                 if (not include_slow_gates and cache is not None
                         and 'location' not in cache):
@@ -1117,15 +1153,22 @@ class QuickActionsPanel(Gtk.Box):
             tier2 = [t for t in self._tiles() if t.tier == 2]
         except Exception:
             return False
-        for idx, tile in enumerate(tier2):
-            buttons = getattr(self, '_tile_buttons', None)
-            if buttons is None or tile.key in buttons:
-                continue
-            try:
+        buttons = getattr(self, '_tile_buttons', None)
+        if buttons is None:
+            return False
+        # Re-lay out every tier-2 tile in order: attaching only the new ones
+        # at their list index lands them on cells already taken by tiles
+        # that were laid out without them (Location covered Tailscale).
+        try:
+            for tile in tier2:
+                btn = buttons.get(tile.key) or self._make_tile(tile)
+                if btn.get_parent() is self.tier2_grid:
+                    self.tier2_grid.remove(btn)
+            for idx, tile in enumerate(tier2):
                 self.tier2_grid.attach(
-                    self._make_tile(tile), idx % 4, idx // 4, 1, 1)
-            except Exception:
-                pass
+                    buttons[tile.key], idx % 4, idx // 4, 1, 1)
+        except Exception:
+            pass
         try:
             self.refresh_states()
         except Exception:
@@ -1343,7 +1386,36 @@ class QuickActionsPanel(Gtk.Box):
             # (starting/error), never the requested toggle.
             self._refresh_captions_ui()
             return
+        if tile.key == 'tailscale':
+            # up/down finish on a worker; show progress, then the real state
+            lbl = self._state_labels.get('tailscale')
+            if lbl is not None:
+                lbl.set_text(_TILE_NEUTRAL_TEXT)
+            return
         self._apply_tile_ui(tile.key, new_state)
+
+    def _set_tailscale(self, enabled: bool) -> None:
+        def _work() -> None:
+            import tailscale
+            try:
+                result = tailscale.up() if enabled else tailscale.down()
+            except Exception:
+                result = tailscale.status()
+            _post_to_main(self._apply_tailscale, result)
+
+        self._spawn_panel_worker(_work)
+
+    def _apply_tailscale(self, result) -> bool:
+        import tailscale
+        self._apply_tile_state('tailscale', result.state == tailscale.RUNNING,
+                               result.detail)
+        opener = getattr(self, '_on_open_uri', None)
+        if result.auth_url and callable(opener):
+            try:
+                opener(result.auth_url)
+            except Exception:
+                pass
+        return False
 
     def _toggle_auto_brightness(self, enabled: bool) -> None:
         if enabled:

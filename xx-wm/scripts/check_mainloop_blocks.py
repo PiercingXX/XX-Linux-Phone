@@ -105,6 +105,8 @@ ALLOW = {
         'privacy monitor thread (pw-dump child lifecycle).',
     ('privacy_monitor.py', '_watch'):
         'privacy monitor thread (child reap, 1 s cap).',
+    ('tailscale.py', '_run'):
+        'tile query worker (_query_tile_states) and toggle worker (_set_tailscale).',
     ('quick_actions.py', '_nm_get'):
         'tile query worker (_query_tile_states).',
     ('quick_actions.py', '_nm_set'):

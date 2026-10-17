@@ -396,7 +396,8 @@ class NotificationShade(Gtk.Window):
         self.quick_actions = QuickActionsPanel(
             dnd_state=dnd_state, focus_state=focus_state, hud=hud,
             config=self._config,
-            on_open_settings=self._open_settings_section)
+            on_open_settings=self._open_settings_section,
+            on_open_uri=self._open_uri)
 
         self._revealer = Gtk.Revealer(
             transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN,
@@ -707,6 +708,17 @@ class NotificationShade(Gtk.Window):
                 callback()
             except Exception:
                 pass
+
+    def _open_uri(self, uri: str) -> None:
+        """Open a link from a tile (Tailscale sign-in) in the default
+        browser, with the shade out of the way."""
+        self.hide_shade()
+        try:
+            Gio.AppInfo.launch_default_for_uri(uri, None)
+        except Exception as exc:
+            from shell_log import get_logger
+            get_logger('notification_shade').warning(
+                'could not open link from tile: %s', exc)
 
     def _on_power_clicked(self, _btn: Gtk.Button) -> None:
         self.hide_shade()

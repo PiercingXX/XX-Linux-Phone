@@ -50,3 +50,12 @@ def _real_gi_modules():
         if name == 'gi' or name.startswith('gi.'):
             del sys.modules[name]
     sys.modules.update(saved)
+
+
+@pytest.fixture(autouse=True)
+def _no_host_tailscale(monkeypatch):
+    """Tests never see the host's Tailscale: the shade tile and anything
+    that probes the CLI behave as on a machine without it. test_tailscale
+    puts the real probe back for its fake-CLI tests."""
+    import tailscale
+    monkeypatch.setattr(tailscale, 'available', lambda: False)

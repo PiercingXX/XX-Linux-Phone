@@ -37,19 +37,21 @@ def test_xdg_settings_uses_chosen_desktop():
     assert 'xdg-settings set default-web-browser "$BROWSER_DESKTOP"' in text
 
 
-def test_pacman_tailscale_then_tgz_fallback():
+def test_tailscale_per_distro_then_static_fallback():
     text = SCRIPT.read_text(encoding='utf-8')
-    start = text.find('# --- 17.3 Tailscale')
-    chunk = text[start:text.find('# --- 17.4')]
-    assert '[ "$PKG" = pacman ]' in chunk
-    assert 'pkg_install tailscale' in chunk
+    chunk = text[text.find('# --- 17.3 Tailscale'):text.find('# --- 17.4')]
+    # apk picks the service subpackage for the running init (pmOS is systemd)
+    assert 'pkg_install tailscale tailscale-systemd' in chunk
+    assert 'pkg_install tailscale tailscale-openrc' in chunk
+    assert 'pacman) pkg_install tailscale' in chunk
+    # Debian does not package tailscale: Tailscale's own apt repo
+    assert 'pkgs.tailscale.com/stable/$_ts_dist/$_ts_code' in chunk
+    assert 'TarballsVersion' in chunk          # static build, newest version
     assert 'systemctl enable --now tailscaled' in chunk
-    assert 'pkgs.tailscale.com/stable' in chunk
-    pacman_at = chunk.find('pkg_install tailscale')
-    tgz_at = chunk.find('pkgs.tailscale.com/stable')
-    assert pacman_at != -1
-    assert tgz_at != -1
-    assert pacman_at < tgz_at
+    assert 'rc-service tailscale start' in chunk
+    # the shade tile toggles without root
+    assert 'tailscale set --operator="$(id -un)"' in chunk
+    assert chunk.find('ts_apt_repo ;;') < chunk.find('|| ts_static')
 
 
 def test_waydroid_skipped_under_3gib():

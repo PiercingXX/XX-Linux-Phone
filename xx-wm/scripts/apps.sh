@@ -109,47 +109,90 @@ fi
 pkg_install gnome-calculator
 
 # --- 17.3 Tailscale ---------------------------------------------------------
-if command -v tailscale >/dev/null 2>&1; then
-    echo "Tailscale already installed."
-elif [ "$PKG" = apk ] && $SUDO apk add tailscale 2>/dev/null; then
-    $SUDO rc-update add tailscale default 2>/dev/null || true
-    $SUDO rc-service tailscale start 2>/dev/null || true
-    echo "Tailscale installed — run: $SUDO tailscale up"
-elif [ "$PKG" = apt ] && $SUDO apt install -y tailscale 2>/dev/null; then
-    $SUDO systemctl enable --now tailscaled 2>/dev/null || true
-    echo "Tailscale installed — run: $SUDO tailscale up"
-elif [ "$PKG" = pacman ]; then
-    pkg_install tailscale
-    if command -v tailscale >/dev/null 2>&1; then
-        $SUDO systemctl enable --now tailscaled 2>/dev/null || true
-        echo "Tailscale installed — run: $SUDO tailscale up"
+# Package per distro, its service under the running init, then make this
+# user the Tailscale operator so the shade tile toggles it without root.
+# Sign-in happens from the tile (it opens the login page).
+ts_systemd() { [ -d /run/systemd/system ]; }
+ts_curl() { command -v curl >/dev/null 2>&1 || pkg_install curl ca-certificates; }
+
+ts_apt_repo() {
+    # Debian/Ubuntu and derivatives (FuriOS, Mobian, PureOS) through
+    # Tailscale's own repo: Debian itself does not package tailscale.
+    ts_curl
+    . /etc/os-release
+    _ts_key=$(mktemp)
+    for _ts_dist in ${ID:-} ${ID_LIKE:-}; do
+        case "$_ts_dist" in debian|ubuntu) ;; *) continue ;; esac
+        _ts_code=${VERSION_CODENAME:-}
+        [ "$_ts_dist" = debian ] && [ -n "${DEBIAN_CODENAME:-}" ] && _ts_code=$DEBIAN_CODENAME
+        [ -n "$_ts_code" ] || continue
+        _ts_base="https://pkgs.tailscale.com/stable/$_ts_dist/$_ts_code"
+        curl -fsSL "$_ts_base.noarmor.gpg" >"$_ts_key" 2>/dev/null || continue
+        $SUDO install -m 644 "$_ts_key" /usr/share/keyrings/tailscale-archive-keyring.gpg
+        curl -fsSL "$_ts_base.tailscale-keyring.list" | $SUDO tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+        $SUDO apt-get update -qq && $SUDO apt-get install -y tailscale && { rm -f "$_ts_key"; return 0; }
+    done
+    rm -f "$_ts_key"
+    return 1
+}
+
+ts_static() {
+    # Last resort: Tailscale's static build, newest version from its index.
+    case "$(uname -m)" in
+        aarch64|arm64) _ts_arch=arm64 ;;
+        armv7*|armv6*) _ts_arch=arm ;;
+        x86_64) _ts_arch=amd64 ;;
+        *) echo "warn: no Tailscale build for $(uname -m)" >&2; return 1 ;;
+    esac
+    ts_curl
+    _ts_ver=$(curl -fsSL 'https://pkgs.tailscale.com/stable/?mode=json' |
+        sed -n 's/.*"TarballsVersion": *"\([^"]*\)".*/\1/p')
+    [ -n "$_ts_ver" ] || { echo "warn: Tailscale version lookup failed" >&2; return 1; }
+    _ts_dir="tailscale_${_ts_ver}_${_ts_arch}"
+    _ts_tmp=$(mktemp -d)
+    curl -fsSL "https://pkgs.tailscale.com/stable/${_ts_dir}.tgz" | tar xz -C "$_ts_tmp" || {
+        echo "warn: Tailscale download failed" >&2; rm -rf "$_ts_tmp"; return 1; }
+    $SUDO install -m 755 "$_ts_tmp/$_ts_dir/tailscale" "$_ts_tmp/$_ts_dir/tailscaled" /usr/local/bin/
+    if ts_systemd; then
+        sed 's|/usr/sbin/tailscaled|/usr/local/bin/tailscaled|g' \
+            "$_ts_tmp/$_ts_dir/systemd/tailscaled.service" |
+            $SUDO tee /etc/systemd/system/tailscaled.service >/dev/null
+        $SUDO install -m 644 "$_ts_tmp/$_ts_dir/systemd/tailscaled.defaults" /etc/default/tailscaled
+        $SUDO systemctl daemon-reload
     fi
-fi
-if ! command -v tailscale >/dev/null 2>&1; then
-    # Static tgz fallback, exactly like the reference apps.sh (service-path sed)
-    echo "Installing Tailscale from static tgz..."
-    TS_VER=1.90.9
-    TS_ARCH=arm64
-    case "$(uname -m)" in x86_64) TS_ARCH=amd64 ;; esac
-    TS_DIR="tailscale_${TS_VER}_${TS_ARCH}"
-    if wget -q "https://pkgs.tailscale.com/stable/${TS_DIR}.tgz" && tar xzf "${TS_DIR}.tgz"; then
-        sed -i 's|/usr/sbin/tailscaled|/usr/local/bin/tailscaled|g' "$TS_DIR/systemd/tailscaled.service"
-        $SUDO mv "$TS_DIR/tailscale" /usr/local/bin/tailscale
-        $SUDO mv "$TS_DIR/tailscaled" /usr/local/bin/tailscaled
-        if [ "$(ps -p 1 -o comm= 2>/dev/null)" = systemd ]; then
-            $SUDO mv "$TS_DIR/systemd/tailscaled.service" /etc/systemd/system/tailscaled.service
-            $SUDO mv "$TS_DIR/systemd/tailscaled.defaults" /etc/default/tailscaled
-            $SUDO systemctl daemon-reload
-            $SUDO systemctl enable --now tailscaled.service
-        else
-            echo "warn: OpenRC service for static tailscaled not written — start tailscaled manually" >&2
-        fi
-        rm -rf "${TS_DIR}.tgz" "$TS_DIR"
-        echo "Tailscale installed — run: $SUDO tailscale up"
+    rm -rf "$_ts_tmp"
+}
+
+install_tailscale() {
+    if ! command -v tailscale >/dev/null 2>&1; then
+        case "$PKG" in
+            apk)
+                if ts_systemd; then pkg_install tailscale tailscale-systemd
+                else pkg_install tailscale tailscale-openrc; fi ;;
+            pacman) pkg_install tailscale ;;
+            apt) ts_apt_repo ;;
+        esac
+    fi
+    command -v tailscale >/dev/null 2>&1 || ts_static || return 1
+    if ts_systemd; then
+        $SUDO systemctl enable --now tailscaled
+    elif command -v rc-service >/dev/null 2>&1; then
+        $SUDO rc-update add tailscale default
+        $SUDO rc-service tailscale start
+    fi
+    # tailscaled needs a moment before it accepts prefs
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        tailscale status --json 2>/dev/null | grep -q BackendState && break
+        sleep 1
+    done
+    if $SUDO tailscale set --operator="$(id -un)"; then
+        echo "Tailscale ready — sign in from the Tailscale tile in the shade."
     else
-        echo "warn: Tailscale download failed" >&2
+        echo "warn: tailscaled is not answering; start it, then run: $SUDO tailscale set --operator=$(id -un)" >&2
     fi
-fi
+}
+
+install_tailscale || echo "warn: Tailscale was not installed" >&2
 
 # --- 17.4 Skippy (mobile PWA over Tailscale) --------------------------------
 SKIPPY_HOST=$(ask "Skippy host (Tailscale IP or name)" "skippy")
