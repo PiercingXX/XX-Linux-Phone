@@ -45,25 +45,25 @@ def _slots():
     ]
 
 
-class TestCompactEmptyIndex:
+class TestStartupNeverDropsPins:
+    """The startup pass used to delete pins that did not resolve; with an
+    empty or partial index (or superseded stock apps) that erased folders."""
+
     def test_empty_index_keeps_slots(self) -> None:
-        from default_layout import compact_unresolved_home
+        from default_layout import remap_superseded_home
         config = FakeConfig(_slots())
-        index = SimpleNamespace(entries=[])
-        assert compact_unresolved_home(config, index) is False
+        index = SimpleNamespace(entries=[], replacement_for=lambda _a: None)
+        assert remap_superseded_home(config, index) is False
         assert config.home_slots == _slots()
         assert config.writes == []
 
-    def test_populated_index_still_compacts(self) -> None:
-        from default_layout import compact_unresolved_home
+    def test_unresolved_pin_survives_a_populated_index(self) -> None:
+        from default_layout import remap_superseded_home
         config = FakeConfig(_slots())
-        index = SimpleNamespace(entries=[
-            SimpleNamespace(app_id='org.gnome.Notes'),
-        ])
-        assert compact_unresolved_home(config, index) is True
-        assert config.home_slots == [
-            {'type': 'app', 'label': 'Notes', 'app_id': 'org.gnome.Notes'},
-        ]
+        index = SimpleNamespace(entries=[SimpleNamespace(app_id='org.gnome.Notes')],
+                                replacement_for=lambda _a: None)
+        assert remap_superseded_home(config, index) is False
+        assert config.home_slots == _slots()
 
 
 class TestShadeSettingsWiring:

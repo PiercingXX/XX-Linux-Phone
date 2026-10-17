@@ -11,8 +11,7 @@ from default_layout import (
     STOCK_HIDDEN_APPS,
     DefaultLayoutResolver,
     apply_default_layout,
-    compact_unresolved_home,
-    compact_unresolved_slots,
+    remap_superseded_home,
     seed_default_layout,
 )
 
@@ -209,50 +208,42 @@ class TestApplyDefaultLayout:
         assert gestures.bindings == {}
 
 
-class TestCompactUnresolved:
-    def test_drops_missing_apps_and_empty_folders(self):
-        slots = [
-            {'type': 'app', 'label': 'Notes', 'app_id': 'notes.desktop'},
+class TestRemapSupersededHome:
+    """Startup only remaps superseded stock apps; it never drops a pin."""
+
+    class _Idx:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        def replacement_for(self, app_id):
+            return self.mapping.get(app_id)
+
+    def _comms(self):
+        return [
             {'type': 'app', 'label': 'Gone', 'app_id': 'missing.desktop'},
-            {'type': 'folder', 'label': 'Tools', 'folder': [
-                {'label': 'Calc', 'app_id': 'calc.desktop'},
-                {'label': 'Cam', 'app_id': 'cam.desktop'},
-            ]},
-            {'type': 'folder', 'label': 'Empty', 'folder': [
-                {'label': 'X', 'app_id': 'nope.desktop'},
-            ]},
             {'type': 'folder', 'label': 'Comms', 'folder': [
-                {'label': 'Phone', 'app_id': None, 'cmd': None},
+                {'label': 'Phone', 'app_id': 'org.gnome.Calls.desktop'},
+                {'label': 'Text', 'app_id': 'sm.puri.Chatty.desktop'},
             ]},
-            {'type': 'app', 'label': 'NoteCmd', 'cmd': ['piercing-note']},
         ]
-        installed = {'notes.desktop', 'calc.desktop'}
-        out = compact_unresolved_slots(
-            slots,
-            is_installed=lambda a: a in installed,
-            cmd_exists=lambda c: c == ['piercing-note'],
-        )
-        assert [s['label'] for s in out] == ['Notes', 'Tools', 'Comms', 'NoteCmd']
-        assert [m['label'] for m in out[1]['folder']] == ['Calc']
-        assert out[2]['folder'][0]['label'] == 'Phone'
 
-    def test_home_write_only_when_changed(self):
-        class _Idx:
-            entries = [type('E', (), {'app_id': 'notes.desktop'})()]
+    def test_superseded_members_are_remapped_not_dropped(self):
+        config = FakeConfig(slots=self._comms(), applied=True)
+        idx = self._Idx({'org.gnome.Calls.desktop': 'io.piercingxx.XXDialer.desktop',
+                         'sm.puri.Chatty.desktop': 'io.piercingxx.TxxT.desktop'})
+        assert remap_superseded_home(config, idx) is True
+        labels = [s['label'] for s in config.home_slots]
+        assert labels == ['Gone', 'Comms']  # nothing dropped, unresolved kept
+        folder = config.home_slots[1]['folder']
+        assert [m['label'] for m in folder] == ['Phone', 'Text']
+        assert [m['app_id'] for m in folder] == [
+            'io.piercingxx.XXDialer.desktop', 'io.piercingxx.TxxT.desktop']
 
-        config = FakeConfig(slots=[
-            {'type': 'app', 'label': 'Notes', 'app_id': 'notes.desktop'},
-        ], applied=True)
-        assert compact_unresolved_home(config, _Idx()) is False
+    def test_write_only_when_something_was_remapped(self):
+        config = FakeConfig(slots=self._comms(), applied=True)
+        assert remap_superseded_home(config, self._Idx({})) is False
         assert config.writes == 0
-
-        config = FakeConfig(slots=[
-            {'type': 'app', 'label': 'Notes', 'app_id': 'notes.desktop'},
-            {'type': 'app', 'label': 'Gone', 'app_id': 'missing.desktop'},
-        ], applied=True)
-        assert compact_unresolved_home(config, _Idx()) is True
-        assert [s['label'] for s in config.home_slots] == ['Notes']
-        assert config.default_layout_applied is True
+        assert config.home_slots == self._comms()
 
 
 if __name__ == '__main__':

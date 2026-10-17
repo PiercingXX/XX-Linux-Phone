@@ -58,9 +58,9 @@ _MUSIC_CANDIDATES = [
 # Phone/Text prefer the device's real telephony apps (GNOME Calls / Chatty —
 # what FuriOS and postmarketOS ship); the shell's built-in dialer is the
 # fallback so the pair always correlates with whatever stack actually works.
-_PHONE_CANDIDATES = ['org.gnome.Calls', 'sm.puri.Calls']
-_TEXT_CANDIDATES = ['sm.puri.Chatty', 'org.gnome.Chats']
-_EMAIL_CANDIDATES = ['org.gnome.Geary', 'org.gnome.Evolution']
+_PHONE_CANDIDATES = ['io.piercingxx.XXDialer', 'org.gnome.Calls', 'sm.puri.Calls']
+_TEXT_CANDIDATES = ['io.piercingxx.TxxT', 'sm.puri.Chatty', 'org.gnome.Chats']
+_EMAIL_CANDIDATES = ['io.piercingxx.XXEmail', 'org.gnome.Geary', 'org.gnome.Evolution']
 _CHAT_CANDIDATES = ['android.com.synology.dschat', 'waydroid.com.synology.dschat',
                     'com.synology.dschat', 'com.synology.chat']
 _SOFTPHONE_CANDIDATES = [
@@ -68,7 +68,7 @@ _SOFTPHONE_CANDIDATES = [
     'waydroid.cz.acrobits.softphone.cloudphone',
     'cz.acrobits.softphone.cloudphone',
 ]
-_CALENDAR_CANDIDATES = ['org.gnome.Calendar', 'gnome-calendar',
+_CALENDAR_CANDIDATES = ['io.piercingxx.XXCalendar', 'org.gnome.Calendar', 'gnome-calendar',
                         'android.com.google.android.calendar',
                         'waydroid.com.google.android.calendar']
 _CALCULATOR_CANDIDATES = ['org.gnome.Calculator', 'gnome-calculator']
@@ -280,82 +280,31 @@ def apply_default_layout(config, gestures=None, resolver: DefaultLayoutResolver 
     config.set_default_layout_applied(True)
 
 
-def _member_resolves(
-        item: dict,
-        is_installed: Callable[[str], bool],
-        cmd_exists: Callable[[list], bool]) -> bool:
-    app_id = item.get('app_id')
-    cmd = item.get('cmd')
-    if app_id:
-        return bool(is_installed(str(app_id)))
-    if cmd:
-        return bool(cmd_exists(list(cmd)))
-    return True
-
-
-def compact_unresolved_slots(
-        slots: list[dict],
-        is_installed: Callable[[str], bool],
-        cmd_exists: Callable[[list], bool] | None = None) -> list[dict]:
-    """Drop uninstalled app slots/members and empty folders. No re-seed."""
-    cmd_exists = cmd_exists or (lambda cmd: bool(cmd) and shutil.which(cmd[0]) is not None)
-    out: list[dict] = []
-    for slot in slots:
-        stype = slot.get('type')
-        if stype == 'folder':
-            members = [
-                m for m in (slot.get('folder') or [])
-                if _member_resolves(m, is_installed, cmd_exists)
-            ]
-            if members:
-                compacted = dict(slot)
-                compacted['folder'] = members
-                out.append(compacted)
-        elif stype == 'app':
-            if slot.get('app_id') or slot.get('cmd'):
-                if _member_resolves(slot, is_installed, cmd_exists):
-                    out.append(slot)
-        else:
-            out.append(slot)
-    return out
-
-
-def compact_unresolved_home(
-        config, app_index, *,
-        cmd_exists: Callable[[list], bool] | None = None) -> bool:
-    """Rewrite config.home_slots when unresolved ids/cmds are present.
-
-    Built-in members (no app_id, no cmd — the dialer) stay. Returns True
-    when a write happened. Never re-seeds and never sets default_layout_applied.
-    """
-    entries = getattr(app_index, 'entries', None) or []
-    if not entries:
-        # No index (transient session: flatpak exports missing, a package
-        # upgrade mid-flight, Gio returning nothing): compacting now would
-        # permanently delete the user's pins for apps that are installed.
+def remap_superseded_home(config, app_index) -> bool:
+    """Point home slots and folder members at the XX app that supersedes a
+    stock one (GNOME Contacts -> xx-contacts, Calls -> xx-dialer, Chatty ->
+    TxxT). Labels stay. Never drops anything: deleting pins that do not
+    resolve at startup once erased the whole Comms folder when its stock
+    apps were superseded. Returns True when a write happened."""
+    replacement_for = getattr(app_index, 'replacement_for', None)
+    if not callable(replacement_for):
         return False
-    ids: set[str] = set()
-    for entry in entries:
-        app_id = getattr(entry, 'app_id', '') or ''
-        if not app_id:
-            continue
-        ids.add(app_id)
-        if app_id.endswith('.desktop'):
-            ids.add(app_id[:-8])
-        else:
-            ids.add(f'{app_id}.desktop')
 
-    def is_installed(app_id: str) -> bool:
-        if not app_id:
-            return False
-        if app_id in ids:
-            return True
-        alt = app_id[:-8] if app_id.endswith('.desktop') else f'{app_id}.desktop'
-        return alt in ids
+    def remap(item: dict) -> dict:
+        new_id = replacement_for(item.get('app_id') or '')
+        return dict(item, app_id=new_id) if new_id else item
 
     current = list(config.home_slots)
-    compacted = compact_unresolved_slots(current, is_installed, cmd_exists)
-    if compacted != current:
-        config.set_home_slots(compacted)
+    remapped = []
+    for slot in current:
+        if slot.get('type') == 'folder':
+            slot = dict(slot, folder=[remap(m) for m in (slot.get('folder') or [])])
+        elif slot.get('type') == 'app':
+            slot = remap(slot)
+        remapped.append(slot)
+    if remapped != current:
+        config.set_home_slots(remapped)
         return True
     return False
+
+

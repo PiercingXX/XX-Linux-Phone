@@ -87,16 +87,11 @@ _SUPERSEDED_BY = {
 }
 
 
-def _superseded(app_id: str, installed: set[str]) -> bool:
-    """True when `app_id` is a superseded stock app whose XX replacement
-    is installed (i.e. listed alongside it)."""
-    replacement = _SUPERSEDED_BY.get(_normalized_app_id(app_id))
-    return replacement is not None and replacement in installed
-
-
 class AppIndex:
     def __init__(self) -> None:
         self.entries: list[AppEntry] = []
+        # Normalized stock app id -> the installed XX app id replacing it.
+        self.replacements: dict[str, str] = {}
 
     def refresh(self) -> list[AppEntry]:
         entries: list[AppEntry] = []
@@ -138,11 +133,20 @@ class AppIndex:
             )
             seen.add(app_id)
 
-        installed = {_normalized_app_id(entry.app_id) for entry in entries}
+        by_norm = {_normalized_app_id(entry.app_id): entry.app_id
+                   for entry in entries}
+        self.replacements = {
+            stock: by_norm[replacement]
+            for stock, replacement in _SUPERSEDED_BY.items()
+            if stock in by_norm and replacement in by_norm}
         entries = [entry for entry in entries
-                   if not _superseded(entry.app_id, installed)]
+                   if _normalized_app_id(entry.app_id) not in self.replacements]
         self.entries = sorted(entries, key=lambda entry: entry.name.casefold())
         return self.entries
+
+    def replacement_for(self, app_id: str) -> str | None:
+        """The installed XX app id that supersedes ``app_id``, else None."""
+        return self.replacements.get(_normalized_app_id(app_id or ''))
 
     def top(self, limit: int = 8) -> list[AppEntry]:
         return self.entries[:limit]

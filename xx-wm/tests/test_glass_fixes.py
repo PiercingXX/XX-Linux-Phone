@@ -217,8 +217,9 @@ def test_wifi_password_dialog_is_wired_to_osk():
     assert '_attach_osk(self.apn_pass_entry)' in WINDOW_SRC
 
 
-def test_home_compacts_unresolved_slots_at_start():
-    assert 'compact_unresolved_home' in WINDOW_SRC
+def test_home_remaps_superseded_slots_at_start():
+    assert 'remap_superseded_home' in WINDOW_SRC
+    assert 'compact_unresolved' not in WINDOW_SRC
 
 
 def test_search_hops_over_apps_while_typing():

@@ -370,9 +370,9 @@ class ShellWindow(Adw.ApplicationWindow):
         self.app_index.refresh()
 
         try:
-            from default_layout import apply_default_layout, compact_unresolved_home
+            from default_layout import apply_default_layout, remap_superseded_home
             apply_default_layout(self.config, self.gesture_config)
-            compact_unresolved_home(self.config, self.app_index)
+            remap_superseded_home(self.config, self.app_index)
         except Exception:
             pass  # first-boot seeding must never block the shell
 
