@@ -131,6 +131,8 @@ The in-shell Settings page holds system sections — the things a config file ca
 
 Theme presets are also offered as a dedicated Appearance surface on the Settings page so they can be changed without a keyboard.
 
+The page opens on a **category menu** (Android Settings style): Network & internet, Connected devices, Display & appearance, Home & launcher, Sound, Battery, Apps, Privacy & security, Storage & backup, System — each row with a live one-line summary, each opening a subpage with a back chevron (back returns to the menu, then to wherever Settings was opened from; `settings.open:<section>` deep links land on the subpage scrolled to that section). Every subpage uses one row grammar (`settings_ui.py`): caps caption, rounded card of rows with hairlines, title + muted status subtitle + one trailing control, at most one muted footnote; typed values open a sheet instead of sitting inline. Row titles 18 px, subtitles 14 px, captions 12 px (scaled by text size).
+
 ## Non-goals
 
 Icon packs, wallpaper images, widgets from third-party apps, animations beyond functional reveals, desktop multi-window tiling.

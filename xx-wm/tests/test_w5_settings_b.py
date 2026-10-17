@@ -42,6 +42,12 @@ class _FakeWidget:
         self._text = kwargs.get('label', '')
         self._active = False
 
+    def __getattr__(self, name):
+        # Any other setter the settings row builders call is recorded.
+        if name.startswith('set_'):
+            return lambda *args: self._rec(name[4:], *args)
+        raise AttributeError(name)
+
     @classmethod
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
@@ -453,14 +459,21 @@ def _built_texts(built):
 
 
 class TestChargingSection:
-    def test_build_starts_with_caps_label(self, fake_gi):
+    def _menus(self, win):
+        menus = []
+        win.item_actions = SimpleNamespace(
+            _show_action_menu=lambda anchor, title, choices: menus.append(
+                (title, dict(choices))))
+        return menus
+
+    def test_build_starts_with_caps_caption(self, fake_gi):
         import settings_charging as charging
         win = _bare_win()
         section = charging.ChargingSection()
         built = section.build(win)
-        assert 'xx-section-label' in built[0].classes
+        assert 'xx-set-caption' in built[0].classes
         assert 'CHARGING' in _texts(built[0])
-        assert 'Charge limit: Off' in _built_texts(built)
+        assert 'Checking battery support…' in _built_texts(built)
 
     def test_unsupported_message(self, fake_gi):
         import settings_charging as charging
@@ -470,15 +483,18 @@ class TestChargingSection:
         section._on_state(win, (False, None))
         assert charging.NO_KNOB_TEXT in _built_texts(built)
 
-    def test_supported_shows_presets(self, fake_gi):
+    def test_supported_row_opens_presets(self, fake_gi):
         import settings_charging as charging
         win = _bare_win()
+        menus = self._menus(win)
         section = charging.ChargingSection()
         built = section.build(win)
         section._on_state(win, (True, '87% — discharging'))
-        labels = _built_texts(built)
-        assert any('80%' in text for text in labels)
-        assert any('87%' in text for text in labels)
+        assert 'Off · charges to 100%' in _built_texts(built)
+        section._pick(win, section._row)
+        title, choices = menus[-1]
+        assert title == 'Charge limit'
+        assert list(choices) == ['Off', '80%', '85%', '90%', 'Custom…']
 
     def test_apply_success_saves_config(self, fake_gi, monkeypatch):
         import settings_charging as charging
@@ -518,66 +534,31 @@ class TestChargingSection:
         section._apply(win, 85)
         assert 'denied' in (section._note.get_text() if section._note else '')
 
-    def _visible_texts(self, widget):
-        found = []
-        visible = getattr(widget, 'get_visible', None)
-        if callable(visible) and not visible():
-            return found
-        label = widget.kwargs.get('label')
-        if isinstance(label, str):
-            found.append(label)
-        text = getattr(widget, '_text', '')
-        if isinstance(text, str) and text and text != label:
-            found.append(text)
-        for child in list(getattr(widget, 'children', [])):
-            found.extend(self._visible_texts(child))
-        direct = getattr(widget, 'child', None)
-        if isinstance(direct, _FakeWidget):
-            found.extend(self._visible_texts(direct))
-        return found
+    def test_custom_sheet_validates(self, fake_gi, monkeypatch):
+        import settings_charging as charging
+        calls = {}
+        fake_helper = SimpleNamespace(
+            set_charge_limit=lambda pct, cb: (
+                calls.update(percent=pct), cb(True, None)))
+        monkeypatch.setitem(sys.modules, 'helper_client', fake_helper)
+        win = _bare_win()
+        section = charging.ChargingSection()
+        section.build(win)
+        assert section._on_custom(win, {'limit': 'off'}) == (
+            'Enter a number from 50 to 100.')
+        assert calls == {}
+        assert section._on_custom(win, {'limit': '72'}) is None
+        assert calls['percent'] == 72
 
-    def _visible_built_texts(self, built):
-        found = []
-        for widget in built:
-            found.extend(self._visible_texts(widget))
-        return found
-
-    def test_unsupported_hides_custom_controls(self, fake_gi):
+    def test_unsupported_row_is_not_a_control(self, fake_gi):
         import settings_charging as charging
         win = _bare_win()
         section = charging.ChargingSection()
         built = section.build(win)
         section._on_state(win, (False, None))
-        assert section._custom_entry.get_visible() is False
-        assert section._apply_btn.get_visible() is False
-        labels = self._visible_built_texts(built)
-        assert charging.NO_KNOB_TEXT in labels
-        assert not any('Custom' in text for text in labels)
-        assert not any('Set custom limit' in text for text in labels)
-        assert not any('%' in text and 'Charge limit' not in text
-                       for text in labels)
-
-    def test_unknown_hides_custom_controls(self, fake_gi):
-        import settings_charging as charging
-        win = _bare_win()
-        section = charging.ChargingSection()
-        built = section.build(win)
-        assert section._custom_entry.get_visible() is False
-        assert section._apply_btn.get_visible() is False
-        labels = self._visible_built_texts(built)
-        assert not any('Set custom limit' in text for text in labels)
-
-    def test_supported_shows_custom_controls(self, fake_gi):
-        import settings_charging as charging
-        win = _bare_win()
-        section = charging.ChargingSection()
-        built = section.build(win)
-        section._on_state(win, (True, '87% — discharging'))
-        assert section._custom_entry.get_visible() is True
-        assert section._apply_btn.get_visible() is True
-        labels = self._visible_built_texts(built)
-        assert any('Set custom limit' in text for text in labels)
-        assert any('80%' in text for text in labels)
+        rows = built[1].children
+        assert len(rows) == 1
+        assert 'clicked' not in rows[0].handlers
 
 
 # --- battery-use model ---------------------------------------------------
@@ -671,7 +652,7 @@ class TestBatteryUseSection:
         labels = _texts(section._list_box)
         assert any('%' in text for text in labels)
         assert section._note is not None
-        assert 'estimated' in section._note.get_text()
+        assert 'Estimated' in section._note.get_text()
 
     def test_empty_state(self, fake_gi):
         import settings_battery_use as battery_use
@@ -691,12 +672,6 @@ class TestScreenTimeModel:
         assert screen_time.fmt_duration(720) == '12m'
         assert screen_time.fmt_duration(3900) == '1h 05m'
         assert screen_time.fmt_duration('junk') == '0s'
-
-    def test_limit_cycle(self):
-        import settings_screentime as screen_time
-        assert screen_time.next_limit(0) == 15
-        assert screen_time.next_limit(240) == 0
-        assert screen_time.next_limit(60) == 120
 
     def test_reached_and_ignore(self):
         import settings_screentime as screen_time
@@ -756,15 +731,19 @@ class TestScreenTimeSection:
         week = [(today - datetime.timedelta(days=i), 60 * i)
                 for i in range(6, -1, -1)]
         section._render(win, ({'a.desktop': 120}, week, 7, 3))
-        assert section._today_label.get_text() == 'Today: 2m'
+        assert section._today_label.get_text() == '2m'
         assert '7 unlocks · 3 notifications' in \
             section._counts_label.get_text()
-        assert len(section._week_box.children) == 7
-        fractions = [args[0] for col in section._week_box.children
-                     for bar in col.children
-                     for name, args in bar.calls if name == 'fraction']
-        assert len(fractions) == 7
-        assert max(fractions) == pytest.approx(1.0)
+        (chart,) = section._week_box.children
+        assert len(chart.children) == 7
+        heights = [args[1] for column in chart.children
+                   for well in column.children[:1]
+                   for bar in well.children
+                   for name, args in bar.calls if name == 'size_request']
+        assert len(heights) == 7
+        assert max(heights) == screen_time._CHART_PX
+        today_bar = chart.children[-1].children[0].children[0]
+        assert 'today' in today_bar.classes
 
     def test_limit_banner_fires_once(self, fake_gi):
         import settings_screentime as screen_time
@@ -790,8 +769,30 @@ class TestScreenTimeSection:
         section._select(win, None)
         section._selected = 'a.desktop'
         section._render(win, ({'a.desktop': 120}, [], 0, 0))
-        assert any('‹ Back' in text
-                   for text in _texts(section._apps_box))
+        texts = _texts(section._apps_box)
+        assert 'Last 7 days' in texts
+        assert 'All apps' in texts
+
+    def test_app_row_menu_sets_limit(self, fake_gi):
+        import settings_screentime as screen_time
+        menus, limits = [], {}
+        config = SimpleNamespace(
+            app_time_limits={}, app_limit_ignored={},
+            label_for=lambda a, n: n,
+            set_app_time_limit=lambda a, m: limits.update({a: m}))
+        win = _bare_win(config=config)
+        win.item_actions = SimpleNamespace(
+            _show_action_menu=lambda anchor, title, choices: menus.append(
+                dict(choices)))
+        section = screen_time.ScreenTimeSection()
+        section.build(win)
+        section._render(win, ({'a.desktop': 120}, [], 0, 0))
+        assert '2m today' in _texts(section._apps_box)
+        section._app_menu(win, None, 'a.desktop', 0, False)
+        assert 'Limit: Off ✓' in menus[-1]
+        assert 'Last 7 days' in menus[-1]
+        menus[-1]['Limit: 1 hour']()
+        assert limits == {'a.desktop': 60}
 
 
 # --- medical model --------------------------------------------------------
@@ -912,38 +913,68 @@ class TestContactsSearchCall:
 
 
 class TestMedicalSection:
-    def test_build_and_save(self, fake_gi):
-        import settings_medical as medical
-        saved = {}
+    def _config(self, saved):
         config = SimpleNamespace(
             medical_id={'name': 'Ada', 'blood_type': 'O+',
                         'emergency_contacts': [{'name': 'Bob',
                                                 'number': '+100'}]},
             lock_screen_medical_id=True,
-            set_medical_id=lambda m: saved.update(medical=m),
             set_lock_screen_medical_id=lambda v: saved.update(show=v))
-        win = _bare_win(config=config)
+
+        def _set(medical):
+            saved['medical'] = medical
+            config.medical_id = medical
+
+        config.set_medical_id = _set
+        return config
+
+    def test_build_and_save(self, fake_gi):
+        import settings_medical as medical
+        saved = {}
+        win = _bare_win(config=self._config(saved))
         section = medical.MedicalSection()
-        section.build(win)
-        assert set(section._entries) == {'name', 'blood_type', 'allergies',
-                                         'medications', 'conditions'}
-        assert section._entries['name'].get_text() == 'Ada'
-        assert section._search_entry is not None
-        section._on_save(win)
+        built = section.build(win)
+        texts = _built_texts(built)
+        assert '2 of 5 fields' in texts
+        assert 'Bob' in texts and '+100' in texts
+        error = section._on_save(win, {'name': 'Ada', 'blood_type': 'O+',
+                                       'allergies': ' Nuts '})
+        assert error is None
         assert saved['medical']['name'] == 'Ada'
-        assert saved['medical']['blood_type'] == 'O+'
+        assert saved['medical']['allergies'] == 'Nuts'
         assert saved['medical']['emergency_contacts'] == [
             {'name': 'Bob', 'number': '+100'}]
         assert 'Saved.' in (section._note.get_text() or '')
+        assert '3 of 5 fields' in _texts(section._row)
 
-    def test_entries_stay_narrow(self, fake_gi):
+    def test_fields_sheet_lists_every_field(self, fake_gi):
         import settings_medical as medical
+        win = _bare_win(config=self._config({}))
         section = medical.MedicalSection()
-        section.build(_bare_win())
-        for field, entry in section._entries.items():
-            widths = [args[0] for name, args in entry.calls
-                      if name == 'width_chars']
-            assert widths == [12], field
+        section.build(win)
+        _box, entries = section._open_fields(win, None)
+        assert list(entries) == ['name', 'blood_type', 'allergies',
+                                 'medications', 'conditions']
+        assert entries['name'].get_text() == 'Ada'
+
+    def test_contacts_save_at_once(self, fake_gi):
+        import settings_medical as medical
+        saved = {}
+        win = _bare_win(config=self._config(saved))
+        section = medical.MedicalSection()
+        section.build(win)
+        section._add_contact(win, 'Cy', '+200')
+        assert saved['medical']['emergency_contacts'][-1] == {
+            'name': 'Cy', 'number': '+200'}
+        section._remove_contact(win, 0)
+        assert saved['medical']['emergency_contacts'] == [
+            {'name': 'Cy', 'number': '+200'}]
+        assert saved['medical']['name'] == 'Ada'
+
+    def test_summary_never_shows_values(self):
+        import settings_medical as medical
+        assert medical.fields_summary({}) == 'Not set'
+        assert medical.fields_summary({'name': 'Ada'}) == '1 of 5 fields'
 
 
 # --- lock media -----------------------------------------------------------
@@ -1076,7 +1107,7 @@ class TestSectionRegistry:
         for key, cls in settings_page.SETTINGS_SECTIONS:
             if key in ('charging', 'batteryuse', 'screentime', 'medical'):
                 built = cls().build(win)
-                assert 'xx-section-label' in built[0].classes, key
+                assert 'xx-set-caption' in built[0].classes, key
 
     def test_all_strings_phone_sized(self, fake_gi):
         # 32 is the shared xx_ui standalone cap (xx-section-label and
@@ -1153,7 +1184,7 @@ class TestMainLoopGuards:
                 r"""\.connect\(\s*['"]([a-z0-9_-]+)(?:::[a-z0-9_-]+)?['"]""",
                 text))
         assert connected <= {'clicked', 'changed', 'activate',
-                             'notify::active', 'map', 'unmap'}, connected
+                             'notify', 'map', 'unmap'}, connected
 
     def test_medical_reply_type_is_variant(self):
         text = (SRC / 'settings_medical.py').read_text(encoding='utf-8')

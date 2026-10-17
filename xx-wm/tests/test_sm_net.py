@@ -1083,6 +1083,13 @@ class _FakeWidget:
         self.props = {}
         self.handlers = {}
 
+    def __getattr__(self, name):
+        # Any other setter the settings row builders call is recorded.
+        if name.startswith('set_'):
+            return lambda *args: self.props.__setitem__(
+                name[4:], args[0] if len(args) == 1 else args)
+        raise AttributeError(name)
+
     @classmethod
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
@@ -1563,7 +1570,7 @@ class TestServiceSectionUI:
     def test_build_title_first(self, fake_gi):
         win = _bare_win()
         built = services.ServicesSection().build(win)
-        assert 'xx-section-label' in built[0].classes
+        assert 'xx-set-caption' in built[0].classes
 
     def test_stop_arms_then_confirms(self, fake_gi, monkeypatch):
         import helper_client as client
@@ -1594,7 +1601,7 @@ class TestFirewallSectionUI:
     def test_build_title_first(self, fake_gi):
         win = _bare_win()
         built = firewall.FirewallSection().build(win)
-        assert 'xx-section-label' in built[0].classes
+        assert 'xx-set-caption' in built[0].classes
 
     def test_switch_calls_helper(self, fake_gi, monkeypatch):
         import helper_client as client

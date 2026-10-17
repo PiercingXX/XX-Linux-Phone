@@ -24,6 +24,19 @@ class _FakeWidget:
         self.props = {}
         self.handlers = {}
 
+    def set_visible(self, value):
+        self.props['visible'] = bool(value)
+
+    def get_visible(self):
+        return self.props.get('visible', True)
+
+    def __getattr__(self, name):
+        # Any other setter the settings row builders call is recorded.
+        if name.startswith('set_'):
+            return lambda *args: self.props.__setitem__(
+                name[4:], args[0] if len(args) == 1 else args)
+        raise AttributeError(name)
+
     @classmethod
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
@@ -161,6 +174,10 @@ class _FakeWidget:
         return self.props['vadjustment']
 
 
+class _FakeEntry(_FakeWidget):
+    pass
+
+
 class _FakeAdjustment:
     def __init__(self):
         self.values = []
@@ -278,13 +295,32 @@ def window():
             if adjustment is not None:
                 adjustment.set_value(value)
 
+    class _FakeScrolled(_FakeWidget):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.props['vadjustment'] = _FakeGtkAdjustment()
+
+    class _FakeGtkStack(_FakeWidget):
+        def add_named(self, child, name):
+            self.append(child)
+            self.props.setdefault('pages', {})[name] = child
+
+        def set_visible_child_name(self, name):
+            self.props['visible'] = name
+
+        def get_visible_child_name(self):
+            return self.props.get('visible', 'menu')
+
     gtk.Box = _FakeWidget
     gtk.Label = _FakeWidget
-    gtk.Button = _FakeWidget
-    gtk.Entry = _FakeWidget
+    gtk.Button = type('_FakeButtonW', (_FakeWidget,), {})
+    gtk.Entry = _FakeEntry
     gtk.Image = _FakeImage
-    gtk.ScrolledWindow = _FakeWidget
-    gtk.Switch = _FakeWidget
+    gtk.ScrolledWindow = _FakeScrolled
+    gtk.Switch = type('_FakeSwitchW', (_FakeWidget,), {})
+    gtk.Stack = _FakeGtkStack
+    gtk.StackTransitionType = SimpleNamespace(SLIDE_LEFT_RIGHT=0)
+    gtk.InputPurpose = SimpleNamespace(PASSWORD=0, PIN=1, NUMBER=2)
     gtk.Grid = _FakeGrid
     gtk.CssProvider = _FakeCssProvider
     gtk.Adjustment = _FakeGtkAdjustment
@@ -397,11 +433,13 @@ class TestOpenSettings:
         assert w.adjustment.values and w.adjustment.values[-1] == 240.0
         assert w.refreshed == ['bluetooth']
 
-    def test_mobile_scrolls_without_extra_refresh(self, window):
+    def test_mobile_lands_on_the_network_page(self, window):
+        # The APN row lives on Network & internet: showing that page
+        # refreshes its live rows (the Wi-Fi scan) like any visit does.
         w = _bare_open(window)
         w.open_settings('mobile')
         assert w.adjustment.values and w.adjustment.values[-1] == 360.0
-        assert w.refreshed == []
+        assert w.refreshed == ['wifi']
 
     def test_none_opens_top_without_scroll_or_refresh(self, window):
         w = _bare_open(window)
@@ -450,29 +488,92 @@ class TestOpenSettings:
                 or 'on_open_settings=self.open_settings' in src)
 
 
-class TestSettingsNarrowRows:
-    def test_gesture_row_stacks_buttons_below_binding(self, window):
-        w = _bare(window)
-        binding, change, reset = _FakeWidget(), _FakeWidget(), _FakeWidget()
-        row = w._build_gesture_row('Swipe left', binding, change, reset)
-        assert len(row.children) == 3
-        name, bound, buttons = row.children
-        assert bound is binding
-        assert buttons.children == [change, reset]
-        assert 'xx-setting' in row.classes
-        assert 'xx-title' in name.classes
+def _built_page(window):
+    import settings_page
+    w = _bare(window)
+    w.stack = _FakeStack()
+    w.left = []
+    w._leave_settings = lambda: w.left.append(1)
+    root = w._build_settings_page()
+    return w, root, settings_page
 
-    def test_no_three_wide_control_row(self, window):
+
+def _walk(widget):
+    yield widget
+    for child in getattr(widget, 'children', []):
+        yield from _walk(child)
+    direct = getattr(widget, 'child', None)
+    if isinstance(direct, _FakeWidget):
+        yield from _walk(direct)
+
+
+class TestSettingsMenu:
+    def test_every_section_sits_in_exactly_one_category(self):
         import settings_page
-        src = inspect.getsource(settings_page.SettingsPage._build_gesture_row)
-        assert 'controls.append(binding)' not in src
+        placed = [key for _cat, _title, keys in
+                  settings_page.SETTINGS_CATEGORIES for key in keys]
+        registered = [key for key, _cls in settings_page.SETTINGS_SECTIONS]
+        assert sorted(placed) == sorted(registered)
+        assert len(set(placed)) == len(placed)
+        grouped = [key for group in settings_page._MENU_GROUPS
+                   for key in group]
+        assert sorted(grouped) == sorted(
+            cat for cat, _t, _k in settings_page.SETTINGS_CATEGORIES)
 
-    def test_apn_entries_shrink(self, window):
+    def test_menu_and_one_subpage_per_category(self, window):
+        w, root, settings_page = _built_page(window)
+        assert 'xx-settings' in root.classes
+        pages = w._settings_stack.props['pages']
+        assert list(pages) == ['menu'] + [
+            'cat-' + cat for cat, _t, _k in settings_page.SETTINGS_CATEGORIES]
+        menu_titles = [node.kwargs.get('label') for node in
+                       _walk(pages['menu'])]
+        for _cat, title, _keys in settings_page.SETTINGS_CATEGORIES:
+            assert title in menu_titles
+
+    def test_every_deep_link_key_opens_its_subpage(self, window):
+        w, _root, settings_page = _built_page(window)
+        page = settings_page.SettingsPage
+        helper = w._settings_page
+        assert isinstance(helper, page)
+        pages = w._settings_stack.props['pages']
+        for key in settings_page._SETTINGS_SECTION_KEYS:
+            category = settings_page.category_for(key)
+            assert category is not None, key
+            w.open_settings(key)
+            assert w.stack.visible == 'settings', key
+            assert w._settings_stack.get_visible_child_name() == (
+                'cat-' + category), key
+            title = w._settings_section_titles[key]
+            assert title in list(_walk(pages['cat-' + category])), key
+            assert w._settings_scroll is helper._scrolls[category], key
+
+    def test_back_returns_to_menu_then_leaves(self, window):
+        w, _root, _settings_page = _built_page(window)
+        w._settings_page.show_category('network')
+        w._settings_page.back()
+        assert w._settings_stack.get_visible_child_name() == 'menu'
+        assert w.left == []
+        w._settings_page.back()
+        assert w.left == [1]
+
+    def test_no_inline_entries_and_one_primary_per_page(self, window):
+        w, _root, _settings_page = _built_page(window)
+        for name, child in w._settings_stack.props['pages'].items():
+            nodes = list(_walk(child))
+            assert not [n for n in nodes if isinstance(n, _FakeEntry)], name
+            primaries = [n for n in nodes if 'xx-btn-primary' in n.classes]
+            assert len(primaries) <= 1, name
+
+    def test_gesture_rows_are_value_rows(self, window):
         w = _bare(window)
-        w.stack = _FakeStack()
-        w._build_settings_page()
-        for entry in (w.apn_entry, w.apn_user_entry, w.apn_pass_entry):
-            assert entry.props['width_chars'] == 12
+        card = w._build_gestures_card()
+        assert 'xx-set-card' in card.classes
+        assert len(card.children) == 6
+        assert all('clicked' in row.handlers for row in card.children)
+        assert set(w._gesture_binding_labels) == {'swipe_left_home',
+                                                  'swipe_right_home'}
+        assert len(w._system_gesture_labels) == 4
 
 
 class TestSettingsListRows:
@@ -505,13 +606,12 @@ class TestSettingsListRows:
         rows = w._wifi_list_box.children
         assert len(rows) == 2
         assert all('clicked' in row.handlers for row in rows)
-        assert 'last' in rows[-1].classes
+        assert all('xx-set-row' in row.classes for row in rows)
         texts = self._texts(w._wifi_list_box)
         assert 'Home' in texts
-        assert 'Connected' in texts
-        assert '80%' in texts
+        assert 'Connected · 80%' in texts
         assert 'Cafe' in texts
-        assert 'Open network' in texts
+        assert 'Open · 40%' in texts
 
     def test_bt_rows_show_state(self, window):
         import settings_page
@@ -545,44 +645,11 @@ class TestSettingsListRows:
 
 
 class TestShellSection:
-    def _page_box(self, window):
-        w = _bare(window)
-        w.stack = _FakeStack()
-        scroll = w._build_settings_page()
-        return w, scroll.child
-
-    def _label_indices(self, box):
-        return [(idx, child.kwargs.get('label')) for idx, child in
-                enumerate(box.children)
-                if isinstance(child, _FakeWidget)
-                and 'label' in child.kwargs]
-
-    def test_page_opens_with_settings_header(self, window):
-        _w, box = self._page_box(window)
-        top = box.children[0].children[0]
-        assert top.children[0].kwargs.get('label') == 'Settings'
-        assert box.children[0].children[1].kwargs.get('label') == 'XX-WM SHELL'
-
-    def test_gestures_moved_to_bottom_under_shell_heading(self, window):
-        _w, box = self._page_box(window)
-        labels = self._label_indices(box)
-        texts = [text for _idx, text in labels]
-        assert 'Gestures' not in texts
-        assert 'GESTURES' not in texts
-        shell_idx = texts.index('SHELL')
-        about_idx = texts.index('ABOUT')
-        assert shell_idx > about_idx
-        assert box.children[-1].children, 'gestures card is the last block'
-
-    def test_shell_note_names_config_dir(self, window):
-        _w, box = self._page_box(window)
-        labels = self._label_indices(box)
-        texts = [text for _idx, text in labels]
-        note_idx = texts.index('Other shell preferences live in ~/.config/xx-wm/')
-        shell_idx = texts.index('SHELL')
-        assert note_idx == shell_idx + 1
-        note = box.children[[idx for idx, _t in labels][note_idx]]
-        assert 'xx-secondary' in note.classes
+    def test_shell_note_ends_the_system_page(self, window):
+        w, _root, _settings_page = _built_page(window)
+        system = w._settings_stack.props['pages']['cat-system']
+        notes = [n for n in _walk(system) if 'xx-set-footnote' in n.classes]
+        assert '~/.config/xx-wm/' in notes[-1].kwargs.get('label')
 
 
 class TestWifiPasswordMode:

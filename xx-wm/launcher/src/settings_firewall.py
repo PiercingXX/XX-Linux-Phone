@@ -15,6 +15,7 @@ mechanisms for systems that have one.
 from __future__ import annotations
 
 import settings_page
+import settings_ui as ui
 
 
 def _ports(*specs) -> tuple:
@@ -103,20 +104,16 @@ class FirewallSection(settings_page._Section):
         self._state: dict | None = None
 
     def build(self, win) -> list:
-        from settings_page import (_section_placeholder, _section_title,
-                                   _outline_action)
-        from gi.repository import Gtk
-
-        label = _section_title(self.title)
-        self._status = _section_placeholder('Checking firewall…')
-        self._toggle_btn = _outline_action(
-            'Turn on', lambda: self._on_toggle(win))
-        self._preset_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                   spacing=0)
-        self._note = _section_placeholder('')
+        self._head = ui.action_row(
+            'Firewall', 'Turn on', lambda _r: self._on_toggle(win),
+            subtitle='Checking firewall…')
+        self._status = self._head.subtitle_label
+        self._toggle_btn = self._head.action
+        built = ui.group('Incoming connections', note='')
+        self._preset_box = built[1]
+        self._note = built[2]
         self._render_presets(win, {})
-        return [label, self._status, self._toggle_btn, self._preset_box,
-                self._note]
+        return built
 
     def refresh(self, win) -> None:
         try:
@@ -130,21 +127,15 @@ class FirewallSection(settings_page._Section):
     # ------------------------------------------------------------ behavior
 
     def _render_presets(self, win, allowed: dict) -> None:
-        from settings_page import _replace_box_children
-        from xx_ui import widgets
-
-        rows = []
-        names = list(PRESETS)
-        for index, name in enumerate(names):
-            preset = PRESETS[name]
-            switch = widgets.make_switch(
+        rows = [self._head]
+        for name, preset in PRESETS.items():
+            row = ui.switch_row(
+                preset['title'], preset['detail'],
                 bool(allowed.get(name, False)),
                 lambda active, n=name: self._on_preset(win, n, active))
-            self._switches[name] = switch
-            rows.append(widgets.setting_row(
-                preset['title'], preset['detail'], switch,
-                last=index == len(names) - 1))
-        _replace_box_children(self._preset_box, rows)
+            self._switches[name] = row.switch
+            rows.append(row)
+        ui.fill(self._preset_box, rows)
 
     def _show_state(self, win, state) -> None:
         self._state = state if isinstance(state, dict) else None
@@ -161,17 +152,11 @@ class FirewallSection(settings_page._Section):
                 pass
         if self._toggle_btn is not None:
             try:
-                child = self._toggle_btn.get_child()
-                if child is not None:
-                    child.set_label(
-                        'Turn off' if self._is_on() else 'Turn on')
+                self._toggle_btn.set_label(
+                    'TURN OFF' if self._is_on() else 'TURN ON')
             except Exception:
                 pass
-        if self._note is not None:
-            try:
-                self._note.set_text(self._note_text())
-            except Exception:
-                pass
+        ui.say(self._note, self._note_text())
 
     def _is_on(self) -> bool:
         return bool(self._state and self._state.get('enabled'))
@@ -179,17 +164,15 @@ class FirewallSection(settings_page._Section):
     def _status_text(self) -> str:
         state = self._state
         if not isinstance(state, dict):
-            return 'Firewall status unavailable.'
+            return 'Status unavailable'
         backend = state.get('backend', 'none')
         if backend == 'none':
-            return ('Off — this system has no inbound firewall, '
-                    'so all incoming connections are allowed.')
+            return 'Off · no inbound firewall, all incoming allowed'
         if backend == 'ufw':
-            return ('On (ufw).'
-                    if state.get('enabled') else 'Off (ufw disabled).')
+            return 'On · ufw' if state.get('enabled') else 'Off · ufw disabled'
         if state.get('enabled'):
-            return 'On (nftables presets installed).'
-        return 'Off (no nftables presets installed).'
+            return 'On · nftables presets installed'
+        return 'Off · no nftables presets installed'
 
     def _note_text(self) -> str:
         state = self._state

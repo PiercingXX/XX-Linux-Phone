@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 
 import settings_page
+import settings_ui as ui
 
 _MAX_PIN = 64
 
@@ -96,60 +97,61 @@ class LockSection(settings_page._Section):
     """Change PIN plus change device password."""
 
     key = 'lock'
-    title = 'Lock'
+    title = 'Screen lock'
 
     def __init__(self) -> None:
         self._status = None
-        self._current_entry = None
-        self._new_entry = None
-        self._confirm_entry = None
+        self._pin_row = None
+        self._pin_entries: dict = {}
 
     def build(self, win) -> list:
-        from xx_ui import widgets
-        from settings_page import (_section_placeholder, _section_title,
-                                   _settings_entry, _settings_row)
-        self._status = _section_placeholder(
-            'Change the lock-screen PIN or the device password.')
-        self._current_entry = _settings_entry(win, 'Current PIN',
-                                              password=True)
-        self._new_entry = _settings_entry(win, 'New PIN', password=True)
-        self._confirm_entry = _settings_entry(win, 'New PIN again',
-                                              password=True)
-        return [_section_title(self.title),
-                _settings_row('Current PIN', self._current_entry),
-                _settings_row('New PIN', self._new_entry),
-                _settings_row('Confirm new PIN', self._confirm_entry),
-                widgets.primary_button(
-                    'Change PIN', lambda: self._on_change_pin(win)),
-                widgets.outline_button(
-                    'Change device password…',
-                    lambda: self._on_change_password(win)),
-                self._status]
+        self._pin_row = ui.nav_row('Change PIN', '',
+                                   lambda r: self._open_pin(win, r))
+        built = ui.group(self.title, [
+            self._pin_row,
+            ui.nav_row('Change device password…', 'Opens passwd in a terminal',
+                       lambda _r: self._on_change_password(win))], note='')
+        self._status = built[2]
+        self.refresh(win)
+        return built
 
     def refresh(self, win) -> None:
-        return None
-
-    def _on_change_pin(self, win) -> None:
         try:
-            current = self._current_entry.get_text()
-            new = self._new_entry.get_text()
-            confirm = self._confirm_entry.get_text()
+            has_pin = bool(win.config.pin_hash)
         except Exception:
-            self._say('Could not read the PIN fields.')
-            return
-        ok, message = change_pin(win.config, current, new, confirm)
-        for entry in (self._current_entry, self._new_entry,
-                      self._confirm_entry):
+            has_pin = False
+        ui.set_subtitle(self._pin_row, 'PIN is set' if has_pin
+                        else 'No PIN · swipe up unlocks')
+
+    def _open_pin(self, win, anchor):
+        box, self._pin_entries = ui.form_sheet(
+            win, anchor, 'Change PIN',
+            [('current', 'Current PIN', '', 'pin'),
+             ('new', 'New PIN', '', 'pin'),
+             ('confirm', 'New PIN again', '', 'pin')],
+            'Change PIN', lambda values: self._on_change_pin(win, values))
+        return box, self._pin_entries
+
+    def _on_change_pin(self, win, values: dict) -> str | None:
+        """Sheet commit: an error string keeps the sheet open."""
+        ok, message = change_pin(win.config, values.get('current', ''),
+                                 values.get('new', ''),
+                                 values.get('confirm', ''))
+        # Typed PINs never linger: every attempt clears the fields.
+        for entry in (getattr(self, '_pin_entries', None) or {}).values():
             try:
                 entry.set_text('')
             except Exception:
                 pass
+        if not ok:
+            return message
         self._say(message)
-        if ok:
-            try:
-                win._show_status('PIN changed.')
-            except Exception:
-                pass
+        self.refresh(win)
+        try:
+            win._show_status('PIN changed.')
+        except Exception:
+            pass
+        return None
 
     def _on_change_password(self, win) -> None:
         ok, detail = change_device_password()
@@ -161,8 +163,4 @@ class LockSection(settings_page._Section):
                 pass
 
     def _say(self, text: str) -> None:
-        try:
-            if self._status is not None:
-                self._status.set_text(text)
-        except Exception:
-            pass
+        ui.say(self._status, text)

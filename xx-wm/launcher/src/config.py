@@ -929,6 +929,19 @@ class ShellConfig:
             widgets[name] = entry
         self.save()
 
+    def set_widget_order(self, keys: list[str]) -> bool:
+        """Apply a whole widget order (the reorder sheet). Anything but a
+        permutation of the known widget keys leaves the order alone."""
+        if sorted(keys) != sorted(DEFAULT_CONFIG['widgets']):
+            return False
+        widgets = self._mutable_widgets()
+        for index, name in enumerate(keys):
+            entry = dict(widgets.get(name) or {})
+            entry['order'] = index
+            widgets[name] = entry
+        self.save()
+        return True
+
     def set_widget_tap(self, key: str, tap) -> None:
         if key not in DEFAULT_CONFIG['widgets']:
             return

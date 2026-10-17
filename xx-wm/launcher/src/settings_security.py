@@ -14,6 +14,7 @@ import shutil
 import subprocess
 
 import settings_page
+import settings_ui as ui
 
 MAX_FILESIZE_MB = 1024
 MAX_SCANSIZE_MB = 2048
@@ -247,41 +248,39 @@ class SecuritySection(settings_page._Section):
     def __init__(self) -> None:
         self._status = None
         self._results_box = None
+        self._scan_rows: list = []
         self._report = None
-        self._file_entry = None
+        self._check_box = None
+        self._check_row = None
+        self._accept_row = None
         self._scan_btn = None
-        self._check_btn = None
-        self._accept_btn = None
-        self._accept_box = None
         self._detections: list = []
         self._scanning = False
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-        from settings_page import (_section_placeholder, _section_title,
-                                   _settings_entry)
         if not clamscan_available():
             return []
-        self._status = _section_placeholder(
-            'Opt-in scan. Nothing runs until you start it.')
-        self._results_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                    spacing=8)
-        self._report = _section_placeholder('')
-        self._file_entry = _settings_entry(win, 'File to scan…')
-        self._scan_btn = widgets.outline_button(
-            'Scan a file', lambda: self._on_scan_file(win))
-        scan_downloads = widgets.outline_button(
-            'Scan Downloads', lambda: self._on_scan_downloads(win))
-        self._check_btn = widgets.outline_button(
-            'Security check', lambda: self._on_check(win))
-        self._accept_btn = widgets.text_button(
-            'Accept as new baseline', lambda: self._on_accept(win))
-        self._accept_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                   spacing=8)
-        return [_section_title(self.title), self._status, scan_downloads,
-                self._file_entry, self._scan_btn, self._results_box,
-                self._check_btn, self._report, self._accept_box]
+        self._scan_btn = ui.nav_row(
+            'Scan a file…', 'Pick a file or folder by path',
+            lambda r: self._open_scan_file(win, r))
+        self._scan_rows = [
+            ui.nav_row('Scan Downloads', 'ClamAV, on demand',
+                       lambda _r: self._on_scan_downloads(win)),
+            self._scan_btn]
+        scan = ui.group('Malware scan', list(self._scan_rows),
+                        note='Opt-in. Nothing runs until you start it.')
+        self._results_box = scan[1]
+        self._status = scan[2]
+        self._check_row = ui.nav_row(
+            'Run security check', 'Listening ports, SUID files, SSH keys, '
+            'packages', lambda _r: self._on_check(win))
+        self._accept_row = ui.nav_row(
+            'Accept as new baseline', 'Stop flagging these changes',
+            lambda _r: self._on_accept(win))
+        check = ui.group('Security check', [self._check_row], note='')
+        self._check_box = check[1]
+        self._report = check[2]
+        return scan + check
 
     def refresh(self, win) -> None:
         return None
@@ -296,21 +295,23 @@ class SecuritySection(settings_page._Section):
             return
         self._start_scan(win, target, recursive=True)
 
-    def _on_scan_file(self, win) -> None:
-        try:
-            target = self._file_entry.get_text().strip()
-        except Exception:
-            target = ''
+    def _open_scan_file(self, win, anchor):
+        return ui.form_sheet(
+            win, anchor, 'Scan a file',
+            [('path', 'File or folder', '~/Downloads/', 'text')],
+            'Scan', lambda values: self._on_scan_file(win, values))
+
+    def _on_scan_file(self, win, values: dict) -> str | None:
+        """Sheet commit: an error string keeps the sheet open."""
+        target = str(values.get('path', '')).strip()
         if not target:
-            self._say('Enter a file to scan.')
-            return
+            return 'Enter a file to scan.'
         import os as _os
         target = _os.path.expanduser(target)
         if not _os.path.exists(target):
-            self._say('File does not exist.')
-            return
-        self._start_scan(win, target,
-                         recursive=_os.path.isdir(target))
+            return 'File does not exist.'
+        self._start_scan(win, target, recursive=_os.path.isdir(target))
+        return None
 
     def _start_scan(self, win, target: str, recursive: bool) -> None:
         from settings_page import _run_bg
@@ -349,19 +350,13 @@ class SecuritySection(settings_page._Section):
         self._render_results(win)
 
     def _render_results(self, win) -> None:
-        from settings_page import _replace_box_children
-        from xx_ui import widgets
         if self._results_box is None:
             return
-        rows = []
-        for path, sig in self._detections[:20]:
-            rows.append(widgets.setting_row(
-                sig, path,
-                widgets.danger_button(
-                    'Quarantine',
-                    lambda p=path, s=sig: self._on_quarantine(win, p, s)),
-                last=False))
-        _replace_box_children(self._results_box, rows)
+        rows = [ui.action_row(
+            sig, 'Quarantine',
+            lambda _r, p=path, s=sig: self._on_quarantine(win, p, s),
+            subtitle=path) for path, sig in self._detections[:20]]
+        ui.fill(self._results_box, list(self._scan_rows) + rows)
 
     def _on_quarantine(self, win, path: str, sig: str) -> None:
         win.item_actions._show_action_menu(
@@ -394,15 +389,14 @@ class SecuritySection(settings_page._Section):
         _run_bg(_work, _done)
 
     def _show_accept(self, visible: bool) -> None:
-        from settings_page import _replace_box_children
-        if self._accept_box is None or self._accept_btn is None:
+        if self._check_box is None:
             return
-        _replace_box_children(
-            self._accept_box, [self._accept_btn] if visible else [])
+        ui.fill(self._check_box, [self._check_row] + (
+            [self._accept_row] if visible else []))
 
     def _on_check(self, win) -> None:
         from settings_page import _run_bg
-        self._say('Checking…')
+        ui.set_subtitle(self._check_row, 'Checking…')
         self._show_accept(False)
 
         def _work():
@@ -415,8 +409,8 @@ class SecuritySection(settings_page._Section):
 
     def _on_report(self, win, res) -> None:
         if not isinstance(res, dict) or res.get('error'):
-            self._say(res.get('error') if isinstance(res, dict)
-                      else 'Check failed.')
+            ui.set_subtitle(self._check_row, res.get('error')
+                            if isinstance(res, dict) else 'Check failed.')
             return
         parts = []
         for label, key in (('Listening sockets', 'listening'),
@@ -435,12 +429,12 @@ class SecuritySection(settings_page._Section):
             short = packages if len(packages) < 400 else (
                 packages[:400] + '…')
             parts.append('Packages: %s' % short)
-        if self._report is not None:
-            self._report.set_text(' '.join(parts))
+        ui.say(self._report, ' '.join(parts))
         changed_any = any(res.get(key, (False, []))[0] for key in (
             'listening', 'suid', 'keys'))
         self._show_accept(bool(changed_any))
-        self._say('' if not changed_any else 'Review changes above.')
+        ui.set_subtitle(self._check_row, 'Changes found · review below'
+                        if changed_any else 'No changes since the baseline')
 
     def _on_accept(self, win) -> None:
         for name in ('listening', 'suid', 'authorized_keys'):
@@ -449,11 +443,7 @@ class SecuritySection(settings_page._Section):
             except OSError:
                 pass
         self._show_accept(False)
-        self._say('Baseline saved.')
+        ui.set_subtitle(self._check_row, 'Baseline saved')
 
     def _say(self, text: str) -> None:
-        try:
-            if self._status is not None:
-                self._status.set_text(text)
-        except Exception:
-            pass
+        ui.say(self._status, text)

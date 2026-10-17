@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from gesture_config import IPC_VERBS, VALID_ACTIONS
 
+import settings_ui as ui
+
 
 # Settings sections a quick-tile long-press can deep-link to (quick_actions
 # tile_settings_section emits these); anything else opens the top of the page.
@@ -11,6 +13,141 @@ _SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'apps', 'appearance',
                           'charging', 'batteryuse', 'screentime', 'medical',
                           'recording', 'captions', 'nearby', 'findmy', 'about',
                           'storage', 'security', 'services', 'firewall')
+
+# The top-level menu (Android Settings style): one row per category, each
+# opening a subpage that holds only its sections, in this order. Grouped
+# the way a phone user looks for things: radios first, then how the phone
+# looks and sounds, then power and apps, then the protective and
+# maintenance pages, System last.
+SETTINGS_CATEGORIES: tuple = (
+    ('network', 'Network & internet', ('wifi', 'mobile', 'firewall')),
+    ('devices', 'Connected devices', ('bluetooth', 'nearby')),
+    ('display', 'Display & appearance', ('appearance', 'display')),
+    ('home', 'Home & launcher', ('launcher', 'gestures')),
+    ('sound', 'Sound', ('sound', 'captions', 'recording')),
+    ('battery', 'Battery', ('battery', 'standby', 'charging',
+                            'batteryuse')),
+    ('apps', 'Apps', ('screentime', 'apps')),
+    ('privacy', 'Privacy & security', ('lock', 'smart_lock', 'permissions',
+                                       'security', 'findmy', 'medical')),
+    ('storage', 'Storage & backup', ('storage', 'backup')),
+    ('system', 'System', ('system', 'keyboard', 'services', 'developer',
+                          'about', 'shell')),
+)
+
+# Menu cards: categories that belong together share one rounded card.
+_MENU_GROUPS = (('network', 'devices'), ('display', 'home', 'sound'),
+                ('battery', 'apps', 'storage'), ('privacy', 'system'))
+
+
+def category_for(key: str | None) -> str | None:
+    """The category holding section ``key`` (or ``key`` itself when it
+    names a category); None for anything else."""
+    for cat, _title, sections in SETTINGS_CATEGORIES:
+        if key == cat or key in sections:
+            return cat
+    return None
+
+
+def _percent(status: str | None) -> str:
+    """'87%' from a battery_status line ('87% — discharging, …')."""
+    head = str(status or '').split(' ', 1)[0]
+    return head if head.endswith('%') else ''
+
+
+def quick_summaries(win) -> dict:
+    """Menu row summaries that only read config (main loop, instant)."""
+    out: dict = {}
+    config = getattr(win, 'config', None)
+    try:
+        from config import THEME_PRESETS
+        import settings_launcher
+        key = str(config.data.get('theme', 'amoled'))
+        theme = 'Custom' if key == 'custom' else THEME_PRESETS[key].name
+        out['display'] = '%s · %s' % (theme,
+                                       settings_launcher._font_label(win))
+    except Exception:
+        pass
+    try:
+        align = str(config.home_alignment).capitalize()
+        count = sum(1 for _k, conf in config.ordered_widgets()
+                    if conf.get('enabled', True))
+        out['home'] = '%s · %d widget%s' % (align, count,
+                                             '' if count == 1 else 's')
+    except Exception:
+        pass
+    try:
+        count = len(list(win.app_index.entries))
+        out['apps'] = '%d installed' % count
+    except Exception:
+        pass
+    try:
+        pin = 'PIN on' if config.pin_hash else 'No PIN'
+        import settings_smart_lock
+        status, _detail = settings_smart_lock.trust_status(win)
+        lock = 'Smart Lock on' if status != 'Off' else 'Smart Lock off'
+        out['privacy'] = '%s · %s' % (pin, lock)
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version as get_version
+        shell_version = get_version('xx-wm')
+    except Exception:
+        shell_version = '0.1.1'
+    out['system'] = 'XX-WM %s' % shell_version
+    return out
+
+
+def slow_summaries() -> dict:
+    """Menu summaries that touch the system (worker thread only; every
+    probe is read-only and failures read as unavailable)."""
+    import system_settings
+
+    out: dict = {}
+    try:
+        enabled = system_settings.wifi_enabled()
+        if enabled is False:
+            out['network'] = 'Wi-Fi off'
+        elif enabled is None:
+            out['network'] = 'Wi-Fi unavailable'
+        else:
+            used = [net.ssid for net in system_settings.list_wifi() or []
+                    if net.in_use]
+            out['network'] = used[0] if used else 'Not connected'
+    except Exception:
+        out['network'] = 'Wi-Fi unavailable'
+    try:
+        powered = system_settings.bt_powered()
+        if powered is None:
+            out['devices'] = 'Bluetooth unavailable'
+        elif not powered:
+            out['devices'] = 'Bluetooth off'
+        else:
+            linked = [dev for dev in system_settings.list_bt_devices() or []
+                      if dev.connected]
+            out['devices'] = ('Bluetooth on · %d connected' % len(linked)
+                              if linked else 'Bluetooth on')
+    except Exception:
+        out['devices'] = 'Bluetooth unavailable'
+    try:
+        sinks = system_settings.list_audio_sinks()
+        default = [sink.description for sink in sinks or []
+                   if sink.is_default]
+        out['sound'] = default[0] if default else 'No output device'
+    except Exception:
+        out['sound'] = 'Audio unavailable'
+    out['battery'] = _percent(system_settings.battery_status()) \
+        or 'No battery'
+    try:
+        import settings_storage
+        _total, free = settings_storage.fs_usage(
+            settings_storage.home_dir())
+        if free is not None:
+            out['storage'] = '%s free' % settings_storage.format_bytes(free)
+    except Exception:
+        pass
+    return out
+
 
 # Home side-swipe gestures the user can bind to an app in Settings
 _GESTURE_TITLES = {
@@ -46,85 +183,13 @@ _UPDATE_NOTIF_ID = 999901
 _UPDATE_RESULT_ID = 999902
 
 
-def _link_button(label_text: str, css: str):
-    from gi.repository import Gtk
-
-    btn = Gtk.Button(label=label_text)
-    btn.add_css_class('flat')
-    btn.add_css_class(css)
-    return btn
-
-
-def _text_action(label_text: str, callback=None):
-    from xx_ui import widgets
-
-    return widgets.text_button(label_text, callback)
-
-
-def _outline_action(label_text: str, callback=None):
-    from xx_ui import widgets
-
-    return widgets.outline_button(label_text, callback)
-
-
 def _replace_box_children(box, children: list) -> None:
-    child = box.get_first_child()
-    while child is not None:
-        nxt = child.get_next_sibling()
-        box.remove(child)
-        child = nxt
-    for widget in children:
-        box.append(widget)
+    ui.fill(box, children)
 
 
 def _section_placeholder(text: str):
-    from xx_ui import widgets
-
-    return widgets.wrap_label(text)
-
-
-def _shrink_button_label(btn) -> None:
-    """Let a button with dynamic text (SSID, device, sink) shrink below
-    its full label instead of forcing the settings page wider."""
-    from gi.repository import Gtk, Pango
-
-    child = btn.get_child()
-    if isinstance(child, Gtk.Label):
-        child.set_xalign(0)
-        child.set_ellipsize(Pango.EllipsizeMode.END)
-        child.set_max_width_chars(24)
-
-
-def _shrink_settings_entry(entry) -> None:
-    """Let a settings entry shrink below its placeholder width so the
-    page fits a 320 px phone. Entries fill the card width regardless
-    (vertical box), so only the minimum request changes."""
-    entry.set_width_chars(12)
-
-
-def _settings_row(title: str, control):
-    from gi.repository import Gtk
-    from xx_ui import widgets
-
-    # Caption over the control, like a Field: the side-by-side layout
-    # forced the page past 320 px.
-    row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-    row.append(widgets.caption(title))
-    row.append(control)
-    return row
-
-
-def _section_title(text: str):
-    from xx_ui import widgets
-
-    return widgets.section_label(text)
-
-
-def _section_card(spacing: int = 8):
-    from xx_ui import widgets
-
-    card = widgets.card()
-    return card
+    """Muted one-sentence row for an empty or unavailable list."""
+    return ui.note_row(text)
 
 
 def _run_bg(work, on_done) -> None:
@@ -143,12 +208,13 @@ def _run_bg(work, on_done) -> None:
 
 
 class _Section:
-    """One settings page section: layout lives here, behavior on SettingsPage.
+    """One settings section: layout lives here, behavior on SettingsPage.
 
-    Later lanes add sections in new files (settings_<feature>.py) and
-    register them in SETTINGS_SECTIONS below. build() returns the widgets
-    to append in order (title first, then card); refresh() re-queries live
-    state for sections that have any.
+    Sections live in settings_<feature>.py modules and register in
+    SETTINGS_SECTIONS below (and in one SETTINGS_CATEGORIES entry).
+    build() returns the widgets to append in order: the caption first
+    (deep links scroll to it), then cards and footnotes built with
+    settings_ui. refresh() re-queries live state off the main loop.
     """
 
     key = ''
@@ -163,96 +229,100 @@ class _Section:
 
 class SystemSection(_Section):
     key = 'system'
-    title = 'System'
+    title = 'Software update'
 
     def __init__(self) -> None:
         self._status = None
+        self._row = None
         self._reboot = None
         self._log = None
-        self._body = None
+        self._card = None
+        self._rows: list = []
+        self._log_text = ''
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        body.append(widgets.setting_row(
-            'Software updates', 'Check for updates',
-            widgets.caps_button(
-                'Check', lambda: win._on_check_updates_clicked(None)),
-            last=True))
-        self._status = _section_placeholder('Not checked yet.')
-        body.append(self._status)
-        self._reboot = _section_placeholder('')
-        body.append(self._reboot)
-        self._log = _section_placeholder('')
-        body.append(self._log)
-        body.append(widgets.primary_button(
-            'Update now', lambda btn: win._on_update_now(btn)))
-        body.append(widgets.outline_button(
-            'Open in terminal', lambda btn: win._on_update_clicked(btn)))
+        self._row = ui.action_row(
+            'Software updates', 'Check',
+            lambda _r: win._on_check_updates_clicked(None),
+            subtitle='Not checked yet.')
+        self._status = self._row.subtitle_label
+        self._reboot = ui.row('Restart to finish', '')
+        self._log = ui.nav_row('Last update log', '',
+                               lambda r: self._show_log(win, r))
+        self._rows = [
+            ui.nav_row('Update now', 'System and Flatpak updates',
+                       lambda r: win._on_update_now(r)),
+            ui.nav_row('Open in terminal', 'Run the update script',
+                       lambda r: win._on_update_clicked(r)),
+        ]
         try:
             import settings_updates
 
             if settings_updates.dots_bootstrap_available():
-                body.append(widgets.outline_button(
-                    'Update PiercingXX scripts',
-                    lambda btn: win._on_dots_update(btn)))
+                self._rows.append(ui.nav_row(
+                    'Update PiercingXX scripts', 'Opens a terminal',
+                    lambda r: win._on_dots_update(r)))
         except Exception:
             pass
-        self._body = body
+        built = ui.group(self.title)
+        self._card = built[1]
         self.refresh(win)
-        return [_section_title(self.title), body]
+        return built
 
     def refresh(self, win) -> None:
+        reason, found = '', None
         try:
             import settings_updates
 
-            reason = settings_updates.reboot_required()
-            if self._reboot is not None:
-                self._reboot.set_text(
-                    'Restart to finish update: %s' % reason if reason else '')
-                self._reboot.set_visible(bool(reason))
-            if self._log is not None:
-                found = settings_updates.latest_update_log()
-                if found is None:
-                    self._log.set_text('')
-                    self._log.set_visible(False)
-                else:
-                    name, tail = found
-                    self._log.set_text('Last update log (%s):\n%s' % (name, tail))
-                    self._log.set_visible(True)
+            reason = settings_updates.reboot_required() or ''
+            found = settings_updates.latest_update_log()
         except Exception:
             pass
+        rows = [self._row]
+        if reason:
+            ui.set_subtitle(self._reboot, reason)
+            rows.append(self._reboot)
+        rows += self._rows
+        if found is not None:
+            name, tail = found
+            self._log_text = tail
+            ui.set_subtitle(self._log, name)
+            rows.append(self._log)
+        if self._card is not None:
+            ui.fill(self._card, rows)
+
+    def _show_log(self, win, anchor) -> None:
+        win.item_actions._show_action_menu(
+            anchor, 'Last update log', [('Close', lambda: None)],
+            subtitle=self._log_text or 'Empty.')
 
 
 class WifiSection(_Section):
     key = 'wifi'
-    title = 'WiFi'
+    title = 'Wi-Fi'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        win._wifi_switch = widgets.make_switch(False)
+        row = ui.switch_row('Wi-Fi', 'Checking…')
+        win._wifi_switch = row.switch
         win._wifi_switch.connect(
             'notify::active',
             lambda s, p: win._on_wifi_switch_flipped(s, p))
         win._wifi_switch_updating = False
-        body.append(widgets.setting_row('WiFi', '', win._wifi_switch))
-        win._wifi_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        body.append(win._wifi_list_box)
-        body.append(_outline_action(
-            'Scan for networks', lambda: win._refresh_wifi()))
-        body.append(_outline_action(
-            'Add hidden network…', lambda: win._on_add_hidden()))
-        win._wifi_saved_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        body.append(_section_title('Saved networks'))
-        body.append(win._wifi_saved_box)
-        win._wifi_service_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        body.append(win._wifi_service_box)
-        return [_section_title(self.title), body]
+        win._wifi_row = row
+        top = ui.group(self.title, [row])
+        win._wifi_service_box = top[1]
+        win._wifi_scan_rows = [
+            ui.nav_row('Scan for networks', '',
+                       lambda _r: win._refresh_wifi()),
+            ui.nav_row('Add hidden network…', '',
+                       lambda _r: win._on_add_hidden()),
+        ]
+        networks = ui.group('Networks', list(win._wifi_scan_rows))
+        win._wifi_list_box = networks[1]
+        saved = ui.group('Saved networks')
+        win._wifi_saved_box = saved[1]
+        ui.fill(win._wifi_saved_box, [], hide_empty=True)
+        return top + networks + saved
 
     def refresh(self, win) -> None:
         win._refresh_wifi()
@@ -263,30 +333,24 @@ class BluetoothSection(_Section):
     title = 'Bluetooth'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        win._bt_switch = widgets.make_switch(False)
+        row = ui.switch_row('Bluetooth', 'Checking…')
+        win._bt_switch = row.switch
         win._bt_switch.connect(
             'notify::active',
             lambda s, p: win._on_bt_switch_flipped(s, p))
         win._bt_switch_updating = False
-        body.append(widgets.setting_row('Bluetooth', '', win._bt_switch))
-        win._bt_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        body.append(win._bt_list_box)
-        body.append(_outline_action(
-            'Scan for devices', lambda: win._refresh_bluetooth(scan=True)))
-        win._bt_unblock_btn = _outline_action(
-            'Unblock Bluetooth', lambda: win._on_bt_unblock())
-        try:
-            win._bt_unblock_btn.set_visible(False)
-        except Exception:
-            pass
-        body.append(win._bt_unblock_btn)
-        win._bt_service_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        body.append(win._bt_service_box)
-        return [_section_title(self.title), body]
+        win._bt_row = row
+        win._bt_unblock_btn = ui.nav_row(
+            'Unblock Bluetooth', 'Bluetooth is blocked by rfkill',
+            lambda _r: win._on_bt_unblock())
+        top = ui.group(self.title, [row])
+        win._bt_service_box = top[1]
+        win._bt_scan_row = ui.nav_row(
+            'Scan for devices', '',
+            lambda _r: win._refresh_bluetooth(scan=True))
+        devices = ui.group('Devices', [win._bt_scan_row])
+        win._bt_list_box = devices[1]
+        return top + devices
 
     def refresh(self, win) -> None:
         win._refresh_bluetooth()
@@ -297,12 +361,11 @@ class SoundSection(_Section):
     title = 'Sound'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-
-        win._sink_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        win._source_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        return [_section_title('Sound output'), win._sink_list_box,
-                _section_title('Microphone'), win._source_list_box]
+        output = ui.group('Output', [ui.note_row('Checking…')])
+        mic = ui.group('Microphone', [ui.note_row('Checking…')])
+        win._sink_list_box = output[1]
+        win._source_list_box = mic[1]
+        return output + mic
 
 
 class BatterySection(_Section):
@@ -311,14 +374,14 @@ class BatterySection(_Section):
 
     def __init__(self) -> None:
         self._health_box = None
+        self._row = None
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        win._battery_label = _section_placeholder('Checking…')
-        self._health_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                   spacing=0)
-        return [_section_title(self.title), win._battery_label,
-                self._health_box]
+        self._row = ui.row('Battery', 'Checking…')
+        win._battery_label = self._row.subtitle_label
+        built = ui.group(self.title, [self._row])
+        self._health_box = built[1]
+        return built
 
     def refresh(self, win) -> None:
         import system_settings
@@ -332,26 +395,22 @@ class BatterySection(_Section):
         _run_bg(_work, lambda res: self._render(win, res))
 
     def _render(self, win, res) -> None:
-        from xx_ui import widgets
         try:
             status, health = res
         except (TypeError, ValueError):
             return
-        try:
-            win._battery_label.set_text(status or 'No battery detected.')
-        except Exception:
-            pass
+        ui.set_subtitle(self._row, status or 'No battery detected.')
         if self._health_box is None:
             return
-        rows = []
-        labels = (('Health', health.get('health', 'Unknown')),
-                  ('Charge cycles', health.get('cycles', 'Unknown')),
-                  ('Temperature', health.get('temperature', 'Unknown')),
-                  ('Voltage', health.get('voltage', 'Unknown')))
-        for index, (title, value) in enumerate(labels):
-            rows.append(widgets.setting_row(
-                title, value, last=index == len(labels) - 1))
-        _replace_box_children(self._health_box, rows)
+        rows = [self._row]
+        for title, key in (('Health', 'health'), ('Charge cycles', 'cycles'),
+                           ('Temperature', 'temperature'),
+                           ('Voltage', 'voltage')):
+            rows.append(ui.row(title, str(health.get(key, 'Unknown'))))
+        ui.fill(self._health_box, rows)
+
+
+_MIRROR_LABELS = ((False, 'Add / update'), (True, 'Mirror · deletes extras'))
 
 
 class BackupSection(_Section):
@@ -364,71 +423,59 @@ class BackupSection(_Section):
         self._mirror = False
         self._source_btn = None
         self._dest_btn = None
-        self._mode_box = None
+        self._mode_row = None
         self._status = None
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
         import filebackup
 
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        body.append(widgets.outline_button(
-            'Export backup', lambda: win._on_export_backup()))
-        win._restore_btn = widgets.outline_button(
-            'Restore from backup',
-            lambda: win._on_restore_backup(win._restore_btn))
-        body.append(win._restore_btn)
-        body.append(widgets.section_label('File backup'))
+        win._restore_btn = ui.nav_row(
+            'Restore settings', 'From an xx-wm backup file',
+            lambda r: win._on_restore_backup(r))
+        settings_group = ui.group(self.title, [
+            ui.nav_row('Export settings', 'Home, theme, gestures',
+                       lambda _r: win._on_export_backup()),
+            win._restore_btn])
         if not self._source:
             sources = filebackup.backup_sources()
             self._source = sources[0] if sources else ''
-        self._source_btn = widgets.outline_button(
-            self._source or 'Choose source…',
-            lambda: self._pick_source(win))
-        _shrink_button_label(self._source_btn)
-        body.append(self._source_btn)
-        self._dest_btn = widgets.outline_button(
-            self._dest or 'Choose destination…',
-            lambda: self._pick_dest(win))
-        _shrink_button_label(self._dest_btn)
-        body.append(self._dest_btn)
-        self._mode_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                 spacing=8)
-        body.append(self._mode_box)
+        self._source_btn = ui.nav_row(
+            'Folder', self._source or 'Choose a folder',
+            lambda _r: self._pick_source(win))
+        self._dest_btn = ui.nav_row(
+            'Destination', self._dest or 'Choose removable storage',
+            lambda _r: self._pick_dest(win))
+        self._mode_row = ui.nav_row(
+            'Mode', '', lambda r: self._pick_mode(win, r))
         self._render_mode(win)
-        body.append(widgets.outline_button(
-            'Preview', lambda: self._on_preview(win)))
-        body.append(widgets.primary_button(
-            'Back up now', lambda: self._on_transfer(win, 'Backup')))
-        body.append(widgets.outline_button(
-            'Restore now', lambda: self._on_transfer(win, 'Restore')))
-        self._status = _section_placeholder(
-            'Back up Photos, Documents, Videos and app data '
-            'to removable storage.')
-        body.append(self._status)
-        return [_section_title(self.title), body]
+        files = ui.group('File backup', [
+            self._source_btn, self._dest_btn, self._mode_row,
+            ui.nav_row('Preview', 'Count what would change',
+                       lambda _r: self._on_preview(win)),
+            ui.nav_row('Back up now', '',
+                       lambda _r: self._on_transfer(win, 'Backup')),
+            ui.nav_row('Restore now', 'Copy back from there',
+                       lambda _r: self._on_transfer(win, 'Restore'))],
+            note='Photos, Documents, Videos and app data to removable '
+                 'storage.')
+        self._status = files[2]
+        return settings_group + files
 
     def _render_mode(self, win) -> None:
-        from xx_ui import widgets
-        if self._mode_box is None:
-            return
-        _replace_box_children(self._mode_box, [widgets.segmented([
-            ('Add / update', not self._mirror,
-             lambda: self._set_mode(win, False)),
-            ('Mirror', self._mirror,
-             lambda: self._set_mode(win, True))])])
+        ui.set_subtitle(self._mode_row, dict(_MIRROR_LABELS)[self._mirror])
+
+    def _pick_mode(self, win, anchor) -> None:
+        win.item_actions._show_action_menu(
+            anchor, 'Mode',
+            [(label, lambda m=mirror: self._set_mode(win, m))
+             for mirror, label in _MIRROR_LABELS])
 
     def _set_mode(self, win, mirror: bool) -> None:
         self._mirror = bool(mirror)
         self._render_mode(win)
 
     def _say(self, text: str) -> None:
-        try:
-            if self._status is not None:
-                self._status.set_text(text)
-        except Exception:
-            pass
+        ui.say(self._status, text)
 
     def _pick_source(self, win) -> None:
         import filebackup
@@ -444,10 +491,7 @@ class BackupSection(_Section):
 
     def _set_source(self, win, path: str) -> None:
         self._source = path
-        try:
-            self._source_btn.set_label(path)
-        except Exception:
-            pass
+        ui.set_subtitle(self._source_btn, path)
 
     def _pick_dest(self, win) -> None:
         import filebackup
@@ -463,10 +507,8 @@ class BackupSection(_Section):
 
     def _set_dest(self, win, path: str) -> None:
         self._dest = path
-        try:
-            self._dest_btn.set_label(path)
-        except Exception:
-            pass
+        ui.set_subtitle(self._dest_btn, path)
+
 
     def _endpoints(self, label: str):
         import filebackup
@@ -583,105 +625,95 @@ class BackupSection(_Section):
             self._say(error or 'Transfer failed.')
 
 
-def _settings_entry(win, placeholder: str, text: str = '',
-                    password: bool = False):
-    from xx_ui import widgets
 
-    entry = widgets.deferred_entry(placeholder)
+def apn_summary(config) -> str:
+    """Row value for the APN: the access point name, never credentials."""
     try:
-        entry.set_text(text)
+        apn = str(config.data.get('apn', '') or '').strip()
     except Exception:
-        pass
-    if password:
-        entry.set_visibility(False)
-    _shrink_settings_entry(entry)
-    getattr(win, '_attach_osk', lambda _w: None)(entry)
-    return entry
+        apn = ''
+    return apn or 'Not set'
 
 
 class MobileSection(_Section):
     key = 'mobile'
     title = 'Mobile data'
 
+    def __init__(self) -> None:
+        self._row = None
+
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
+        self._row = ui.nav_row('Access point (APN)', apn_summary(win.config),
+                               lambda r: self._open_sheet(win, r))
+        win._apn_row = self._row
+        return ui.group(self.title, [self._row])
 
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        win.apn_entry = _settings_entry(
-            win, 'APN (e.g. internet)', win.config.data.get('apn', ''))
-        win.apn_user_entry = _settings_entry(
-            win, 'Username (leave blank if none)',
-            win.config.data.get('apn_user', ''))
-        win.apn_pass_entry = _settings_entry(
-            win, 'Password (leave blank if none)',
-            win.config.data.get('apn_pass', ''), password=True)
+    def _open_sheet(self, win, anchor):
+        data = win.config.data
+        return ui.form_sheet(
+            win, anchor, 'Access point',
+            [('apn', 'APN', data.get('apn', ''), 'text'),
+             ('user', 'Username (blank if none)', data.get('apn_user', ''),
+              'text'),
+             ('password', 'Password (blank if none)',
+              data.get('apn_pass', ''), 'password')],
+            'Save', lambda values: win._on_apn_save(values))
 
-        body.append(_settings_row('APN', win.apn_entry))
-        body.append(_settings_row('Username', win.apn_user_entry))
-        body.append(_settings_row('Password', win.apn_pass_entry))
-        body.append(widgets.primary_button(
-            'Save APN', lambda: win._on_apn_save(None)))
-        return [_section_title(self.title), body]
+    def refresh(self, win) -> None:
+        ui.set_subtitle(self._row, apn_summary(win.config))
 
 
 class AppearanceSection(_Section):
     key = 'appearance'
-    title = 'Appearance'
+    title = 'Theme'
 
     def build(self, win) -> list:
         # The swatch picker lives on the window (it owns the live preview
-        # provider); the section only gives it the caps label to sit under.
-        return [_section_title(self.title), win._build_appearance_card()]
+        # provider); mode, font and text size come from the launcher
+        # section's appearance rows.
+        import settings_launcher
+
+        theme = ui.group(self.title,
+                         [ui.wide_row(win._build_appearance_card())])
+        return theme + settings_launcher.build_appearance_group(win)
+
+
+# Interfaces the About row skips (the tap shows them all).
+_VIRTUAL_IFACES = ('lo', 'veth', 'br-', 'docker', 'virbr', 'tailscale',
+                   'tun', 'wg')
 
 
 class AboutSection(_Section):
     key = 'about'
-    title = 'About'
+    title = 'About phone'
 
     def __init__(self) -> None:
         self._detail_box = None
-        self._storage_card = None
+        self._head_rows: list = []
+        self._storage_row = None
         self._modem_props = None
         self._imei_revealed = False
         self._last_res = None
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
         from importlib.metadata import version as get_version
 
         try:
             shell_version = get_version('xx-wm')
         except Exception:
             shell_version = '0.1.1'
-
-        about_card = _section_card()
-        about_card.append(widgets.setting_row('Version', shell_version))
-        about_card.append(widgets.setting_row(
-            'Device', win._get_device_name()))
-        self._detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                   spacing=0)
-        _replace_box_children(self._detail_box, [
-            _section_placeholder('Loading device info…')])
-        self._storage_card = _section_card()
-        self._render_storage(win, 'Checking…')
-        logs_row = widgets.list_row(
-            'Logs', 'Shell and system logs', trailing=widgets.chevron(),
-            last=True)
-        logs_row.connect(
-            'clicked', lambda _b: settings_launcher.open_logs(win))
-        logs_card = _section_card()
-        logs_card.append(logs_row)
-        return [_section_title(self.title), about_card, self._detail_box,
-                self._storage_card, logs_card]
-
-    def _render_storage(self, win, summary: str) -> None:
-        from xx_ui import widgets
-        row = widgets.list_row(
-            'Storage', summary, trailing=widgets.chevron(), last=True)
-        row.connect('clicked', lambda _b: win.open_settings('storage'))
-        _replace_box_children(self._storage_card, [row])
+        self._head_rows = [ui.row('Version', 'XX-WM %s' % shell_version),
+                           ui.row('Device', win._get_device_name())]
+        about = ui.group(self.title, self._head_rows +
+                         [ui.note_row('Loading device info…')])
+        self._detail_box = about[1]
+        self._storage_row = ui.nav_row(
+            'Storage', 'Checking…', lambda _r: win.open_settings('storage'))
+        logs_row = ui.nav_row(
+            'Logs', 'Shell and system logs',
+            lambda _r: settings_launcher.open_logs(win))
+        more = ui.group('More', [self._storage_row, logs_row])
+        return about + more
 
     def refresh(self, win) -> None:
         def _work():
@@ -704,7 +736,6 @@ class AboutSection(_Section):
         _run_bg(_work, lambda res: self._render(win, res))
 
     def _render(self, win, res) -> None:
-        from xx_ui import widgets
         if not isinstance(res, dict) or self._detail_box is None:
             return
         self._modem_props = res.get('modem')
@@ -717,54 +748,48 @@ class AboutSection(_Section):
                           if detail else macs[iface])
             net_lines.append('%s: %s' % (iface, detail or '—'))
         thermal = res.get('thermal') or {}
-        rows = [
-            ('OS', res.get('os', '?')),
-            ('Kernel', res.get('kernel', '?')),
-            ('Uptime', res.get('uptime', '?')),
-            ('CPU', res.get('cpu', '?')),
-            ('Memory', res.get('mem', '?')),
-        ]
-        widgets_list = [widgets.setting_row(title, str(value))
-                        for title, value in rows]
+        rows = list(self._head_rows)
+        for title, key in (('OS', 'os'), ('Kernel', 'kernel'),
+                           ('Uptime', 'uptime'), ('CPU', 'cpu'),
+                           ('Memory', 'mem')):
+            rows.append(ui.row(title, str(res.get(key, '?'))))
         if thermal:
-            widgets_list.append(widgets.setting_row(
+            rows.append(ui.row(
                 'Temperatures',
                 ', '.join('%s %s' % (kind, temp)
                           for kind, temp in sorted(thermal.items()))))
-        widgets_list.append(self._modem_row(win))
-        widgets_list.append(self._imei_row(win))
-        if net_lines:
-            widgets_list.append(widgets.setting_row(
-                'Network', '; '.join(net_lines), last=True))
-        else:
-            widgets_list.append(widgets.setting_row(
-                'Network', 'Unavailable', last=True))
-        _replace_box_children(self._detail_box, widgets_list)
+        rows.append(self._modem_row(win))
+        rows.append(self._imei_row(win))
+        self._net_text = '\n'.join(net_lines)
+        shown = ['%s  %s' % (iface, ips[iface][0])
+                 for iface in sorted(ips)
+                 if ips.get(iface) and not iface.startswith(_VIRTUAL_IFACES)
+                 ][:3]
+        rows.append(ui.nav_row(
+            'Network', '\n'.join(shown) if shown else 'Unavailable',
+            lambda r: win.item_actions._show_action_menu(
+                r, 'Network', [('Close', lambda: None)],
+                subtitle=self._net_text or 'Unavailable')))
+        ui.fill(self._detail_box, rows)
         self._last_res = res
-        self._render_storage(win, res.get('storage', '?'))
+        ui.set_subtitle(self._storage_row, res.get('storage', '?'))
 
     def _modem_row(self, win):
-        from xx_ui import widgets
         props = self._modem_props or {}
         parts = [str(props[key]) for key in (
             'Manufacturer', 'Model', 'Revision') if props.get(key)]
-        return widgets.setting_row(
-            'Modem', ' · '.join(parts) if parts else (
-                'No modem detected.' if not props else 'Modem detected.'),
-            last=False)
+        return ui.row('Modem', ' · '.join(parts) if parts else (
+            'No modem detected.' if not props else 'Modem detected.'))
 
     def _imei_row(self, win):
-        from xx_ui import widgets
         props = self._modem_props or {}
         imei = props.get('EquipmentIdentifier')
         if not imei:
-            return widgets.setting_row('IMEI', 'Unavailable', last=True)
+            return ui.row('IMEI', 'Unavailable')
         if self._imei_revealed:
-            return widgets.setting_row('IMEI', str(imei), last=True)
-        row = widgets.list_row('IMEI', 'Tap to show',
-                               trailing=widgets.chevron(), last=True)
-        row.connect('clicked', lambda _b: self._reveal_imei(win))
-        return row
+            return ui.row('IMEI', str(imei))
+        return ui.nav_row('IMEI', 'Tap to show',
+                          lambda _r: self._reveal_imei(win))
 
     def _reveal_imei(self, win) -> None:
         self._imei_revealed = True
@@ -778,12 +803,10 @@ class ShellSection(_Section):
 
     def build(self, _win) -> list:
         # Shell preferences live in ~/.config/xx-wm/ (design.md "Settings
-        # scope"), not on this system-only page — the gesture bindings stay
-        # reachable here at the bottom, under a Shell heading that says so.
-        shell_note = _section_title(self.title)
-        note = _section_placeholder(
-            'Other shell preferences live in ~/.config/xx-wm/')
-        return [shell_note, note]
+        # scope"); the System page ends by saying so.
+        return [ui.footnote(
+            'Every other shell preference lives in ~/.config/xx-wm/ and '
+            'reloads live when edited.')]
 
 
 class RecordingSection(_Section):
@@ -792,13 +815,14 @@ class RecordingSection(_Section):
     key = 'recording'
     title = 'Screen recording'
 
+    def __init__(self) -> None:
+        self._row = None
+
     def build(self, win) -> list:
-        card = _section_card()
-        self._status = _section_placeholder('Not recording.')
-        card.append(self._status)
-        card.append(_section_placeholder(
-            'Recordings save to ~/Videos/Screenrecordings.'))
-        return [_section_title(self.title), card]
+        self._row = ui.row(self.title, 'Not recording')
+        return ui.group(self.title, [self._row],
+                        note='Start and stop it from the Record tile. '
+                             'Recordings save to ~/Videos/Screenrecordings.')
 
     def refresh(self, win) -> None:
         def _state():
@@ -809,23 +833,19 @@ class RecordingSection(_Section):
                     return 'Recording…'
             except Exception:
                 pass
-            return 'Not recording.'
+            return 'Not recording'
 
         _run_bg(_state, self._render)
 
     def _render(self, status) -> None:
-        try:
-            if self._status is not None:
-                self._status.set_text(status or 'Not recording.')
-        except Exception:
-            pass
+        ui.set_subtitle(self._row, status or 'Not recording')
 
 
 class CaptionsSection(_Section):
     """Live captions status (read-only): the Captions tile switches it."""
 
     key = 'captions'
-    title = 'Captions'
+    title = 'Live captions'
 
     def build(self, win) -> list:
         try:
@@ -834,11 +854,10 @@ class CaptionsSection(_Section):
         except Exception:
             installed = False
         if installed:
-            note = ('Live captions are available — '
-                    'use the Captions tile to switch them on.')
+            text = 'Available · switch on from the Captions tile'
         else:
-            note = 'Live captions are not installed on this device.'
-        return [_section_title(self.title), _section_placeholder(note)]
+            text = 'Not installed on this device'
+        return ui.group(self.title, [ui.row(self.title, text)])
 
 
 SHARE_APP_ID = 'io.piercingxx.XXShare.desktop'
@@ -850,21 +869,16 @@ class NearbySection(_Section):
 
     def build(self, win) -> list:
         from gi.repository import Gio
-        from xx_ui import widgets
         try:
             installed = Gio.DesktopAppInfo.new(SHARE_APP_ID) is not None
         except Exception:
             installed = False
         if not installed:
-            return [_section_title(self.title), _section_placeholder(
-                'Nearby share is not installed on this device.')]
-        return [_section_title(self.title),
-                _section_placeholder(
-                    'Send and receive files with nearby phones and computers'
-                    ' (LocalSend compatible).'),
-                widgets.outline_button(
-                    'Open Share',
-                    lambda *_a: win._launch_app_id(SHARE_APP_ID))]
+            return ui.group(self.title, [ui.row(
+                self.title, 'Not installed on this device')])
+        return ui.group(self.title, [ui.nav_row(
+            self.title, 'Send files to nearby phones and computers '
+            '(LocalSend)', lambda _r: win._launch_app_id(SHARE_APP_ID))])
 
 
 class FindMySection(_Section):
@@ -874,13 +888,8 @@ class FindMySection(_Section):
     title = 'Find My Device'
 
     def build(self, win) -> list:
-        from xx_ui import widgets
-
-        card = _section_card()
-        card.append(widgets.setting_row('Find My Device', 'Off', last=True))
-        card.append(_section_placeholder(
-            'This device cannot be located remotely.'))
-        return [_section_title(self.title), card]
+        return ui.group(self.title, [ui.row(
+            self.title, 'Off · this device cannot be located remotely')])
 
 
 class DeveloperSection(_Section):
@@ -888,7 +897,7 @@ class DeveloperSection(_Section):
     title = 'Developer'
 
     def build(self, win) -> list:
-        return [_section_title(self.title), win._build_developer_card()]
+        return [ui.caption(self.title), win._build_developer_card()]
 
     def refresh(self, win) -> None:
         win._refresh_xxdb_section()
@@ -896,18 +905,19 @@ class DeveloperSection(_Section):
 
 class GesturesSection(_Section):
     key = 'gestures'
-    title = ''
+    title = 'Swipes'
 
     def build(self, win) -> list:
-        # The gestures card stays the last block by contract.
-        return [win._build_gestures_card()]
+        # The gestures block stays the last section by contract.
+        return [ui.caption(self.title), win._build_gestures_card(),
+                ui.footnote('Up, down and edge swipes work over any app.')]
 
     def refresh(self, win) -> None:
         win._refresh_gesture_labels()
 
 
-# Page order: later lanes append new (key, section) pairs here; the gestures
-# card must stay last (a test pins it as the final block).
+# Registry order (tests pin it; the gestures section stays last). Page
+# placement comes from SETTINGS_CATEGORIES.
 #
 # The feature sections below live in their own settings_<feature>.py
 # modules (plain module imports, not from-imports: those modules read
@@ -986,30 +996,32 @@ class SettingsPage:
         return self._sections.get(key)
 
     def _build_settings_page(self):
+        """The settings surface: a stack of the category menu plus one
+        subpage per category. Every section builds once, up front, so
+        live refreshes and deep links find their widgets."""
         from gi.repository import Gtk
-        from xx_ui import widgets as _widgets
 
         win = self._win
-        scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        box.add_css_class('xx-page-body')
-        box.set_margin_top(16)
-        box.set_margin_bottom(24)
-
-        header = _widgets.page_header('Settings', 'XX-WM SHELL')
-        # The page box already carries the gutter; the header's own
-        # padding would double it and misalign the title.
-        header.remove_css_class('xx-page-body')
-
         built: dict[str, list] = {}
-        box.append(header)
         for key, _cls in SETTINGS_SECTIONS:
-            section_widgets = self._sections[key].build(win)
-            built[key] = section_widgets
-            for widget in section_widgets:
-                box.append(widget)
+            built[key] = self._sections[key].build(win) or []
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root.add_css_class('xx-settings')
+        root.set_hexpand(True)
+        root.set_vexpand(True)
+        stack = Gtk.Stack()
+        stack.set_vexpand(True)
+        stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        stack.set_transition_duration(160)
+        self._scrolls: dict = {}
+        stack.add_named(self._page('menu', 'Settings', self._build_menu()),
+                        'menu')
+        for key, title, sections in SETTINGS_CATEGORIES:
+            body = [widget for name in sections
+                    for widget in built.get(name, [])]
+            stack.add_named(self._page(key, title, body), 'cat-' + key)
+        root.append(stack)
 
         # Refresh the quick sections whenever the settings page is opened
         win.stack.connect(
@@ -1018,27 +1030,154 @@ class SettingsPage:
             if stack.get_visible_child_name() == 'settings' else None,
         )
 
-        win._settings_scroll = scroll
+        win._settings_stack = stack
+        win._settings_scroll = self._scrolls['menu']
         win._settings_section_titles = {
-            key: built[key][0] for key in _SETTINGS_SECTION_KEYS
-            if built.get(key)
-        }
+            key: widgets[0] for key, widgets in built.items() if widgets}
+        self._refresh_menu()
+        return root
 
-        scroll.set_child(box)
-        return scroll
+    def _page(self, key: str, title: str, body_widgets: list):
+        """One settings screen: a fixed back bar (its small title fades in
+        once the big one scrolls away) over a scrolling column."""
+        from gi.repository import Gtk
+        from xx_ui import widgets
+
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        bar.add_css_class('xx-set-bar')
+        back = widgets.icon_button('go-previous-symbolic', self.back)
+        back.set_tooltip_text('Back')
+        bar.append(back)
+        small = widgets.label(title, 'xx-set-bar-title')
+        small.set_hexpand(True)
+        small.set_valign(Gtk.Align.CENTER)
+        small.set_opacity(0.0)
+        bar.append(small)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.add_css_class('xx-set-body')
+        header = widgets.wrap_label(title, 'xx-set-header')
+        body.append(header)
+        for widget in body_widgets:
+            body.append(widget)
+        scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_child(body)
+        # Touch has no focus ring to follow: a focused switch far down a
+        # page must not yank the view when the page is shown again.
+        scroll.get_child().set_scroll_to_focus(False)
+        scroll.get_vadjustment().connect(
+            'value-changed',
+            lambda adj: small.set_opacity(1.0 if adj.get_value() > 48
+                                          else 0.0))
+        self._scrolls[key] = scroll
+
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        page.append(bar)
+        page.append(scroll)
+        return page
+
+    def _build_menu(self) -> list:
+        titles = {key: title for key, title, _s in SETTINGS_CATEGORIES}
+        self._menu_rows: dict = {}
+        cards = []
+        for group in _MENU_GROUPS:
+            rows = []
+            for key in group:
+                row = ui.nav_row(titles[key], '',
+                                 lambda _r, k=key: self.show_category(k))
+                self._menu_rows[key] = row
+                rows.append(row)
+            card = ui.card(rows)
+            card.add_css_class('xx-set-menu-card')
+            cards.append(card)
+        return cards
+
+    def show_category(self, key: str | None,
+                      scroll_top: bool = True) -> None:
+        """Show one category subpage (None: the menu) and refresh it."""
+        win = self._win
+        stack = getattr(win, '_settings_stack', None)
+        if stack is not None:
+            stack.set_visible_child_name('menu' if key is None
+                                         else 'cat-' + key)
+        scroll = getattr(self, '_scrolls', {}).get(key or 'menu')
+        if scroll is not None:
+            win._settings_scroll = scroll
+            if scroll_top:
+                scroll.get_vadjustment().set_value(0.0)
+        if key is None:
+            self._refresh_menu()
+            return
+        for _cat, _title, sections in SETTINGS_CATEGORIES:
+            if _cat != key:
+                continue
+            for name in sections:
+                try:
+                    self._sections[name].refresh(win)
+                except Exception:
+                    pass
+
+    def back(self) -> None:
+        """Back from a subpage returns to the menu; back from the menu
+        leaves Settings for wherever it was opened from."""
+        win = self._win
+        stack = getattr(win, '_settings_stack', None)
+        if stack is not None and stack.get_visible_child_name() != 'menu':
+            self.show_category(None)
+            return
+        win._leave_settings()
+
+    def _refresh_menu(self) -> None:
+        rows = getattr(self, '_menu_rows', None)
+        if not rows:
+            return
+        win = self._win
+        quick = quick_summaries(win)
+        status = getattr(self._sections.get('system'), '_status', None)
+        try:
+            update = status.get_text().rstrip('.') if status else ''
+        except Exception:
+            update = ''
+        if update:
+            quick['system'] = '%s · %s' % (quick['system'], update)
+        for key, text in quick.items():
+            ui.set_subtitle(rows.get(key), text)
+        _run_bg(slow_summaries, self._show_summaries)
+
+    def _show_summaries(self, res) -> None:
+        rows = getattr(self, '_menu_rows', None) or {}
+        if not isinstance(res, dict):
+            return
+        win = self._win
+        saver = ''
+        try:
+            import settings_standby
+            saver = 'saver on' if settings_standby.saver_is_on(win) \
+                else 'saver off'
+        except Exception:
+            pass
+        if res.get('battery'):
+            res['battery'] = '%s · %s' % (res['battery'], saver) \
+                if saver else res['battery']
+        for key, text in res.items():
+            if text:
+                ui.set_subtitle(rows.get(key), text)
 
     def open_settings(self, section: str | None = None) -> None:
-        """Show the settings page, scrolled to a quick-tile section.
+        """Show Settings: the subpage holding ``section`` scrolled to it,
+        a whole category for a category key, the menu otherwise.
 
-        `section` is one of _SETTINGS_SECTION_KEYS (or None for the top);
-        unknown values open the top. The linked section also refreshes:
-        a WiFi scan for 'wifi', a device list for 'bluetooth', live state
-        for the rest."""
+        Every _SETTINGS_SECTION_KEYS entry resolves (a test walks them).
+        The shown subpage refreshes: a WiFi scan on Network, a device
+        list on Connected devices, live state for the rest."""
         from gi.repository import GLib
 
         win = self._win
-        key = section if section in _SETTINGS_SECTION_KEYS else None
+        category = category_for(section)
+        key = section if section in self._sections else None
         win.stack.set_visible_child_name('settings')
+        self.show_category(category)
         win.present()
         win._scroll_settings_to(key)
         if key is not None:
@@ -1049,10 +1188,6 @@ class SettingsPage:
             GLib.idle_add(win._scroll_settings_to, key)
             for retry_ms in (150, 300, 600, 1000, 1500):
                 GLib.timeout_add(retry_ms, win._scroll_settings_to, key)
-            try:
-                self._sections[key].refresh(win)
-            except Exception:
-                pass
 
     def _scroll_settings_to(self, section: str | None) -> bool:
         win = self._win
@@ -1089,76 +1224,31 @@ class SettingsPage:
         for key, label in win._system_gesture_labels.items():
             label.set_text(win._gesture_binding_text(key))
 
-    def _build_gesture_row(self, title_text: str, binding, change, reset):
-        """One gesture binding stacked title/binding/buttons: the binding
-        beside both buttons forced the settings page past 320 px."""
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
-        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        row.add_css_class('xx-setting')
-        name = widgets.label(title_text, 'xx-title')
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        buttons.append(change)
-        buttons.append(reset)
-        row.append(name)
-        row.append(binding)
-        row.append(buttons)
-        return row
-
-    def _binding_label(self, key: str, store: dict):
-        from xx_ui import widgets
-
-        win = self._win
-        binding = widgets.label(
-            win._gesture_binding_text(key), 'xx-secondary')
-        binding.set_hexpand(True)
-        store[key] = binding
-        return binding
-
-    @staticmethod
-    def _link_button(label_text: str, css: str):
-        return _link_button(label_text, css)
-
     def _build_gestures_card(self):
-        from xx_ui import widgets
-
+        """Home swipes then the four system (lisgd) swipes: one value row
+        each, the binding as its subtitle; a tap opens the choices."""
         win = self._win
-        card = _section_card()
+        rows = []
         for key, title in _GESTURE_TITLES.items():
-            card.append(win._build_gesture_row(
-                title, win._binding_label(key, win._gesture_binding_labels),
-                _text_action('Change',
-                             lambda k=key, t=title: win._pick_gesture_app(k, t)),
-                _text_action('Clear',
-                             lambda k=key: win._clear_gesture_app(k))))
-
+            row = ui.nav_row(
+                '%s on home' % title, win._gesture_binding_text(key),
+                lambda r, k=key, t=title: self._pick_home_swipe(r, k, t))
+            win._gesture_binding_labels[key] = row.subtitle_label
+            rows.append(row)
         for key, title in _SYSTEM_GESTURE_TITLES.items():
-            # The Change menu anchors on its own button, so it is wired
-            # after the row hands the button back.
-            change = widgets.text_button('Change')
-            default = _text_action(
-                'Default', lambda k=key: win._reset_system_gesture(k))
-            card.append(win._build_gesture_row(
-                title, win._binding_label(key, win._system_gesture_labels),
-                change, default))
-            change.connect(
-                'clicked',
-                lambda _b, c=change, k=key, t=title: win._pick_system_gesture(
-                    c, k, t))
-        note = _section_placeholder(
-            'System-level gestures apply immediately. Home swipes stay in-shell.')
-        card.append(note)
-        card.append(_section_placeholder(
-            'Every gesture: swipe left or right on home launches its bound '
-            'app; double-tap on home locks or runs its action; long-press '
-            'on home opens edit mode, settings, or nothing; the home key '
-            'while already home can open recents instead. Short swipe up '
-            'from the bottom goes home, long swipe up opens recents, edge '
-            'swipes go back, and swipe down from the top opens the shade — '
-            'those four work over any app. Swipe up on home itself opens '
-            'the drawer.'))
-        return card
+            row = ui.nav_row(
+                title, win._gesture_binding_text(key),
+                lambda r, k=key, t=title: win._pick_system_gesture(r, k, t))
+            win._system_gesture_labels[key] = row.subtitle_label
+            rows.append(row)
+        return ui.card(rows)
+
+    def _pick_home_swipe(self, anchor, key: str, title: str) -> None:
+        win = self._win
+        win.item_actions._show_action_menu(
+            anchor, '%s on home' % title,
+            [('Choose app…', lambda: win._pick_gesture_app(key, title)),
+             ('Clear', lambda: win._clear_gesture_app(key))])
 
     def _pick_system_gesture(self, anchor, key: str, title: str) -> None:
         win = self._win
@@ -1166,6 +1256,7 @@ class SettingsPage:
                    for a in sorted(VALID_ACTIONS)]
         choices += [(_VERB_LABELS[v], lambda v=v: win._set_system_gesture(key, v))
                     for v in sorted(IPC_VERBS)]
+        choices.append(('Default', lambda: win._reset_system_gesture(key)))
         win.item_actions._show_action_menu(anchor, title, choices)
 
     def _set_system_gesture(self, key: str, value: str) -> None:
@@ -1192,42 +1283,22 @@ class SettingsPage:
     # -- Developer section: wireless debugging (xxdb) ----------------------
 
     def _build_developer_card(self):
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
         win = self._win
-        card = _section_card()
-
         # The flip handler reads the switch itself, so it stays on the
         # raw notify signal instead of the bool-only builder callback.
-        switch = widgets.make_switch(False)
-        switch.connect('notify::active',
-                       lambda s, p: win._on_xxdb_switch_flipped(s, p))
-        win._xxdb_switch = switch
-        card.append(widgets.setting_row(
-            'Wireless debugging', '', switch, last=True))
-
-        win._xxdb_status = _section_placeholder('Off')
-        pair_btn = _outline_action(
-            'Pair with code',
-            lambda: win._on_xxdb_pair_clicked())
-
-        win._xxdb_hosts_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                      spacing=4)
-        win._xxdb_pending_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                        spacing=4)
-
-        card.append(win._xxdb_status)
-        card.append(pair_btn)
-        card.append(win._xxdb_hosts_box)
-        card.append(win._xxdb_pending_box)
+        row = ui.switch_row('Wireless debugging', 'Off')
+        row.switch.connect('notify::active',
+                           lambda s, p: win._on_xxdb_switch_flipped(s, p))
+        win._xxdb_switch = row.switch
+        win._xxdb_status = row.subtitle_label
+        win._xxdb_rows = [row, ui.nav_row(
+            'Pair with code', 'A one-time code for xxdb',
+            lambda _r: win._on_xxdb_pair_clicked())]
+        win._xxdb_card = ui.card(win._xxdb_rows)
         win._refresh_xxdb_section()
-        return card
+        return win._xxdb_card
 
     def _refresh_xxdb_section(self) -> None:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
         win = self._win
         if getattr(win, '_xxdb_switch', None) is None:
             return
@@ -1242,40 +1313,29 @@ class SettingsPage:
             win._xxdb_status.set_text('Off')
         else:
             win._xxdb_status.set_text(ctrl.status_text())
-        hosts: list = []
+        rows = list(getattr(win, '_xxdb_rows', []))
         if ctrl is not None:
             for entry in ctrl.trusted_hosts():
-                name = widgets.label(
-                    '%s — %s…' % (entry['name'], entry['fingerprint'][:16]),
-                    'xx-secondary')
-                name.set_hexpand(True)
-                forget = widgets.text_button(
-                    'Forget',
-                    lambda fp=entry['fingerprint']: win._on_xxdb_forget(fp))
-                line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                               spacing=8)
-                line.append(name)
-                line.append(forget)
-                hosts.append(line)
-        _replace_box_children(win._xxdb_hosts_box, hosts or
-                              [_section_placeholder('No paired hosts.')])
-        pending: list = []
-        if ctrl is not None:
+                rows.append(ui.action_row(
+                    entry['name'], 'Forget',
+                    lambda _r, fp=entry['fingerprint']:
+                    win._on_xxdb_forget(fp),
+                    subtitle='Paired · %s…' % entry['fingerprint'][:16]))
             for token, label in ctrl.pending_system_requests():
-                text = widgets.wrap_label('Allow file access: %s' % label)
-                text.set_hexpand(True)
-                allow = widgets.text_button(
-                    'Allow',
-                    lambda t=token: win._on_xxdb_confirm(t, True))
-                deny = widgets.text_button(
-                    'Deny', lambda t=token: win._on_xxdb_confirm(t, False))
-                line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                               spacing=8)
-                line.append(text)
-                line.append(allow)
-                line.append(deny)
-                pending.append(line)
-        _replace_box_children(win._xxdb_pending_box, pending)
+                rows.append(ui.nav_row(
+                    'File access request', label,
+                    lambda r, t=token, lb=label: self._ask_xxdb(r, t, lb)))
+        card = getattr(win, '_xxdb_card', None)
+        if card is not None:
+            ui.fill(card, rows)
+
+    def _ask_xxdb(self, anchor, token: str, label: str) -> None:
+        win = self._win
+        win.item_actions._show_action_menu(
+            anchor, 'Allow file access?',
+            [('Allow', lambda: win._on_xxdb_confirm(token, True)),
+             ('Deny', lambda: win._on_xxdb_confirm(token, False))],
+            subtitle=label)
 
     def _on_xxdb_switch_flipped(self, switch, _pspec) -> None:
         win = self._win
@@ -1334,14 +1394,6 @@ class SettingsPage:
     def _section_placeholder(self, text: str):
         return _section_placeholder(text)
 
-    @staticmethod
-    def _shrink_button_label(btn) -> None:
-        return _shrink_button_label(btn)
-
-    @staticmethod
-    def _shrink_settings_entry(entry) -> None:
-        return _shrink_settings_entry(entry)
-
     def _refresh_system_sections(self) -> None:
         win = self._win
         win._refresh_xxdb_section()
@@ -1363,27 +1415,9 @@ class SettingsPage:
         self._win._battery_label.set_text(status or 'No battery detected.')
 
     def _show_sinks(self, sinks) -> None:
-        from xx_ui import widgets
-
-        win = self._win
-        if sinks is None:
-            _replace_box_children(
-                win._sink_list_box,
-                [_section_placeholder('Audio system unavailable.')])
-            return
-        rows = []
-        items = list(sinks)
-        for index, sink in enumerate(items):
-            row = widgets.list_row(
-                sink.description,
-                'Default output' if sink.is_default else '',
-                last=index == len(items) - 1)
-            row.connect(
-                'clicked', lambda _b, s=sink: win._on_sink_selected(s))
-            rows.append(row)
-        _replace_box_children(
-            win._sink_list_box,
-            rows or [_section_placeholder('No output devices.')])
+        self._show_audio(getattr(self._win, '_sink_list_box', None), sinks,
+                         'output', lambda sink: self._win._on_sink_selected(
+                             sink))
 
     def _on_sink_selected(self, sink) -> None:
         import system_settings
@@ -1397,28 +1431,24 @@ class SettingsPage:
         )
 
     def _show_sources(self, sources) -> None:
-        from xx_ui import widgets
+        self._show_audio(getattr(self._win, '_source_list_box', None),
+                         sources, 'input',
+                         lambda source: self._win._on_source_selected(source))
 
-        win = self._win
-        box = getattr(win, '_source_list_box', None)
+    @staticmethod
+    def _show_audio(box, devices, kind: str, on_pick) -> None:
+        """Output/microphone card: one row per device, the default one
+        marked in its subtitle; a tap makes that device the default."""
         if box is None:
             return
-        if sources is None:
-            _replace_box_children(
-                box, [_section_placeholder('Audio system unavailable.')])
+        if devices is None:
+            ui.fill(box, [ui.note_row('Audio system unavailable.')])
             return
-        items = list(sources)
-        rows = []
-        for index, source in enumerate(items):
-            row = widgets.list_row(
-                source.description,
-                'Default input' if source.is_default else '',
-                last=index == len(items) - 1)
-            row.connect(
-                'clicked', lambda _b, s=source: win._on_source_selected(s))
-            rows.append(row)
-        _replace_box_children(
-            box, rows or [_section_placeholder('No input devices.')])
+        rows = [ui.row(device.description,
+                       'Default %s' % kind if device.is_default else '',
+                       on_activate=lambda _r, d=device: on_pick(d))
+                for device in devices]
+        ui.fill(box, rows or [ui.note_row('No %s devices.' % kind)])
 
     def _on_source_selected(self, source) -> None:
         import system_settings
@@ -1435,9 +1465,15 @@ class SettingsPage:
 
     def _refresh_wifi(self) -> None:
         win = self._win
-        _replace_box_children(
-            win._wifi_list_box, [_section_placeholder('Scanning…')])
-        win._run_bg(self._wifi_snapshot, win._show_wifi_full)
+        self._fill_wifi_list([ui.note_row('Scanning…')])
+        win._run_bg(self._wifi_snapshot, self._show_wifi_full)
+
+    def _fill_wifi_list(self, rows: list) -> None:
+        """Networks card: the scan results, then Scan and Add hidden."""
+        win = self._win
+        box = getattr(win, '_wifi_list_box', None)
+        if box is not None:
+            ui.fill(box, rows + list(getattr(win, '_wifi_scan_rows', [])))
 
     @staticmethod
     def _wifi_snapshot():
@@ -1481,50 +1517,44 @@ class SettingsPage:
         self._show_wifi_service(res)
 
     def _show_wifi_service(self, res) -> None:
-        """Start-service row when NetworkManager is down but installed."""
-        from xx_ui import widgets
-
+        """Wi-Fi card: the radio row (state in its subtitle) plus a
+        Start-service row while NetworkManager is down but installed."""
         win = self._win
         box = getattr(win, '_wifi_service_box', None)
-        if box is None:
+        row = getattr(win, '_wifi_row', None)
+        if box is None or row is None:
             return
-        if res.get('nm_running') or res.get('networks') is not None:
-            _replace_box_children(box, [])
-            return
-        import shutil
-        if shutil.which('nmcli') is None:
-            _replace_box_children(
-                box, [_section_placeholder('WiFi unavailable on this device.')])
-            return
-        note = _section_placeholder('NetworkManager is not running.')
-        start = widgets.outline_button(
-            'Start service', lambda: win._on_start_network_service())
-        _replace_box_children(box, [note, start])
+        networks = res.get('networks')
+        rows = [row]
+        if res.get('nm_running') or networks is not None:
+            used = [net.ssid for net in networks or [] if net.in_use]
+            if res.get('enabled') is False:
+                state = 'Off'
+            elif used:
+                state = 'Connected to %s' % used[0]
+            else:
+                state = 'Not connected'
+        else:
+            import shutil
+            if shutil.which('nmcli') is None:
+                state = 'Unavailable on this device'
+            else:
+                state = 'NetworkManager is not running'
+                rows.append(ui.nav_row(
+                    'Start network service', 'Starts NetworkManager',
+                    lambda _r: win._on_start_network_service()))
+        ui.set_subtitle(row, state)
+        ui.fill(box, rows)
 
     def _show_wifi_saved(self, saved) -> None:
-        from xx_ui import widgets
-
         win = self._win
         box = getattr(win, '_wifi_saved_box', None)
         if box is None:
             return
-        if saved is None:
-            _replace_box_children(box, [])
-            return
-        items = list(saved)
-        if not items:
-            _replace_box_children(
-                box, [_section_placeholder('No saved networks.')])
-            return
-        rows = []
-        for index, ssid in enumerate(items):
-            row = widgets.list_row(
-                ssid, 'Saved', last=index == len(items) - 1)
-            row.connect(
-                'clicked',
-                lambda _b, s=ssid, w=row: win._on_saved_wifi_selected(s, w))
-            rows.append(row)
-        _replace_box_children(box, rows)
+        rows = [ui.nav_row(ssid, 'Saved',
+                           lambda r, s=ssid: win._on_saved_wifi_selected(s, r))
+                for ssid in saved or []]
+        ui.fill(box, rows, hide_empty=True)
 
     def _on_wifi_switch_flipped(self, switch, _pspec) -> None:
         import system_settings
@@ -1600,34 +1630,25 @@ class SettingsPage:
              ('Cancel', lambda: None)])
 
     def _show_wifi(self, networks) -> None:
-        from xx_ui import widgets
-
         win = self._win
         if networks is None:
-            _replace_box_children(
-                win._wifi_list_box,
-                [_section_placeholder('WiFi unavailable on this device.')])
+            self._fill_wifi_list(
+                [ui.note_row('Wi-Fi is unavailable on this device.')])
             return
-        items = list(networks[:12])
         rows = []
-        for index, net in enumerate(items):
+        for net in networks[:12]:
             if net.in_use:
                 detail = 'Connected'
             elif net.security == 'open':
-                detail = 'Open network'
+                detail = 'Open'
             else:
                 detail = 'Secured'
-            row = widgets.list_row(
+            if net.signal is not None:
+                detail = '%s · %d%%' % (detail, net.signal)
+            rows.append(ui.row(
                 net.ssid or '(hidden network)', detail,
-                meta='%d%%' % net.signal if net.signal is not None else '',
-                last=index == len(items) - 1)
-            row.connect(
-                'clicked',
-                lambda _b, n=net, w=row: win._on_wifi_selected(n, w))
-            rows.append(row)
-        _replace_box_children(
-            win._wifi_list_box,
-            rows or [_section_placeholder('No networks found.')])
+                on_activate=lambda r, n=net: win._on_wifi_selected(n, r)))
+        self._fill_wifi_list(rows or [ui.note_row('No networks found.')])
 
     def _on_wifi_selected(self, net, widget) -> None:
         win = self._win
@@ -1692,14 +1713,22 @@ class SettingsPage:
 
         win = self._win
         if scan:
-            _replace_box_children(
-                win._bt_list_box, [_section_placeholder('Scanning…')])
+            self._fill_bt_list([ui.note_row('Scanning…')])
             system_settings.start_bt_discovery()
             GLib.timeout_add_seconds(
                 6, lambda: win._run_bg(system_settings.list_bt_devices,
-                                       win._show_bt_full) or False)
+                                       self._show_bt_full) or False)
             return
-        win._run_bg(self._bt_snapshot, win._show_bt_full)
+        win._run_bg(self._bt_snapshot, self._show_bt_full)
+
+    def _fill_bt_list(self, rows: list) -> None:
+        """Devices card: known and found devices, then Scan."""
+        win = self._win
+        box = getattr(win, '_bt_list_box', None)
+        if box is None:
+            return
+        scan = getattr(win, '_bt_scan_row', None)
+        ui.fill(box, rows + ([scan] if scan is not None else []))
 
     @staticmethod
     def _bt_snapshot():
@@ -1738,31 +1767,47 @@ class SettingsPage:
                 pass
             finally:
                 win._bt_switch_updating = False
+        blocked = bool(isinstance(res, dict) and res.get('blocked'))
         unblock = getattr(win, '_bt_unblock_btn', None)
         if unblock is not None:
             try:
-                unblock.set_visible(bool(isinstance(res, dict)
-                                         and res.get('blocked')))
+                unblock.set_visible(blocked)
             except Exception:
                 pass
-        self._show_bt_service(devices)
+        self._show_bt_service(devices, res if isinstance(res, dict) else {})
 
-    def _show_bt_service(self, devices) -> None:
-        """Start-service row when bluetoothd is down."""
-        from xx_ui import widgets
-
+    def _show_bt_service(self, devices, res=None) -> None:
+        """Bluetooth card: the radio row (state in its subtitle), plus
+        Unblock while rfkill blocks it and Start while bluetoothd is down."""
         win = self._win
         box = getattr(win, '_bt_service_box', None)
-        if box is None:
+        row = getattr(win, '_bt_row', None)
+        if box is None or row is None:
             return
-        if devices is not None:
-            _replace_box_children(box, [])
-            return
-        note = _section_placeholder(
-            'Bluetooth is unavailable — the service may be stopped.')
-        start = widgets.outline_button(
-            'Start service', lambda: win._on_start_bluetooth_service())
-        _replace_box_children(box, [note, start])
+        res = res or {}
+        rows = [row]
+        if res.get('blocked'):
+            state = 'Blocked'
+            rows.append(win._bt_unblock_btn)
+        elif devices is None:
+            state = 'Unavailable · the service may be stopped'
+            rows.append(ui.nav_row(
+                'Start Bluetooth service', 'Starts bluetoothd',
+                lambda _r: win._on_start_bluetooth_service()))
+        elif res.get('powered') is False:
+            state = 'Off'
+        else:
+            linked = [dev for dev in devices if dev.connected]
+            paired = [dev for dev in devices if dev.paired]
+            if linked:
+                state = 'Connected to %s' % (linked[0].name
+                                             or linked[0].address)
+            elif paired:
+                state = 'On · %d paired' % len(paired)
+            else:
+                state = 'On'
+        ui.set_subtitle(row, state)
+        ui.fill(box, rows)
 
     def _on_bt_switch_flipped(self, switch, _pspec) -> None:
         import system_settings
@@ -1830,31 +1875,24 @@ class SettingsPage:
             win._show_status(f'Could not start service: {err}')
 
     def _show_bt_devices(self, devices) -> None:
-        from xx_ui import widgets
-
         win = self._win
         if devices is None:
-            _replace_box_children(
-                win._bt_list_box,
-                [_section_placeholder('Bluetooth unavailable on this device.')])
+            self._fill_bt_list(
+                [ui.note_row('Bluetooth is unavailable on this device.')])
             return
-        items = list(devices[:12])
         rows = []
-        for index, dev in enumerate(items):
+        for dev in devices[:12]:
             if dev.connected:
                 state = 'Connected'
             elif dev.paired:
                 state = 'Paired'
             else:
-                state = 'Available'
-            row = widgets.list_row(
-                dev.name or dev.address, state,
-                last=index == len(items) - 1)
-            row.connect('clicked', lambda _b, d=dev: win._on_bt_selected(d))
-            rows.append(row)
-        _replace_box_children(
-            win._bt_list_box,
-            rows or [_section_placeholder('No devices — scan to discover.')])
+                state = 'Available · tap to pair'
+            rows.append(ui.row(dev.name or dev.address, state,
+                               on_activate=lambda _r, d=dev:
+                               win._on_bt_selected(d)))
+        self._fill_bt_list(
+            rows or [ui.note_row('No devices yet. Scan to find some.')])
 
     def _on_bt_selected(self, dev) -> None:
         import system_settings
@@ -1920,19 +1958,19 @@ class SettingsPage:
                     win._show_status(result[1] if result else 'Rename failed.'),
                     win._refresh_bluetooth())))
 
-    def _settings_row(self, title: str, control):
-        return _settings_row(title, control)
-
-    def _on_apn_save(self, _btn) -> None:
+    def _on_apn_save(self, values: dict) -> None:
+        """Commit the APN sheet: config first, then nmcli off-thread."""
         win = self._win
-        apn = win.apn_entry.get_text().strip()
-        user = win.apn_user_entry.get_text().strip()
-        pwd = win.apn_pass_entry.get_text()
+        apn = str(values.get('apn', '')).strip()
+        user = str(values.get('user', '')).strip()
+        pwd = str(values.get('password', ''))
         win.config.data['apn'] = apn
         win.config.data['apn_user'] = user
         win.config.data['apn_pass'] = pwd
         win.config.save()
         win._apply_apn(apn, user, pwd)
+        ui.set_subtitle(getattr(win, '_apn_row', None),
+                        apn_summary(win.config))
         win._show_status('APN saved.')
 
     @staticmethod

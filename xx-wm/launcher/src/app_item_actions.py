@@ -45,6 +45,9 @@ def muted_menu_subtitle(config: ShellConfig, app_id: str | None,
 # never size the popover past the screen. Item labels wrap (WORD_CHAR still
 # breaks dot-chains like long app ids); titles stay one line and ellipsize.
 _MENU_TEXT_WIDTH = 28
+# Menus longer than this scroll inside a capped height (px).
+_MENU_SCROLL_AFTER = 8
+_MENU_MAX_HEIGHT = 440
 
 
 def validate_folder_name(slots: list[dict], name: str,
@@ -236,6 +239,18 @@ class AppItemActions:
                 self._popover_ref.popdown()
             callback()
 
+        rows = box
+        if len(actions) > _MENU_SCROLL_AFTER:
+            # A long choice list scrolls inside the menu instead of
+            # running off the bottom of a phone screen.
+            rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            scroller = Gtk.ScrolledWindow()
+            scroller.set_policy(Gtk.PolicyType.NEVER,
+                                Gtk.PolicyType.AUTOMATIC)
+            scroller.set_propagate_natural_height(True)
+            scroller.set_max_content_height(_MENU_MAX_HEIGHT)
+            scroller.set_child(rows)
+            box.append(scroller)
         for label, callback in actions:
             btn = Gtk.Button(label=label)
             btn.add_css_class('xx-menu-row')
@@ -243,7 +258,7 @@ class AppItemActions:
             child.set_xalign(0)
             self._cap_item_label(child)
             btn.connect('clicked', lambda _b, cb=callback: _run(cb))
-            box.append(btn)
+            rows.append(btn)
         return box
 
     def _show_action_menu(self, anchor: Gtk.Widget, title: str | None,

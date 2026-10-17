@@ -7,15 +7,11 @@ drawer, the built-in exemptions (read-only), and the live frozen count.
 from __future__ import annotations
 
 import settings_page
+import settings_ui as ui
 
 TIMEOUT_CHOICES = ((5, '5 min'), (15, '15 min'), (30, '30 min'),
                    (0, 'Never'))
 THRESHOLD_CHOICES = (10, 15, 20, 25)
-SAVER_EFFECTS = (
-    'Shorter wait before unused apps freeze.',
-    'Freezes 30 s after blank instead of 2 min.',
-    'Pauses auto weather and update checks.',
-)
 
 
 def _cfg(win, name: str, default):
@@ -81,8 +77,8 @@ def display_name(win, app_id: str) -> str:
 def _frozen_text(win) -> str:
     count = frozen_count(win)
     if count is None:
-        return 'Frozen now: checking…'
-    return 'Frozen now: %d' % count
+        return 'Frozen apps: checking…'
+    return '%d app%s frozen now' % (count, '' if count == 1 else 's')
 
 
 class StandbySection(settings_page._Section):
@@ -90,61 +86,47 @@ class StandbySection(settings_page._Section):
     title = 'Battery saver'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
-        saver_head = settings_page._section_title('Battery saver')
-        saver_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        saver_switch = widgets.make_switch(saver_is_on(win))
-        saver_switch.connect(
+        saver = ui.switch_row('Battery saver', _frozen_text(win),
+                              saver_is_on(win))
+        saver.switch.connect(
             'notify::active',
             lambda sw, _p: self._on_saver_flipped(win, sw))
-        win._saver_switch = saver_switch
-        saver_body.append(widgets.setting_row('Battery saver', '', saver_switch))
-        auto_switch = widgets.make_switch(
-            bool(_cfg(win, 'battery_saver_auto', True)))
-        auto_switch.connect(
+        win._saver_switch = saver.switch
+        win._standby_frozen_label = saver.subtitle_label
+        auto = ui.switch_row('Automatic', '',
+                             bool(_cfg(win, 'battery_saver_auto', True)))
+        auto.switch.connect(
             'notify::active',
             lambda sw, _p: self._on_auto_flipped(win, sw))
-        win._saver_auto_switch = auto_switch
-        saver_body.append(widgets.setting_row(
-            'Auto-on at low battery', self._threshold_text(win), auto_switch))
-        self._threshold_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        saver_body.append(self._threshold_box)
+        win._saver_auto_switch = auto.switch
+        self._auto_row = auto
+        self._threshold_box = ui.nav_row(
+            'Turn on at', '', lambda r: self._pick_threshold(win, r))
         self._render_threshold(win)
-        for effect in SAVER_EFFECTS:
-            saver_body.append(
-                settings_page._section_placeholder('· ' + effect))
-        frozen_label = settings_page._section_placeholder(_frozen_text(win))
-        win._standby_frozen_label = frozen_label
-        saver_body.append(frozen_label)
+        saver_group = ui.group(
+            self.title, [saver, auto, self._threshold_box],
+            note='Saver freezes unused apps sooner and 30 s after the screen '
+                 'blanks (not 2 min), and pauses auto weather and update '
+                 'checks.')
 
-        standby_head = settings_page._section_title('App standby')
-        standby_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._timeout_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        standby_body.append(self._timeout_box)
+        self._timeout_box = ui.nav_row(
+            'Freeze unused apps', '',
+            lambda r: self._pick_timeout(win, r))
         self._render_timeout(win)
-
-        exempt_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        win._standby_exempt_box = exempt_box
-        standby_body.append(exempt_box)
-
-        standby_body.append(settings_page._outline_action(
-            'Never freeze an app…', lambda: self._on_add_exempt(win)))
-
+        self._exempt_add = ui.nav_row(
+            'Never freeze an app…', 'Pick it from the app drawer',
+            lambda _r: self._on_add_exempt(win))
         try:
             from app_standby import builtin_exemption_labels
             labels = builtin_exemption_labels()
         except Exception:
             labels = ()
-        for label_text in labels:
-            standby_body.append(settings_page._section_placeholder(
-                '· %s (always)' % label_text))
-
+        standby_group = ui.group(
+            'App standby', note='Always kept awake: %s.' % ', '.join(labels)
+            if labels else None)
+        win._standby_exempt_box = standby_group[1]
         self._render_exempt(win)
-        return [saver_head, saver_body, standby_head, standby_body]
+        return saver_group + standby_group
 
     def refresh(self, win) -> None:
         self._sync_switches(win)
@@ -189,19 +171,18 @@ class StandbySection(settings_page._Section):
         except Exception:
             pass
 
-    def _threshold_text(self, win) -> str:
-        return 'Auto-on at %d%%' % _threshold_pct(win)
-
     def _render_threshold(self, win) -> None:
-        box = getattr(self, '_threshold_box', None)
-        if box is None:
-            return
-        from xx_ui import widgets
-        current = _threshold_pct(win)
-        settings_page._replace_box_children(box, [widgets.segmented([
-            ('%d%%' % pct, pct == current,
-             lambda pct=pct: self._set_threshold(win, pct))
-            for pct in THRESHOLD_CHOICES])])
+        pct = _threshold_pct(win)
+        ui.set_subtitle(getattr(self, '_threshold_box', None),
+                        '%d%% battery' % pct)
+        ui.set_subtitle(getattr(self, '_auto_row', None),
+                        'Turns on at low battery')
+
+    def _pick_threshold(self, win, anchor) -> None:
+        win.item_actions._show_action_menu(
+            anchor, 'Turn on at',
+            [('%d%%' % pct, lambda pct=pct: self._set_threshold(win, pct))
+             for pct in THRESHOLD_CHOICES])
 
     def _set_threshold(self, win, pct: int) -> None:
         try:
@@ -209,13 +190,6 @@ class StandbySection(settings_page._Section):
         except Exception:
             pass
         self._render_threshold(win)
-
-    def _timeout_text(self, win) -> str:
-        minutes = _standby_minutes(win)
-        for value, label in TIMEOUT_CHOICES:
-            if value == minutes:
-                return 'Freeze after: %s' % label
-        return 'Freeze after: %d min' % minutes
 
     def _timeout_label(self, win) -> str:
         minutes = _standby_minutes(win)
@@ -225,20 +199,12 @@ class StandbySection(settings_page._Section):
         return '%d min' % minutes
 
     def _render_timeout(self, win) -> None:
-        # Five timeout values cannot fit one segmented row (minimum
-        # 383 px on a 320 px content), so the standby delay stays a
-        # value row opening the same menu — always showing the current
-        # delay, including the stock 10 min default the menu omits.
-        box = getattr(self, '_timeout_box', None)
-        if box is None:
-            return
-        from xx_ui import widgets
-        row = widgets.list_row(
-            'Freeze after', self._timeout_label(win),
-            trailing=widgets.chevron(), last=True)
-        row.connect(
-            'clicked', lambda _b, r=row: self._pick_timeout(win, r))
-        settings_page._replace_box_children(box, [row])
+        # The standby delay is a value row opening the choices, always
+        # showing the current delay, including the stock 10 min default
+        # the menu omits.
+        label = self._timeout_label(win)
+        ui.set_subtitle(getattr(self, '_timeout_box', None),
+                        label if label == 'Never' else 'After %s' % label)
 
     def _pick_timeout(self, win, anchor) -> None:
         actions = getattr(win, 'item_actions', None)
@@ -256,25 +222,21 @@ class StandbySection(settings_page._Section):
         self._render_timeout(win)
 
     def _render_exempt(self, win) -> None:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
         box = getattr(win, '_standby_exempt_box', None)
         if box is None:
             return
-        rows = []
+        rows = [getattr(self, '_timeout_box', None)]
         for app_id in exempt_ids(win):
-            name = widgets.label(display_name(win, app_id), 'xx-secondary')
-            name.set_hexpand(True)
-            remove = settings_page._text_action(
-                'Remove', lambda aid=app_id: self._on_remove_exempt(win, aid))
-            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            line.append(name)
-            line.append(remove)
-            rows.append(line)
-        settings_page._replace_box_children(
-            box, rows or [settings_page._section_placeholder(
-                'Every app may freeze.')])
+            rows.append(ui.row(
+                display_name(win, app_id), 'Never frozen',
+                on_activate=lambda r, aid=app_id: win.item_actions
+                ._show_action_menu(
+                    r, display_name(win, aid),
+                    [('Allow freezing',
+                      lambda: self._on_remove_exempt(win, aid)),
+                     ('Cancel', lambda: None)])))
+        rows.append(getattr(self, '_exempt_add', None))
+        ui.fill(box, [row for row in rows if row is not None])
 
     def _on_add_exempt(self, win) -> None:
         try:

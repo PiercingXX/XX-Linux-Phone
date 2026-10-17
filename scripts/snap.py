@@ -9,7 +9,10 @@ renders the window at phone size (2x) and exits.
                     [--path DIR ...] [--script nav.py] -- -m xx_contacts
 
 The --script file runs with ``win`` (the window) and ``app`` in scope,
-after --delay; the capture follows another --delay. Point HOME/XDG_* at a
+after --delay; the capture follows another --delay. With SNAP_MULTI=1
+in the environment the script captures its own shots instead
+(``snap_render(path)`` per shot, then ``snap_done()`` for --out and
+exit). Point HOME/XDG_* at a
 seeded temp dir yourself so the app shows real-looking data.
 """
 
@@ -33,6 +36,7 @@ from gi.repository import GLib, Graphene, Gtk
 out, w, h, delay, script = (os.environ['SNAP_OUT'], int(os.environ['SNAP_W']),
                             int(os.environ['SNAP_H']), float(os.environ['SNAP_DELAY']),
                             os.environ.get('SNAP_SCRIPT', ''))
+multi = os.environ.get('SNAP_MULTI') == '1'
 state = {'win': None}
 _present = Gtk.Window.present
 
@@ -44,7 +48,9 @@ def _main_window():
     return wins[0] if wins else None
 
 
-def _capture():
+def _render(path):
+    """Paint the main window to ``path`` (2x). Scripts get it as
+    ``snap_render`` to capture several shots in one run (SNAP_MULTI)."""
     win = _main_window()
     if win is None:
         print('snap: no visible window', file=sys.stderr)
@@ -60,8 +66,12 @@ def _capture():
     Gtk.WidgetPaintable.new(win).snapshot(snap, aw, ah)
     node = snap.to_node()
     rect = Graphene.Rect().init(0, 0, aw * 2, ah * 2)
-    win.get_native().get_renderer().render_texture(node, rect).save_to_png(out)
-    print('snap: wrote', out, flush=True)
+    win.get_native().get_renderer().render_texture(node, rect).save_to_png(path)
+    print('snap: wrote', path, flush=True)
+
+
+def _capture():
+    _render(out)
     os._exit(0)
 
 
@@ -70,8 +80,10 @@ def _navigate():
         win = _main_window()
         code = compile(open(script).read(), script, 'exec')
         exec(code, {'win': win, 'app': win.get_application() if win else None,
-                    'Gtk': Gtk, 'GLib': GLib})
-    GLib.timeout_add(int(delay * 1000), _capture)
+                    'Gtk': Gtk, 'GLib': GLib, 'snap_render': _render,
+                    'snap_done': _capture})
+    if not multi:
+        GLib.timeout_add(int(delay * 1000), _capture)
     return False
 
 
@@ -85,7 +97,8 @@ def present(self, *a):
 
 
 Gtk.Window.present = present
-GLib.timeout_add(int(delay * 1000) * 6 + 20000, lambda: os._exit(4))
+GLib.timeout_add(int(delay * 1000) * 6 + (900000 if multi else 20000),
+                 lambda: os._exit(4))
 args = sys.argv[1:]
 sys.argv = [args[1] if args[0] == '-m' else args[0]] + args[2 if args[0] == '-m' else 1:]
 if args[0] == '-m':

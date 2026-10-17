@@ -1,8 +1,13 @@
 #!/bin/sh
-# Render the in-shell Settings page (every viewport) for every theme.
+# Render the in-shell Settings (menu, every category subpage at each
+# viewport, and the sheets/menus its rows open) for every theme.
 #   xx-wm/tools/snap_settings.sh OUTDIR [theme ...]
-# Sibling of snap_shell.sh (part 1): same seeded temp HOME, first boot done,
-# same 360x720 / zero-`snap: WARNING` gate. One labeled sheet per theme.
+# Same seeded temp HOME and 360x720 / zero-`snap: WARNING` gate as
+# snap_shell.sh. One shell launch per theme drives every shot
+# (snap_settings_nav.py, SNAP_MULTI); themes render in parallel, each on
+# its own session bus (the shell is a single-instance app). Output:
+# sheet-<theme>-settings-<n>.png contact sheets (KEEP_SHOTS=1 also keeps
+# the single shots). SNAP_SETTINGS_ONLY="network privacy" limits pages.
 set -u
 REPO=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 OUTDIR=${1:?usage: snap_settings.sh OUTDIR [theme ...]}
@@ -10,9 +15,10 @@ shift || true
 if [ "$#" -gt 0 ]; then
     THEMES="$*"
 else
-    THEMES="amoled paper forest aura burgundy"
+    THEMES="amoled paper aura"
 fi
 mkdir -p "$OUTDIR"
+OUTDIR=$(CDPATH='' cd -- "$OUTDIR" && pwd)
 WORK=$(mktemp -d)
 if [ "${KEEP_WORK:-0}" = 1 ]; then
     trap 'echo "work kept: $WORK"' EXIT INT TERM
@@ -33,6 +39,12 @@ seed_home() {
     cat > "$_home/.config/xx-wm/config.json" <<EOF
 {"theme": "$_theme",
  "pin_hash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+ "apn": "internet",
+ "medical_id": {"name": "Alex Doe", "blood_type": "O+",
+                "allergies": "Penicillin",
+                "emergency_contacts": [{"name": "Sam Doe", "number": "+1 555 0100"}]},
+ "standby_exempt": ["calculator.desktop"],
+ "smart_lock_wifi_ssids": ["HomeWifi"],
  "home_slots": [
   {"type": "app", "label": "Notes", "app_id": "notes.desktop", "cmd": null, "folder": null},
   {"type": "app", "label": "Calendar", "app_id": "calendar.desktop", "cmd": null, "folder": null},
@@ -41,92 +53,71 @@ seed_home() {
 EOF
 }
 
-# $1 = shot name, $2 = open_settings arg (empty = top), $3 = bottom (1 = jump to end)
-shot_nav() {
-    _shot=$1 _section=$2 _bottom=$3
-    {
-        echo "win.unfullscreen()"
-        echo "win.set_default_size(360, 720)"
-        echo "win.set_size_request(360, 720)"
-        if [ -n "$_section" ]; then
-            echo "win.open_settings('$_section')"
-        else
-            echo "win.open_settings(None)"
-        fi
-        if [ "$_bottom" = 1 ]; then
-            # Deferred past layout like the in-app deep-link retries: the
-            # adjustment upper reads 0 until the first frames land.
-            echo "from gi.repository import GLib"
-            echo "GLib.timeout_add(600, lambda: (win._settings_scroll.get_vadjustment().set_value(win._settings_scroll.get_vadjustment().get_upper()), False)[1])"
-        fi
-    } > "$WORK/nav-settings-$_shot.py"
-}
-
-# Viewports covering the whole page top to bottom.
-shot_nav top '' 0
-shot_nav wifi 'wifi' 0
-shot_nav charging 'charging' 0
-shot_nav screentime 'screentime' 0
-shot_nav standby 'standby' 0
-shot_nav privacy 'permissions' 0
-shot_nav smartlock 'smart_lock' 0
-shot_nav services 'services' 0
-shot_nav firewall 'firewall' 0
-shot_nav medical 'medical' 0
-shot_nav extras 'recording' 0
-shot_nav about 'about' 0
-shot_nav bottom '' 1
-SHOTS="top wifi charging screentime standby privacy smartlock services firewall medical extras about bottom"
-
-run_one() {
-    _home=$1 _out=$2 _nav=$3
-    _err="$WORK/snap.err"
-    _try=0
-    while [ "$_try" -lt 3 ]; do
-        _try=$((_try + 1))
-        HOME="$_home" XDG_CONFIG_HOME="$_home/.config" \
-            XDG_DATA_HOME="$_home/.local/share" \
-            XDG_CACHE_HOME="$_home/.cache" \
-            XDG_DATA_DIRS="$_home/.local/share" \
-            python3 "$REPO/scripts/snap.py" --out "$_out" --delay 2.0 \
-            --path "$REPO/common" --path "$REPO/xx-wm/launcher/src" \
-            --script "$_nav" -- "$REPO/xx-wm/launcher/src/main.py" 2>"$_err" \
-            && break
-        echo "snap retry $_try: $_out"
-        sleep 1
-    done
-    if [ ! -f "$_out" ]; then
-        echo "snap failed: $_out"
-        tail -n 20 "$_err"
-        return 1
-    fi
-    if grep -q 'snap: WARNING' "$_err"; then
-        echo "snap size mismatch: $_out"
-        grep 'snap: WARNING' "$_err"
-        if [ "${ALLOW_WIDE:-0}" != 1 ]; then
-            return 1
-        fi
-    fi
+run_theme() {
+    _theme=$1
+    _home="$WORK/home-$_theme"
+    _shots="$WORK/shots-$_theme"
+    _err="$WORK/$_theme.err"
+    mkdir -p "$_shots"
+    seed_home "$_home" "$_theme"
+    HOME="$_home" XDG_CONFIG_HOME="$_home/.config" \
+        XDG_DATA_HOME="$_home/.local/share" \
+        XDG_CACHE_HOME="$_home/.cache" \
+        XDG_DATA_DIRS="$_home/.local/share" \
+        SNAP_MULTI=1 SNAP_SETTINGS_OUT="$_shots" SNAP_SETTINGS_THEME="$_theme" \
+        SNAP_SETTINGS_ONLY="${SNAP_SETTINGS_ONLY:-}" \
+        dbus-run-session -- python3 "$REPO/scripts/snap.py" --out "$_shots/done.png" --delay 2.0 \
+        --path "$REPO/common" --path "$REPO/xx-wm/launcher/src" \
+        --script "$REPO/xx-wm/tools/snap_settings_nav.py" \
+        -- "$REPO/xx-wm/launcher/src/main.py" >"$WORK/$_theme.out" 2>"$_err"
 }
 
 for theme in $THEMES; do
+    run_theme "$theme" &
+done
+wait
+
+status=0
+for theme in $THEMES; do
     echo "=== $theme"
-    SHOME="$WORK/home-$theme"
-    seed_home "$SHOME" "$theme"
-    for shot in $SHOTS; do
-        run_one "$SHOME" "$WORK/$theme-settings-$shot.png" \
-            "$WORK/nav-settings-$shot.py" || exit 1
+    _shots="$WORK/shots-$theme"
+    _err="$WORK/$theme.err"
+    if [ ! -f "$_shots/$theme-menu.png" ]; then
+        echo "snap failed: $theme"
+        tail -n 20 "$_err"
+        status=1
+        continue
+    fi
+    if grep -q 'snap: WARNING\|snap: no row' "$_err"; then
+        grep 'snap: WARNING\|snap: no row' "$_err"
+        status=1
+    fi
+    rm -f "$_shots/done.png" "$_shots/$theme-end.png"
+    # Shots in capture order, 4x2 per contact sheet.
+    _list=$(ls -tr "$_shots"/*.png)
+    _n=0 _page=0 _batch=""
+    for shot in $_list; do
+        _label=$(basename "$shot" .png)
+        _label=${_label#"$theme"-}
+        _batch="$_batch -label $_label $shot"
+        _n=$((_n + 1))
+        if [ "$_n" = 8 ]; then
+            # shellcheck disable=SC2086
+            montage $_batch -tile 4x2 -geometry 360x720+4+4 -background black \
+                -fill white -pointsize 20 \
+                "$OUTDIR/sheet-$theme-settings-$_page.png" || status=1
+            _n=0 _page=$((_page + 1)) _batch=""
+        fi
     done
-    # shellcheck disable=SC2086
-    montage $(
-        for shot in $SHOTS; do echo "-label settings-$shot $WORK/$theme-settings-$shot.png"; done
-    ) -tile 4x3 -geometry 360x720+4+4 -background black \
-        -fill white -pointsize 20 "$OUTDIR/sheet-$theme-settings.png" \
-        || { echo "montage failed: $theme"; exit 1; }
-    echo "wrote $OUTDIR/sheet-$theme-settings.png"
+    if [ -n "$_batch" ]; then
+        # shellcheck disable=SC2086
+        montage $_batch -tile 4x2 -geometry 360x720+4+4 -background black \
+            -fill white -pointsize 20 \
+            "$OUTDIR/sheet-$theme-settings-$_page.png" || status=1
+    fi
+    echo "wrote $OUTDIR/sheet-$theme-settings-*.png"
     if [ "${KEEP_SHOTS:-0}" = 1 ]; then
-        for shot in $SHOTS; do
-            cp "$WORK/$theme-settings-$shot.png" "$OUTDIR/$theme-settings-$shot.png"
-        done
+        cp "$_shots"/*.png "$OUTDIR/"
     fi
 done
+exit "$status"

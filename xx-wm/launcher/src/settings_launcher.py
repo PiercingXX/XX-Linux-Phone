@@ -5,14 +5,15 @@ gestures, appearance), all backed by config.json with hot reload.
 from __future__ import annotations
 
 import settings_page
+import settings_ui as ui
 
 WIDGET_ORDER = ('time', 'date', 'weather', 'battery')
 
 _WIDGET_TITLES = {
-    'time': 'Time widget',
-    'date': 'Date widget',
-    'weather': 'Weather widget',
-    'battery': 'Battery widget',
+    'time': 'Time',
+    'date': 'Date',
+    'weather': 'Weather',
+    'battery': 'Battery',
 }
 
 _TAP_LABELS = {
@@ -96,6 +97,18 @@ def _binding_text(win, key: str) -> str:
             pass
         return app_id
     return action.replace('_', ' ').title()
+
+
+def location_text(win) -> str:
+    """Manual weather location row value: 'Not set' or 'lat, lon'."""
+    try:
+        lat = win.config.data.get('weather_lat')
+        lon = win.config.data.get('weather_lon')
+    except Exception:
+        return 'Not set'
+    if lat is None or lon is None:
+        return 'Not set'
+    return '%s, %s' % (lat, lon)
 
 
 def _font_key(win) -> str:
@@ -327,43 +340,73 @@ def _install_font(win, path: str):
         return (False, str(error))
 
 
+def _choice_label(choices, value, fallback: str) -> str:
+    for key, label in choices:
+        if key == value:
+            return label
+    return fallback
+
+
+def _scale_row(title: str, value_text: str, slider):
+    """Card row: title and live value over a full-width slider."""
+    from gi.repository import Gtk
+    from xx_ui import widgets
+
+    head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+    name = widgets.label(title, 'xx-title')
+    name.set_hexpand(True)
+    value = Gtk.Label(label=value_text, xalign=1.0)
+    value.add_css_class('xx-secondary')
+    head.append(name)
+    head.append(value)
+    column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    column.append(head)
+    column.append(slider)
+    row = ui.wide_row(column)
+    row.value_label = value
+    return row
+
+
+def build_appearance_group(win) -> list:
+    """Mode, font and text size: launcher prefs shown on the Display &
+    appearance page under the theme swatches."""
+    return LauncherSection().build_appearance(win)
+
+
 class LauncherSection(settings_page._Section):
     key = 'launcher'
-    title = 'Launcher'
+    title = 'Home screen'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-
         win._launcher_binding_labels = {}
-        win._launcher_widgets_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        win._launcher_gestures_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        win._launcher_font_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        win._launcher_sort_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        win._launcher_mode_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._render_widgets(win)
-        self._render_gesture_rows(win)
-        self._render_font(win)
-        self._render_sort(win)
-        self._render_mode(win)
-        return [
-            settings_page._section_title(self.title),
-            self._build_home_card(win),
-            self._build_widgets_card(win),
-            self._build_weather_card(win),
-            self._build_clock_card(win),
-            self._build_drawer_card(win),
-            self._build_gestures_card(win),
-            self._build_appearance_card(win),
-        ]
+        win._launcher_updating = False
+        home = ui.group(self.title, [
+            ui.nav_row('Alignment', '',
+                       lambda r: self._pick_choice(
+                           win, r, 'Alignment', _ALIGN_CHOICES,
+                           lambda v: self._set_alignment(win, v))),
+            ui.nav_row('Clock', '',
+                       lambda r: self._pick_choice(
+                           win, r, 'Clock', _CLOCK_CHOICES,
+                           lambda v: self._set_clock(win, v))),
+            ui.nav_row('Reset home layout…', 'Back to the default slots',
+                       lambda _r: self._confirm_reset(win))])
+        win._launcher_home_rows = home[1]
+        widgets_group = ui.group(
+            'Widgets', note='Tap a widget to choose what tapping it on '
+                            'home does.')
+        win._launcher_widgets_box = widgets_group[1]
+        weather = self._build_weather_group(win)
+        drawer = self._build_drawer_group(win)
+        gestures = self._build_gestures_group(win)
+        self.refresh(win)
+        return home + widgets_group + weather + drawer + gestures
 
     def refresh(self, win) -> None:
         self._sync_switches(win)
+        self._render_home(win)
         self._render_widgets(win)
+        self._render_weather(win)
         self._render_gesture_rows(win)
         self._render_font(win)
         self._render_sort(win)
@@ -388,27 +431,48 @@ class LauncherSection(settings_page._Section):
         finally:
             win._launcher_updating = False
 
+    def _pick_choice(self, win, anchor, title: str, choices, apply) -> None:
+        actions = getattr(win, 'item_actions', None)
+        if actions is None:
+            return
+        actions._show_action_menu(
+            anchor, title,
+            [(label, lambda value=value: apply(value))
+             for value, label in choices])
+
+    def _switch(self, win, attr: str, title: str, subtitle: str, active,
+                handler):
+        row = ui.switch_row(title, subtitle, bool(active))
+        row.switch.connect('notify::active',
+                           lambda sw, _p: handler(win, sw))
+        setattr(win, attr, row.switch)
+        return row
+
     # -- Home -----------------------------------------------------------
 
-    def _build_home_card(self, win):
-        from xx_ui import widgets
-
-        card = settings_page._section_card()
-        card.append(widgets.caption('HOME'))
-        current = getattr(win.config, 'home_alignment', 'center')
-        card.append(widgets.segmented([
-            (label, value == current,
-             lambda value=value: self._set_alignment(win, value))
-            for value, label in _ALIGN_CHOICES]))
-        card.append(settings_page._outline_action(
-            'Reset home layout…', lambda: self._confirm_reset(win)))
-        return card
+    def _render_home(self, win) -> None:
+        card = getattr(win, '_launcher_home_rows', None)
+        if card is None:
+            return
+        rows = []
+        child = card.get_first_child()
+        while child is not None:
+            rows.append(child)
+            child = child.get_next_sibling()
+        if len(rows) < 2:
+            return
+        ui.set_subtitle(rows[0], _choice_label(
+            _ALIGN_CHOICES, getattr(win.config, 'home_alignment', 'center'),
+            'Center'))
+        ui.set_subtitle(rows[1], _choice_label(
+            _CLOCK_CHOICES, _config_get(win, 'clock_24h', None), 'System'))
 
     def _set_alignment(self, win, value: str) -> None:
         try:
             win.config.set_home_alignment(value)
         except Exception:
             return
+        self._render_home(win)
         try:
             win._apply_config_change()
         except Exception:
@@ -454,18 +518,9 @@ class LauncherSection(settings_page._Section):
 
     # -- Widgets --------------------------------------------------------
 
-    def _build_widgets_card(self, win):
-        from xx_ui import widgets
-
-        card = settings_page._section_card()
-        card.append(widgets.caption('WIDGETS'))
-        card.append(win._launcher_widgets_box)
-        return card
-
     def _render_widgets(self, win) -> None:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
+        """One row per widget: name, its tap action, the on/off switch.
+        A tap on the row picks the tap action; the last row reorders."""
         box = getattr(win, '_launcher_widgets_box', None)
         if box is None:
             return
@@ -476,28 +531,20 @@ class LauncherSection(settings_page._Section):
         ordered = sorted(configs, key=lambda k: configs[k].get('order', 99))
         rows = []
         for key in ordered:
-            conf = configs[key]
-            enabled = bool(conf.get('enabled', True))
-            switch = widgets.make_switch(enabled)
-            switch.connect(
+            row = ui.switch_row(
+                _WIDGET_TITLES.get(key, key),
+                'On tap: %s' % _tap_text(win, key),
+                bool(configs[key].get('enabled', True)),
+                on_activate=lambda r, k=key: self._pick_tap(win, r, k))
+            row.switch.connect(
                 'notify::active',
                 lambda sw, _p, k=key: self._on_widget_flipped(win, k, sw))
-            title = _WIDGET_TITLES.get(key, key)
-            rows.append(widgets.setting_row(title, _tap_text(win, key), switch))
-            controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                               spacing=8)
-            up = widgets.text_button(
-                '↑', lambda k=key: self._move_widget(win, k, -1))
-            down = widgets.text_button(
-                '↓', lambda k=key: self._move_widget(win, k, +1))
-            tap = widgets.text_button('On tap…')
-            controls.append(up)
-            controls.append(down)
-            controls.append(tap)
-            tap.connect('clicked',
-                        lambda _b, k=key, b=tap: self._pick_tap(win, b, k))
-            rows.append(controls)
-        settings_page._replace_box_children(box, rows)
+            rows.append(row)
+        if len(ordered) > 1:
+            rows.append(ui.nav_row(
+                'Rearrange widgets…', 'Drag to set the order on home',
+                lambda r: self._show_widget_reorder(win, r)))
+        ui.fill(box, rows)
 
     def _on_widget_flipped(self, win, key: str, switch) -> None:
         if getattr(win, '_launcher_updating', False):
@@ -507,12 +554,26 @@ class LauncherSection(settings_page._Section):
             win._build_widget_block()
         except Exception:
             pass
-        self._render_widgets(win)
 
-    def _move_widget(self, win, key: str, delta: int) -> None:
+    def _show_widget_reorder(self, win, anchor) -> None:
+        """The shared drag-to-reorder sheet (reorder_sheet.py)."""
+        actions = getattr(win, 'item_actions', None)
+        if actions is None:
+            return
         try:
-            win.config.move_widget(key, delta)
-            win._build_widget_block()
+            configs = win.config.widgets
+        except Exception:
+            return
+        ordered = sorted(configs, key=lambda k: configs[k].get('order', 99))
+        actions.show_reorder(
+            anchor, 'Rearrange widgets',
+            [(key, _WIDGET_TITLES.get(key, key)) for key in ordered],
+            on_order_changed=lambda ids: self._apply_widget_order(win, ids))
+
+    def _apply_widget_order(self, win, ids: list) -> None:
+        try:
+            if win.config.set_widget_order(list(ids)):
+                win._build_widget_block()
         except Exception:
             pass
         self._render_widgets(win)
@@ -527,8 +588,8 @@ class LauncherSection(settings_page._Section):
             ('Refresh', lambda: self._set_tap(win, key, 'refresh')),
             ('Choose app…', lambda: self._pick_tap_app(win, key)),
         ]
-        actions._show_action_menu(anchor, _WIDGET_TITLES.get(key, key),
-                                  choices)
+        actions._show_action_menu(
+            anchor, 'On tap: %s' % _WIDGET_TITLES.get(key, key), choices)
 
     def _set_tap(self, win, key: str, tap) -> None:
         try:
@@ -547,40 +608,32 @@ class LauncherSection(settings_page._Section):
 
     # -- Weather --------------------------------------------------------
 
-    def _build_weather_card(self, win):
-        from xx_ui import widgets
+    def _build_weather_group(self, win) -> list:
+        win._launcher_unit_row = ui.nav_row(
+            'Temperature unit', '',
+            lambda r: self._pick_choice(
+                win, r, 'Temperature unit', _TEMP_CHOICES,
+                lambda v: self._set_temp_unit(win, v)))
+        auto = self._switch(
+            win, '_launcher_auto_loc', 'Auto location',
+            'For the forecast',
+            _config_get(win, 'weather_auto_location', True),
+            self._on_auto_loc)
+        win._launcher_location_row = ui.nav_row(
+            'Manual location', '', lambda r: self._open_location(win, r))
+        return ui.group('Weather', [win._launcher_unit_row, auto,
+                                    win._launcher_location_row])
 
-        card = settings_page._section_card()
-        card.append(widgets.caption('WEATHER'))
-        current = _config_get(win, 'weather_temp_unit', 'fahrenheit')
-        card.append(widgets.segmented([
-            (label, value == current,
-             lambda value=value: self._set_temp_unit(win, value))
-            for value, label in _TEMP_CHOICES]))
-        auto = widgets.make_switch(
-            bool(_config_get(win, 'weather_auto_location', True)))
-        auto.connect('notify::active',
-                     lambda sw, _p: self._on_auto_loc(win, sw))
-        win._launcher_auto_loc = auto
-        card.append(widgets.setting_row('Auto location', '', auto))
-        try:
-            lat = win.config.data.get('weather_lat')
-            lon = win.config.data.get('weather_lon')
-        except Exception:
-            lat, lon = None, None
-        win._launcher_lat = settings_page._settings_entry(
-            win, 'Latitude', '' if lat is None else str(lat))
-        win._launcher_lon = settings_page._settings_entry(
-            win, 'Longitude', '' if lon is None else str(lon))
-        card.append(settings_page._settings_row(
-            'Manual location', win._launcher_lat))
-        card.append(win._launcher_lon)
-        card.append(widgets.primary_button(
-            'Save location', lambda: self._save_location(win)))
-        return card
+    def _render_weather(self, win) -> None:
+        ui.set_subtitle(getattr(win, '_launcher_unit_row', None),
+                        _choice_label(_TEMP_CHOICES, _config_get(
+                            win, 'weather_temp_unit', 'fahrenheit'), '°F'))
+        ui.set_subtitle(getattr(win, '_launcher_location_row', None),
+                        location_text(win))
 
     def _set_temp_unit(self, win, value: str) -> None:
         _config_set(win, 'weather_temp_unit', value)
+        self._render_weather(win)
         try:
             win._refresh_weather()
         except Exception:
@@ -595,12 +648,23 @@ class LauncherSection(settings_page._Section):
         except Exception:
             pass
 
-    def _save_location(self, win) -> None:
-        def _parse(entry) -> float | None:
-            try:
-                text = entry.get_text().strip()
-            except Exception:
-                return None
+    def _open_location(self, win, anchor):
+        try:
+            lat = win.config.data.get('weather_lat')
+            lon = win.config.data.get('weather_lon')
+        except Exception:
+            lat, lon = None, None
+        return ui.form_sheet(
+            win, anchor, 'Manual location',
+            [('lat', 'Latitude', '' if lat is None else lat, 'number'),
+             ('lon', 'Longitude', '' if lon is None else lon, 'number')],
+            'Save location', lambda values: self._save_location(win, values),
+            note='Leave both blank to clear.')
+
+    def _save_location(self, win, values: dict) -> str | None:
+        """Commit the location sheet; an error string keeps it open."""
+        def _parse(text) -> float | None:
+            text = str(text or '').strip()
             if not text:
                 return None
             try:
@@ -608,39 +672,26 @@ class LauncherSection(settings_page._Section):
             except (TypeError, ValueError):
                 return None
 
-        lat = _parse(getattr(win, '_launcher_lat', None))
-        lon = _parse(getattr(win, '_launcher_lon', None))
+        lat = _parse(values.get('lat'))
+        lon = _parse(values.get('lon'))
         if (lat is None) != (lon is None):
-            try:
-                win._show_status('Set both latitude and longitude.')
-            except Exception:
-                pass
-            return
+            return 'Set both latitude and longitude.'
         _config_set(win, 'weather_lat', lat)
         _config_set(win, 'weather_lon', lon)
+        self._render_weather(win)
         try:
             win._refresh_weather(force=True)
             win._show_status('Location saved.' if lat is not None
                              else 'Location cleared.')
         except Exception:
             pass
+        return None
 
     # -- Clock ----------------------------------------------------------
 
-    def _build_clock_card(self, win):
-        from xx_ui import widgets
-
-        card = settings_page._section_card()
-        card.append(widgets.caption('CLOCK'))
-        current = _config_get(win, 'clock_24h', None)
-        card.append(widgets.segmented([
-            (label, value == current,
-             lambda value=value: self._set_clock(win, value))
-            for value, label in _CLOCK_CHOICES]))
-        return card
-
     def _set_clock(self, win, value) -> None:
         _config_set(win, 'clock_24h', value)
+        self._render_home(win)
         try:
             win._refresh_clock()
         except Exception:
@@ -648,52 +699,27 @@ class LauncherSection(settings_page._Section):
 
     # -- Drawer ---------------------------------------------------------
 
-    def _build_drawer_card(self, win):
-        from xx_ui import widgets
-
-        card = settings_page._section_card()
-        card.append(widgets.caption('DRAWER'))
-        # Three long values cannot fit one segmented row on a 320 px
-        # content, so the default sort stays a value row opening the same
-        # menu (the standby timeout idiom).
-        card.append(win._launcher_sort_box)
-        auto = widgets.make_switch(bool(getattr(
-            win.config, 'search_auto_launch', False)))
-        auto.connect('notify::active',
-                     lambda sw, _p: self._on_auto_launch(win, sw))
-        win._launcher_auto_launch = auto
-        card.append(widgets.setting_row(
-            'Search auto-launch', '', auto))
-        card.append(settings_page._section_placeholder(
-            'Type a space first to stop it.'))
-        return card
+    def _build_drawer_group(self, win) -> list:
+        win._launcher_sort_box = ui.nav_row(
+            'Default sort', '', lambda r: self._pick_sort(win, r))
+        auto = self._switch(
+            win, '_launcher_auto_launch', 'Search auto-launch',
+            'Opens a lone match; a leading space stops it',
+            getattr(win.config, 'search_auto_launch', False),
+            self._on_auto_launch)
+        return ui.group('App drawer', [win._launcher_sort_box, auto])
 
     def _sort_label(self, win) -> str:
         current = _config_get(win, 'drawer_sort', 'default')
-        for value, label in _SORT_CHOICES:
-            if value == current:
-                return label
-        return _SORT_CHOICES[0][1]
+        return _choice_label(_SORT_CHOICES, current, _SORT_CHOICES[0][1])
 
     def _render_sort(self, win) -> None:
-        from xx_ui import widgets
-
-        box = getattr(win, '_launcher_sort_box', None)
-        if box is None:
-            return
-        row = widgets.list_row('Default sort', self._sort_label(win),
-                               trailing=widgets.chevron(), last=True)
-        row.connect('clicked',
-                    lambda _b, r=row: self._pick_sort(win, r))
-        settings_page._replace_box_children(box, [row])
+        ui.set_subtitle(getattr(win, '_launcher_sort_box', None),
+                        self._sort_label(win))
 
     def _pick_sort(self, win, anchor) -> None:
-        actions = getattr(win, 'item_actions', None)
-        if actions is None:
-            return
-        choices = [(label, lambda value=value: self._set_sort(win, value))
-                   for value, label in _SORT_CHOICES]
-        actions._show_action_menu(anchor, 'Default sort', choices)
+        self._pick_choice(win, anchor, 'Default sort', _SORT_CHOICES,
+                          lambda value: self._set_sort(win, value))
 
     def _set_sort(self, win, value: str) -> None:
         _config_set(win, 'drawer_sort', value)
@@ -713,52 +739,32 @@ class LauncherSection(settings_page._Section):
 
     # -- Gestures -------------------------------------------------------
 
-    def _build_gestures_card(self, win):
-        from xx_ui import widgets
-
-        card = settings_page._section_card()
-        card.append(widgets.caption('GESTURES'))
-        card.append(win._launcher_gestures_box)
-        recents = widgets.make_switch(
-            bool(_config_get(win, 'home_to_recents', False)))
-        recents.connect('notify::active',
-                        lambda sw, _p: self._on_recents(win, sw))
-        win._launcher_recents = recents
-        card.append(widgets.setting_row(
-            'Home opens recents', 'When already home', recents))
-        return card
-
-    def _render_gesture_rows(self, win) -> None:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
-        box = getattr(win, '_launcher_gestures_box', None)
-        if box is None:
-            return
+    def _build_gestures_group(self, win) -> list:
         rows = []
         for key, title in (('double_tap_home', _DOUBLE_TAP_TITLE),
                            ('long_press_home', _LONG_PRESS_TITLE)):
-            label = widgets.label(_binding_text(win, key), 'xx-secondary')
-            label.set_hexpand(True)
-            win._launcher_binding_labels[key] = label
-            change = widgets.text_button(
-                'Change',
-                lambda k=key, t=title: self._pick_home_gesture(win, k, t))
-            default = widgets.text_button(
-                'Default', lambda k=key: self._reset_home_gesture(win, k))
-            buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                              spacing=8)
-            buttons.append(change)
-            buttons.append(default)
-            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            row.add_css_class('xx-setting')
-            row.append(widgets.label(title, 'xx-title'))
-            row.append(label)
-            row.append(buttons)
+            row = ui.nav_row(
+                title, _binding_text(win, key),
+                lambda r, k=key, t=title: self._pick_home_gesture(
+                    win, k, t, r))
+            win._launcher_binding_labels[key] = row.subtitle_label
             rows.append(row)
-        settings_page._replace_box_children(box, rows)
+        rows.append(self._switch(
+            win, '_launcher_recents', 'Home opens recents',
+            'When already on home',
+            _config_get(win, 'home_to_recents', False), self._on_recents))
+        return ui.group('Gestures on home', rows)
 
-    def _pick_home_gesture(self, win, key: str, title: str) -> None:
+    def _render_gesture_rows(self, win) -> None:
+        for key, label in (getattr(win, '_launcher_binding_labels', None)
+                           or {}).items():
+            try:
+                label.set_text(_binding_text(win, key))
+            except Exception:
+                pass
+
+    def _pick_home_gesture(self, win, key: str, title: str,
+                           anchor=None) -> None:
         actions = getattr(win, 'item_actions', None)
         if actions is None:
             return
@@ -776,7 +782,9 @@ class LauncherSection(settings_page._Section):
                 for action in sorted(VALID_ACTIONS)]
         choices.append(('Choose app…',
                         lambda: self._pick_home_gesture_app(win, key, title)))
-        actions._show_action_menu(win._launcher_gestures_box, title, choices)
+        choices.append(('Default',
+                        lambda: self._reset_home_gesture(win, key)))
+        actions._show_action_menu(anchor, title, choices)
 
     def _set_home_gesture(self, win, key: str, action: str) -> None:
         try:
@@ -805,54 +813,35 @@ class LauncherSection(settings_page._Section):
             return
         _config_set(win, 'home_to_recents', bool(switch.get_active()))
 
-    # -- Appearance -----------------------------------------------------
+    # -- Appearance (shown on the Display & appearance page) -------------
 
-    def _build_appearance_card(self, win):
-        from xx_ui import widgets
-
-        card = settings_page._section_card()
-        card.append(widgets.caption('APPEARANCE'))
-        # Four values cannot fit one segmented row on a 320 px content,
-        # so the mode stays a value row opening the same menu.
-        card.append(win._launcher_mode_box)
-        card.append(win._launcher_font_box)
-        card.append(settings_page._outline_action(
-            'Import font…', lambda: self._import_font(win)))
-        scale_row = widgets.setting_row('Text size', '', None)
-        card.append(scale_row)
-        scale = self._build_scale(win)
-        card.append(scale)
-        return card
+    def build_appearance(self, win) -> list:
+        win._launcher_mode_box = ui.nav_row(
+            'Mode', '', lambda r: self._pick_mode(win, r))
+        win._launcher_font_box = ui.nav_row(
+            'Font', '', lambda r: self._pick_font(win, r))
+        rows = [win._launcher_mode_box, win._launcher_font_box,
+                ui.nav_row('Import font…', 'A .ttf or .otf file',
+                           lambda _r: self._import_font(win)),
+                self._build_scale(win)]
+        self._render_mode(win)
+        self._render_font(win)
+        return ui.group('Look', rows)
 
     def _mode_label(self, win) -> str:
         try:
             mode = win.config.appearance_mode
         except AttributeError:
             mode = 'theme'
-        for value, label in _MODE_CHOICES:
-            if value == mode:
-                return label
-        return _MODE_CHOICES[0][1]
+        return _choice_label(_MODE_CHOICES, mode, _MODE_CHOICES[0][1])
 
     def _render_mode(self, win) -> None:
-        from xx_ui import widgets
-
-        box = getattr(win, '_launcher_mode_box', None)
-        if box is None:
-            return
-        row = widgets.list_row('Mode', self._mode_label(win),
-                               trailing=widgets.chevron(), last=True)
-        row.connect('clicked',
-                    lambda _b, r=row: self._pick_mode(win, r))
-        settings_page._replace_box_children(box, [row])
+        ui.set_subtitle(getattr(win, '_launcher_mode_box', None),
+                        self._mode_label(win))
 
     def _pick_mode(self, win, anchor) -> None:
-        actions = getattr(win, 'item_actions', None)
-        if actions is None:
-            return
-        choices = [(label, lambda value=value: self._set_mode(win, value))
-                   for value, label in _MODE_CHOICES]
-        actions._show_action_menu(anchor, 'Mode', choices)
+        self._pick_choice(win, anchor, 'Mode', _MODE_CHOICES,
+                          lambda value: self._set_mode(win, value))
 
     def _set_mode(self, win, value: str) -> None:
         try:
@@ -867,9 +856,7 @@ class LauncherSection(settings_page._Section):
 
     def _build_scale(self, win):
         from gi.repository import Gtk
-        from xx_ui import widgets
 
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         adjustment = Gtk.Adjustment(
             value=float(getattr(win.config, 'text_size_scale', 1.0) or 1.0),
             lower=0.5, upper=2.0, step_increment=0.05, page_increment=0.1)
@@ -879,15 +866,15 @@ class LauncherSection(settings_page._Section):
         slider.set_draw_value(False)
         slider.set_hexpand(True)
         slider.set_size_request(0, 44)
-        percent = widgets.label(
-            '%d%%' % round(adjustment.get_value() * 100), 'xx-title')
+        row = _scale_row('Text size',
+                         '%d%%' % round(adjustment.get_value() * 100),
+                         slider)
+        percent = row.value_label
         win._launcher_scale_label = percent
         slider.connect('value-changed',
                        lambda _s: self._on_scale(win, slider, percent))
-        box.append(slider)
-        box.append(percent)
         win._launcher_scale = slider
-        return box
+        return row
 
     def _on_scale(self, win, slider, percent) -> None:
         try:
@@ -914,16 +901,8 @@ class LauncherSection(settings_page._Section):
             pass
 
     def _render_font(self, win) -> None:
-        from xx_ui import widgets
-
-        box = getattr(win, '_launcher_font_box', None)
-        if box is None:
-            return
-        row = widgets.list_row('Font', _font_label(win),
-                               trailing=widgets.chevron(), last=True)
-        row.connect('clicked',
-                    lambda _b, r=row: self._pick_font(win, r))
-        settings_page._replace_box_children(box, [row])
+        ui.set_subtitle(getattr(win, '_launcher_font_box', None),
+                        _font_label(win))
 
     def _pick_font(self, win, anchor) -> None:
         actions = getattr(win, 'item_actions', None)
