@@ -399,9 +399,12 @@ def _home_page(win):
 
 
 def _tap_win(config, entries=(), refreshed=None, launched=None,
-             searched=None):
+             searched=None, coords=(40.0, -83.0), opened=None):
     win = SimpleNamespace(
         config=config,
+        _weather=SimpleNamespace(coordinates=lambda: coords),
+        _open_settings=(lambda section=None: opened.append(section)
+                        if opened is not None else None),
         app_index=SimpleNamespace(entries=list(entries)),
         _refresh_weather=(lambda force=False: refreshed.append(force)
                           if refreshed is not None else None),
@@ -463,6 +466,15 @@ class TestWeatherTap:
         win = _tap_win(config, entries, refreshed, launched, searched)
         _home_page(win)._dispatch_widget_tap('weather', 'refresh')
         assert refreshed == [True]
+        assert launched == [] and searched == []
+
+    def test_no_location_tap_opens_launcher_settings(self, config):
+        refreshed, launched, searched, opened = [], [], [], []
+        entries = [_app_entry('org.gnome.Weather.desktop', 'Weather')]
+        win = _tap_win(config, entries, refreshed, launched, searched,
+                       coords=None, opened=opened)
+        _home_page(win)._dispatch_widget_tap('weather', 'default')
+        assert opened == ['launcher']
         assert launched == [] and searched == []
 
     def test_weather_default_tap_is_default(self, config):
