@@ -14,10 +14,11 @@ runs on a worker thread over warm SQLite data only (never a contacts
 round trip) and replies via ``invocation.return_value`` from
 ``GLib.idle_add``.
 
-This process also owns the silenced-call record cards: when
-``NoteCall`` reports an unanswered incoming whose screen row says
-Silence, the bundled notifier posts the batched card (the GUI never
-posts). Shell consult shape (what this service answers): one async
+This process also owns every missed-call record card: when
+``NoteCall`` reports an unanswered incoming, the bundled notifier posts
+the silenced card for silenced verdicts and the missed-call card for
+calls that rang (the GUI never posts, and neither does the shell).
+Shell consult shape (what this service answers): one async
 ``CheckNumber`` per incoming call with auto-start allowed and a
 2000 ms timeout, unpacking the ``(ss)`` reply tuple; any error or
 timeout fails open to ring. There is deliberately no
@@ -124,13 +125,41 @@ def _default_call_placer(number: str) -> None:
         pass
 
 
+def _default_message_launcher(number: str) -> None:
+    """Notification "Message": open TxxT for the number.
+
+    TxxT exposes no open-by-number D-Bus method (``OpenThread`` takes a
+    conversation id, and its thread URIs take ids too) and registers no
+    ``sms:`` handler yet, so this launches ``io.piercingxx.TxxT``
+    itself carrying an ``sms:`` URI for the number — TxxT opens on the
+    conversation list today, and the URI names the thread once TxxT
+    learns ``sms:`` links. When the desktop entry is absent it falls
+    back to the default ``sms:`` handler, wherever one exists.
+    Worker-thread safe, result ignored.
+    """
+    from gi.repository import Gio
+
+    uri = "sms:%s" % (number or "")
+    try:
+        info = Gio.DesktopAppInfo.new("io.piercingxx.TxxT.desktop")
+    except Exception:
+        info = None
+    if info is not None:
+        try:
+            if info.launch_uris([uri], None):
+                return
+        except Exception:
+            pass
+    Gio.AppInfo.launch_default_for_uri(uri, None)
+
+
 class PolicyService:
     """D-Bus dispatch over the warm store; Gio shapes double as test seams."""
 
     def __init__(self, db_file: Path | None = None,
                  home: Path | None = None, spawn=None,
                  idle=None, cold_lookup=None, notifier=None,
-                 call_placer=None) -> None:
+                 call_placer=None, message_launcher=None) -> None:
         self._db_file = db_file if db_file is not None else db_path(home)
         self._home = home
         self._spawn = spawn or _default_spawn
@@ -141,6 +170,7 @@ class PolicyService:
         self._cold_lock = threading.Lock()
         self._cold_lookup_done = False
         self._call_placer = call_placer
+        self._message_launcher = message_launcher
         if notifier is not None:
             self._notifier = notifier
         else:
@@ -148,7 +178,8 @@ class PolicyService:
                 db_file=self._db_file, home=self._home,
                 on_call_back=self._place_call_back,
                 on_ring_next=self._star_number,
-                on_block=self._block_number)
+                on_block=self._block_number,
+                on_message=self._message_number)
 
     def attach_contacts_client(self, client) -> None:
         """Wire the service-process cache sync; the next CheckNumber may
@@ -287,19 +318,24 @@ class PolicyService:
             engine.note_call(store, number, direction, started_ms,
                              duration_ms, disposition,
                              default_region=region)
-        self._maybe_post_silenced(number, direction, disposition)
+        self._maybe_post_card(number, direction, disposition)
 
-    def _maybe_post_silenced(self, number: str, direction: str,
-                             disposition: str) -> None:
-        """Post the silenced-record card for an unanswered silenced call.
+    def _maybe_post_card(self, number: str, direction: str,
+                         disposition: str) -> None:
+        """Post the record card for an unanswered incoming call.
 
-        Runs in this process (the single owner of these cards): the
-        shell's NoteCall is the trigger, the screen row written by the
-        earlier CheckNumber says whether the call was silenced, and the
-        bundled notifier applies the three-state policy plus burst
-        batching. Answered, outgoing, unscreened and non-silenced calls
-        post nothing — a fail-open shell consult leaves no screen row,
-        so the shell's own card is the only one there. Never raises.
+        Runs in this process (the single owner of missed-call cards):
+        the shell's NoteCall is the trigger, the screen row written by
+        the earlier CheckNumber says whether the call rang, and the
+        bundled notifier posts. Silenced verdicts keep the silenced
+        card wording (plus the three-state policy and burst batching),
+        including observed ones that rang; enforced blocks post
+        nothing; every other unanswered incoming — observed blocks and
+        plain rings, including fail-open calls with no screen row —
+        posts the missed-call card. Both go through the
+        ``decide_missed`` gate against the Recents watermark over only
+        their own rows, so a call never posts as both cards. Never
+        raises.
         """
         try:
             if str(direction or "").strip().lower() != "incoming":
@@ -315,19 +351,67 @@ class PolicyService:
                 return
             with Store(self._db_file) as store:
                 latest = store.latest_for(key)
-            if latest is None or latest.verdict != "Silence":
+            if latest is not None and \
+                    latest.verdict == _recents.TOKEN_BLOCK \
+                    and latest.mode != "observed":
                 return
             moment = int(time.time() * 1000)
             with Store(self._db_file) as store:
                 pending = _recents.pending_missed_rows(store)
                 viewed = store.get_recents_viewed()
-            if isinstance(_recents.decide_missed(pending, viewed, moment),
-                          _recents.MissedSuppress):
+                screens = {row.key: self._screen_row(store, row.number)
+                           for row in pending}
+            if latest is not None and \
+                    latest.verdict == _recents.TOKEN_SILENCE:
+                mine = [row for row in pending
+                        if self._is_silenced(screens.get(row.key))]
+                if isinstance(_recents.decide_missed(mine, viewed, moment),
+                              _recents.MissedSuppress):
+                    return
+                self._notifier.screened(latest.e164 or e164, latest.verdict,
+                                        latest.reason, at_ms=moment)
                 return
-            self._notifier.screened(latest.e164 or e164, latest.verdict,
-                                    latest.reason, at_ms=moment)
+            mine = [row for row in pending
+                    if self._did_ring(screens.get(row.key))]
+            outcome = _recents.decide_missed(mine, viewed, moment)
+            if isinstance(outcome, _recents.MissedSuppress):
+                return
+            self._notifier.post_missed(outcome, self._region(), moment)
         except Exception:
             pass
+
+    @staticmethod
+    def _screen_row(store, number: str | None):
+        """Latest screen row behind a call-log number, None when the
+        call was never screened. Never raises."""
+        try:
+            key = (number or "").strip()
+            if not key:
+                return None
+            return store.latest_for(key)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _did_ring(screen) -> bool:
+        """True when a pending row audibly rang: unscreened fail-open
+        calls, plain rings, and observed rows (the phone rang despite
+        the verdict — Android's ``MissedNotifPolicy`` treats those as
+        missed too). Only enforced silences and enforced blocks stayed
+        silent. Verdict literals mirror ``recents.TOKEN_*``."""
+        if screen is None:
+            return True
+        if screen.verdict == "Silence":
+            return False
+        if screen.verdict == "Block" and screen.mode != "observed":
+            return False
+        return True
+
+    @staticmethod
+    def _is_silenced(screen) -> bool:
+        """True for rows the silenced card covers (any mode: observed
+        silences keep the silenced wording)."""
+        return screen is not None and screen.verdict == "Silence"
 
     def flush_daily_digest(self) -> bool:
         """Post the stashed daily summary when its 24 h clock expired."""
@@ -343,6 +427,16 @@ class PolicyService:
         except Exception:
             return None
         return row.lookup_key if row is not None else None
+
+    def _message_number(self, number: str) -> None:
+        """Notification "Message": open TxxT for that number."""
+        try:
+            launcher = self._message_launcher
+            if launcher is None:
+                launcher = _default_message_launcher
+            launcher(number)
+        except Exception:
+            pass
 
     def _place_call_back(self, number: str) -> None:
         """Notification "Call back": place via ModemManager Voice."""
@@ -466,9 +560,9 @@ class PolicyService:
         The shell fires this with auto-start on every tap of a card
         carrying the action-target hint, which re-activates an
         idle-exited service; the number rides in the key and the posted
-        ids persist in the store, so Call back / Ring next time / Block
-        all work with no live memory. Unknown ids do nothing. Never
-        raises.
+        ids persist in the store, so Call back / Message / Ring next
+        time / Block all work with no live memory. Unknown ids do
+        nothing. Never raises.
         """
         try:
             return bool(self._notifier.handle_notification_action(

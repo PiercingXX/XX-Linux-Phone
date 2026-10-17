@@ -123,15 +123,22 @@ def test_service_posts_nothing_unless_silenced_unanswered(tmp_path):
     service.note_call(ADA, "outgoing", int(time.time() * 1000), 0,
                       "missed")
     assert sink.cards == []
-    service.note_call("+19995550100", "incoming",
-                      int(time.time() * 1000), 0, "missed")
-    assert sink.cards == []
     with Store(tmp_path / "calls.db") as store:
         store.add_blocked(BO)
     assert service.check_number(BO) == ("block", "blocked")
     service.note_call(BO, "incoming", int(time.time() * 1000), 0,
                       "missed")
     assert sink.cards == []
+
+
+def test_service_posts_missed_for_unscreened_rung_call(tmp_path):
+    """An unscreened unanswered incoming rang: it posts the missed
+    card, never the silenced one."""
+    service, sink, _placed, _contacts = _silenced_service(tmp_path)
+    service.note_call("+19995550100", "incoming",
+                      int(time.time() * 1000), 0, "missed")
+    (card,) = sink.cards
+    assert card["summary"] == "Missed call"
 
 
 def test_service_card_actions_run_in_service(tmp_path):

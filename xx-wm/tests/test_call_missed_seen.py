@@ -1,83 +1,83 @@
-"""Shell missed-call card: formatted number, tap target (lane missed_seen)."""
-import os
+"""The shell posts no missed-call cards: the dialer owns them all.
+
+The dialer policy service is D-Bus activatable, so NoteCall wakes it
+when it is not running — the shell-side fallback this file once
+covered could only fire when a fake consult reported a silence verdict
+without reaching the service, which the real consult never does (a
+silence verdict always arrives after the reached report). One owner
+posts missed cards, so a call can never card twice.
+"""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'launcher' / 'src'))
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'common'))
 
-import xx_phone  # noqa: E402
+import call_screen  # noqa: E402
 from call_wiring import CallWiring  # noqa: E402
 
 NUMBER = "+14155550100"
-
-
-class _App:
-    def __init__(self):
-        self.seen = []
-
-    def _on_notification(self, notif_id, app_name, summary, body,
-                         desktop_entry, hints, actions=None):
-        self.seen.append({"id": notif_id, "summary": summary,
-                          "body": body, "entry": desktop_entry,
-                          "hints": hints})
-
-
-class _Shade:
-    def __init__(self):
-        self.seen = []
-
-    def add_notification(self, notif_id, app_name, summary, body,
-                         desktop_entry="", actions=None, hints=None):
-        self.seen.append({"id": notif_id, "summary": summary,
-                          "body": body, "entry": desktop_entry})
+STARTED = 1_700_000_000_000
 
 
 class _Win:
-    def __init__(self, app=None):
+    def __init__(self):
         self.config = None
-        self._screen_pending = {"caller": "", "number": NUMBER}
-        self._call_notif_seq = 0
-        self._app = app
-        self.shade = _Shade()
+        self._screen_pending = {"caller": "", "number": NUMBER,
+                                "started_ms": STARTED,
+                                "verdict": None, "reason": "",
+                                "answered": False}
+        self._screen_tracked = {}
+        self._screen_done = set()
+        self._call_ui = None
+        self._call_bar = None
+        self.notes = []
+        self.notifs = []
 
     def get_application(self):
-        return self._app
+        return None
 
     def _ensure_shade(self):
-        return self.shade
+        notifs = self.notifs
+
+        class _Shade:
+            def add_notification(self, *args):
+                notifs.append(args)
+
+        return _Shade()
 
 
-def _expected():
-    return xx_phone.display(
-        NUMBER, xx_phone.user_country("", "", os.environ))
+def _wiring(win, monkeypatch):
+    monkeypatch.setattr(call_screen, 'note_call',
+                        lambda *a, **_k: win.notes.append(a))
+    return CallWiring(win)
 
 
-def test_card_text_uses_shared_display():
-    app = _App()
-    CallWiring(_Win(app))._post_silenced_missed(NUMBER, "unknown caller")
-    (card,) = app.seen
-    assert _expected() in card["summary"]
-    assert card["body"].startswith("Silenced: ")
+def test_no_shell_card_method_remains():
+    assert not hasattr(CallWiring, '_post_silenced_missed')
 
 
-def test_card_tap_opens_dialer_recents():
-    app = _App()
-    CallWiring(_Win(app))._post_silenced_missed(NUMBER, "unknown caller")
-    (card,) = app.seen
-    assert card["entry"] == "io.piercingxx.XXDialer"
+def test_report_end_only_reports_the_call(monkeypatch):
+    win = _Win()
+    _wiring(win, monkeypatch)._report_call_end(
+        NUMBER, 'incoming', STARTED, False)
+    assert win.notes and win.notes[0][1] == 'incoming'
+    assert win.notes[0][4] == 'missed'
+    assert win.notifs == []
 
 
-def test_shade_fallback_carries_number_and_entry():
-    CallWiring(_Win(None))._post_silenced_missed(NUMBER, "unknown caller")
-    win = _Win(None)
-    CallWiring(win)._post_silenced_missed(NUMBER, "unknown caller")
-    assert _expected() in win.shade.seen[-1]["summary"]
-    assert win.shade.seen[-1]["entry"] == "io.piercingxx.XXDialer"
+def test_answered_end_only_reports_the_call(monkeypatch):
+    win = _Win()
+    win._screen_pending['answered'] = True
+    _wiring(win, monkeypatch)._report_call_end(
+        NUMBER, 'incoming', STARTED, True)
+    assert win.notes and win.notes[0][4] == 'answered'
+    assert win.notifs == []
 
 
-def test_withheld_number_never_crashes():
-    app = _App()
-    CallWiring(_Win(app))._post_silenced_missed("", "hidden caller")
-    (card,) = app.seen
-    assert card["summary"] == "Unknown call"
+def test_call_ended_hook_only_reports_the_call(monkeypatch):
+    win = _Win()
+    wiring = _wiring(win, monkeypatch)
+    wiring._on_call_ended()
+    assert win.notes and win.notes[0][4] == 'missed'
+    assert win.notifs == []
+    assert win._screen_pending is None

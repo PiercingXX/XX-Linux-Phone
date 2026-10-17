@@ -400,7 +400,7 @@ class TestWiringVerdicts:
         assert ('incoming', 'Mom', '+15550001111') in events
         assert 'ring' not in events
 
-    def test_silenced_missed_posts_reason(self, monkeypatch):
+    def test_ended_missed_reports_without_posting_a_card(self, monkeypatch):
         import modem_monitor
         events, notifs, notes = [], [], []
         win, _ui, fake_consult, _box = _wiring_win(
@@ -416,7 +416,7 @@ class TestWiringVerdicts:
         wiring._on_call_ended()
         assert notes and notes[0][1] == 'incoming'
         assert notes[0][4] == 'missed'
-        assert notifs and 'Silenced: not in contacts' in notifs[0][3]
+        assert notifs == []
 
     def test_answered_reports_answered(self, monkeypatch):
         import modem_monitor
@@ -922,64 +922,59 @@ def test_shell_consult_activates_real_service(tmp_path):
     assert 'SHELL-CONSULT-OK block blocked' in proc.stdout
 
 
-def _reached_consult(verdict, reason, reached):
-    """Fake consult reporting verdict provenance like the real one."""
+def _verdict_consult(verdict, reason):
+    """Fake consult answering with one verdict, like the real one."""
 
     def _fake(number, on_verdict, **kwargs):
-        callback = kwargs.get('on_reached')
-        if callable(callback):
-            callback(reached)
         on_verdict(verdict, reason)
 
     return _fake
 
 
-class TestSilencedCardOwnership:
-    """Exactly one silenced-call card: the dialer policy service owns it
-    whenever the consult reached the service, and the shell posts its
-    own only on fail-open paths where the service was unreachable."""
+class TestMissedCardOwnership:
+    """The shell never posts a missed-call card: the dialer policy
+    service owns every one, and NoteCall wakes it over D-Bus activation
+    when it is not running. Both terminal paths (the legacy end hook
+    and the snapshot tracker) only report the call."""
 
-    def _incoming(self, monkeypatch, events, verdict, reason, reached,
-                  notifs):
+    def _incoming(self, monkeypatch, events, verdict, reason, notifs):
         import modem_monitor
         win, _ui, _fake, _box = _wiring_win(events, notifs=notifs)
         monkeypatch.setattr(modem_monitor, 'bus_name_has_owner',
                             lambda _n: False)
         monkeypatch.setattr(call_screen, 'consult_check_number',
-                            _reached_consult(verdict, reason, reached))
+                            _verdict_consult(verdict, reason))
         return win
 
-    def test_service_silence_posts_no_shell_card(self, monkeypatch):
+    def test_ended_silence_posts_no_shell_card(self, monkeypatch):
         events, notifs, notes = [], [], []
         win = self._incoming(monkeypatch, events, 'silence',
-                             'unknown caller', True, notifs)
+                             'unknown caller', notifs)
         monkeypatch.setattr(call_screen, 'note_call',
                             lambda *a, **_k: notes.append(a))
         wiring = call_wiring.CallWiring(win)
         wiring._on_call_incoming('Mom', '+15550001111')
-        assert win._screen_pending['consult_reached'] is True
         wiring._on_call_ended()
         assert notes and notes[0][4] == 'missed'
         assert notifs == []
 
-    def test_unreachable_service_posts_shell_card(self, monkeypatch):
+    def test_ended_ring_posts_no_shell_card(self, monkeypatch):
         events, notifs, notes = [], [], []
-        win = self._incoming(monkeypatch, events, 'silence',
-                             'unknown caller', False, notifs)
+        win = self._incoming(monkeypatch, events, 'ring',
+                             'saved contact', notifs)
         monkeypatch.setattr(call_screen, 'note_call',
                             lambda *a, **_k: notes.append(a))
         wiring = call_wiring.CallWiring(win)
         wiring._on_call_incoming('Mom', '+15550001111')
-        assert win._screen_pending['consult_reached'] is False
         wiring._on_call_ended()
         assert notes and notes[0][4] == 'missed'
-        assert notifs and 'Silenced: not in contacts' in notifs[0][3]
+        assert notifs == []
 
-    def test_snapshot_path_skips_card_when_reached(self, monkeypatch):
+    def test_snapshot_path_posts_no_shell_card(self, monkeypatch):
         import modem_monitor
         events, notifs, notes = [], [], []
         win = self._incoming(monkeypatch, events, 'silence',
-                             'unknown caller', True, notifs)
+                             'unknown caller', notifs)
         monkeypatch.setattr(call_screen, 'note_call',
                             lambda *a, **_k: notes.append(a))
         wiring = call_wiring.CallWiring(win)
@@ -993,11 +988,11 @@ class TestSilencedCardOwnership:
         assert notes and notes[0][4] == 'missed'
         assert notifs == []
 
-    def test_snapshot_path_posts_card_when_unreached(self, monkeypatch):
+    def test_snapshot_path_posts_no_shell_card_for_ring(self, monkeypatch):
         import modem_monitor
         events, notifs, notes = [], [], []
-        win = self._incoming(monkeypatch, events, 'silence',
-                             'unknown caller', False, notifs)
+        win = self._incoming(monkeypatch, events, 'ring',
+                             'saved contact', notifs)
         monkeypatch.setattr(call_screen, 'note_call',
                             lambda *a, **_k: notes.append(a))
         wiring = call_wiring.CallWiring(win)
@@ -1009,4 +1004,4 @@ class TestSilencedCardOwnership:
         wiring._on_calls_changed([ringing])
         wiring._on_calls_changed([])
         assert notes and notes[0][4] == 'missed'
-        assert notifs and 'Silenced: not in contacts' in notifs[0][3]
+        assert notifs == []

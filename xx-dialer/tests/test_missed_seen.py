@@ -174,8 +174,19 @@ def test_cancel_event_posts_nothing_and_leaves_watermark(tmp_path):
     service.check_number(ADA)
     service.note_call(ADA, "incoming", base, 30_000, "answered")
     service.note_call(ADA, "outgoing", base, 0, "missed")
-    service.note_call("+19995550100", "incoming", base, 0, "missed")
     assert sink.cards == []
+    assert _viewed_at(tmp_path) == 0
+
+
+def test_unscreened_rung_missed_posts_missed_card(tmp_path):
+    """A fail-open call has no screen row, but it rang: it posts the
+    missed-call card (never the silenced one), and posting alone does
+    not move the watermark — only viewing does."""
+    service, sink, _placed, _contacts = _silenced_service(tmp_path)
+    base = int(time.time() * 1000)
+    service.note_call("+19995550100", "incoming", base, 0, "missed")
+    (card,) = sink.cards
+    assert card["summary"] == "Missed call"
     assert _viewed_at(tmp_path) == 0
 
 

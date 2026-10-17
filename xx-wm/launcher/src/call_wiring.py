@@ -15,29 +15,6 @@ UNKNOWN_RING_REASONS = frozenset({
 })
 
 
-def display_number(number: str) -> str:
-    """User-facing form of a missed-call number (never raises).
-
-    Goes through the shared ``xx_phone`` display rule; the country
-    comes from the locale only (explicit empty operator strings), so
-    this never touches the modem bus from the main thread. Falls back
-    to the number as it came in.
-    """
-    raw = number if isinstance(number, str) else ''
-    if not raw.strip():
-        return ''
-    try:
-        import os as _os
-
-        import xx_phone as _xx_phone
-
-        shown = _xx_phone.display(
-            raw, _xx_phone.user_country("", "", _os.environ))
-    except Exception:
-        return raw
-    return shown or raw
-
-
 def ringer_tone_for(verdict: str, reason: str) -> str:
     """Sound file for a ringing verdict: the unknown-caller tone when
     the dialer's screening verdict says the caller is unknown but
@@ -124,10 +101,6 @@ class CallWiring:
             win._screen_pending = {
                 'number': raw, 'caller': caller, 'started_ms': now_ms,
                 'verdict': None, 'reason': '', 'answered': False,
-                # True once the policy service answered the consult. The
-                # service owns silenced-call record cards, so the shell
-                # posts its own only when the service was unreachable.
-                'consult_reached': False,
             }
         except Exception:
             pass
@@ -183,7 +156,6 @@ class CallWiring:
                     pass
                 return
             if verdict == 'silence':
-                pending['silenced'] = True
                 try:
                     call_ui.stop_ringing()
                 except Exception:
@@ -204,17 +176,8 @@ class CallWiring:
                 except Exception:
                     pass
 
-        def _on_reached(reached: bool) -> None:
-            try:
-                pending = getattr(win, '_screen_pending', None)
-                if (isinstance(pending, dict)
-                        and pending.get('number') == raw):
-                    pending['consult_reached'] = bool(reached)
-            except Exception:
-                pass
-
         try:
-            consult_check_number(raw, _on_verdict, on_reached=_on_reached)
+            consult_check_number(raw, _on_verdict)
         except Exception:
             _on_verdict('ring', 'fail-open')
 
@@ -285,8 +248,13 @@ class CallWiring:
         return None
 
     def _report_call_end(self, number: str, direction: str, started_ms: int,
-                         answered: bool,
-                         silenced_reason: str | None = None) -> None:
+                         answered: bool) -> None:
+        """Report one finished call to the dialer policy service.
+
+        NoteCall wakes the service over D-Bus activation when it is not
+        running, and the service owns every missed-call card — the
+        shell never posts its own, so a call can never card twice.
+        """
         win = self._win
         import time as _time
         try:
@@ -314,41 +282,6 @@ class CallWiring:
             from call_screen import note_call
             note_call(number, direction, int(started_ms), duration_ms,
                       'answered' if answered else 'missed')
-        except Exception:
-            pass
-        if direction == 'incoming' and not answered and silenced_reason:
-            try:
-                self._post_silenced_missed(number, silenced_reason)
-            except Exception:
-                pass
-
-    def _post_silenced_missed(self, number: str, reason: str) -> None:
-        from call_screen import silence_reason_text
-        win = self._win
-        try:
-            display = getattr(win, '_screen_pending', None) or {}
-            caller = display.get('caller') if isinstance(display, dict) else ''
-        except Exception:
-            caller = ''
-        summary = caller or display_number(number) or 'Unknown call'
-        body = 'Silenced: %s' % silence_reason_text(reason)
-        try:
-            win._call_notif_seq = int(getattr(win, '_call_notif_seq', 0)) + 1
-        except Exception:
-            win._call_notif_seq = 1
-        notif_id = 1_910_000_000 + int(getattr(win, '_call_notif_seq', 1))
-        try:
-            app = win.get_application()
-            handler = getattr(app, '_on_notification', None)
-        except Exception:
-            handler = None
-        if callable(handler):
-            handler(notif_id, 'Phone', summary, body,
-                    'io.piercingxx.XXDialer', {})
-            return
-        try:
-            win._ensure_shade().add_notification(
-                notif_id, 'Phone', summary, body, 'io.piercingxx.XXDialer')
         except Exception:
             pass
 
@@ -424,19 +357,10 @@ class CallWiring:
         for path in [p for p in tracked if p not in current]:
             info = tracked.pop(path)
             try:
-                silenced = None
-                pending = getattr(win, '_screen_pending', None)
-                if (isinstance(pending, dict)
-                        and pending.get('number') == info.get('number')
-                        and pending.get('silenced')
-                        and not pending.get('consult_reached')
-                        and info.get('direction') == 'incoming'):
-                    silenced = pending.get('reason') or 'silenced'
                 self._report_call_end(info.get('number', ''),
                                       info.get('direction', 'incoming'),
                                       int(info.get('started_ms', now_ms)),
-                                      bool(info.get('answered', False)),
-                                      silenced)
+                                      bool(info.get('answered', False)))
                 # The legacy on_ended adapter reports the same call below:
                 # mark it reported so the log gets exactly one row.
                 try:
@@ -535,13 +459,9 @@ class CallWiring:
         try:
             pending = getattr(win, '_screen_pending', None)
             if isinstance(pending, dict) and not pending.get('reported'):
-                silenced = (pending.get('reason') or 'silenced'
-                            if pending.get('silenced')
-                            and not pending.get('consult_reached') else None)
                 self._report_call_end(pending.get('number', ''), 'incoming',
                                       int(pending.get('started_ms', 0)),
-                                      bool(pending.get('answered', False)),
-                                      silenced)
+                                      bool(pending.get('answered', False)))
             win._screen_pending = None
         except Exception:
             pass

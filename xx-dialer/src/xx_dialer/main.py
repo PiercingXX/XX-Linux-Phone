@@ -172,11 +172,10 @@ def build_dialer_view(deps: DialerDeps):
 def _watch_calls(voice, view) -> None:
     """Refresh Recents on call changes.
 
-    The shell owns the incoming surface and its missed-call card, and
-    the policy service process owns the silenced-record cards, so this
-    watcher only keeps the store-driven UI honest: any call-list or
-    state change refreshes Recents (rows and the unread badge). It
-    never posts a notification.
+    The shell owns the incoming surface only, and the policy service
+    process owns every missed-call card, so this watcher only keeps
+    the store-driven UI honest: any call-list or state change refreshes
+    Recents (rows and the unread badge). It never posts a notification.
     """
     import gi
 

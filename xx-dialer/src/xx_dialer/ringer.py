@@ -1,18 +1,23 @@
-"""Silenced-call record cards over org.freedesktop.Notifications.
+"""Post-hoc call record cards over org.freedesktop.Notifications.
 
-The shell owns the incoming surface and its own missed-call card; this
-module posts the dialer's post-hoc record — ``Silenced call`` /
-``N silenced calls`` with the reason string — obeying the three-state
+The dialer policy service owns every missed-call card; the shell posts
+none. Silenced calls keep the ``Silenced call`` / ``N silenced calls``
+wording with the reason string — obeying the three-state
 ``silenced_notif_policy`` (immediately / daily summary / never) and
 collapsing bursts inside the 60 s window into one card (port of
-``ring/SilencedNotifier.kt`` + ``ring/SilenceBatcher.kt``). The daily
-summary stashes into the store and flushes opportunistically on each new
-silenced call and on every app start — no alarms.
+``ring/SilencedNotifier.kt`` + ``ring/SilenceBatcher.kt``). Calls that
+rang but went unanswered post the ``Missed call`` / ``N missed calls``
+card instead (port of ``ring/MissedCallReceiver.kt`` +
+``ring/MissedNotifContent.kt``), gated by the same ``decide_missed``
+seen rules. The daily summary stashes into the store and flushes
+opportunistically on each new silenced call and on every app start —
+no alarms.
 
-Single cards carry the recovery actions Call back, Ring next time and
-Block; batch cards carry none (same rule as the Android original). Every
-bus failure degrades to a dropped card, never a raise — a refused card
-must not crash the app.
+Single silenced cards carry Call back, Ring next time and Block; single
+missed cards carry Call back, Message and Block, plus Ring next time
+for unknown callers; batch cards carry none (same rule as the Android
+original). Every bus failure degrades to a dropped card, never a
+raise — a refused card must not crash the app.
 
 All Gio use is injectable: ``notify`` replaces the FDN sender, the
 action handlers replace modem/contacts work, and the store/config come
@@ -21,6 +26,8 @@ from plain paths, so headless tests drive everything through fakes.
 from __future__ import annotations
 
 import time
+
+import xx_phone
 
 from xx_dialer import applog, config as app_config
 from xx_dialer import recents
@@ -33,12 +40,14 @@ NOTIF_IFACE = "org.freedesktop.Notifications"
 ACTION_TARGET_HINT = "x-xx-wm-action-target"
 
 REPLACES_SILENCED = 1
+REPLACES_MISSED = 2
 
 APP_NAME = "XX Dialer"
 
 _ACTION_CALL_BACK = "call-back"
 _ACTION_RING_NEXT = "ring-next-time"
 _ACTION_BLOCK = "block-contact"
+_ACTION_MESSAGE = "message"
 
 _ACTION_ALIASES = {
     "call-back": _ACTION_CALL_BACK,
@@ -47,6 +56,8 @@ _ACTION_ALIASES = {
     "star": _ACTION_RING_NEXT,
     "block-contact": _ACTION_BLOCK,
     "block": _ACTION_BLOCK,
+    "message": _ACTION_MESSAGE,
+    "sms": _ACTION_MESSAGE,
 }
 
 _ACTION_DEDUPE_MS = 30_000
@@ -104,6 +115,7 @@ class Notifier:
 
     def __init__(self, db_file=None, home=None, notify=None,
                  on_call_back=None, on_ring_next=None, on_block=None,
+                 on_message=None,
                  bus=None, gio=None, glib=None) -> None:
         from pathlib import Path as _Path
 
@@ -115,6 +127,7 @@ class Notifier:
         self._on_call_back = on_call_back or (lambda _e164: None)
         self._on_ring_next = on_ring_next or (lambda _e164: None)
         self._on_block = on_block or (lambda _e164: None)
+        self._on_message = on_message or (lambda _e164: None)
         self._bus = bus
         self._gio = gio
         self._glib = glib
@@ -177,6 +190,90 @@ class Notifier:
         self._send(REPLACES_SILENCED, title, body, actions,
                    e164=(e164 or "").strip())
 
+    def post_missed(self, outcome: recents.MissedPost,
+                    region: str | None = None,
+                    now_ms: int | None = None) -> None:
+        """Post the missed-call card for one ``decide_missed`` outcome.
+
+        One unseen call names the caller (the saved name, else the
+        shared display form) plus the time, with Call back, Message and
+        Block — and Ring next time for unknown callers only. Several
+        unseen share one grouped card with the latest callers newest
+        first and no actions; tapping it opens the dialer on Recents.
+        The missed replace id is its own, so a new missed call updates
+        the card instead of stacking, and silenced cards are untouched.
+        Never raises.
+        """
+        try:
+            count = max(1, int(outcome.count))
+        except (TypeError, ValueError):
+            count = 1
+        moment = now_ms if now_ms is not None else _now_ms()
+        area = region or self._region()
+        subject = getattr(outcome, "subject", None)
+        if count == 1 and subject is not None:
+            number = (subject.number or "").strip()
+            name = self._caller_name(number, subject.cached_name)
+            who = name or self._display_number(number, area)
+            when = recents.format_when(subject.time_ms, moment)
+            actions: list[tuple[str, str]] = []
+            if number:
+                actions = [
+                    ("%s:%s" % (_ACTION_CALL_BACK, number), "Call back"),
+                    ("%s:%s" % (_ACTION_MESSAGE, number), "Message"),
+                ]
+                if not name:
+                    actions.append(
+                        ("%s:%s" % (_ACTION_RING_NEXT, number),
+                         "Ring next time"))
+                actions.append(
+                    ("%s:%s" % (_ACTION_BLOCK, number), "Block"))
+            self._send(REPLACES_MISSED,
+                       recents.missed_title(count),
+                       "%s · %s" % (who, when), actions, e164=number)
+            return
+        if count == 1:
+            when = recents.format_when(moment, moment)
+            self._send(REPLACES_MISSED, recents.missed_title(count),
+                       when, [], e164="")
+            return
+        labels = []
+        for row in getattr(outcome, "covered", None) or []:
+            number = (row.number or "").strip()
+            labels.append(self._caller_name(number, row.cached_name)
+                          or self._display_number(number, area))
+        body = "\n".join(recents.inbox_lines(labels))
+        self._send(REPLACES_MISSED, recents.missed_title(count),
+                   body, [], e164="")
+
+    def _caller_name(self, number: str,
+                     cached_name: str | None) -> str:
+        """Saved name for a card: the mirror's display name, else the
+        call log's cached name, else "" (the caller formats the number)."""
+        if (number or "").strip():
+            try:
+                with Store(self._db_file) as store:
+                    found = store.find_mirror(number.strip())
+            except Exception:
+                found = None
+            if found is not None and (found.display_name or "").strip():
+                return found.display_name.strip()
+        if cached_name and cached_name.strip():
+            return cached_name.strip()
+        return ""
+
+    def _display_number(self, number: str, region: str) -> str:
+        """Shared display form of a card number, never blank, never a raise."""
+        raw = (number or "").strip()
+        if not raw:
+            return "Withheld"
+        try:
+            shown = xx_phone.display(
+                raw, xx_phone.display_country(region))
+        except Exception:
+            return raw
+        return shown or raw
+
     def flush_daily_if_due(self, now_ms: int | None = None) -> bool:
         """Post the stashed daily summary when its 24 h clock expired.
 
@@ -211,13 +308,17 @@ class Notifier:
     def dismiss_silenced(self) -> None:
         self._close(REPLACES_SILENCED)
 
+    def dismiss_missed(self) -> None:
+        self._close(REPLACES_MISSED)
+
     # ---- notification actions --------------------------------------------
 
     def handle_action(self, key: str) -> bool:
         """Dispatch one FDN action key (``kind:number``). Never raises.
 
-        True when the action ran; the caller marks the card's calls
-        seen on True, so a failed tap keeps its card up.
+        True when the action ran; the caller closes the card it rode in
+        on and marks the card's calls seen on True, so a failed tap
+        keeps its card up.
         """
         try:
             kind, _, number = str(key).partition(":")
@@ -227,7 +328,12 @@ class Notifier:
             return False
 
     def _dispatch(self, kind: str | None, number: str) -> bool:
-        """Run one canonical action; False when the key is unusable."""
+        """Run one canonical action; False when the key is unusable.
+
+        Closing is the caller's job (it holds the server id): both the
+        live signal path and the shell forward close the tapped card,
+        so a missed-card tap never closes the silenced card instead.
+        """
         if kind is None or not number:
             return False
         try:
@@ -237,9 +343,10 @@ class Notifier:
                 self._on_ring_next(number)
             elif kind == _ACTION_BLOCK:
                 self._on_block(number)
+            elif kind == _ACTION_MESSAGE:
+                self._on_message(number)
             else:
                 return False
-            self.dismiss_silenced()
         except Exception:
             return False
         return True
@@ -273,6 +380,7 @@ class Notifier:
             if not self._dispatch(kind, number):
                 return False
             self._mark_acted(notif_id, str(action_key or ""))
+            self._close_server(notif_id)
             self._acknowledge_posted(notif_id)
             applog.write("cards", "action id=%d %s %s" % (
                 notif_id, kind, number), self._home)
@@ -436,11 +544,17 @@ class Notifier:
         server_id = self._server_ids.pop(replaces_id, 0)
         if not server_id:
             return
-        closer = self._fdn_closer()
-        if closer is None:
-            return
+        self._close_server(server_id)
+
+    def _close_server(self, server_id: int) -> None:
+        """Close one posted card by its server id. Never raises."""
         try:
-            closer(server_id)
+            closer = self._fdn_closer()
+            if closer is None:
+                return
+            closer(int(server_id))
+        except (TypeError, ValueError):
+            pass
         except Exception:
             pass
 
@@ -547,6 +661,7 @@ class Notifier:
         except (TypeError, ValueError):
             pass
         if self.handle_action(str(key)):
+            self._close_server(seen_id)
             self._acknowledge_posted(seen_id)
 
     def _on_closed_signal(self, _conn, _sender, _path, _iface, _signal,

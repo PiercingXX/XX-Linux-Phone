@@ -24,17 +24,6 @@ VALID_VERDICTS = frozenset({"ring", "silence", "block"})
 
 NOTE_TIMEOUT_MS = 2_000
 
-_REASON_DISPLAY = {
-    "unknown caller": "not in contacts",
-    "hidden caller": "withheld number",
-}
-
-
-def silence_reason_text(reason: str) -> str:
-    """Human fragment for a silenced-call notification body."""
-    token = (reason or "").strip()
-    return _REASON_DISPLAY.get(token, token or "silenced")
-
 
 def _gio_glib(gio, glib):
     if gio is not None and glib is not None:
@@ -53,8 +42,7 @@ def consult_check_number(number, on_verdict, bus=None, gio=None,
     happens through the call itself. ``on_verdict(verdict, reason)``
     fires exactly once on the main loop. ``on_reached(True)`` fires when
     the service answered (even with an unusable verdict, which still
-    fail-opens); ``on_reached(False)`` when it never did, so the shell
-    can tell a service verdict apart from a fail-open fallback.
+    fail-opens); ``on_reached(False)`` when it never did.
     """
     def _report_reached(reached: bool) -> None:
         if on_reached is not None:

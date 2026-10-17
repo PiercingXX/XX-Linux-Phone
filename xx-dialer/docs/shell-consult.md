@@ -72,28 +72,26 @@ display text, not a dispatch key: switch on `verdict` only.
 
 ## Silenced-call record cards: exactly one owner
 
-The **dialer policy service** owns the post-hoc "Silenced call" /
-"N silenced calls" record cards (batching, the three-state
-`silenced_notif_policy`, the daily digest, and the Call back / Ring
-next time / Block actions, ported from `ring/SilencedNotifier.kt` +
-`ring/SilenceBatcher.kt`). The shell's `NoteCall` after an unanswered
-silenced call is what triggers the card: the service matches the call
-against the screen row its own `CheckNumber` wrote and posts the card
-from the service process, with or without the GUI running. The GUI
-never posts these cards (it only shows the Recents rows and badges).
+The **dialer policy service** owns every post-hoc missed-call record
+card: "Silenced call" / "N silenced calls" for silenced verdicts
+(batching, the three-state `silenced_notif_policy`, the daily digest,
+and the Call back / Ring next time / Block actions, ported from
+`ring/SilencedNotifier.kt` + `ring/SilenceBatcher.kt`), and "Missed
+call" / "N missed calls" for unanswered incoming calls that rang
+(ported from `ring/MissedCallReceiver.kt` +
+`ring/MissedNotifContent.kt`, with the Call back / Message / Block
+actions plus Ring next time for unknown callers). The shell's
+`NoteCall` after an unanswered incoming is what triggers the card: the
+service matches the call against the screen row its own `CheckNumber`
+wrote and posts the card from the service process, with or without
+the GUI running. The GUI never posts these cards (it only shows the
+Recents rows and badges).
 
-Shell rule: when the consult **reached the service** (any verdict
-came back, including fail-open-shaped `("ring", "fail-open")` from a
-bad verdict — i.e. the service answered), the shell must NOT post its
-own silenced notification. The service posts the record card when the
-silenced call ends unanswered. The shell posts its own silenced card
-(`call_wiring._post_silenced_missed`, the "Silenced: \<reason\>" card)
-**only on fail-open paths** where the service was unreachable (error
-or timeout, no verdict), so an unanswered silenced call still leaves
-exactly one card instead of none. With the dialer open, the user gets
-one card (from the service); with it closed, the batching still
-happens (in the service). Duplicates mean the shell posted on a
-consult that reached the service — that is the bug to fix shell-side.
+Shell rule: the shell **never** posts a missed-call card of its own.
+`NoteCall` wakes the service over D-Bus activation when it is not
+running, so no shell fallback is needed on fail-open paths — the old
+shell-side silenced fallback is gone. Duplicates mean something other
+than the service posted — that is the bug to fix.
 
 ## `NoteCall`
 
@@ -101,8 +99,9 @@ After **every** call ends (incoming and outgoing, answered or not),
 report the outcome so the dialer's repeat-caller (15 min) and
 recent-outgoing (48 h) state stays correct no matter which surface
 placed or answered the call. Fire-and-forget. `NoteCall` for an
-unanswered silenced incoming is additionally the trigger for the
-service's silenced-record card above.
+unanswered incoming is additionally the trigger for the service's
+missed-call card above (silenced or missed wording, per the screen
+verdict).
 
 - Signature: `NoteCall(in s number, in s direction, in x started_ms,
   in x duration_ms, in s disposition)` — no return values.
@@ -118,7 +117,7 @@ service's silenced-record card above.
 
 ## `HandleNotificationAction`
 
-Every silenced-call card the service posts carries the hint
+Every missed-call card the service posts carries the hint
 `x-xx-wm-action-target` (string):
 
 ```
@@ -126,8 +125,11 @@ Every silenced-call card the service posts carries the hint
 ```
 
 with actions `call-back:<e164>` / `ring-next-time:<e164>` /
-`block-contact:<e164>` (labels Call back / Ring next time / Block;
-batch cards carry no actions). When the user invokes one, the shell
+`block-contact:<e164>` on silenced cards (labels Call back / Ring next
+time / Block) and `call-back:<e164>` / `message:<e164>` /
+[`ring-next-time:<e164>` for unknown callers] / `block-contact:<e164>`
+on single missed cards (batch cards carry no actions). When the user
+invokes one, the shell
 emits `ActionInvoked` as usual **and** calls
 `HandleNotificationAction(in u id, in s action_key)` on that target
 with auto-start allowed (async, 5 s timeout, fire-and-forget), so the

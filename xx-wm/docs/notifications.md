@@ -23,7 +23,8 @@ expires silently.
 
 Some actions belong to a background service that has already exited by
 the time the user taps: the dialer policy service posts Call back /
-Ring next time / Block on its silenced-call cards and then idle-exits,
+Message / Ring next time / Block on its missed-call cards and then
+idle-exits,
 and the TxxT daemon posts Reply / Open the same way. A plain
 `ActionInvoked` signal would go nowhere, because signals do not
 auto-start services.
@@ -52,6 +53,9 @@ x-xx-wm-action-target:
   "io.piercingxx.XXDialer.Policy /io/piercingxx/XXDialer/Policy io.piercingxx.XXDialer.Policy1"
 ```
 
-with actions `call-back` / `ring-next-time` / `block-contact`. The
+with actions `call-back` / `ring-next-time` / `block-contact`, plus
+`message` on missed-call cards (single cards for known callers carry
+`call-back` / `message` / `block-contact`, adding `ring-next-time` for
+unknown callers; grouped cards carry no actions). The
 service implements `HandleNotificationAction` with the same `(u, s)`
 signature and dispatches on the action key it posted.

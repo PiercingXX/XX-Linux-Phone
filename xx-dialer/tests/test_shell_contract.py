@@ -100,14 +100,15 @@ def test_consult_call_shape_matches():
 
 def test_wiring_handoff_matches():
     """Incoming consults once; block hangs up shell-side; silence only
-    stops the ringer; the shell posts its own silenced card only when
-    the consult never reached the service (the service owns those)."""
+    stops the ringer; the shell never posts a missed-call card — the
+    dialer policy service owns every one (NoteCall wakes it over D-Bus
+    activation when it is not running)."""
     source = _read(_shell_root(), "launcher", "src", "call_wiring.py")
     assert "consult_check_number(raw, _on_verdict" in source
     assert "hangup_call(path" in source
     assert "call_ui.stop_ringing()" in source
-    assert "not pending.get('consult_reached')" in source
-    assert "_post_silenced_missed" in source
+    assert "_post_silenced_missed" not in source
+    assert "consult_reached" not in source
     assert "XXDialer.Policy" not in source
 
 
@@ -155,7 +156,8 @@ def test_action_target_matches_shell_daemon():
     assert match is not None
     assert ringer.action_target() == match.group(1)
     assert {ringer._ACTION_CALL_BACK, ringer._ACTION_RING_NEXT,
-            ringer._ACTION_BLOCK} == {"call-back", "ring-next-time",
-                                      "block-contact"}
-    for name in ("call-back", "ring-next-time", "block-contact"):
+            ringer._ACTION_BLOCK, ringer._ACTION_MESSAGE} == {
+                "call-back", "ring-next-time", "block-contact", "message"}
+    for name in ("call-back", "ring-next-time", "block-contact",
+                 "message"):
         assert ("`%s`" % name) in doc
