@@ -684,7 +684,10 @@ class Database:
             paths_module.ensure_parent_for(path))
         self._path = str(target)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(self._path)
+        # Shared with the player service worker thread (single writer);
+        # writes already serialize on _lock.
+        self._conn = sqlite3.connect(
+            self._path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._lock, self._conn as conn:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -703,7 +706,7 @@ class Database:
         db = cls.__new__(cls)
         db._path = ":memory:"
         db._lock = threading.RLock()
-        db._conn = sqlite3.connect(":memory:")
+        db._conn = sqlite3.connect(":memory:", check_same_thread=False)
         db._conn.row_factory = sqlite3.Row
         with db._lock, db._conn as conn:
             conn.execute("PRAGMA journal_mode=MEMORY")

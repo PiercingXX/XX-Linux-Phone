@@ -297,6 +297,27 @@ service's state. Progress writes go through the existing sync path (§2.8);
 the service never touches the token beyond the in-memory bearer handed at
 play time (libsecret stays in the GUI + sync worker).
 
+M2 UI contract (`io.piercingxx.XXAudiobook.Player1` at
+`/io/piercingxx/XXAudiobook/Player`; every call blocks, so the GUI runs
+them on a worker thread): `Open(item)` loads paused at the resume point
+(streaming `POST /play`, else the cached detail + verified local files
+with no session); `Play/Pause/PlayPause/Stop`; `SeekTo(us)`,
+`SeekRelative(us)`, `SkipBack/SkipForward` (prefs intervals),
+`NextChapter/PreviousChapter` (3 s restart rule); `SetRate` (0.5-3.0,
+remembered per book); `Sleep(ms)` / `SleepEndOfChapter` / `CancelSleep`;
+`SetSession(api_base, bearer)` / `ClearSession` (memory only);
+`GetState() -> a{sv}` (`item_id, title, author, cover_url, status,
+position_us, duration_us, rate, volume, chapter_index/count,
+track_index/count, has_book, can_go_next/previous, sleep_remaining_ms,
+sleep_end_of_chapter`); `CheckConflict(item)` / `ResolveConflict(item,
+use_server)` for the > 60 s prompt. Signals: `StateChanged(a{sv})` on
+real changes, `BookmarkRequested(item, position_us)` for the bookmark
+custom action. Cold start restores the mini-player paused from the
+last-played pointer + cached detail (`restore`), then plays through
+`Open` + `Play`. MPRIS `OpenUri` takes `book:{item_id}`; the
+`io.piercingxx.XXAuto.Actions1` rows are skip-back, bookmark,
+skip-forward in that order.
+
 ### 2.9 Progress sync: 15 s cadence, offline queue, LWW, > 60 s prompt
 
 `SyncScheduler` cadence verbatim: local `record()` + `setLastPlayed()` (+

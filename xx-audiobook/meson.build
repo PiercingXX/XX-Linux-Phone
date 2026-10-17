@@ -40,8 +40,23 @@ install_data(
     'src/xx_audiobook/repos.py',
     'src/xx_audiobook/api_routes.py',
     'src/xx_audiobook/applog.py',
+    'src/xx_audiobook/timeline.py',
+    'src/xx_audiobook/stream_auth.py',
+    'src/xx_audiobook/sleep.py',
+    'src/xx_audiobook/sync.py',
+    'src/xx_audiobook/restore.py',
+    'src/xx_audiobook/player.py',
   ],
   install_dir: join_paths(app_datadir, 'xx_audiobook'),
+)
+
+# Player service subpackage (background daemon: own bus name + MPRIS).
+install_data(
+  [
+    'src/xx_audiobook/service/__init__.py',
+    'src/xx_audiobook/service/player_service.py',
+  ],
+  install_dir: join_paths(app_datadir, 'xx_audiobook', 'service'),
 )
 
 # Launcher -> $prefix/bin/xx-audiobook
@@ -85,14 +100,33 @@ install_data(
 # D-Bus session activation: the .desktop is DBusActivatable, so the bus
 # must know how to start the app. Without this file the first launch
 # from the drawer fails to activate. Name= must equal the owned name.
-# (M2 adds io.piercingxx.XXAudiobook.Player.service for the player daemon,
-# which must own its own name, never this one.)
 dbus_conf = configuration_data()
 dbus_conf.set('bindir', bindir)
 
 configure_file(
   input: 'data/io.piercingxx.XXAudiobook.service.in',
   output: 'io.piercingxx.XXAudiobook.service',
+  configuration: dbus_conf,
+  install: true,
+  install_dir: join_paths(datadir, 'dbus-1', 'services'),
+)
+
+# Player daemon launcher -> $prefix/bin/xx-audiobook-player
+configure_file(
+  input: 'data/xx-audiobook-player.in',
+  output: 'xx-audiobook-player',
+  configuration: launcher_conf,
+  install: true,
+  install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)
+
+# Player activation: the daemon owns io.piercingxx.XXAudiobook.Player
+# (never the app id, or the GUI would exit as a secondary instance),
+# so idle-exit never breaks clients. Name= must equal the owned name.
+configure_file(
+  input: 'data/io.piercingxx.XXAudiobook.Player.service.in',
+  output: 'io.piercingxx.XXAudiobook.Player.service',
   configuration: dbus_conf,
   install: true,
   install_dir: join_paths(datadir, 'dbus-1', 'services'),

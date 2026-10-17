@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=io.piercingxx.XXAudiobook.Player
+Exec=@bindir@/xx-audiobook-player

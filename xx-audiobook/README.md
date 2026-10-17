@@ -36,8 +36,25 @@ XX_AUDIOBOOK_API_BASE=http://127.0.0.1:8750/ PYTHONPATH=src:../common python3 -m
 |------|------------------|
 | `PORT_SPEC.md` | Feature inventory, Linux mappings, XX-WM integration, milestone plan |
 | `meson.build` / `data/` | Install: package to datadir, launcher to bindir, `.desktop`, metainfo, icon, D-Bus activation |
-| `src/xx_audiobook/` | `main.py` (Adw.Application + five-tab shell), `paths.py`, `prefs.py`, `auth.py`, `api_routes.py`, `applog.py` |
+| `src/xx_audiobook/` | `main.py` (Adw.Application + five-tab shell), `paths.py`, `prefs.py`, `auth.py`, `api_routes.py`, `applog.py`, `timeline.py` (book timeline), `sleep.py` (sleep timer), `stream_auth.py` (estate-only bearer), `sync.py` (session sync timing), `restore.py` (mini-player restore), `player.py` (playbin engine + client), `service/player_service.py` (background daemon) |
 | `tests/` | pytest smoke tests, headless (no display, no network beyond the loopback fixture) |
+
+## Background player service (M2)
+
+The daemon owns `io.piercingxx.XXAudiobook.Player` (never the app id)
+plus `org.mpris.MediaPlayer2.xx_audiobook`, so the window always starts
+while it runs. It idle-exits after 60 s with no book loaded
+(`XX_AUDIOBOOK_PLAYER_IDLE_TIMEOUT` overrides); the D-Bus activation
+file restarts it on demand:
+
+```sh
+PYTHONPATH=src python3 -m xx_audiobook.service.player_service
+PYTHONPATH=src XX_AUDIOBOOK_AUDIOSINK=fakesink python3 -m xx_audiobook.service.player_service --idle-timeout 5
+```
+
+The UI contract (`Player1` methods, `GetState`, `StateChanged`,
+`BookmarkRequested`) is documented in [PORT_SPEC.md](PORT_SPEC.md)
+(§2.8, "M2 UI contract"). No UI ships in this lane.
 
 ## Install
 

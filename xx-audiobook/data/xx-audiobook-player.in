@@ -1,0 +1,5 @@
+#!/bin/sh
+# Installed launcher: run the background player service from the datadir.
+# The service owns io.piercingxx.XXAudiobook.Player (never the app id),
+# plus org.mpris.MediaPlayer2.xx_audiobook while it runs.
+PYTHONPATH="@app_dir@${PYTHONPATH:+:$PYTHONPATH}" exec @python@ -m xx_audiobook.service.player_service "$@"
