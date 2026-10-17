@@ -46,6 +46,7 @@ install_data(
     'src/xx_audiobook/sync.py',
     'src/xx_audiobook/restore.py',
     'src/xx_audiobook/player.py',
+    'src/xx_audiobook/download.py',
   ],
   install_dir: join_paths(app_datadir, 'xx_audiobook'),
 )
@@ -130,4 +131,41 @@ configure_file(
   configuration: dbus_conf,
   install: true,
   install_dir: join_paths(datadir, 'dbus-1', 'services'),
+)
+
+# Download worker launcher -> $prefix/bin/xx-audiobook-download
+configure_file(
+  input: 'data/xx-audiobook-download.in',
+  output: 'xx-audiobook-download',
+  configuration: launcher_conf,
+  install: true,
+  install_dir: get_option('bindir'),
+  install_mode: 'rwxr-xr-x',
+)
+
+# Background downloads: systemd user units (opt-in; enable explicitly,
+# never auto-enabled at install). The per-book template is started by
+# the app on enqueue; the sync timer sweeps Queued rows every 15 min.
+systemd_conf = configuration_data()
+systemd_conf.set('bindir', bindir)
+
+configure_file(
+  input: 'data/systemd/xx-audiobook-download@.service.in',
+  output: 'xx-audiobook-download@.service',
+  configuration: systemd_conf,
+  install: true,
+  install_dir: join_paths(datadir, 'systemd', 'user'),
+)
+
+configure_file(
+  input: 'data/systemd/xx-audiobook-sync.service.in',
+  output: 'xx-audiobook-sync.service',
+  configuration: systemd_conf,
+  install: true,
+  install_dir: join_paths(datadir, 'systemd', 'user'),
+)
+
+install_data(
+  'data/systemd/xx-audiobook-sync.timer',
+  install_dir: join_paths(datadir, 'systemd', 'user'),
 )

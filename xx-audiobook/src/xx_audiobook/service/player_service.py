@@ -1409,6 +1409,14 @@ def build_service(db_path=None, api_base: str | None = None,
         store_module.Database())
     if backend is None:
         backend = player_module.RealGstBackend()
+    if local_file is None:
+        try:
+            from xx_audiobook import download as download_module
+
+            local_file = download_module.DownloadRepository(
+                None, db, download_module.BookFiles()).local_file
+        except Exception:
+            local_file = None
     service = PlayerService(db, None, backend, local_file=local_file)
     if api_base and bearer:
         service.set_session(api_base, bearer)

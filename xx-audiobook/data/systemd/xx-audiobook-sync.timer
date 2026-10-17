@@ -1,0 +1,10 @@
+[Unit]
+Description=XX-Audiobook queued download retry (every 15 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Unit=xx-audiobook-sync.service
+
+[Install]
+WantedBy=timers.target

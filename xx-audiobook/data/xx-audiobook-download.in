@@ -1,0 +1,5 @@
+#!/bin/sh
+# Installed launcher: run one queued book download in the background.
+# The per-book systemd template passes the item id as %i; --retry-queued
+# sweeps every Queued/Failed-retryable row (used by the sync timer).
+PYTHONPATH="@app_dir@${PYTHONPATH:+:$PYTHONPATH}" exec @python@ -m xx_audiobook.download "$@"

@@ -357,6 +357,21 @@ VPN (Tailscale) is not metering by itself; default wifi-only ⇒ download only
 when Online. Storage-low refuses new downloads. The queue UI (§1.1) and
 `isComplete()` offline-play gate are unchanged.
 
+M4 UI state API (`src/xx_audiobook/download.py`, no UI here): the
+Downloads screen uses `DownloadsState.list()` (book rows newest-first),
+`status(item_id)` (`state`, `bytes_done/total`, `error`, `is_complete`),
+`enqueue(item_id, title)` / `cancel(item_id)` / `retry(item_id)` /
+`delete(item_id)`, and `block_reason()` ("Waiting for Wi-Fi." /
+"No network connection." / None); the Setup screen uses
+`wifi_only()` / `set_wifi_only(bool)` (the `download_wifi_only` pref,
+default true), `storage_used_bytes()` / `storage_state()`
+(`used_bytes`, `free_bytes`, `low`), and `submit_enqueue` /
+`submit_probe_network` from the GTK thread (results via
+`GLib.idle_add`). The player service resolves every track through
+`DownloadRepository.local_file()` first (verified `file://`, no
+auth header) and opens fully-downloaded books offline from the
+cached detail with `sessionId = null`.
+
 ### 2.11 Zones (Home Assistant)
 
 Unchanged verbs through the service: `GET /api/locations` →

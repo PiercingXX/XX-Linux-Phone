@@ -1,0 +1,9 @@
+[Unit]
+Description=XX-Audiobook background download sweep (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@bindir@/xx-audiobook-download --retry-queued
+Nice=10

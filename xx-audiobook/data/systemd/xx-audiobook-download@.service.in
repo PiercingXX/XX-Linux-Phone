@@ -1,0 +1,9 @@
+[Unit]
+Description=XX-Audiobook download of book %i (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@bindir@/xx-audiobook-download %i
+Nice=10
