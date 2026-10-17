@@ -22,3 +22,7 @@ option('systemd_user_unit_dir',
 option('wordlist',
        type: 'string', value : '/usr/share/dict/words',
        description : 'Filename of the word list used by the fzf completer')
+
+option('glide',
+       type: 'boolean', value: true,
+       description: 'Whether to build the glide (swipe) decoder library')

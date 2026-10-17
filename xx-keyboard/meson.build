@@ -205,12 +205,16 @@ subdir('protocol')
 subdir('src')
 subdir('tests')
 subdir('doc')
+if get_option('glide')
+  subdir('glide')
+endif
 
 summary(
   {
     'Tests': get_option('tests'),
     'Documentation': get_option('gtk_doc'),
     'Manpages': get_option('man'),
+    'Glide': get_option('glide'),
   },
   bool_yn: true,
   section: 'Build',

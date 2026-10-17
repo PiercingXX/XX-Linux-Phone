@@ -1,0 +1,28 @@
+Provenance of xx-keyboard/glide
+==============================
+
+Decoder sources (latinime/)
+---------------------------
+AOSP LatinIME native decoder, via the owner's xx-keyboard
+(ref/xx-keyboard/app/src/main/jni/src), which pins pristine AOSP
+LatinIME and carries the owner's own gesture scoring tuning in
+suggest/policyimpl/gesture/gesture_scoring_params.cpp.
+
+Licensed under the Apache License, Version 2.0; each file keeps its
+upstream copyright header. Apache-2.0 code linked into the GPL-3.0
+Stevia keyboard is license-compatible (GPL-3.0 whole, Apache-2.0
+parts retain their grant).
+
+The copied tree is everything tools/glide-replay's Makefile selects:
+all .cpp files under jni/src (there are no com_android_* JNI wrappers
+or jni_common files below that directory, so nothing was excluded).
+The JNI entry points in jni/com_android_*.cpp were deliberately left
+out: xxglide.cpp drives the decoder classes directly with a minimal
+host JNIEnv stand-in (same technique as tools/glide-replay/jni_shim.h).
+
+Dictionaries (dicts/)
+---------------------
+main_en-US.dict and main_en-GB.dict, copied byte-identical from
+ref/xx-keyboard/app/src/main/assets/dicts/. AOSP wordlist lineage
+(via the HeliBoard aosp-dictionaries collection), Apache-2.0, ver4
+binary tries. No license attribute is embedded in the binaries.
