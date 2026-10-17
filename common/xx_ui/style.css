@@ -63,6 +63,12 @@ window {
   outline-style: none;
 }
 
+/* Brand display face (clocks): Space Mono over the house monos; a
+   user-picked family stays in charge (see css.display_family). */
+.xx-display-face {
+  font-family: ${display_family};
+}
+
 /* Kill button gradients/shadows and the default switch everywhere. */
 button {
   background: transparent;
@@ -657,6 +663,94 @@ button.xx-tile.toggle.active:checked:dir(rtl) {
 .xx-tile.active .xx-tile-state {
   color: ${background};
   opacity: 0.75;
+}
+
+/* ---- Glyph tiles (quick settings): the brand opacity ramp of the
+   theme's foreground over its background. Off: ink-raised (3.5%) fill,
+   10% hairline. On: inverted foreground block. Working: dashed 40%
+   border. Attention: a foreground dot, state at text weight. ---- */
+
+button.xx-gtile,
+button.xx-gtile.toggle,
+button.xx-gtile.toggle:checked {
+  /* 80 px tall border-box: GTK min sizes count the content box only. */
+  min-height: 57px;
+  min-width: 0;
+  padding: 11px 8px 10px 10px;
+  background-color: alpha(${foreground}, 0.035);
+  background-image: none;
+  border: 1px solid alpha(${foreground}, 0.10);
+  border-radius: 14px;
+  box-shadow: none;
+  color: alpha(${foreground}, 0.90);
+  transition: none;
+  animation: none;
+}
+
+button.xx-gtile:hover,
+button.xx-gtile.toggle:hover {
+  background-color: alpha(${foreground}, 0.06);
+}
+
+button.xx-gtile:active,
+button.xx-gtile.toggle:active {
+  background-color: alpha(${foreground}, 0.10);
+}
+
+button.xx-gtile.active,
+button.xx-gtile.active:checked,
+button.xx-gtile.toggle.active:checked:dir(ltr),
+button.xx-gtile.toggle.active:checked:dir(rtl),
+button.xx-gtile.toggle.active:hover {
+  background-color: ${foreground};
+  background-image: none;
+  border-color: ${foreground};
+  color: ${background};
+  transition: none;
+  animation: none;
+}
+
+button.xx-gtile.working,
+button.xx-gtile.toggle.working:checked {
+  border: 1px dashed alpha(${foreground}, 0.40);
+}
+
+.xx-gtile-glyph {
+  color: inherit;
+  -gtk-icon-size: 20px;
+}
+
+.xx-gtile-dot {
+  min-width: 6px;
+  min-height: 6px;
+  margin-top: 2px;
+  border-radius: 3px;
+  background-color: transparent;
+}
+
+.xx-gtile.attention .xx-gtile-dot {
+  background-color: ${foreground};
+}
+
+.xx-gtile-label {
+  font-size: ${tiny_px}px;
+  font-weight: 500;
+  /* 0.08em keeps an 8-char caps label (AIRPLANE) inside a 76 px tile. */
+  letter-spacing: 0.08em;
+}
+
+.xx-gtile-state {
+  font-size: ${tiny_px}px;
+  letter-spacing: 0.02em;
+  color: ${muted};
+}
+
+.xx-gtile.attention .xx-gtile-state {
+  color: alpha(${foreground}, 0.90);
+}
+
+.xx-gtile.active .xx-gtile-state {
+  color: alpha(${background}, 0.66);
 }
 
 /* ---- Dialog / menu ---- */

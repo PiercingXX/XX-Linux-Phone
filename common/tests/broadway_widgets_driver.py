@@ -117,6 +117,11 @@ def main() -> None:
     rows.append(widgets.status_tile('WiFi', 'HomeNet', active=True,
                                     on_toggle=lambda _b: None))
     rows.append(widgets.status_tile('Mute'))
+    tile = widgets.glyph_tile('xx-none-symbolic', 'Tailnet', 'Sign in',
+                              on_toggle=lambda _b: None)
+    tile.add_css_class('attention')
+    assert widgets.glyph_tile_state(tile).get_text() == 'Sign in'
+    rows.append(tile)
     rows.append(widgets.end_call_button())
     rows.append(widgets.bubble('yeah. 9 at the laundromat', outgoing=True))
     rows.append(widgets.bubble('still on for tonight?', outgoing=False))

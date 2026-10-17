@@ -90,6 +90,7 @@ def main() -> None:
     rows.append(keys)
     rows.append(widgets.call_action(LONG, active=True))
     rows.append(widgets.status_tile(LONG, LONG, active=True))
+    rows.append(widgets.glyph_tile('xx-none-symbolic', LONG, LONG, active=True))
     rows.append(widgets.end_call_button())
     rows.append(widgets.bubble(LONG, outgoing=True))
     rows.append(widgets.bubble(LONG, outgoing=False))

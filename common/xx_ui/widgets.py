@@ -582,6 +582,78 @@ def status_tile_state(button: Gtk.ToggleButton) -> Gtk.Label:
     return button.get_child().get_last_child()
 
 
+# Glyph tiles sit 4-up across 360 px: 8 caps chars is the label budget
+# (AIRPLANE, LOCATION); a longer state line (SSID) ellipsizes.
+_GLYPH_TILE_LABEL_CHARS = 8
+_GLYPH_TILE_STATE_CHARS = 10
+GLYPH_TILE_ICON_PX = 20
+
+
+def glyph_tile(icon_name: str, label_text: str, state: str = '',
+               active: bool = False, on_toggle=None) -> Gtk.ToggleButton:
+    """Quick-settings tile: symbolic glyph top-left, caps label and a
+    state line bottom-left, inverted (foreground block) while on.
+
+    Two extra looks ride on CSS classes the caller toggles: ``working``
+    (dashed border while a toggle finishes off-thread) and ``attention``
+    (a dot top-right, state line at text weight: the tile wants the
+    user, e.g. a sign-in). ``active`` tracks the switch like
+    ``status_tile``; ``glyph_tile_state`` reaches the state line.
+    """
+    button = Gtk.ToggleButton()
+    button.add_css_class('xx-gtile')
+    # The state block's vexpand pins it to the bottom edge; stop it from
+    # propagating so a tall window never stretches the tile rows.
+    button.set_vexpand(False)
+    body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    top = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 0)
+    top.set_valign(Gtk.Align.START)
+    glyph = icon_image(icon_name, GLYPH_TILE_ICON_PX)
+    glyph.add_css_class('xx-gtile-glyph')
+    glyph.set_halign(Gtk.Align.START)
+    glyph.set_hexpand(True)
+    top.append(glyph)
+    dot = Gtk.Box()
+    dot.add_css_class('xx-gtile-dot')
+    dot.set_valign(Gtk.Align.START)
+    dot.set_halign(Gtk.Align.END)
+    top.append(dot)
+    body.append(top)
+    text = Gtk.Box.new(Gtk.Orientation.VERTICAL, 3)
+    text.set_vexpand(True)
+    text.set_valign(Gtk.Align.END)
+    shown = label_text.upper()
+    name = Gtk.Label(label=shown, xalign=0.0)
+    name.add_css_class('xx-gtile-label')
+    _fit_single(name, _GLYPH_TILE_LABEL_CHARS)
+    text.append(name)
+    sub = Gtk.Label(label=state, xalign=0.0)
+    sub.add_css_class('xx-gtile-state')
+    _fit_single(sub, _GLYPH_TILE_STATE_CHARS)
+    text.append(sub)
+    body.append(text)
+    button.set_child(body)
+    if active:
+        button.set_active(True)
+        button.add_css_class('active')
+
+    def _sync(*_args) -> None:
+        if button.get_active():
+            button.add_css_class('active')
+        else:
+            button.remove_css_class('active')
+
+    button.connect('toggled', _sync)
+    if on_toggle is not None:
+        button.connect('toggled', lambda _b: on_toggle(button))
+    return button
+
+
+def glyph_tile_state(button: Gtk.ToggleButton) -> Gtk.Label:
+    """The state line of a ``glyph_tile`` (for live text updates)."""
+    return button.get_child().get_last_child().get_last_child()
+
+
 def bubble(text: str, outgoing: bool = True) -> Gtk.Label:
     widget = label(text, 'xx-bubble-out' if outgoing else 'xx-bubble-in')
     _fit_wrap(widget)

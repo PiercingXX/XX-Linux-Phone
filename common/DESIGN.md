@@ -63,6 +63,14 @@ dialogs/popovers/menus (48 px menu rows, focused entry gets a 1 px
 `foreground` outline); outgoing inverted bubbles, incoming plain text,
 10 px muted timestamps, caption day separators between hairlines.
 
+`GlyphTile` (quick settings, 4-up at 360 px, 80 px tall, radius 14): a
+20 px symbolic glyph over an 8-char caps label and a state line. Off is
+the foreground ramp (3.5% fill, 10% hairline); on inverts; `working`
+dashes the border at 40% while a toggle runs off-thread; `attention`
+adds a 6 px foreground dot and lifts the state line to text weight.
+`.xx-display-face` sets the brand display face (Space Mono) on clocks
+while the UI font is a house mono.
+
 ## Never
 
 Libadwaita blue, HeaderBar chrome, button gradients/shadows, default

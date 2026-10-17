@@ -347,3 +347,29 @@ def test_tile_state_flips_paint_instantly(isolated_home):
     assert checked, 'no toggle-qualified checked tile rule'
     assert 'transition: none' in checked.group(1)
     assert 'animation: none' in checked.group(1)
+
+
+def test_display_face_prefers_space_mono_for_house_monos():
+    from xx_ui import css
+    assert css.display_family('JetBrainsMono Nerd Font, Monospace') == (
+        'Space Mono, SpaceMono Nerd Font, JetBrainsMono Nerd Font, Monospace')
+    assert css.display_family('Space Mono, Monospace').startswith('Space Mono')
+    # Any other family the user picked keeps the display role too.
+    assert css.display_family('Sans Light') == 'Sans Light'
+
+
+def test_glyph_tile_rules_use_the_foreground_ramp():
+    import re
+    from xx_ui import css, theme
+    out = css.render(theme.Theme(
+        key='t', background='#101010', surface='#202020',
+        surface_alt='#303030', border='#404040', foreground='#FAFAFA',
+        muted='#AAAAAA', accent='#00FF00', font_family='Sans',
+        scale=1.0, dark=True))
+    base = re.search(r'button\.xx-gtile\.toggle:checked\s*\{([^}]*)\}', out)
+    assert base and 'alpha(#FAFAFA, 0.035)' in base.group(1)
+    assert 'alpha(#FAFAFA, 0.10)' in base.group(1)
+    assert 'dashed alpha(#FAFAFA, 0.40)' in out
+    assert '.xx-gtile.attention .xx-gtile-dot' in out
+    assert '#00FF00' not in out.split('.xx-gtile')[1]
+    assert '.xx-display-face' in out

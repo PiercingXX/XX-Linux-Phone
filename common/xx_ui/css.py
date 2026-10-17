@@ -42,6 +42,20 @@ def sanitize_font_family(family: str) -> str:
     return cleaned or _DEFAULT_FAMILY
 
 
+# Brand display face. Used only while the UI font is one of the house
+# monos; any other family the user picked also sets the display role.
+_DISPLAY_FACES = ('Space Mono', 'SpaceMono Nerd Font')
+_HOUSE_MONO_MARKERS = ('jetbrains', 'space mono', 'spacemono')
+
+
+def display_family(font_family: str) -> str:
+    """Family list for ``.xx-display-face`` (pure)."""
+    family = sanitize_font_family(font_family)
+    if any(marker in family.lower() for marker in _HOUSE_MONO_MARKERS):
+        return ', '.join([*_DISPLAY_FACES, family])
+    return family
+
+
 def _template() -> str:
     return (Path(__file__).with_name('style.css')).read_text(encoding='utf-8')
 
@@ -58,6 +72,7 @@ def render(active: _theme.Theme) -> str:
         'danger': _theme.DANGER_RED,
         'on_danger': _theme.ON_DANGER_FG,
         'font_family': sanitize_font_family(active.font_family),
+        'display_family': display_family(active.font_family),
     }
     for key, base in _BASE_PX.items():
         mapping[key] = str(round(base * active.scale))
