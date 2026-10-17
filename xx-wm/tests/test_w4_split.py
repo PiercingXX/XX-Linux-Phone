@@ -163,9 +163,10 @@ def test_settings_registry_order_and_shape():
     keys = [key for key, _cls in settings_page.SETTINGS_SECTIONS]
     assert keys == ['system', 'wifi', 'bluetooth', 'sound', 'battery',
                     'charging', 'batteryuse', 'screentime',
-                    'backup', 'mobile', 'standby', 'permissions',
-                    'smart_lock', 'medical', 'about', 'shell',
-                    'developer', 'gestures']
+                    'backup', 'mobile', 'appearance', 'standby',
+                    'permissions', 'smart_lock', 'medical',
+                    'recording', 'captions', 'nearby', 'findmy',
+                    'about', 'shell', 'developer', 'gestures']
     for key, cls in settings_page.SETTINGS_SECTIONS:
         section = cls()
         assert callable(getattr(section, 'build', None)), key

@@ -106,6 +106,8 @@ def main() -> None:
     rows.append(widgets.setting_row('Repeat caller rings',
                                     'Second call gets through',
                                     widgets.make_switch(True), last=True))
+    rows.append(widgets.list_row('Ada Lovelace', '+1 555-010-0142',
+                                 trailing=widgets.chevron(), last=True))
     rows.append(widgets.empty_state('Nothing scheduled.'))
     keys = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
     for digit, sub in (('1', ''), ('2', 'ABC')):

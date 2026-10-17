@@ -1570,18 +1570,12 @@ class ShellWindow(Adw.ApplicationWindow):
             # box — prepend/append on it silently built nothing at all.
             inner = page.get_child()
             box = inner.get_child() if isinstance(inner, Gtk.Viewport) else inner
-            back_btn = Gtk.Button(label='Back')
-            back_btn.add_css_class('flat')
-            back_btn.add_css_class('action-link')
+            from xx_ui import widgets
+            back_btn = widgets.icon_button(
+                'go-previous-symbolic', lambda *_a: self._leave_settings())
+            back_btn.set_tooltip_text('Back')
             back_btn.set_halign(Gtk.Align.START)
-            back_btn.connect('clicked', lambda _b: self._leave_settings())
             box.prepend(back_btn)
-            appearance_title = Gtk.Label(label='Appearance', xalign=0)
-            appearance_title.add_css_class('section-title')
-            appearance_card = self._build_appearance_card()
-            appearance_card.set_name('appearance_card')
-            box.append(appearance_title)
-            box.append(appearance_card)
         except Exception:
             pass
         return page
@@ -1590,9 +1584,11 @@ class ShellWindow(Adw.ApplicationWindow):
         """Theme picker: every preset plus custom as swatches — a 40 px
         rounded square of the preset background with an "Aa" in its
         foreground, the name captioned under it, the selected one ringed.
-        Tapping applies live; Custom opens a hex-entry dialog."""
+        Tapping applies live; Custom opens a hex-entry dialog. The
+        Appearance settings section gives it its caps label; the grid
+        itself sits directly on the page, not in a bordered card."""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        card.add_css_class('settings-card')
+        card.set_name('appearance_card')
         grid = Gtk.Grid(column_spacing=12, row_spacing=8)
         grid.set_column_homogeneous(True)
         self._theme_buttons = {}

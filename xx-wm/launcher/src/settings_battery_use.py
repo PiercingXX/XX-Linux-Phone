@@ -165,27 +165,15 @@ class BatteryUseSection(settings_page._Section):
         self._note = None
 
     def build(self, win) -> list:
-        from settings_page import _section_card, _section_title
-        from gi.repository import Gtk, Pango
+        from settings_page import _section_placeholder, _section_title
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
-        card = _section_card(spacing=8)
-        note = Gtk.Label(
-            label='Since full charge · estimated', xalign=0)
-        note.add_css_class('dim-label')
-        note.set_wrap(True)
-        note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        note.set_max_width_chars(26)
-        card.append(note)
+        head = widgets.caption('Since full charge · estimated')
         self._list_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        card.append(self._list_box)
-        self._note = Gtk.Label(label='', xalign=0)
-        self._note.add_css_class('dim-label')
-        self._note.set_wrap(True)
-        self._note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._note.set_max_width_chars(26)
-        card.append(self._note)
-        return [_section_title(self.title), card]
+            orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._note = _section_placeholder('')
+        return [_section_title(self.title), head, self._list_box, self._note]
 
     def refresh(self, win) -> None:
         from settings_page import _run_bg
@@ -224,7 +212,7 @@ class BatteryUseSection(settings_page._Section):
     def _render(self, win, res) -> None:
         from settings_page import (_replace_box_children,
                                    _section_placeholder)
-        from gi.repository import Gtk, Pango
+        from xx_ui import widgets
         if self._list_box is None:
             return
         try:
@@ -233,21 +221,14 @@ class BatteryUseSection(settings_page._Section):
             return
         rows = estimate_shares(screen, cpu)
         if not rows:
-            _replace_box_children(
-                self._list_box,
-                [_section_placeholder('No usage yet.')])
+            rendered = [_section_placeholder('No usage yet.')]
         else:
-            widgets = []
-            for row in rows:
-                name = self._display_name(win, row[0])
-                label = Gtk.Label(label=f'{name}: {format_share(row)}',
-                                  xalign=0)
-                label.add_css_class('dim-label')
-                label.set_wrap(True)
-                label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                label.set_max_width_chars(26)
-                widgets.append(label)
-            _replace_box_children(self._list_box, widgets)
+            rendered = []
+            for index, row in enumerate(rows):
+                rendered.append(widgets.list_row(
+                    self._display_name(win, row[0]), format_share(row),
+                    last=index == len(rows) - 1))
+        _replace_box_children(self._list_box, rendered)
         detail = ('Screen time today + CPU time · estimated'
                   if cpu else 'Screen time today · estimated (CPU unattributed)')
         if self._note is not None:

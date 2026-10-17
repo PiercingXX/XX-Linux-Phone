@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import settings_page
 
-TIMEOUT_CHOICES = ((5, '5 min'), (15, '15 min'), (30, '30 min'), (0, 'Never'))
+TIMEOUT_CHOICES = ((5, '5 min'), (15, '15 min'), (30, '30 min'),
+                   (0, 'Never'))
 THRESHOLD_CHOICES = (10, 15, 20, 25)
 SAVER_EFFECTS = (
     'Shorter wait before unused apps freeze.',
@@ -89,105 +90,61 @@ class StandbySection(settings_page._Section):
     title = 'Battery saver'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
-        saver_card = settings_page._section_card(spacing=8)
-
-        saver_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        saver_label = Gtk.Label(label='Battery saver', xalign=0)
-        saver_label.set_hexpand(True)
-        saver_label.set_wrap(True)
-        saver_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        saver_label.set_max_width_chars(18)
-        saver_switch = Gtk.Switch()
-        saver_switch.set_active(saver_is_on(win))
+        saver_head = settings_page._section_title('Battery saver')
+        saver_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        saver_switch = widgets.make_switch(saver_is_on(win))
         saver_switch.connect(
             'notify::active',
             lambda sw, _p: self._on_saver_flipped(win, sw))
         win._saver_switch = saver_switch
-        saver_row.append(saver_label)
-        saver_row.append(saver_switch)
-
-        auto_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        auto_label = Gtk.Label(label='Auto-on at low battery', xalign=0)
-        auto_label.set_hexpand(True)
-        auto_label.set_wrap(True)
-        auto_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        auto_label.set_max_width_chars(18)
-        auto_switch = Gtk.Switch()
-        auto_switch.set_active(bool(_cfg(win, 'battery_saver_auto', True)))
+        saver_body.append(widgets.setting_row('Battery saver', '', saver_switch))
+        auto_switch = widgets.make_switch(
+            bool(_cfg(win, 'battery_saver_auto', True)))
         auto_switch.connect(
             'notify::active',
             lambda sw, _p: self._on_auto_flipped(win, sw))
         win._saver_auto_switch = auto_switch
-        auto_row.append(auto_label)
-        auto_row.append(auto_switch)
-
-        threshold_btn = Gtk.Button(label=self._threshold_text(win))
-        threshold_btn.add_css_class('flat')
-        threshold_btn.add_css_class('action-link')
-        settings_page._shrink_button_label(threshold_btn)
-        threshold_btn.connect(
-            'clicked', lambda btn: self._pick_threshold(win, btn))
-        win._saver_threshold_btn = threshold_btn
-
-        saver_card.append(saver_row)
-        saver_card.append(auto_row)
-        saver_card.append(threshold_btn)
+        saver_body.append(widgets.setting_row(
+            'Auto-on at low battery', self._threshold_text(win), auto_switch))
+        self._threshold_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        saver_body.append(self._threshold_box)
+        self._render_threshold(win)
         for effect in SAVER_EFFECTS:
-            line = Gtk.Label(label='· ' + effect, xalign=0)
-            line.add_css_class('dim-label')
-            line.set_wrap(True)
-            line.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            line.set_max_width_chars(26)
-            saver_card.append(line)
-        frozen_label = Gtk.Label(label=_frozen_text(win), xalign=0)
-        frozen_label.add_css_class('dim-label')
-        frozen_label.set_wrap(True)
-        frozen_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        frozen_label.set_max_width_chars(26)
+            saver_body.append(
+                settings_page._section_placeholder('· ' + effect))
+        frozen_label = settings_page._section_placeholder(_frozen_text(win))
         win._standby_frozen_label = frozen_label
-        saver_card.append(frozen_label)
+        saver_body.append(frozen_label)
 
-        standby_card = settings_page._section_card(spacing=8)
-        timeout_btn = Gtk.Button(label=self._timeout_text(win))
-        timeout_btn.add_css_class('flat')
-        timeout_btn.add_css_class('action-link')
-        settings_page._shrink_button_label(timeout_btn)
-        timeout_btn.connect(
-            'clicked', lambda btn: self._pick_timeout(win, btn))
-        win._standby_timeout_btn = timeout_btn
-        standby_card.append(timeout_btn)
+        standby_head = settings_page._section_title('App standby')
+        standby_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._timeout_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        standby_body.append(self._timeout_box)
+        self._render_timeout(win)
 
-        exempt_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        exempt_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         win._standby_exempt_box = exempt_box
-        standby_card.append(exempt_box)
+        standby_body.append(exempt_box)
 
-        add_btn = Gtk.Button(label='Never freeze an app…')
-        add_btn.add_css_class('flat')
-        add_btn.add_css_class('action-link')
-        settings_page._shrink_button_label(add_btn)
-        add_btn.connect('clicked', lambda _b: self._on_add_exempt(win))
-        standby_card.append(add_btn)
+        standby_body.append(settings_page._outline_action(
+            'Never freeze an app…', lambda: self._on_add_exempt(win)))
 
-        builtin_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         try:
             from app_standby import builtin_exemption_labels
             labels = builtin_exemption_labels()
         except Exception:
             labels = ()
         for label_text in labels:
-            line = Gtk.Label(label='· %s (always)' % label_text, xalign=0)
-            line.add_css_class('dim-label')
-            line.set_wrap(True)
-            line.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            line.set_max_width_chars(26)
-            builtin_box.append(line)
-        standby_card.append(builtin_box)
+            standby_body.append(settings_page._section_placeholder(
+                '· %s (always)' % label_text))
 
         self._render_exempt(win)
-        return [settings_page._section_title('Battery saver'), saver_card,
-                settings_page._section_title('App standby'), standby_card]
+        return [saver_head, saver_body, standby_head, standby_body]
 
     def refresh(self, win) -> None:
         self._sync_switches(win)
@@ -236,21 +193,15 @@ class StandbySection(settings_page._Section):
         return 'Auto-on at %d%%' % _threshold_pct(win)
 
     def _render_threshold(self, win) -> None:
-        btn = getattr(win, '_saver_threshold_btn', None)
-        if btn is not None:
-            try:
-                btn.set_label(self._threshold_text(win))
-            except Exception:
-                pass
-
-    def _pick_threshold(self, win, anchor) -> None:
-        actions = getattr(win, 'item_actions', None)
-        if actions is None:
+        box = getattr(self, '_threshold_box', None)
+        if box is None:
             return
-        choices = [('%d%%' % pct,
-                    lambda pct=pct: self._set_threshold(win, pct))
-                   for pct in THRESHOLD_CHOICES]
-        actions._show_action_menu(anchor, 'Auto-on level', choices)
+        from xx_ui import widgets
+        current = _threshold_pct(win)
+        settings_page._replace_box_children(box, [widgets.segmented([
+            ('%d%%' % pct, pct == current,
+             lambda pct=pct: self._set_threshold(win, pct))
+            for pct in THRESHOLD_CHOICES])])
 
     def _set_threshold(self, win, pct: int) -> None:
         try:
@@ -266,13 +217,28 @@ class StandbySection(settings_page._Section):
                 return 'Freeze after: %s' % label
         return 'Freeze after: %d min' % minutes
 
+    def _timeout_label(self, win) -> str:
+        minutes = _standby_minutes(win)
+        for value, label in TIMEOUT_CHOICES:
+            if value == minutes:
+                return label
+        return '%d min' % minutes
+
     def _render_timeout(self, win) -> None:
-        btn = getattr(win, '_standby_timeout_btn', None)
-        if btn is not None:
-            try:
-                btn.set_label(self._timeout_text(win))
-            except Exception:
-                pass
+        # Five timeout values cannot fit one segmented row (minimum
+        # 383 px on a 320 px content), so the standby delay stays a
+        # value row opening the same menu — always showing the current
+        # delay, including the stock 10 min default the menu omits.
+        box = getattr(self, '_timeout_box', None)
+        if box is None:
+            return
+        from xx_ui import widgets
+        row = widgets.list_row(
+            'Freeze after', self._timeout_label(win),
+            trailing=widgets.chevron(), last=True)
+        row.connect(
+            'clicked', lambda _b, r=row: self._pick_timeout(win, r))
+        settings_page._replace_box_children(box, [row])
 
     def _pick_timeout(self, win, anchor) -> None:
         actions = getattr(win, 'item_actions', None)
@@ -290,22 +256,18 @@ class StandbySection(settings_page._Section):
         self._render_timeout(win)
 
     def _render_exempt(self, win) -> None:
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
         box = getattr(win, '_standby_exempt_box', None)
         if box is None:
             return
         rows = []
         for app_id in exempt_ids(win):
-            name = Gtk.Label(label=display_name(win, app_id), xalign=0)
-            name.add_css_class('dim-label')
+            name = widgets.label(display_name(win, app_id), 'xx-secondary')
             name.set_hexpand(True)
-            name.set_ellipsize(Pango.EllipsizeMode.END)
-            name.set_max_width_chars(18)
-            remove = settings_page._link_button('Remove', 'dim-label')
-            remove.connect(
-                'clicked',
-                lambda _b, aid=app_id: self._on_remove_exempt(win, aid))
+            remove = settings_page._text_action(
+                'Remove', lambda aid=app_id: self._on_remove_exempt(win, aid))
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             line.append(name)
             line.append(remove)

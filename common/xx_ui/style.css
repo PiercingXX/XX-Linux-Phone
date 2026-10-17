@@ -538,6 +538,11 @@ button.xx-danger-text {
   border-bottom: none;
 }
 
+.xx-setting image,
+.xx-row image {
+  color: ${muted};
+}
+
 /* ---- Keypad keys: surface rounded squares ---- */
 
 .xx-key {

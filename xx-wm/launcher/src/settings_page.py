@@ -5,9 +5,10 @@ from gesture_config import IPC_VERBS, VALID_ACTIONS
 
 # Settings sections a quick-tile long-press can deep-link to (quick_actions
 # tile_settings_section emits these); anything else opens the top of the page.
-_SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'standby',
-                          'permissions', 'smart_lock', 'charging',
-                          'batteryuse', 'screentime', 'medical')
+_SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'appearance',
+                          'standby', 'permissions', 'smart_lock', 'charging',
+                          'batteryuse', 'screentime', 'medical', 'recording',
+                          'captions', 'nearby', 'findmy', 'about')
 
 # Home side-swipe gestures the user can bind to an app in Settings
 _GESTURE_TITLES = {
@@ -51,6 +52,18 @@ def _link_button(label_text: str, css: str):
     return btn
 
 
+def _text_action(label_text: str, callback=None):
+    from xx_ui import widgets
+
+    return widgets.text_button(label_text, callback)
+
+
+def _outline_action(label_text: str, callback=None):
+    from xx_ui import widgets
+
+    return widgets.outline_button(label_text, callback)
+
+
 def _replace_box_children(box, children: list) -> None:
     child = box.get_first_child()
     while child is not None:
@@ -62,14 +75,9 @@ def _replace_box_children(box, children: list) -> None:
 
 
 def _section_placeholder(text: str):
-    from gi.repository import Gtk, Pango
+    from xx_ui import widgets
 
-    label = Gtk.Label(label=text, xalign=0)
-    label.add_css_class('dim-label')
-    label.set_wrap(True)
-    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-    label.set_max_width_chars(26)
-    return label
+    return widgets.wrap_label(text)
 
 
 def _shrink_button_label(btn) -> None:
@@ -92,31 +100,27 @@ def _shrink_settings_entry(entry) -> None:
 
 
 def _settings_row(title: str, control):
-    from gi.repository import Gtk, Pango
+    from gi.repository import Gtk
+    from xx_ui import widgets
 
-    # Title above the control: label + entry side by side forced width.
-    row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-    label = Gtk.Label(label=title, xalign=0)
-    label.set_wrap(True)
-    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-    row.append(label)
+    # Caption over the control, like a Field: the side-by-side layout
+    # forced the page past 320 px.
+    row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+    row.append(widgets.caption(title))
     row.append(control)
     return row
 
 
 def _section_title(text: str):
-    from gi.repository import Gtk
+    from xx_ui import widgets
 
-    title = Gtk.Label(label=text, xalign=0)
-    title.add_css_class('section-title')
-    return title
+    return widgets.section_label(text)
 
 
-def _section_card(spacing: int = 12):
-    from gi.repository import Gtk
+def _section_card(spacing: int = 8):
+    from xx_ui import widgets
 
-    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
-    card.add_css_class('settings-card')
+    card = widgets.card()
     return card
 
 
@@ -160,21 +164,17 @@ class SystemSection(_Section):
 
     def build(self, win) -> list:
         from gi.repository import Gtk
+        from xx_ui import widgets
 
-        system_card = _section_card()
-        update_button = Gtk.Button(label='Update system')
-        update_button.add_css_class('flat')
-        update_button.add_css_class('action-link')
-        update_button.connect('clicked', win._on_update_clicked)
-
-        check_updates_button = Gtk.Button(label='Check for updates now')
-        check_updates_button.add_css_class('flat')
-        check_updates_button.add_css_class('action-link')
-        check_updates_button.connect('clicked', win._on_check_updates_clicked)
-
-        system_card.append(update_button)
-        system_card.append(check_updates_button)
-        return [_section_title(self.title), system_card]
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        body.append(widgets.setting_row(
+            'Software updates', 'Check for updates',
+            widgets.caps_button(
+                'Check', lambda: win._on_check_updates_clicked(None)),
+            last=True))
+        body.append(widgets.outline_button(
+            'Update system', lambda: win._on_update_clicked(None)))
+        return [_section_title(self.title), body]
 
 
 class WifiSection(_Section):
@@ -184,15 +184,12 @@ class WifiSection(_Section):
     def build(self, win) -> list:
         from gi.repository import Gtk
 
-        wifi_card = _section_card(spacing=8)
-        win._wifi_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        wifi_scan_btn = Gtk.Button(label='Scan for networks')
-        wifi_scan_btn.add_css_class('flat')
-        wifi_scan_btn.add_css_class('action-link')
-        wifi_scan_btn.connect('clicked', lambda _b: win._refresh_wifi())
-        wifi_card.append(win._wifi_list_box)
-        wifi_card.append(wifi_scan_btn)
-        return [_section_title(self.title), wifi_card]
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        win._wifi_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.append(win._wifi_list_box)
+        body.append(_outline_action(
+            'Scan for networks', lambda: win._refresh_wifi()))
+        return [_section_title(self.title), body]
 
     def refresh(self, win) -> None:
         win._refresh_wifi()
@@ -205,15 +202,12 @@ class BluetoothSection(_Section):
     def build(self, win) -> list:
         from gi.repository import Gtk
 
-        bt_card = _section_card(spacing=8)
-        win._bt_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        bt_scan_btn = Gtk.Button(label='Scan for devices')
-        bt_scan_btn.add_css_class('flat')
-        bt_scan_btn.add_css_class('action-link')
-        bt_scan_btn.connect('clicked', lambda _b: win._refresh_bluetooth(scan=True))
-        bt_card.append(win._bt_list_box)
-        bt_card.append(bt_scan_btn)
-        return [_section_title(self.title), bt_card]
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        win._bt_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.append(win._bt_list_box)
+        body.append(_outline_action(
+            'Scan for devices', lambda: win._refresh_bluetooth(scan=True)))
+        return [_section_title(self.title), body]
 
     def refresh(self, win) -> None:
         win._refresh_bluetooth()
@@ -226,10 +220,8 @@ class SoundSection(_Section):
     def build(self, win) -> list:
         from gi.repository import Gtk
 
-        sound_card = _section_card(spacing=8)
-        win._sink_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        sound_card.append(win._sink_list_box)
-        return [_section_title(self.title), sound_card]
+        win._sink_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        return [_section_title(self.title), win._sink_list_box]
 
 
 class BatterySection(_Section):
@@ -237,16 +229,8 @@ class BatterySection(_Section):
     title = 'Battery'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk, Pango
-
-        battery_card = _section_card(spacing=8)
-        win._battery_label = Gtk.Label(label='Checking…', xalign=0)
-        win._battery_label.add_css_class('dim-label')
-        win._battery_label.set_wrap(True)
-        win._battery_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        win._battery_label.set_max_width_chars(26)
-        battery_card.append(win._battery_label)
-        return [_section_title(self.title), battery_card]
+        win._battery_label = _section_placeholder('Checking…')
+        return [_section_title(self.title), win._battery_label]
 
 
 class BackupSection(_Section):
@@ -255,22 +239,32 @@ class BackupSection(_Section):
 
     def build(self, win) -> list:
         from gi.repository import Gtk
+        from xx_ui import widgets
 
-        backup_card = _section_card()
-        export_btn = Gtk.Button(label='Export backup')
-        export_btn.add_css_class('flat')
-        export_btn.add_css_class('action-link')
-        export_btn.connect('clicked', lambda _btn: win._on_export_backup())
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        body.append(widgets.outline_button(
+            'Export backup', lambda: win._on_export_backup()))
+        win._restore_btn = widgets.outline_button(
+            'Restore from backup',
+            lambda: win._on_restore_backup(win._restore_btn))
+        body.append(win._restore_btn)
+        return [_section_title(self.title), body]
 
-        restore_btn = Gtk.Button(label='Restore from backup')
-        restore_btn.add_css_class('flat')
-        restore_btn.add_css_class('action-link')
-        restore_btn.connect('clicked', lambda btn: win._on_restore_backup(btn))
-        win._restore_btn = restore_btn
 
-        backup_card.append(export_btn)
-        backup_card.append(restore_btn)
-        return [_section_title(self.title), backup_card]
+def _settings_entry(win, placeholder: str, text: str = '',
+                    password: bool = False):
+    from xx_ui import widgets
+
+    entry = widgets.deferred_entry(placeholder)
+    try:
+        entry.set_text(text)
+    except Exception:
+        pass
+    if password:
+        entry.set_visibility(False)
+    _shrink_settings_entry(entry)
+    getattr(win, '_attach_osk', lambda _w: None)(entry)
+    return entry
 
 
 class MobileSection(_Section):
@@ -279,37 +273,34 @@ class MobileSection(_Section):
 
     def build(self, win) -> list:
         from gi.repository import Gtk
+        from xx_ui import widgets
 
-        apn_card = _section_card()
-        win.apn_entry = Gtk.Entry()
-        win.apn_entry.set_placeholder_text('APN (e.g. internet)')
-        win.apn_entry.set_text(win.config.data.get('apn', ''))
-        _shrink_settings_entry(win.apn_entry)
-        getattr(win, '_attach_osk', lambda _w: None)(win.apn_entry)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        win.apn_entry = _settings_entry(
+            win, 'APN (e.g. internet)', win.config.data.get('apn', ''))
+        win.apn_user_entry = _settings_entry(
+            win, 'Username (leave blank if none)',
+            win.config.data.get('apn_user', ''))
+        win.apn_pass_entry = _settings_entry(
+            win, 'Password (leave blank if none)',
+            win.config.data.get('apn_pass', ''), password=True)
 
-        win.apn_user_entry = Gtk.Entry()
-        win.apn_user_entry.set_placeholder_text('Username (leave blank if none)')
-        win.apn_user_entry.set_text(win.config.data.get('apn_user', ''))
-        _shrink_settings_entry(win.apn_user_entry)
-        getattr(win, '_attach_osk', lambda _w: None)(win.apn_user_entry)
+        body.append(_settings_row('APN', win.apn_entry))
+        body.append(_settings_row('Username', win.apn_user_entry))
+        body.append(_settings_row('Password', win.apn_pass_entry))
+        body.append(widgets.primary_button(
+            'Save APN', lambda: win._on_apn_save(None)))
+        return [_section_title(self.title), body]
 
-        win.apn_pass_entry = Gtk.Entry()
-        win.apn_pass_entry.set_visibility(False)
-        win.apn_pass_entry.set_placeholder_text('Password (leave blank if none)')
-        win.apn_pass_entry.set_text(win.config.data.get('apn_pass', ''))
-        _shrink_settings_entry(win.apn_pass_entry)
-        getattr(win, '_attach_osk', lambda _w: None)(win.apn_pass_entry)
 
-        apn_save_btn = Gtk.Button(label='Save APN')
-        apn_save_btn.add_css_class('flat')
-        apn_save_btn.add_css_class('action-link')
-        apn_save_btn.connect('clicked', win._on_apn_save)
+class AppearanceSection(_Section):
+    key = 'appearance'
+    title = 'Appearance'
 
-        apn_card.append(_settings_row('APN', win.apn_entry))
-        apn_card.append(_settings_row('Username', win.apn_user_entry))
-        apn_card.append(_settings_row('Password', win.apn_pass_entry))
-        apn_card.append(apn_save_btn)
-        return [_section_title(self.title), apn_card]
+    def build(self, win) -> list:
+        # The swatch picker lives on the window (it owns the live preview
+        # provider); the section only gives it the caps label to sit under.
+        return [_section_title(self.title), win._build_appearance_card()]
 
 
 class AboutSection(_Section):
@@ -317,7 +308,7 @@ class AboutSection(_Section):
     title = 'About'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk, Pango
+        from xx_ui import widgets
         from importlib.metadata import version as get_version
 
         try:
@@ -325,21 +316,10 @@ class AboutSection(_Section):
         except Exception:
             shell_version = '0.1.1'
 
-        about_card = _section_card(spacing=8)
-        version_label = Gtk.Label(label=f'Version: {shell_version}', xalign=0)
-        version_label.add_css_class('dim-label')
-        version_label.set_wrap(True)
-        version_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        version_label.set_max_width_chars(26)
-
-        device_label = Gtk.Label(label=f'Device: {win._get_device_name()}', xalign=0)
-        device_label.add_css_class('dim-label')
-        device_label.set_wrap(True)
-        device_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        device_label.set_max_width_chars(26)
-
-        about_card.append(version_label)
-        about_card.append(device_label)
+        about_card = _section_card()
+        about_card.append(widgets.setting_row('Version', shell_version))
+        about_card.append(widgets.setting_row(
+            'Device', win._get_device_name(), last=True))
         return [_section_title(self.title), about_card]
 
 
@@ -348,19 +328,110 @@ class ShellSection(_Section):
     title = 'Shell'
 
     def build(self, _win) -> list:
-        from gi.repository import Gtk, Pango
-
         # Shell preferences live in ~/.config/xx-wm/ (design.md "Settings
         # scope"), not on this system-only page — the gesture bindings stay
         # reachable here at the bottom, under a Shell heading that says so.
         shell_note = _section_title(self.title)
-        note = Gtk.Label(
-            label='Other shell preferences live in ~/.config/xx-wm/', xalign=0)
-        note.add_css_class('dim-label')
-        note.set_wrap(True)
-        note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        note.set_max_width_chars(26)
+        note = _section_placeholder(
+            'Other shell preferences live in ~/.config/xx-wm/')
         return [shell_note, note]
+
+
+class RecordingSection(_Section):
+    """Screen recording status (read-only): the Record tile owns capture."""
+
+    key = 'recording'
+    title = 'Screen recording'
+
+    def build(self, win) -> list:
+        card = _section_card()
+        self._status = _section_placeholder('Not recording.')
+        card.append(self._status)
+        card.append(_section_placeholder(
+            'Recordings save to ~/Videos/Screenrecordings.'))
+        return [_section_title(self.title), card]
+
+    def refresh(self, win) -> None:
+        def _state():
+            try:
+                import capture
+                recorder = capture.get_recorder()
+                if recorder.is_recording():
+                    return 'Recording…'
+            except Exception:
+                pass
+            return 'Not recording.'
+
+        _run_bg(_state, self._render)
+
+    def _render(self, status) -> None:
+        try:
+            if self._status is not None:
+                self._status.set_text(status or 'Not recording.')
+        except Exception:
+            pass
+
+
+class CaptionsSection(_Section):
+    """Live captions status (read-only): the Captions tile switches it."""
+
+    key = 'captions'
+    title = 'Captions'
+
+    def build(self, win) -> list:
+        try:
+            import captions
+            installed = captions.captions_installed()
+        except Exception:
+            installed = False
+        if installed:
+            note = ('Live captions are available — '
+                    'use the Captions tile to switch them on.')
+        else:
+            note = 'Live captions are not installed on this device.'
+        return [_section_title(self.title), _section_placeholder(note)]
+
+
+SHARE_APP_ID = 'io.piercingxx.XXShare.desktop'
+
+
+class NearbySection(_Section):
+    key = 'nearby'
+    title = 'Nearby share'
+
+    def build(self, win) -> list:
+        from gi.repository import Gio
+        from xx_ui import widgets
+        try:
+            installed = Gio.DesktopAppInfo.new(SHARE_APP_ID) is not None
+        except Exception:
+            installed = False
+        if not installed:
+            return [_section_title(self.title), _section_placeholder(
+                'Nearby share is not installed on this device.')]
+        return [_section_title(self.title),
+                _section_placeholder(
+                    'Send and receive files with nearby phones and computers'
+                    ' (LocalSend compatible).'),
+                widgets.outline_button(
+                    'Open Share',
+                    lambda *_a: win._launch_app_id(SHARE_APP_ID))]
+
+
+class FindMySection(_Section):
+    """Find My Device stays OFF with no enabling control."""
+
+    key = 'findmy'
+    title = 'Find My Device'
+
+    def build(self, win) -> list:
+        from xx_ui import widgets
+
+        card = _section_card()
+        card.append(widgets.setting_row('Find My Device', 'Off', last=True))
+        card.append(_section_placeholder(
+            'This device cannot be located remotely.'))
+        return [_section_title(self.title), card]
 
 
 class DeveloperSection(_Section):
@@ -412,10 +483,15 @@ SETTINGS_SECTIONS: list[tuple[str, type[_Section]]] = [
     ('screentime', settings_screentime.ScreenTimeSection),
     ('backup', BackupSection),
     ('mobile', MobileSection),
+    ('appearance', AppearanceSection),
     ('standby', settings_standby.StandbySection),
     ('permissions', settings_permissions.PermissionsSection),
     ('smart_lock', settings_smart_lock.SmartLockSection),
     ('medical', settings_medical.MedicalSection),
+    ('recording', RecordingSection),
+    ('captions', CaptionsSection),
+    ('nearby', NearbySection),
+    ('findmy', FindMySection),
     ('about', AboutSection),
     ('shell', ShellSection),
     ('developer', DeveloperSection),
@@ -444,26 +520,28 @@ class SettingsPage:
 
     def _build_settings_page(self):
         from gi.repository import Gtk
+        from xx_ui import widgets as _widgets
 
         win = self._win
         scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.add_css_class('settings-page')
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
-        box.set_margin_top(36)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.add_css_class('xx-page-body')
+        box.set_margin_top(16)
         box.set_margin_bottom(24)
-        box.set_margin_start(24)
-        box.set_margin_end(24)
 
-        title = Gtk.Label(label='Shell settings', xalign=0)
-        title.add_css_class('section-title')
+        header = _widgets.page_header('Settings', 'XX-WM SHELL')
+        # The page box already carries the gutter; the header's own
+        # padding would double it and misalign the title.
+        header.remove_css_class('xx-page-body')
 
         built: dict[str, list] = {}
+        box.append(header)
         for key, _cls in SETTINGS_SECTIONS:
-            widgets = self._sections[key].build(win)
-            built[key] = widgets
-            for widget in widgets:
+            section_widgets = self._sections[key].build(win)
+            built[key] = section_widgets
+            for widget in section_widgets:
                 box.append(widget)
 
         # Refresh the quick sections whenever the settings page is opened
@@ -496,7 +574,13 @@ class SettingsPage:
         win.present()
         win._scroll_settings_to(key)
         if key is not None:
+            # Showing the page re-lays it out over the next frames, so an
+            # early offset reads stale allocations (upper 0 clamps to the
+            # top). Retry on a ladder past layout; each pass is idempotent,
+            # so late passes are no-ops once the offset sticks.
             GLib.idle_add(win._scroll_settings_to, key)
+            for retry_ms in (150, 300, 600, 1000, 1500):
+                GLib.timeout_add(retry_ms, win._scroll_settings_to, key)
             try:
                 self._sections[key].refresh(win)
             except Exception:
@@ -540,13 +624,12 @@ class SettingsPage:
     def _build_gesture_row(self, title_text: str, binding, change, reset):
         """One gesture binding stacked title/binding/buttons: the binding
         beside both buttons forced the settings page past 320 px."""
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
         row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        name = Gtk.Label(label=title_text, xalign=0)
-        name.set_wrap(True)
-        name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        name.set_max_width_chars(24)
+        row.add_css_class('xx-setting')
+        name = widgets.label(title_text, 'xx-title')
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         buttons.append(change)
         buttons.append(reset)
@@ -556,14 +639,12 @@ class SettingsPage:
         return row
 
     def _binding_label(self, key: str, store: dict):
-        from gi.repository import Gtk, Pango
+        from xx_ui import widgets
 
         win = self._win
-        binding = Gtk.Label(label=win._gesture_binding_text(key), xalign=0)
-        binding.add_css_class('dim-label')
+        binding = widgets.label(
+            win._gesture_binding_text(key), 'xx-secondary')
         binding.set_hexpand(True)
-        binding.set_ellipsize(Pango.EllipsizeMode.END)
-        binding.set_max_width_chars(16)
         store[key] = binding
         return binding
 
@@ -572,35 +653,33 @@ class SettingsPage:
         return _link_button(label_text, css)
 
     def _build_gestures_card(self):
-        from gi.repository import Gtk
+        from xx_ui import widgets
+
         win = self._win
         card = _section_card()
         for key, title in _GESTURE_TITLES.items():
-            change = _link_button('Change', 'action-link')
-            change.connect('clicked', lambda _b, k=key, t=title: win._pick_gesture_app(k, t))
-
-            clear = _link_button('Clear', 'dim-label')
-            clear.connect('clicked', lambda _b, k=key: win._clear_gesture_app(k))
-
             card.append(win._build_gesture_row(
                 title, win._binding_label(key, win._gesture_binding_labels),
-                change, clear))
+                _text_action('Change',
+                             lambda k=key, t=title: win._pick_gesture_app(k, t)),
+                _text_action('Clear',
+                             lambda k=key: win._clear_gesture_app(k))))
 
         for key, title in _SYSTEM_GESTURE_TITLES.items():
-            change = _link_button('Change', 'action-link')
-            change.connect(
-                'clicked', lambda b, k=key, t=title: win._pick_system_gesture(b, k, t))
-
-            clear = _link_button('Default', 'dim-label')
-            clear.connect('clicked', lambda _b, k=key: win._reset_system_gesture(k))
-
+            # The Change menu anchors on its own button, so it is wired
+            # after the row hands the button back.
+            change = widgets.text_button('Change')
+            default = _text_action(
+                'Default', lambda k=key: win._reset_system_gesture(k))
             card.append(win._build_gesture_row(
                 title, win._binding_label(key, win._system_gesture_labels),
-                change, clear))
-        note = Gtk.Label(
-            label='System-level gestures apply immediately. Home swipes stay in-shell.',
-            xalign=0, wrap=True)
-        note.add_css_class('dim-label')
+                change, default))
+            change.connect(
+                'clicked',
+                lambda _b, c=change, k=key, t=title: win._pick_system_gesture(
+                    c, k, t))
+        note = _section_placeholder(
+            'System-level gestures apply immediately. Home swipes stay in-shell.')
         card.append(note)
         return card
 
@@ -636,40 +715,31 @@ class SettingsPage:
     # -- Developer section: wireless debugging (xxdb) ----------------------
 
     def _build_developer_card(self):
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
         win = self._win
         card = _section_card()
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        title = Gtk.Label(label='Wireless debugging', xalign=0)
-        title.set_hexpand(True)
-        title.set_wrap(True)
-        title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        title.set_max_width_chars(18)
-        switch = Gtk.Switch()
-        switch.set_active(False)
-        switch.connect('notify::active', win._on_xxdb_switch_flipped)
-        row.append(title)
-        row.append(switch)
+        # The flip handler reads the switch itself, so it stays on the
+        # raw notify signal instead of the bool-only builder callback.
+        switch = widgets.make_switch(False)
+        switch.connect('notify::active',
+                       lambda s, p: win._on_xxdb_switch_flipped(s, p))
         win._xxdb_switch = switch
+        card.append(widgets.setting_row(
+            'Wireless debugging', '', switch, last=True))
 
-        win._xxdb_status = Gtk.Label(label='Off', xalign=0)
-        win._xxdb_status.add_css_class('dim-label')
-        win._xxdb_status.set_wrap(True)
-        win._xxdb_status.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        win._xxdb_status.set_max_width_chars(26)
-
-        pair_btn = _link_button('Pair device with pairing code',
-                                'action-link')
-        pair_btn.connect('clicked', lambda _b: win._on_xxdb_pair_clicked())
+        win._xxdb_status = _section_placeholder('Off')
+        pair_btn = _outline_action(
+            'Pair with code',
+            lambda: win._on_xxdb_pair_clicked())
 
         win._xxdb_hosts_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                       spacing=4)
         win._xxdb_pending_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                         spacing=4)
 
-        card.append(row)
         card.append(win._xxdb_status)
         card.append(pair_btn)
         card.append(win._xxdb_hosts_box)
@@ -678,7 +748,8 @@ class SettingsPage:
         return card
 
     def _refresh_xxdb_section(self) -> None:
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
         win = self._win
         if getattr(win, '_xxdb_switch', None) is None:
@@ -697,20 +768,15 @@ class SettingsPage:
         hosts: list = []
         if ctrl is not None:
             for entry in ctrl.trusted_hosts():
-                name = Gtk.Label(
-                    label=f"{entry['name']} — {entry['fingerprint'][:16]}…",
-                    xalign=0)
-                name.add_css_class('dim-label')
-                name.set_wrap(True)
-                name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                name.set_max_width_chars(20)
-                forget = _link_button('Forget', 'dim-label')
-                forget.connect(
-                    'clicked',
-                    lambda _b, fp=entry['fingerprint']: win._on_xxdb_forget(fp))
+                name = widgets.label(
+                    '%s — %s…' % (entry['name'], entry['fingerprint'][:16]),
+                    'xx-secondary')
+                name.set_hexpand(True)
+                forget = widgets.text_button(
+                    'Forget',
+                    lambda fp=entry['fingerprint']: win._on_xxdb_forget(fp))
                 line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                                spacing=8)
-                name.set_hexpand(True)
                 line.append(name)
                 line.append(forget)
                 hosts.append(line)
@@ -719,21 +785,15 @@ class SettingsPage:
         pending: list = []
         if ctrl is not None:
             for token, label in ctrl.pending_system_requests():
-                text = Gtk.Label(label=f'Allow file access: {label}', xalign=0)
-                text.set_wrap(True)
-                text.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                text.set_max_width_chars(22)
-                allow = _link_button('Allow', 'action-link')
-                allow.connect(
-                    'clicked',
-                    lambda _b, t=token: win._on_xxdb_confirm(t, True))
-                deny = _link_button('Deny', 'dim-label')
-                deny.connect(
-                    'clicked',
-                    lambda _b, t=token: win._on_xxdb_confirm(t, False))
+                text = widgets.wrap_label('Allow file access: %s' % label)
+                text.set_hexpand(True)
+                allow = widgets.text_button(
+                    'Allow',
+                    lambda t=token: win._on_xxdb_confirm(t, True))
+                deny = widgets.text_button(
+                    'Deny', lambda t=token: win._on_xxdb_confirm(t, False))
                 line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                                spacing=8)
-                text.set_hexpand(True)
                 line.append(text)
                 line.append(allow)
                 line.append(deny)
@@ -812,7 +872,7 @@ class SettingsPage:
         win._run_bg(system_settings.battery_status, win._show_battery)
         win._run_bg(system_settings.list_audio_sinks, win._show_sinks)
         win._run_bg(system_settings.list_bt_devices, win._show_bt_devices)
-        for key in ('standby', 'permissions', 'smart_lock'):
+        for key in ('standby', 'permissions', 'smart_lock', 'recording'):
             section = self._sections.get(key)
             if section is not None:
                 try:
@@ -824,7 +884,7 @@ class SettingsPage:
         self._win._battery_label.set_text(status or 'No battery detected.')
 
     def _show_sinks(self, sinks) -> None:
-        from gi.repository import Gtk
+        from xx_ui import widgets
 
         win = self._win
         if sinks is None:
@@ -833,14 +893,15 @@ class SettingsPage:
                 [_section_placeholder('Audio system unavailable.')])
             return
         rows = []
-        for sink in sinks:
-            marker = '● ' if sink.is_default else ''
-            btn = Gtk.Button(label=marker + sink.description)
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link' if sink.is_default else 'dim-label')
-            _shrink_button_label(btn)
-            btn.connect('clicked', lambda _b, s=sink: win._on_sink_selected(s))
-            rows.append(btn)
+        items = list(sinks)
+        for index, sink in enumerate(items):
+            row = widgets.list_row(
+                sink.description,
+                'Default output' if sink.is_default else '',
+                last=index == len(items) - 1)
+            row.connect(
+                'clicked', lambda _b, s=sink: win._on_sink_selected(s))
+            rows.append(row)
         _replace_box_children(
             win._sink_list_box,
             rows or [_section_placeholder('No output devices.')])
@@ -865,7 +926,7 @@ class SettingsPage:
         win._run_bg(system_settings.list_wifi, win._show_wifi)
 
     def _show_wifi(self, networks) -> None:
-        from gi.repository import Gtk
+        from xx_ui import widgets
 
         win = self._win
         if networks is None:
@@ -873,16 +934,23 @@ class SettingsPage:
                 win._wifi_list_box,
                 [_section_placeholder('WiFi unavailable on this device.')])
             return
+        items = list(networks[:12])
         rows = []
-        for net in networks[:12]:
-            marker = '● ' if net.in_use else ''
-            lock = '' if net.security == 'open' else '  ⚿'
-            btn = Gtk.Button(label=f'{marker}{net.ssid}{lock}  ({net.signal}%)')
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link' if net.in_use else 'dim-label')
-            _shrink_button_label(btn)
-            btn.connect('clicked', lambda _b, n=net, w=btn: win._on_wifi_selected(n, w))
-            rows.append(btn)
+        for index, net in enumerate(items):
+            if net.in_use:
+                detail = 'Connected'
+            elif net.security == 'open':
+                detail = 'Open network'
+            else:
+                detail = 'Secured'
+            row = widgets.list_row(
+                net.ssid or '(hidden network)', detail,
+                meta='%d%%' % net.signal if net.signal is not None else '',
+                last=index == len(items) - 1)
+            row.connect(
+                'clicked',
+                lambda _b, n=net, w=row: win._on_wifi_selected(n, w))
+            rows.append(row)
         _replace_box_children(
             win._wifi_list_box,
             rows or [_section_placeholder('No networks found.')])
@@ -928,7 +996,7 @@ class SettingsPage:
         win._run_bg(system_settings.list_bt_devices, win._show_bt_devices)
 
     def _show_bt_devices(self, devices) -> None:
-        from gi.repository import Gtk
+        from xx_ui import widgets
 
         win = self._win
         if devices is None:
@@ -936,15 +1004,20 @@ class SettingsPage:
                 win._bt_list_box,
                 [_section_placeholder('Bluetooth unavailable on this device.')])
             return
+        items = list(devices[:12])
         rows = []
-        for dev in devices[:12]:
-            state = ' — connected' if dev.connected else (' — paired' if dev.paired else '')
-            btn = Gtk.Button(label=dev.name + state)
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link' if dev.connected else 'dim-label')
-            _shrink_button_label(btn)
-            btn.connect('clicked', lambda _b, d=dev: win._on_bt_selected(d))
-            rows.append(btn)
+        for index, dev in enumerate(items):
+            if dev.connected:
+                state = 'Connected'
+            elif dev.paired:
+                state = 'Paired'
+            else:
+                state = 'Available'
+            row = widgets.list_row(
+                dev.name or dev.address, state,
+                last=index == len(items) - 1)
+            row.connect('clicked', lambda _b, d=dev: win._on_bt_selected(d))
+            rows.append(row)
         _replace_box_children(
             win._bt_list_box,
             rows or [_section_placeholder('No devices — scan to discover.')])

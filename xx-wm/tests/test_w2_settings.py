@@ -24,6 +24,14 @@ class _FakeWidget:
         self.props = {}
         self.handlers = {}
 
+    @classmethod
+    def new(cls, *args, **kwargs):
+        return cls(*args, **kwargs)
+
+    @classmethod
+    def new_with_label(cls, text):
+        return cls(label=text)
+
     def append(self, child):
         self.children.append(child)
         try:
@@ -58,6 +66,13 @@ class _FakeWidget:
     def add_css_class(self, name):
         self.classes.append(name)
 
+    def remove_css_class(self, name):
+        if name in self.classes:
+            self.classes.remove(name)
+
+    def add_controller(self, controller):
+        self.props['controller'] = controller
+
     def connect(self, signal, callback, *args):
         self.handlers[signal] = (callback, args)
         return 1
@@ -70,6 +85,24 @@ class _FakeWidget:
 
     def set_xalign(self, value):
         self.props['xalign'] = value
+
+    def set_halign(self, value):
+        self.props['halign'] = value
+
+    def set_valign(self, value):
+        self.props['valign'] = value
+
+    def set_can_focus(self, value):
+        self.props['can_focus'] = value
+
+    def set_size_request(self, width, height):
+        self.props['size_request'] = (width, height)
+
+    def set_name(self, name):
+        self.props['name'] = name
+
+    def get_name(self):
+        return self.props.get('name', '')
 
     def set_margin_top(self, value):
         self.props['margin_top'] = value
@@ -103,6 +136,11 @@ class _FakeWidget:
 
     def set_text(self, value):
         self.props['text'] = value
+
+    def get_text(self):
+        if 'text' in self.props:
+            return self.props['text']
+        return self.kwargs.get('label', '')
 
     def set_visibility(self, value):
         self.props['visibility'] = value
@@ -167,12 +205,54 @@ def window():
         make('Pango'), make('Gio'),
     )
     adw.ApplicationWindow = type('ApplicationWindow', (), {})
+
+    class _FakeImage(_FakeWidget):
+        @classmethod
+        def new_from_icon_name(cls, name):
+            image = cls()
+            image.props['icon_name'] = name
+            return image
+
+        def set_pixel_size(self, px):
+            self.props['pixel_size'] = px
+
+    class _FakeGesture(_FakeWidget):
+        def set_propagation_phase(self, phase):
+            self.props['propagation_phase'] = phase
+
+        def set_touch_only(self, touch_only):
+            self.props['touch_only'] = touch_only
+
+    class _FakeGrid(_FakeWidget):
+        def set_column_homogeneous(self, homogeneous):
+            self.props['column_homogeneous'] = homogeneous
+
+        def attach(self, child, *args):
+            self.append(child)
+
+    class _FakeCssProvider:
+        def __init__(self):
+            self.data = []
+
+        def load_from_data(self, data):
+            self.data.append(bytes(data))
+
     gtk.Box = _FakeWidget
     gtk.Label = _FakeWidget
     gtk.Button = _FakeWidget
     gtk.Entry = _FakeWidget
+    gtk.Image = _FakeImage
     gtk.ScrolledWindow = _FakeWidget
     gtk.Switch = _FakeWidget
+    gtk.Grid = _FakeGrid
+    gtk.CssProvider = _FakeCssProvider
+    gtk.GestureClick = _FakeGesture
+    gtk.Align = SimpleNamespace(START=0, END=1, CENTER=2, FILL=3)
+    gtk.PropagationPhase = SimpleNamespace(
+        NONE=0, CAPTURE=1, BUBBLE=2, TARGET=3)
+    gtk.StyleContext = SimpleNamespace(
+        add_provider_for_display=lambda *a, **k: None)
+    gdk.Display = SimpleNamespace(get_default=lambda: None)
     gtk.Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
     gtk.PolicyType = SimpleNamespace(NEVER=0, AUTOMATIC=1)
     pango.WrapMode = SimpleNamespace(WORD=0, WORD_CHAR=1, CHAR=2)
@@ -180,6 +260,7 @@ def window():
     repo.Adw, repo.Gdk, repo.GLib, repo.Gtk, repo.Pango, repo.Gio = (
         adw, gdk, glib, gtk, pango, gio)
     glib.idle_add = lambda callback, *args: (callback(*args), 0)[1]
+    glib.timeout_add = lambda _ms, callback, *args: (callback(*args), 0)[1]
 
     installed = {
         'gi': gi, 'gi.repository': repo,
@@ -189,6 +270,12 @@ def window():
     }
     saved = {name: sys.modules.get(name) for name in installed}
     saved_window = sys.modules.pop('window', None)
+    # xx_ui.widgets binds Gtk at import time and both sys.modules and the
+    # package attribute cache it: drop both so section code re-binds to
+    # this fixture's fakes instead of an earlier test file's.
+    import xx_ui
+    saved_widgets = sys.modules.pop('xx_ui.widgets', None)
+    saved_widgets_attr = xx_ui.__dict__.pop('widgets', None)
     sys.modules.update(installed)
     try:
         import window
@@ -204,13 +291,23 @@ def window():
             sys.modules['window'] = saved_window
         else:
             sys.modules.pop('window', None)
+        import xx_ui
+        if saved_widgets is not None:
+            sys.modules['xx_ui.widgets'] = saved_widgets
+        else:
+            sys.modules.pop('xx_ui.widgets', None)
+        if saved_widgets_attr is not None:
+            xx_ui.widgets = saved_widgets_attr
+        elif 'widgets' in xx_ui.__dict__:
+            del xx_ui.__dict__['widgets']
 
 
 def _bare(window):
     w = object.__new__(window.ShellWindow)
     w.gesture_config = SimpleNamespace(get=lambda key: 'none')
     w.app_index = SimpleNamespace(entries=[])
-    w.config = SimpleNamespace(data={}, label_for=lambda app_id, name: name)
+    w.config = SimpleNamespace(data={}, label_for=lambda app_id, name: name,
+                               theme=window.THEME_PRESETS['amoled'])
     w._gesture_binding_labels = {}
     w._system_gesture_labels = {}
     return w
@@ -278,6 +375,29 @@ class TestOpenSettings:
         assert w.adjustment.values == []
         assert w.refreshed == []
 
+    def test_deep_link_retries_scroll_past_layout(self, window):
+        import sys
+        w = _bare_open(window)
+        glib = sys.modules['gi.repository.GLib']
+        calls = []
+        def _idle(callback, *args):
+            calls.append(('idle', args))
+            return callback(*args)
+
+        def _timeout(ms, callback, *args):
+            calls.append((ms, args))
+            return callback(*args)
+
+        glib.idle_add = _idle
+        glib.timeout_add = _timeout
+        w.open_settings('wifi')
+        assert [ms for ms, _a in calls] == ['idle', 150, 300, 600, 1000,
+                                            1500]
+        assert all(args == ('wifi',) for _ms, args in calls)
+        # One direct scroll from _open_settings plus the immediate pass,
+        # the idle pass and the five scheduled retries.
+        assert w.adjustment.values == [120.0] * 8
+
     def test_shade_handler_is_open_settings(self, window):
         src = inspect.getsource(window.ShellWindow._ensure_shade)
         # The shade's Settings button must reach the shell's settings
@@ -296,8 +416,8 @@ class TestSettingsNarrowRows:
         name, bound, buttons = row.children
         assert bound is binding
         assert buttons.children == [change, reset]
-        assert name.props['wrap'] is True
-        assert name.props['max_width_chars'] == 24
+        assert 'xx-setting' in row.classes
+        assert 'xx-title' in name.classes
 
     def test_no_three_wide_control_row(self, window):
         import settings_page
@@ -310,6 +430,75 @@ class TestSettingsNarrowRows:
         w._build_settings_page()
         for entry in (w.apn_entry, w.apn_user_entry, w.apn_pass_entry):
             assert entry.props['width_chars'] == 12
+
+
+class TestSettingsListRows:
+    def _texts(self, box):
+        found = []
+
+        def _walk(widget):
+            label = widget.kwargs.get('label')
+            if isinstance(label, str):
+                found.append(label)
+            for child in widget.children:
+                _walk(child)
+            if isinstance(getattr(widget, 'child', None), _FakeWidget):
+                _walk(widget.child)
+
+        _walk(box)
+        return found
+
+    def test_wifi_rows_show_state_and_signal(self, window):
+        import settings_page
+        from gi.repository import Gtk
+        w = _bare(window)
+        page = settings_page.SettingsPage(w)
+        w._wifi_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        nets = [SimpleNamespace(ssid='Home', signal=80, security='wpa',
+                                in_use=True),
+                SimpleNamespace(ssid='Cafe', signal=40, security='open',
+                                in_use=False)]
+        page._show_wifi(nets)
+        rows = w._wifi_list_box.children
+        assert len(rows) == 2
+        assert all('clicked' in row.handlers for row in rows)
+        assert 'last' in rows[-1].classes
+        texts = self._texts(w._wifi_list_box)
+        assert 'Home' in texts
+        assert 'Connected' in texts
+        assert '80%' in texts
+        assert 'Cafe' in texts
+        assert 'Open network' in texts
+
+    def test_bt_rows_show_state(self, window):
+        import settings_page
+        from gi.repository import Gtk
+        w = _bare(window)
+        page = settings_page.SettingsPage(w)
+        w._bt_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        devs = [SimpleNamespace(name='Pods', address='AA:BB', paired=True,
+                                connected=True),
+                SimpleNamespace(name='', address='CC:DD', paired=False,
+                                connected=False)]
+        page._show_bt_devices(devs)
+        texts = self._texts(w._bt_list_box)
+        assert 'Pods' in texts
+        assert 'Connected' in texts
+        assert 'CC:DD' in texts
+
+    def test_sink_rows_mark_default(self, window):
+        import settings_page
+        from gi.repository import Gtk
+        w = _bare(window)
+        page = settings_page.SettingsPage(w)
+        w._sink_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sinks = [SimpleNamespace(description='Built-in Audio',
+                                 is_default=True),
+                 SimpleNamespace(description='USB Headset', is_default=False)]
+        page._show_sinks(sinks)
+        texts = self._texts(w._sink_list_box)
+        assert 'Built-in Audio' in texts
+        assert 'Default output' in texts
 
 
 class TestShellSection:
@@ -325,13 +514,20 @@ class TestShellSection:
                 if isinstance(child, _FakeWidget)
                 and 'label' in child.kwargs]
 
+    def test_page_opens_with_settings_header(self, window):
+        _w, box = self._page_box(window)
+        top = box.children[0].children[0]
+        assert top.children[0].kwargs.get('label') == 'Settings'
+        assert box.children[0].children[1].kwargs.get('label') == 'XX-WM SHELL'
+
     def test_gestures_moved_to_bottom_under_shell_heading(self, window):
         _w, box = self._page_box(window)
         labels = self._label_indices(box)
         texts = [text for _idx, text in labels]
         assert 'Gestures' not in texts
-        shell_idx = texts.index('Shell')
-        about_idx = texts.index('About')
+        assert 'GESTURES' not in texts
+        shell_idx = texts.index('SHELL')
+        about_idx = texts.index('ABOUT')
         assert shell_idx > about_idx
         assert box.children[-1].children, 'gestures card is the last block'
 
@@ -340,11 +536,10 @@ class TestShellSection:
         labels = self._label_indices(box)
         texts = [text for _idx, text in labels]
         note_idx = texts.index('Other shell preferences live in ~/.config/xx-wm/')
-        shell_idx = texts.index('Shell')
+        shell_idx = texts.index('SHELL')
         assert note_idx == shell_idx + 1
         note = box.children[[idx for idx, _t in labels][note_idx]]
-        assert 'dim-label' in note.classes
-        assert note.props['wrap'] is True
+        assert 'xx-secondary' in note.classes
 
 
 class TestWifiPasswordMode:

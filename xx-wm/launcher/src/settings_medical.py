@@ -110,78 +110,58 @@ class MedicalSection(settings_page._Section):
         self._draft_contacts: list = []
 
     def build(self, win) -> list:
-        from settings_page import (_section_card, _section_title,
-                                   _settings_row, _shrink_settings_entry)
-        from gi.repository import Gtk, Pango
+        from settings_page import (_section_placeholder, _section_title,
+                                   _settings_entry, _settings_row)
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
         medical = getattr(win.config, 'medical_id', {})
-        card = _section_card(spacing=8)
+        head = _section_title(self.title)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         for field, title in MEDICAL_FIELDS:
-            entry = Gtk.Entry()
-            entry.set_placeholder_text(title)
             try:
-                entry.set_text(medical.get(field, '')
-                               if isinstance(medical, dict) else '')
+                text = (medical.get(field, '')
+                        if isinstance(medical, dict) else '')
             except Exception:
-                pass
-            _shrink_settings_entry(entry)
-            getattr(win, '_attach_osk', lambda _w: None)(entry)
+                text = ''
+            entry = _settings_entry(win, title, text)
             self._entries[field] = entry
-            card.append(_settings_row(title, entry))
+            body.append(_settings_row(title, entry))
 
-        contacts_title = Gtk.Label(label='Emergency contacts', xalign=0)
-        contacts_title.add_css_class('dim-label')
-        card.append(contacts_title)
+        body.append(widgets.caption('Emergency contacts'))
         self._draft_contacts = [
             dict(entry) for entry in (medical.get('emergency_contacts', [])
                                       if isinstance(medical, dict) else [])
             if isinstance(entry, dict)]
-        from gi.repository import Gtk as _Gtk
-        self._contacts_box = _Gtk.Box(
-            orientation=_Gtk.Orientation.VERTICAL, spacing=4)
-        card.append(self._contacts_box)
+        self._contacts_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.append(self._contacts_box)
 
-        self._search_entry = Gtk.Entry()
-        self._search_entry.set_placeholder_text('Add: search contacts')
-        _shrink_settings_entry(self._search_entry)
-        getattr(win, '_attach_osk', lambda _w: None)(self._search_entry)
+        self._search_entry = _settings_entry(win, 'Add: search contacts')
         self._search_entry.connect('changed', lambda _e: self._on_search())
-        card.append(self._search_entry)
-        self._results_box = _Gtk.Box(
-            orientation=_Gtk.Orientation.VERTICAL, spacing=4)
-        card.append(self._results_box)
+        body.append(self._search_entry)
+        self._results_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.append(self._results_box)
 
-        switch_row = _Gtk.Box(orientation=_Gtk.Orientation.HORIZONTAL,
-                              spacing=8)
-        switch_title = Gtk.Label(label='Show on lock screen', xalign=0)
-        switch_title.set_hexpand(True)
-        switch_title.set_wrap(True)
-        switch_title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        switch_title.set_max_width_chars(18)
-        self._show_switch = Gtk.Switch()
+        self._show_switch = widgets.make_switch()
         try:
             self._show_switch.set_active(
                 bool(getattr(win.config, 'lock_screen_medical_id', True)))
         except Exception:
             pass
-        switch_row.append(switch_title)
-        switch_row.append(self._show_switch)
-        card.append(switch_row)
+        body.append(widgets.setting_row(
+            'Show on lock screen',
+            'First responders see it without unlocking.',
+            self._show_switch))
 
-        save_btn = Gtk.Button(label='Save Medical ID')
-        save_btn.add_css_class('flat')
-        save_btn.add_css_class('action-link')
-        save_btn.connect('clicked', lambda _b: self._on_save(win))
-        card.append(save_btn)
+        body.append(widgets.primary_button(
+            'Save Medical ID', lambda: self._on_save(win)))
 
-        self._note = Gtk.Label(label='', xalign=0)
-        self._note.add_css_class('dim-label')
-        self._note.set_wrap(True)
-        self._note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._note.set_max_width_chars(26)
-        card.append(self._note)
+        self._note = _section_placeholder('')
+        body.append(self._note)
         self._render_contacts()
-        return [_section_title(self.title), card]
+        return [head, body]
 
     def refresh(self, win) -> None:
         return None
@@ -189,9 +169,10 @@ class MedicalSection(settings_page._Section):
     # ------------------------------------------------------------ behavior
 
     def _render_contacts(self) -> None:
-        from settings_page import (_link_button, _replace_box_children,
-                                   _section_placeholder)
-        from gi.repository import Gtk, Pango
+        from settings_page import (_replace_box_children,
+                                   _section_placeholder, _text_action)
+        from gi.repository import Gtk
+        from xx_ui import widgets
         if self._contacts_box is None:
             return
         rows = []
@@ -200,14 +181,10 @@ class MedicalSection(settings_page._Section):
             number = entry.get('number', '')
             text = (f'{name} — {number}'.strip(' —')
                     if name or number else 'Contact')
-            label = Gtk.Label(label=text, xalign=0)
-            label.add_css_class('dim-label')
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            label.set_max_width_chars(20)
+            label = widgets.label(text, 'xx-secondary')
             label.set_hexpand(True)
-            remove = _link_button('Remove', 'dim-label')
-            remove.connect(
-                'clicked', lambda _b, i=index: self._remove_contact(i))
+            remove = _text_action(
+                'Remove', lambda i=index: self._remove_contact(i))
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
             line.append(label)
@@ -241,33 +218,29 @@ class MedicalSection(settings_page._Section):
         self._render_results(results if isinstance(results, list) else [])
 
     def _render_results(self, rows: list, note: str = '') -> None:
-        from settings_page import (_link_button, _replace_box_children,
-                                   _section_placeholder)
-        from gi.repository import Gtk, Pango
+        from settings_page import (_replace_box_children,
+                                   _section_placeholder, _text_action)
+        from gi.repository import Gtk
+        from xx_ui import widgets as _widgets
         if self._results_box is None:
             return
-        widgets = []
+        rendered = []
         for uid, name, number in rows[:_SEARCH_LIMIT]:
             text = (f'{name} — {number}'.strip(' —')
                     if name or number else uid)
-            label = Gtk.Label(label=text, xalign=0)
-            label.add_css_class('dim-label')
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            label.set_max_width_chars(20)
+            label = _widgets.label(text, 'xx-secondary')
             label.set_hexpand(True)
-            add = _link_button('Add', 'action-link')
-            add.connect(
-                'clicked',
-                lambda _b, n=name, p=number: self._add_contact(n, p))
+            add = _text_action(
+                'Add', lambda n=name, p=number: self._add_contact(n, p))
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
             line.append(label)
             line.append(add)
-            widgets.append(line)
-        if not widgets:
-            widgets = [_section_placeholder(
+            rendered.append(line)
+        if not rendered:
+            rendered = [_section_placeholder(
                 note or 'No matching contacts.')]
-        _replace_box_children(self._results_box, widgets)
+        _replace_box_children(self._results_box, rendered)
 
     def _add_contact(self, name: str, number: str) -> None:
         self._draft_contacts.append({'name': name, 'number': number})

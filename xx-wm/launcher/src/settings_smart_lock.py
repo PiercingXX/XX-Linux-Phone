@@ -57,63 +57,44 @@ class SmartLockSection(settings_page._Section):
     title = 'Smart Lock'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
-        status_card = settings_page._section_card(spacing=8)
-        status_label = Gtk.Label(label='Off', xalign=0)
-        status_label.set_wrap(True)
-        status_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        status_label.set_max_width_chars(24)
-        win._slock_status_label = status_label
-        status_card.append(status_label)
-        detail_label = Gtk.Label(label='', xalign=0)
-        detail_label.add_css_class('dim-label')
-        detail_label.set_wrap(True)
-        detail_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        detail_label.set_max_width_chars(26)
-        win._slock_detail_label = detail_label
-        status_card.append(detail_label)
-        reauth = Gtk.Label(label=reauth_text(), xalign=0)
-        reauth.add_css_class('dim-label')
-        reauth.set_wrap(True)
-        reauth.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        reauth.set_max_width_chars(26)
-        status_card.append(reauth)
+        status_card = settings_page._section_card()
+        win._slock_status_label = widgets.label('Off', 'xx-title')
+        status_card.append(win._slock_status_label)
+        win._slock_detail_label = settings_page._section_placeholder('')
+        status_card.append(win._slock_detail_label)
+        status_card.append(
+            settings_page._section_placeholder(reauth_text()))
 
-        bt_card = settings_page._section_card(spacing=8)
-        bt_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        win._slock_bt_box = bt_box
-        bt_card.append(bt_box)
-        bt_add = Gtk.Button(label='Trust a device…')
-        bt_add.add_css_class('flat')
-        bt_add.add_css_class('action-link')
-        settings_page._shrink_button_label(bt_add)
-        bt_add.connect('clicked', lambda btn: self._pick_bt_device(win, btn))
-        bt_card.append(bt_add)
+        win._slock_bt_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        bt_add = settings_page._outline_action('Trust a device…')
+        bt_add.connect(
+            'clicked',
+            lambda _b, b=bt_add: self._pick_bt_device(win, b))
 
-        wifi_card = settings_page._section_card(spacing=8)
-        wifi_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        win._slock_wifi_box = wifi_box
-        wifi_card.append(wifi_box)
-        wifi_add = Gtk.Button(label='Trust a network…')
-        wifi_add.add_css_class('flat')
-        wifi_add.add_css_class('action-link')
-        settings_page._shrink_button_label(wifi_add)
-        wifi_add.connect('clicked', lambda btn: self._pick_ssid(win, btn))
-        wifi_card.append(wifi_add)
+        win._slock_wifi_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        wifi_add = settings_page._outline_action('Trust a network…')
+        wifi_add.connect(
+            'clicked',
+            lambda _b, b=wifi_add: self._pick_ssid(win, b))
 
-        widgets = [settings_page._section_title(self.title), status_card,
-                   settings_page._section_title('Trusted devices'), bt_card,
-                   settings_page._section_title('Trusted networks'),
-                   wifi_card]
+        built = [settings_page._section_title(self.title), status_card,
+                 settings_page._section_title('Trusted devices'),
+                 win._slock_bt_box, bt_add,
+                 settings_page._section_title('Trusted networks'),
+                 win._slock_wifi_box, wifi_add]
         try:
             import smart_lock
             if smart_lock.on_body_supported():
-                widgets.extend(self._build_on_body(win))
+                built.extend(self._build_on_body(win))
         except Exception:
             pass
         self.refresh(win)
-        return widgets
+        return built
 
     def _build_on_body(self, win) -> list:
         from gi.repository import Gtk, Pango
@@ -149,22 +130,18 @@ class SmartLockSection(settings_page._Section):
                     pass
 
     def _render_bt(self, win) -> None:
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
         box = getattr(win, '_slock_bt_box', None)
         if box is None:
             return
         rows = []
         for address in trusted_bt(win):
-            name = Gtk.Label(label=address, xalign=0)
-            name.add_css_class('dim-label')
+            name = widgets.label(address, 'xx-secondary')
             name.set_hexpand(True)
-            name.set_ellipsize(Pango.EllipsizeMode.END)
-            name.set_max_width_chars(18)
-            remove = settings_page._link_button('Remove', 'dim-label')
-            remove.connect(
-                'clicked',
-                lambda _b, addr=address: self._remove_bt(win, addr))
+            remove = settings_page._text_action(
+                'Remove', lambda addr=address: self._remove_bt(win, addr))
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             line.append(name)
             line.append(remove)
@@ -174,22 +151,18 @@ class SmartLockSection(settings_page._Section):
                 'No trusted devices.')])
 
     def _render_wifi(self, win) -> None:
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
         box = getattr(win, '_slock_wifi_box', None)
         if box is None:
             return
         rows = []
         for ssid in trusted_ssids(win):
-            name = Gtk.Label(label=ssid, xalign=0)
-            name.add_css_class('dim-label')
+            name = widgets.label(ssid, 'xx-secondary')
             name.set_hexpand(True)
-            name.set_ellipsize(Pango.EllipsizeMode.END)
-            name.set_max_width_chars(18)
-            remove = settings_page._link_button('Remove', 'dim-label')
-            remove.connect(
-                'clicked',
-                lambda _b, net=ssid: self._remove_ssid(win, net))
+            remove = settings_page._text_action(
+                'Remove', lambda net=ssid: self._remove_ssid(win, net))
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             line.append(name)
             line.append(remove)

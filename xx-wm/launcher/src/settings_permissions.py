@@ -165,60 +165,41 @@ class PermissionsSection(settings_page._Section):
     title = 'App permissions'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk, Pango
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
-        indicators_card = settings_page._section_card(spacing=8)
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        title = Gtk.Label(label='Privacy indicators', xalign=0)
-        title.set_hexpand(True)
-        title.set_wrap(True)
-        title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        title.set_max_width_chars(18)
-        switch = Gtk.Switch()
-        switch.set_active(self._indicators_on(win))
+        head = settings_page._section_title(self.title)
+        switch = widgets.make_switch(self._indicators_on(win))
         switch.connect(
             'notify::active',
             lambda sw, _p: self._on_indicators_flipped(win, sw))
         win._perm_ind_switch = switch
-        row.append(title)
-        row.append(switch)
-        indicators_card.append(row)
-        note = Gtk.Label(
-            label='Shows mic, camera and location use.', xalign=0)
-        note.add_css_class('dim-label')
-        note.set_wrap(True)
-        note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        note.set_max_width_chars(26)
-        indicators_card.append(note)
-        recent_title = Gtk.Label(label='Recently used', xalign=0)
-        recent_title.add_css_class('dim-label')
-        indicators_card.append(recent_title)
-        recent_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        indicators = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        indicators.append(widgets.setting_row(
+            'Privacy indicators', 'Mic, camera and location',
+            switch))
+        indicators.append(settings_page._section_title('Recently used'))
+        recent_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         win._perm_recent_box = recent_box
-        indicators_card.append(recent_box)
+        indicators.append(recent_box)
 
-        apps_card = settings_page._section_card(spacing=8)
-        nav_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        apps_head = settings_page._section_title('Apps')
+        apps_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        nav_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         win._perm_nav_box = nav_box
-        apps_card.append(nav_box)
-        apps_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        apps_body.append(nav_box)
+        apps_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         win._perm_apps_box = apps_box
-        apps_card.append(apps_box)
-        disclaimer = Gtk.Label(
-            label='Only Flatpak apps can be limited here. '
+        apps_body.append(apps_box)
+        apps_body.append(settings_page._section_placeholder(
+            'Only Flatpak apps can be limited here. '
             'Native apps reach camera, mic and location directly — '
-            'watch the indicators.', xalign=0)
-        disclaimer.add_css_class('dim-label')
-        disclaimer.set_wrap(True)
-        disclaimer.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        disclaimer.set_max_width_chars(26)
-        apps_card.append(disclaimer)
+            'watch the indicators.'))
 
         self._render_recent(win, getattr(win, '_perm_recent', None),
                             getattr(win, '_perm_recent_at', None) or time.time())
         self._render_apps(win)
-        return [settings_page._section_title(self.title),
-                indicators_card, apps_card]
+        return [head, indicators, apps_head, apps_body]
 
     def refresh(self, win) -> None:
         self._sync_indicators(win)
@@ -312,49 +293,44 @@ class PermissionsSection(settings_page._Section):
             return
         rows = []
         if isinstance(recent, list):
-            from gi.repository import Gtk, Pango
-            for item in recent[:8]:
-                if not isinstance(item, dict):
-                    continue
+            from xx_ui import widgets
+            items = [item for item in recent[:8]
+                     if isinstance(item, dict) and item.get('app')]
+            for index, item in enumerate(items):
                 kind = _RECENT_KIND_LABELS.get(item.get('kind'),
                                               item.get('kind'))
-                app = item.get('app')
                 try:
                     seen = float(item.get('at'))
                 except (TypeError, ValueError):
                     continue
-                if not app:
-                    continue
-                label = Gtk.Label(
-                    label='%s — %s · %s' % (app, kind, age_text(seen, at)),
-                    xalign=0)
-                label.add_css_class('dim-label')
-                label.set_wrap(True)
-                label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                label.set_max_width_chars(26)
-                rows.append(label)
+                rows.append(widgets.setting_row(
+                    item.get('app'),
+                    '%s · %s' % (kind, age_text(seen, at)),
+                    last=index == len(items) - 1))
         settings_page._replace_box_children(
             box, rows or [settings_page._section_placeholder(
                 'No use in the last 24 h.')])
 
     def _render_apps(self, win) -> None:
+        from xx_ui import widgets
         nav = getattr(win, '_perm_nav_box', None)
         box = getattr(win, '_perm_apps_box', None)
         if nav is None or box is None:
             return
         counts = self._perm_counts(win)
         nav_rows = []
-        for kind, label in PERM_KINDS:
+        kinds = list(PERM_KINDS)
+        for index, (kind, label) in enumerate(kinds):
             if kind == 'network':
-                text = 'Network — %d blocked' % counts[kind]
+                detail = '%d blocked' % counts[kind]
             else:
-                text = '%s — %d allowed' % (label, counts[kind])
-            btn = settings_page._link_button(text, 'action-link')
-            settings_page._shrink_button_label(btn)
-            btn.connect(
-                'clicked',
-                lambda _b, k=kind: self._open_perm_view(win, k))
-            nav_rows.append(btn)
+                detail = '%d allowed' % counts[kind]
+            row = widgets.list_row(
+                label, detail, trailing=widgets.chevron(),
+                last=index == len(kinds) - 1)
+            row.connect(
+                'clicked', lambda _b, k=kind: self._open_perm_view(win, k))
+            nav_rows.append(row)
         settings_page._replace_box_children(nav, nav_rows)
         view = getattr(win, '_perm_view', None)
         if isinstance(view, tuple) and view and view[0] == 'app':
@@ -365,27 +341,25 @@ class PermissionsSection(settings_page._Section):
             self._render_app_list(win, box)
 
     def _render_app_list(self, win, box) -> None:
-        from gi.repository import Gtk
+        from xx_ui import widgets
 
+        entries = list(_entries(win))
         rows = []
-        for entry in _entries(win):
+        for index, entry in enumerate(entries):
             name = _display_name(win, entry)
-            tag = 'Flatpak' if _is_flatpak(entry) else 'Native'
-            btn = Gtk.Button(label='%s — %s' % (name, tag))
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link' if _is_flatpak(entry)
-                              else 'dim-label')
-            settings_page._shrink_button_label(btn)
-            btn.connect(
+            tag = ('Flatpak app' if _is_flatpak(entry)
+                   else 'Native app — no limits')
+            row = widgets.list_row(
+                name, tag, trailing=widgets.chevron(),
+                last=index == len(entries) - 1)
+            row.connect(
                 'clicked',
                 lambda _b, e=entry: self._open_app_view(win, e.app_id))
-            rows.append(btn)
+            rows.append(row)
         settings_page._replace_box_children(
             box, rows or [settings_page._section_placeholder('No apps.')])
 
     def _render_perm_view(self, win, box, kind: str) -> None:
-        from gi.repository import Gtk, Pango
-
         rows = []
         if kind == 'network':
             try:
@@ -394,12 +368,8 @@ class PermissionsSection(settings_page._Section):
             except Exception:
                 denied = []
             for app_id in denied:
-                label = Gtk.Label(label='%s — blocked' % app_id, xalign=0)
-                label.add_css_class('dim-label')
-                label.set_wrap(True)
-                label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                label.set_max_width_chars(24)
-                rows.append(label)
+                rows.append(settings_page._section_placeholder(
+                    '%s — blocked' % app_id))
         else:
             maps = getattr(win, '_perm_maps', None)
             table = maps.get(kind) if isinstance(maps, dict) else None
@@ -408,42 +378,27 @@ class PermissionsSection(settings_page._Section):
                     state = stored_state(maps, kind, app_id)
                     text = {True: 'allowed', False: 'denied'}.get(
                         state, 'ask')
-                    label = Gtk.Label(
-                        label='%s — %s' % (app_id, text), xalign=0)
-                    label.add_css_class('dim-label')
-                    label.set_wrap(True)
-                    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                    label.set_max_width_chars(24)
-                    rows.append(label)
+                    rows.append(settings_page._section_placeholder(
+                        '%s — %s' % (app_id, text)))
             elif maps is None:
                 rows.append(settings_page._section_placeholder(
                     'Permission store unavailable.'))
-        back = settings_page._link_button('Back to apps', 'dim-label')
-        back.connect('clicked', lambda _b: self._open_app_list(win))
+        back = settings_page._text_action(
+            'Back to apps', lambda: self._open_app_list(win))
         rows.append(back)
         settings_page._replace_box_children(box, rows or [
             settings_page._section_placeholder('Nobody has this access.'),
             back])
 
     def _render_app_detail(self, win, box, app_id: str) -> None:
-        from gi.repository import Gtk, Pango
+        from xx_ui import widgets
 
-        rows = []
-        title = Gtk.Label(label=app_id, xalign=0)
-        title.set_wrap(True)
-        title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        title.set_max_width_chars(24)
-        rows.append(title)
+        rows = [widgets.label(app_id, 'xx-title')]
         maps = getattr(win, '_perm_maps', None)
         switches = {}
-        for kind, label in PERM_KINDS:
-            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            name = Gtk.Label(label=label, xalign=0)
-            name.set_hexpand(True)
-            name.set_wrap(True)
-            name.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            name.set_max_width_chars(18)
-            switch = Gtk.Switch()
+        kinds = list(PERM_KINDS)
+        for index, (kind, label) in enumerate(kinds):
+            switch = widgets.make_switch()
             if kind == 'network':
                 switch.set_active(not network_denied(win, app_id))
                 supported = getattr(win, '_perm_net_supported', None)
@@ -455,25 +410,17 @@ class PermissionsSection(settings_page._Section):
                 'notify::active',
                 lambda sw, _p, k=kind: self._on_perm_flipped(win, app_id, k, sw))
             switches[kind] = switch
-            line.append(name)
-            line.append(switch)
-            rows.append(line)
+            rows.append(widgets.setting_row(
+                label, '', switch, last=index == len(kinds) - 1))
             if kind == 'network' and getattr(
                     win, '_perm_net_supported', None) is False:
-                note = Gtk.Label(label='Needs the helper service.',
-                                 xalign=0)
-                note.add_css_class('dim-label')
-                note.set_wrap(True)
-                note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                note.set_max_width_chars(26)
-                rows.append(note)
+                rows.append(settings_page._section_placeholder(
+                    'Needs the helper service.'))
         win._perm_detail_switches = switches
-        reset = settings_page._link_button('Reset all to ask', 'action-link')
-        reset.connect('clicked', lambda _b: self._on_reset_app(win, app_id))
-        rows.append(reset)
-        back = settings_page._link_button('Back to apps', 'dim-label')
-        back.connect('clicked', lambda _b: self._open_app_list(win))
-        rows.append(back)
+        rows.append(settings_page._text_action(
+            'Reset all to ask', lambda: self._on_reset_app(win, app_id)))
+        rows.append(settings_page._text_action(
+            'Back to apps', lambda: self._open_app_list(win)))
         settings_page._replace_box_children(box, rows)
 
     def _open_app_list(self, win) -> None:

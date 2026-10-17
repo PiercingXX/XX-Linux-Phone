@@ -42,6 +42,14 @@ class _FakeWidget:
         self._text = kwargs.get('label', '')
         self._active = False
 
+    @classmethod
+    def new(cls, *args, **kwargs):
+        return cls(*args, **kwargs)
+
+    @classmethod
+    def new_with_label(cls, text):
+        return cls(label=text)
+
     def _rec(self, name, *args):
         self.calls.append((name, args))
 
@@ -79,9 +87,16 @@ class _FakeWidget:
     def add_css_class(self, name):
         self.classes.append(name)
 
+    def remove_css_class(self, name):
+        if name in self.classes:
+            self.classes.remove(name)
+
     def connect(self, signal, callback, *args):
         self.handlers[signal] = (callback, args)
         return 1
+
+    def set_can_focus(self, value):
+        self._rec('can_focus', value)
 
     def add_controller(self, controller):
         self.calls.append(('add_controller', (controller,)))
@@ -230,13 +245,32 @@ def _install_fake_gi(monkeypatch):
     adw, gdk, glib, gtk, pango, gio = (
         _make('Adw'), _make('Gdk'), _make('GLib'), _make('Gtk'),
         _make('Pango'), _make('Gio'))
+    class _FakeImage(_FakeWidget):
+        @classmethod
+        def new_from_icon_name(cls, name):
+            image = cls()
+            image._rec('icon_name', name)
+            return image
+
+        def set_pixel_size(self, px):
+            self._rec('pixel_size', px)
+
+    class _FakeGesture(_FakeWidget):
+        def set_propagation_phase(self, phase):
+            self._rec('propagation_phase', phase)
+
     gtk.Box = _FakeWidget
     gtk.Label = _FakeWidget
     gtk.Button = _FakeWidget
     gtk.Entry = _FakeWidget
+    gtk.Image = _FakeImage
     gtk.Switch = _FakeWidget
     gtk.ScrolledWindow = _FakeWidget
     gtk.ProgressBar = _FakeWidget
+    gtk.GestureClick = _FakeGesture
+    gtk.Align = SimpleNamespace(START=0, END=1, CENTER=2, FILL=3)
+    gtk.PropagationPhase = SimpleNamespace(
+        NONE=0, CAPTURE=1, BUBBLE=2, TARGET=3)
     gtk.Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
     gtk.PolicyType = SimpleNamespace(NEVER=0, AUTOMATIC=1)
     gtk.InputPurpose = SimpleNamespace(NUMBER=1, FREE_FORM=0)
@@ -250,19 +284,14 @@ def _install_fake_gi(monkeypatch):
         def load_from_data(self, data):
             self.data.append(bytes(data))
 
-    class _FakeGesture(_FakeWidget):
-        @classmethod
-        def new(cls):
-            return cls()
-
     gtk.CssProvider = _FakeCssProvider
-    gtk.GestureClick = _FakeGesture
     gtk.StyleContext = SimpleNamespace(
         add_provider_for_display=lambda *a, **k: None)
     gdk.Display = SimpleNamespace(get_default=lambda: None)
     pango.WrapMode = SimpleNamespace(WORD=0, WORD_CHAR=1, CHAR=2)
     pango.EllipsizeMode = SimpleNamespace(NONE=0, START=1, MIDDLE=2, END=3)
     glib.idle_add = lambda callback, *args: (callback(*args), 0)[1]
+    glib.timeout_add = lambda _ms, callback, *args: (callback(*args), 0)[1]
     glib.Error = type('Error', (Exception,), {})
     glib.SpawnFlags = SimpleNamespace(SEARCH_PATH=1)
     gio.BusType = SimpleNamespace(SYSTEM=1, SESSION=2)
@@ -277,6 +306,14 @@ def _install_fake_gi(monkeypatch):
                          'gi.repository.Pango': pango,
                          'gi.repository.Gio': gio}.items():
         monkeypatch.setitem(sys.modules, name, module)
+    # xx_ui.widgets binds Gtk at import time and both sys.modules and the
+    # package attribute cache it: drop both so section code re-binds to
+    # this fixture's fakes instead of an earlier test file's
+    # (monkeypatch reverts both deletions after the test).
+    import xx_ui
+    monkeypatch.delitem(sys.modules, 'xx_ui.widgets', raising=False)
+    if 'widgets' in xx_ui.__dict__:
+        monkeypatch.delattr(xx_ui, 'widgets', raising=False)
     return gtk
 
 
@@ -408,25 +445,38 @@ class TestChargeProbe:
         assert charging.parse_custom_limit('') is None
 
 
+def _built_texts(built):
+    found = []
+    for widget in built:
+        found.extend(_texts(widget))
+    return found
+
+
 class TestChargingSection:
-    def test_build_and_unsupported_message(self, fake_gi):
+    def test_build_starts_with_caps_label(self, fake_gi):
         import settings_charging as charging
         win = _bare_win()
         section = charging.ChargingSection()
-        widgets = section.build(win)
-        assert len(widgets) == 2
-        assert 'settings-card' in widgets[1].classes
-        assert 'section-title' in widgets[0].classes
+        built = section.build(win)
+        assert 'xx-section-label' in built[0].classes
+        assert 'CHARGING' in _texts(built[0])
+        assert 'Charge limit: Off' in _built_texts(built)
+
+    def test_unsupported_message(self, fake_gi):
+        import settings_charging as charging
+        win = _bare_win()
+        section = charging.ChargingSection()
+        built = section.build(win)
         section._on_state(win, (False, None))
-        assert charging.NO_KNOB_TEXT in _texts(widgets[1])
+        assert charging.NO_KNOB_TEXT in _built_texts(built)
 
     def test_supported_shows_presets(self, fake_gi):
         import settings_charging as charging
         win = _bare_win()
         section = charging.ChargingSection()
-        widgets = section.build(win)
+        built = section.build(win)
         section._on_state(win, (True, '87% — discharging'))
-        labels = _texts(widgets[1])
+        labels = _built_texts(built)
         assert any('80%' in text for text in labels)
         assert any('87%' in text for text in labels)
 
@@ -486,15 +536,21 @@ class TestChargingSection:
             found.extend(self._visible_texts(direct))
         return found
 
+    def _visible_built_texts(self, built):
+        found = []
+        for widget in built:
+            found.extend(self._visible_texts(widget))
+        return found
+
     def test_unsupported_hides_custom_controls(self, fake_gi):
         import settings_charging as charging
         win = _bare_win()
         section = charging.ChargingSection()
-        widgets = section.build(win)
+        built = section.build(win)
         section._on_state(win, (False, None))
         assert section._custom_entry.get_visible() is False
         assert section._apply_btn.get_visible() is False
-        labels = self._visible_texts(widgets[1])
+        labels = self._visible_built_texts(built)
         assert charging.NO_KNOB_TEXT in labels
         assert not any('Custom' in text for text in labels)
         assert not any('Set custom limit' in text for text in labels)
@@ -505,21 +561,21 @@ class TestChargingSection:
         import settings_charging as charging
         win = _bare_win()
         section = charging.ChargingSection()
-        widgets = section.build(win)
+        built = section.build(win)
         assert section._custom_entry.get_visible() is False
         assert section._apply_btn.get_visible() is False
-        labels = self._visible_texts(widgets[1])
+        labels = self._visible_built_texts(built)
         assert not any('Set custom limit' in text for text in labels)
 
     def test_supported_shows_custom_controls(self, fake_gi):
         import settings_charging as charging
         win = _bare_win()
         section = charging.ChargingSection()
-        widgets = section.build(win)
+        built = section.build(win)
         section._on_state(win, (True, '87% — discharging'))
         assert section._custom_entry.get_visible() is True
         assert section._apply_btn.get_visible() is True
-        labels = self._visible_texts(widgets[1])
+        labels = self._visible_built_texts(built)
         assert any('Set custom limit' in text for text in labels)
         assert any('80%' in text for text in labels)
 
@@ -609,10 +665,10 @@ class TestBatteryUseSection:
             daily_totals=lambda day: {'org.example.App.desktop': 600})
         win = _bare_win()
         section = battery_use.BatteryUseSection()
-        widgets = section.build(win)
+        section.build(win)
         section._slice_override = app_slice
         section._render(win, section._gather(tracker, app_slice))
-        labels = _texts(widgets[1])
+        labels = _texts(section._list_box)
         assert any('%' in text for text in labels)
         assert section._note is not None
         assert 'estimated' in section._note.get_text()
@@ -621,9 +677,9 @@ class TestBatteryUseSection:
         import settings_battery_use as battery_use
         win = _bare_win()
         section = battery_use.BatteryUseSection()
-        widgets = section.build(win)
+        section.build(win)
         section._render(win, ({}, {}))
-        assert 'No usage yet.' in _texts(widgets[1])
+        assert 'No usage yet.' in _texts(section._list_box)
 
 
 # --- screen-time model ---------------------------------------------------
@@ -1014,17 +1070,18 @@ class TestSectionRegistry:
         for key in ('charging', 'batteryuse', 'screentime', 'medical'):
             assert key in settings_page._SETTINGS_SECTION_KEYS
 
-    def test_each_section_builds_title_then_card(self, fake_gi):
+    def test_each_section_builds_title_first(self, fake_gi):
         import settings_page
         win = _bare_win()
         for key, cls in settings_page.SETTINGS_SECTIONS:
             if key in ('charging', 'batteryuse', 'screentime', 'medical'):
-                widgets = cls().build(win)
-                assert len(widgets) == 2, key
-                assert 'section-title' in widgets[0].classes, key
-                assert 'settings-card' in widgets[1].classes, key
+                built = cls().build(win)
+                assert 'xx-section-label' in built[0].classes, key
 
     def test_all_strings_phone_sized(self, fake_gi):
+        # 32 is the shared xx_ui standalone cap (xx-section-label and
+        # wrapped notes); the common width driver proves helpers with
+        # far longer strings still allocate exactly 360 px.
         import settings_page
         win = _bare_win()
         for key, cls in settings_page.SETTINGS_SECTIONS:
@@ -1033,7 +1090,7 @@ class TestSectionRegistry:
                     for node in _walk(widget):
                         for name, args in node.calls:
                             if name == 'max_width_chars':
-                                assert args[0] <= 26, (key, args)
+                                assert args[0] <= 32, (key, args)
                             if name == 'width_chars':
                                 assert args[0] <= 12, (key, args)
 

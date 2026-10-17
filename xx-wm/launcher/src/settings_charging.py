@@ -105,48 +105,30 @@ class ChargingSection(settings_page._Section):
         self._supported: bool | None = None
 
     def build(self, win) -> list:
-        from settings_page import (_section_card, _section_title,
-                                   _shrink_settings_entry)
-        from gi.repository import Gtk, Pango
+        from settings_page import (_section_placeholder, _section_title,
+                                   _settings_entry)
+        from gi.repository import Gtk
+        from xx_ui import widgets
 
         self._current = getattr(win.config, 'charge_limit', None)
-        card = _section_card(spacing=8)
-        self._status = Gtk.Label(label=limit_label(self._current), xalign=0)
-        self._status.add_css_class('dim-label')
-        self._status.set_wrap(True)
-        self._status.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._status.set_max_width_chars(26)
-        card.append(self._status)
+        label = _section_title(self.title)
+        self._status = _section_placeholder(limit_label(self._current))
 
         self._options_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        card.append(self._options_box)
+            orientation=Gtk.Orientation.VERTICAL, spacing=8)
 
-        self._custom_entry = Gtk.Entry()
-        self._custom_entry.set_placeholder_text(CUSTOM_PLACEHOLDER)
+        self._custom_entry = _settings_entry(win, CUSTOM_PLACEHOLDER)
         try:
             self._custom_entry.set_input_purpose(Gtk.InputPurpose.NUMBER)
         except Exception:
             pass
-        _shrink_settings_entry(self._custom_entry)
-        getattr(win, '_attach_osk', lambda _w: None)(self._custom_entry)
-        apply_btn = Gtk.Button(label='Set custom limit')
-        apply_btn.add_css_class('flat')
-        apply_btn.add_css_class('action-link')
-        apply_btn.connect(
-            'clicked', lambda _b: self._on_custom(win))
-        self._apply_btn = apply_btn
-        card.append(self._custom_entry)
-        card.append(apply_btn)
+        self._apply_btn = widgets.outline_button(
+            'Set custom limit', lambda: self._on_custom(win))
 
-        self._note = Gtk.Label(label='', xalign=0)
-        self._note.add_css_class('dim-label')
-        self._note.set_wrap(True)
-        self._note.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._note.set_max_width_chars(26)
-        card.append(self._note)
+        self._note = _section_placeholder('')
         self._render_options(win)
-        return [_section_title(self.title), card]
+        return [label, self._status, self._options_box, self._custom_entry,
+                self._apply_btn, self._note]
 
     def refresh(self, win) -> None:
         from settings_page import _run_bg
@@ -205,6 +187,7 @@ class ChargingSection(settings_page._Section):
 
     def _render_options(self, win) -> None:
         from settings_page import _replace_box_children, _section_placeholder
+        from xx_ui import widgets
         if self._options_box is None:
             return
         if self._supported is not True:
@@ -212,17 +195,10 @@ class ChargingSection(settings_page._Section):
                 self._options_box, [_section_placeholder(NO_KNOB_TEXT)])
             self._set_custom_visible(False)
             return
-        from gi.repository import Gtk
-        rows = []
-        for label, value in CHARGE_PRESETS:
-            marked = f'● {label}' if self._current == value else label
-            btn = Gtk.Button(label=marked)
-            btn.add_css_class('flat')
-            btn.add_css_class('action-link')
-            btn.connect(
-                'clicked', lambda _b, v=value: self._on_pick(win, v))
-            rows.append(btn)
-        _replace_box_children(self._options_box, rows)
+        _replace_box_children(self._options_box, [widgets.segmented([
+            (label, self._current == value,
+             lambda v=value: self._on_pick(win, v))
+            for label, value in CHARGE_PRESETS])])
         self._set_custom_visible(True)
 
     def _set_custom_visible(self, visible: bool) -> None:

@@ -191,32 +191,20 @@ class ScreenTimeSection(settings_page._Section):
         self._selected: str | None = None
 
     def build(self, win) -> list:
-        from settings_page import _section_card, _section_title
-        from gi.repository import Gtk, Pango
+        from settings_page import _section_placeholder, _section_title
+        from gi.repository import Gtk
 
-        card = _section_card(spacing=8)
-        self._today_label = Gtk.Label(label='Today: —', xalign=0)
-        self._today_label.add_css_class('dim-label')
-        self._today_label.set_wrap(True)
-        self._today_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._today_label.set_max_width_chars(26)
-        card.append(self._today_label)
+        label = _section_title(self.title)
+        self._today_label = _section_placeholder('Today: —')
 
         self._week_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                                  spacing=4)
-        card.append(self._week_box)
-
-        self._counts_label = Gtk.Label(label='', xalign=0)
-        self._counts_label.add_css_class('dim-label')
-        self._counts_label.set_wrap(True)
-        self._counts_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self._counts_label.set_max_width_chars(26)
-        card.append(self._counts_label)
+        self._counts_label = _section_placeholder('')
 
         self._apps_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                 spacing=4)
-        card.append(self._apps_box)
-        return [_section_title(self.title), card]
+                                 spacing=0)
+        return [label, self._today_label, self._week_box,
+                self._counts_label, self._apps_box]
 
     def refresh(self, win) -> None:
         from settings_page import _run_bg
@@ -326,9 +314,9 @@ class ScreenTimeSection(settings_page._Section):
             pass
 
     def _render_apps(self, win, totals: dict, day: str) -> None:
-        from settings_page import (_link_button, _replace_box_children,
-                                   _section_placeholder)
-        from gi.repository import Gtk, Pango
+        from settings_page import (_replace_box_children,
+                                   _section_placeholder, _text_action)
+        from xx_ui import widgets
         if self._apps_box is None:
             return
         if self._selected is not None:
@@ -338,51 +326,40 @@ class ScreenTimeSection(settings_page._Section):
             limits = win.config.app_time_limits
         except Exception:
             limits = {}
+        items = sorted(totals.items(), key=lambda kv: -kv[1])
         rows = []
-        for app_id, secs in sorted(totals.items(), key=lambda kv: -kv[1]):
+        for index, (app_id, secs) in enumerate(items):
             name = self._display_name(win, app_id)
-            open_btn = Gtk.Button(
-                label=f'{name}: {fmt_duration(secs)}')
-            open_btn.add_css_class('flat')
-            open_btn.add_css_class('action-link')
-            child = open_btn.get_child()
-            if child is not None and hasattr(child, 'set_max_width_chars'):
-                try:
-                    child.set_xalign(0)
-                    child.set_ellipsize(Pango.EllipsizeMode.END)
-                    child.set_max_width_chars(24)
-                except Exception:
-                    pass
-            open_btn.connect(
-                'clicked', lambda _b, a=app_id: self._select(win, a))
-            rows.append(open_btn)
             current = 0
             if isinstance(limits, dict):
                 try:
                     current = int(limits.get(app_id, 0))
                 except (TypeError, ValueError):
                     current = 0
-            limit_btn = Gtk.Button(
-                label=f'Limit: {limit_label_text(current)}')
-            limit_btn.add_css_class('flat')
-            limit_btn.add_css_class('dim-label')
-            limit_btn.connect(
-                'clicked', lambda _b, a=app_id: self._cycle_limit(win, a))
-            rows.append(limit_btn)
+            detail = '%s · Limit: %s' % (
+                fmt_duration(secs), limit_label_text(current))
             if app_id in reached_limits(win.config, totals, day):
-                ignore = _link_button('Ignore for today', 'dim-label')
-                ignore.connect(
-                    'clicked',
-                    lambda _b, a=app_id: self._ignore(win, a))
-                rows.append(ignore)
+                detail += ' · over'
+            row = widgets.list_row(
+                name, detail, last=index == len(items) - 1)
+            row.connect('clicked', lambda _b, a=app_id: self._select(win, a))
+            rows.append(row)
+            limit_row = _text_action(
+                'Limit: %s' % limit_label_text(current),
+                lambda a=app_id: self._cycle_limit(win, a))
+            rows.append(limit_row)
+            if app_id in reached_limits(win.config, totals, day):
+                rows.append(_text_action(
+                    'Ignore for today',
+                    lambda a=app_id: self._ignore(win, a)))
         if not rows:
             rows = [_section_placeholder('No screen time yet.')]
         _replace_box_children(self._apps_box, rows)
 
     def _render_breakdown(self, win, totals: dict) -> None:
-        from settings_page import (_link_button, _replace_box_children)
+        from settings_page import (_replace_box_children,
+                                   _section_placeholder, _text_action)
         from settings_battery_use import usage_tracker_for
-        from gi.repository import Gtk, Pango
         tracker = usage_tracker_for(win)
         per_day: list = []
         if tracker is not None:
@@ -396,22 +373,14 @@ class ScreenTimeSection(settings_page._Section):
                 except Exception:
                     secs = 0
                 per_day.append((day, secs))
-        rows = []
-        back = _link_button('‹ Back', 'dim-label')
-        back.connect('clicked', lambda _b: self._select(win, None))
-        rows.append(back)
+        rows = [_text_action('‹ Back', lambda: self._select(win, None))]
         for day, secs in per_day:
             try:
                 stamp = day.strftime('%a %b %d')
             except Exception:
                 stamp = str(day)
-            label = Gtk.Label(label=f'{stamp}: {fmt_duration(secs)}',
-                              xalign=0)
-            label.add_css_class('dim-label')
-            label.set_wrap(True)
-            label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            label.set_max_width_chars(26)
-            rows.append(label)
+            rows.append(_section_placeholder(
+                '%s: %s' % (stamp, fmt_duration(secs))))
         _replace_box_children(self._apps_box, rows)
 
     def _select(self, win, app_id: str | None) -> None:

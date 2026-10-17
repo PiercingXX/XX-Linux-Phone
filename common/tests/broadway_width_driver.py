@@ -81,6 +81,8 @@ def main() -> None:
     rows.append(widgets.setting_row(LONG, LONG, widgets.make_switch(True)))
     rows.append(widgets.setting_row(LONG, LONG, widgets.make_switch(False),
                                     last=True))
+    rows.append(widgets.list_row(LONG, LONG, trailing=widgets.chevron(),
+                                 last=True))
     rows.append(widgets.empty_state(LONG, LONG))
     keys = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
     for digit, sub in (('1', 'VM'), ('2', 'ABCDEF')):

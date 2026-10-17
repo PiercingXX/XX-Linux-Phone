@@ -32,24 +32,8 @@ window.xx-wm paned {
   margin-bottom: 4px;
 }
 
-.section-title {
-  font-size: 18pt;
-  font-weight: 600;
-}
-
 .dim-label {
   font-size: 11.5pt;
-}
-
-/* Borders only inside the settings page, not globally */
-.settings-card,
-.settings-page list,
-.settings-page row,
-.settings-page scrolledwindow,
-.settings-page entry {
-  border-radius: 20px;
-  border-width: 1px;
-  border-style: solid;
 }
 
 /* Drawer search: flat text, no box chrome — text-first like every surface */
@@ -94,9 +78,7 @@ entry {
   font-size: 12.5pt;
 }
 
-.settings-card {
-  padding: 18px;
-}
+
 
 /* A-Z rail: small muted letters down the right edge. Real 44 px touch
    targets in their own scroller, so 27 letters never size the drawer. */

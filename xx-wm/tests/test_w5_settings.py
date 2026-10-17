@@ -325,6 +325,14 @@ class _FakeWidget:
         self.props = {}
         self.handlers = {}
 
+    @classmethod
+    def new(cls, *args, **kwargs):
+        return cls(*args, **kwargs)
+
+    @classmethod
+    def new_with_label(cls, text):
+        return cls(label=text)
+
     def append(self, child):
         self.children.append(child)
         try:
@@ -359,6 +367,13 @@ class _FakeWidget:
     def add_css_class(self, name):
         self.classes.append(name)
 
+    def remove_css_class(self, name):
+        if name in self.classes:
+            self.classes.remove(name)
+
+    def add_controller(self, controller):
+        self.props['controller'] = controller
+
     def connect(self, signal, callback, *args):
         self.handlers[signal] = (callback, args)
         return 1
@@ -371,6 +386,18 @@ class _FakeWidget:
 
     def set_xalign(self, value):
         self.props['xalign'] = value
+
+    def set_halign(self, value):
+        self.props['halign'] = value
+
+    def set_valign(self, value):
+        self.props['valign'] = value
+
+    def set_can_focus(self, value):
+        self.props['can_focus'] = value
+
+    def set_size_request(self, width, height):
+        self.props['size_request'] = (width, height)
 
     def set_margin_top(self, value):
         self.props['margin_top'] = value
@@ -406,6 +433,11 @@ class _FakeWidget:
         self.props['text'] = value
         if isinstance(self, _FakeLabel):
             self.props['label'] = value
+
+    def get_text(self):
+        if 'text' in self.props:
+            return self.props['text']
+        return self.kwargs.get('label', '')
 
     def set_label(self, value):
         self.props['label'] = value
@@ -474,12 +506,32 @@ def fake_gtk():
         make('Pango'), make('Gio'),
     )
     adw.ApplicationWindow = type('ApplicationWindow', (), {})
+
+    class _FakeImage(_FakeWidget):
+        @classmethod
+        def new_from_icon_name(cls, name):
+            image = cls()
+            image.props['icon_name'] = name
+            return image
+
+        def set_pixel_size(self, px):
+            self.props['pixel_size'] = px
+
+    class _FakeGesture(_FakeWidget):
+        def set_propagation_phase(self, phase):
+            self.props['propagation_phase'] = phase
+
     gtk.Box = _FakeBox
     gtk.Label = _FakeLabel
     gtk.Button = _FakeButton
     gtk.Entry = _FakeWidget
+    gtk.Image = _FakeImage
     gtk.ScrolledWindow = _FakeWidget
     gtk.Switch = _FakeSwitch
+    gtk.GestureClick = _FakeGesture
+    gtk.Align = SimpleNamespace(START=0, END=1, CENTER=2, FILL=3)
+    gtk.PropagationPhase = SimpleNamespace(
+        NONE=0, CAPTURE=1, BUBBLE=2, TARGET=3)
     gtk.Orientation = SimpleNamespace(HORIZONTAL=0, VERTICAL=1)
     gtk.PolicyType = SimpleNamespace(NEVER=0, AUTOMATIC=1)
     pango.WrapMode = SimpleNamespace(WORD=0, WORD_CHAR=1, CHAR=2)
@@ -487,6 +539,7 @@ def fake_gtk():
     repo.Adw, repo.Gdk, repo.GLib, repo.Gtk, repo.Pango, repo.Gio = (
         adw, gdk, glib, gtk, pango, gio)
     glib.idle_add = lambda callback, *args: (callback(*args), 0)[1]
+    glib.timeout_add = lambda _ms, callback, *args: (callback(*args), 0)[1]
 
     installed = {
         'gi': gi, 'gi.repository': repo,
@@ -495,6 +548,12 @@ def fake_gtk():
         'gi.repository.Pango': pango, 'gi.repository.Gio': gio,
     }
     saved = {name: sys.modules.get(name) for name in installed}
+    # xx_ui.widgets binds Gtk at import time and both sys.modules and the
+    # package attribute cache it: drop both so section code re-binds to
+    # this fixture's fakes instead of an earlier test file's.
+    import xx_ui
+    saved_widgets = sys.modules.pop('xx_ui.widgets', None)
+    saved_widgets_attr = xx_ui.__dict__.pop('widgets', None)
     sys.modules.update(installed)
     try:
         yield gtk
@@ -504,6 +563,14 @@ def fake_gtk():
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = module
+        if saved_widgets is not None:
+            sys.modules['xx_ui.widgets'] = saved_widgets
+        else:
+            sys.modules.pop('xx_ui.widgets', None)
+        if saved_widgets_attr is not None:
+            xx_ui.widgets = saved_widgets_attr
+        elif 'widgets' in xx_ui.__dict__:
+            del xx_ui.__dict__['widgets']
 
 
 class _StubConfig:
@@ -622,6 +689,9 @@ def _labels(box):
         if isinstance(widget, _FakeWidget):
             for child in widget.children:
                 _walk(child)
+            direct = getattr(widget, 'child', None)
+            if isinstance(direct, _FakeWidget):
+                _walk(direct)
 
     _walk(box)
     return texts
@@ -663,15 +733,14 @@ class TestStandbySection:
     def _section(self):
         return settings_standby.StandbySection()
 
-    def test_titles_and_cards(self, fake_gtk):
+    def test_titles_are_caps_labels(self, fake_gtk):
         win = _bare_win()
         widgets = self._section().build(win)
         titles = [w.label_text() for w in widgets
                   if isinstance(w, _FakeLabel)]
-        assert titles == ['Battery saver', 'App standby']
-        cards = [w for w in widgets if isinstance(w, _FakeBox)]
-        assert len(cards) == 2
-        assert all('settings-card' in card.classes for card in cards)
+        assert titles == ['BATTERY SAVER', 'APP STANDBY']
+        assert all('xx-section-label' in w.classes
+                   for w in widgets if isinstance(w, _FakeLabel))
 
     def test_saver_effects_and_builtins_listed(self, fake_gtk):
         win = _bare_win()
@@ -684,11 +753,12 @@ class TestStandbySection:
 
     def test_frozen_count_live(self, fake_gtk):
         win = _bare_win()
-        widgets = self._section().build(win)
-        assert 'Frozen now: 0' in _labels(widgets[1])
+        section = self._section()
+        section.build(win)
+        assert 'Frozen now: 0' in _labels(win._standby_frozen_label)
         win.standby.frozen_apps = ['a.desktop', 'b.desktop']
-        self._section().refresh(win)
-        assert 'Frozen now: 2' in _labels(widgets[1])
+        section.refresh(win)
+        assert 'Frozen now: 2' in _labels(win._standby_frozen_label)
 
     def test_saver_flip_drives_controller_and_config(self, fake_gtk):
         win = _bare_win()
@@ -701,28 +771,41 @@ class TestStandbySection:
         assert win._saver_set is True
         assert win.config.battery_saver is True
 
-    def test_threshold_pick(self, fake_gtk):
+    def test_threshold_segments(self, fake_gtk):
         win = _bare_win()
         section = self._section()
         section.build(win)
-        assert win._saver_threshold_btn.label_text() == 'Auto-on at 15%'
-        section._pick_threshold(win, win._saver_threshold_btn)
-        assert win._menus and win._menus[-1][0] == 'Auto-on level'
-        choices = dict(win._menus[-1][1])
-        choices['20%']()
+        segments = _buttons(section._threshold_box)
+        assert {btn.label_text() for btn in segments} == {
+            '10%', '15%', '20%', '25%'}
+        twenty = next(btn for btn in segments
+                      if btn.label_text() == '20%')
+        callback, _args = twenty.handlers['clicked']
+        callback(twenty)
         assert win.config.battery_saver_auto_pct == 20
-        assert win._saver_threshold_btn.label_text() == 'Auto-on at 20%'
+        selected = [btn for btn in _buttons(section._threshold_box)
+                    if 'seg-selected' in btn.classes]
+        assert [btn.label_text() for btn in selected] == ['20%']
+
+    def test_timeout_row_shows_stock_default(self, fake_gtk):
+        win = _bare_win()
+        section = self._section()
+        section.build(win)
+        assert _labels(section._timeout_box) == ['Freeze after', '10 min']
 
     def test_timeout_pick_never(self, fake_gtk):
         win = _bare_win()
         section = self._section()
         section.build(win)
-        section._pick_timeout(win, win._standby_timeout_btn)
+        (row,) = _buttons(section._timeout_box)
+        callback, _args = row.handlers['clicked']
+        callback(row)
+        assert win._menus and win._menus[-1][0] == 'Freeze after'
         choices = dict(win._menus[-1][1])
         assert set(choices) == {'5 min', '15 min', '30 min', 'Never'}
         choices['Never']()
         assert win.config.app_standby_minutes == 0
-        assert win._standby_timeout_btn.label_text() == 'Freeze after: Never'
+        assert _labels(section._timeout_box) == ['Freeze after', 'Never']
 
     def test_exempt_add_remove(self, fake_gtk):
         win = _bare_win()
@@ -762,13 +845,13 @@ class TestPermissionsSection:
     def test_titles_nav_and_disclaimer(self, fake_gtk):
         win = _bare_win()
         widgets = self._section().build(win)
-        assert widgets[0].label_text() == 'App permissions'
-        nav = [btn.label_text() for btn in _buttons(win._perm_nav_box)]
-        assert nav == ['Camera — 0 allowed', 'Microphone — 0 allowed',
-                       'Location — 0 allowed', 'Network — 0 blocked']
+        assert widgets[0].label_text() == 'APP PERMISSIONS'
+        nav = _labels(win._perm_nav_box)
+        assert nav == ['Camera', '0 allowed', 'Microphone', '0 allowed',
+                       'Location', '0 allowed', 'Network', '0 blocked']
         assert 'No use in the last 24 h.' in _labels(win._perm_recent_box)
         assert any('Native apps reach camera' in text
-                   for text in _labels(widgets[2]))
+                   for text in _labels(widgets[3]))
 
     def test_indicator_flip(self, fake_gtk):
         win = _bare_win()
@@ -788,8 +871,9 @@ class TestPermissionsSection:
         win.app_index.entries[0] = _entry('org.flat.App', 'Flat',
                                          flatpak=True)
         self._section().build(win)
-        rows = [btn.label_text() for btn in _buttons(win._perm_apps_box)]
-        assert rows == ['Flat — Flatpak', 'Native — Native']
+        rows = _labels(win._perm_apps_box)
+        assert rows == ['Flat', 'Flatpak app',
+                        'Native', 'Native app — no limits']
 
     def test_perm_view_lists_states(self, fake_gtk):
         win = _bare_win()
@@ -878,8 +962,7 @@ class TestPermissionsSection:
                   {'kind': 'camera', 'app': 'Cam', 'at': now - 7200.0}],
             now)
         texts = _labels(win._perm_recent_box)
-        assert 'Calls — mic · 1m ago' in texts
-        assert 'Cam — cam · 2h ago' in texts
+        assert texts == ['Calls', 'mic · 1m ago', 'Cam', 'cam · 2h ago']
 
     def test_helpers(self):
         assert settings_permissions.age_text(100.0, 130.0) == 'just now'

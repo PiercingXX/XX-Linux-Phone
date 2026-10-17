@@ -209,6 +209,11 @@ def compact_header(back_cb, title: str, subtitle: str = '',
     return root
 
 
+def chevron(px: int = BAR_ICON_PX) -> Gtk.Image:
+    """Muted trailing disclosure chevron for navigation rows."""
+    return icon_image('go-next-symbolic', px)
+
+
 def count_badge(text: str) -> Gtk.Label:
     """Small inverted unread-count pill for list-row trailing meta."""
     widget = Gtk.Label(label=text)
