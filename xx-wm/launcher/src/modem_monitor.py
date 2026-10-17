@@ -657,6 +657,12 @@ class ModemMonitor:
         elif new_state == _STATE_TERMINATED:
             self._drop_call(call_path)
             return
+        elif (new_state == _STATE_RINGING_IN
+                and call.direction == _DIR_INCOMING):
+            # A waiting call that the network promotes to ringing never
+            # passed through the initial fetch announcement: screen it
+            # (consult) and ring it like any other incoming call.
+            self._announce_incoming(call_path)
         self._refresh_active_path()
         self._emit_changed()
 

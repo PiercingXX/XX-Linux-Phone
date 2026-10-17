@@ -58,6 +58,7 @@ _SHELL_LAUNCHER_IDS = frozenset({
     'wofi', 'rofi', 'bemenu', 'fuzzel', 'dmenu',
     'ulauncher', 'kupfer', 'albert', 'synapse', 'gnome-do',
     'krunner', 'org.kde.krunner',
+    'io.piercingxx.xxwm',
 })
 
 

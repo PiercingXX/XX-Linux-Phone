@@ -519,6 +519,13 @@ class ShellWindow(Adw.ApplicationWindow):
         return self._output_capture
 
     def _overlays_block_capture(self) -> bool:
+        if getattr(self, '_blanked', False):
+            return True
+        try:
+            if self._call_live():
+                return True
+        except Exception:
+            pass
         if getattr(self, '_layer_is_top', False):
             return True
         if self._switcher is not None and self._switcher.get_visible():
@@ -863,10 +870,14 @@ class ShellWindow(Adw.ApplicationWindow):
                 manager = ToplevelManager()
             self._toplevel_manager = manager
             try:
-                self._known_toplevels = {
-                    t.handle for t in manager.list()}
+                listed = list(manager.list())
+                self._known_toplevels = {t.handle for t in listed}
+                self._known_app_ids = {t.app_id for t in listed}
+                self._known_generation = getattr(manager, 'generation', 0)
             except Exception:
                 self._known_toplevels = set()
+                self._known_app_ids = set()
+                self._known_generation = getattr(manager, 'generation', 0)
             on_change = getattr(manager, 'on_change', None)
             if callable(on_change):
                 on_change(self._on_foreign_toplevels)
@@ -878,20 +889,41 @@ class ShellWindow(Adw.ApplicationWindow):
         if manager is None:
             return
         try:
-            current = {t.handle for t in manager.list()}
+            listed = list(manager.list())
+            current = {t.handle for t in listed}
+            current_ids = {t.app_id for t in listed}
         except Exception:
             return
         try:
             known = getattr(self, '_known_toplevels', None)
             if not isinstance(known, set):
                 known = set()
+            known_ids = getattr(self, '_known_app_ids', None)
+            if not isinstance(known_ids, set):
+                known_ids = set(current_ids)
+            old_generation = getattr(self, '_known_generation', None)
+            generation = getattr(manager, 'generation', 0)
+            if old_generation is None:
+                old_generation = generation
         except Exception:
             known = set()
+            known_ids = set(current_ids)
+            old_generation = getattr(manager, 'generation', 0)
+            generation = old_generation
         try:
             self._known_toplevels = set(current)
+            self._known_generation = generation
+            # A resync clears the registry and replays every open window
+            # under fresh handles: the empty clear carries the old app ids
+            # over, so the replay adopts instead of yielding. An empty
+            # event otherwise means everything really closed, so the
+            # baseline resets and a later re-map yields.
+            if current or generation == old_generation:
+                self._known_app_ids = set(current_ids)
         except Exception:
             pass
-        if current - known:
+        if (current - known and generation == old_generation
+                and current_ids - known_ids):
             self._yield_to_foreign_app()
 
     def _yield_to_foreign_app(self) -> None:
@@ -1110,7 +1142,7 @@ class ShellWindow(Adw.ApplicationWindow):
             self._shade = NotificationShade(
                 dnd_state=self.dnd_state,
                 focus_state=self.focus_state,
-                on_open_settings=self._open_settings,
+                on_open_settings=self.open_settings,
                 on_power=self._show_power_menu,
                 hud=hud,
                 config=self.config,

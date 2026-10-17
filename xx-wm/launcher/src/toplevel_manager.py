@@ -446,7 +446,7 @@ class WaylandToplevelBackend:
     # -- public API (backend contract) -------------------------------------
 
     def available(self) -> bool:
-        return self._manager is not None
+        return self._manager is not None and not self._closing
 
     def connect(self, callback) -> None:
         self._manager_cb = callback
@@ -548,10 +548,26 @@ class DeferredWaylandBackend:
         self._state_callback = None
         self._real: WaylandToplevelBackend | None = None
         self._ready_callbacks: list[object] = []
+        self._shutdown_requested = False
         thread = threading.Thread(
             target=self._prepare, name='xx-wm-wayland-bindings', daemon=True,
         )
         thread.start()
+
+    def shutdown(self) -> None:
+        """Drop the live connection, or tear down the backend still being
+        built. Without this every resync leaked a Wayland client, a reader
+        thread and a pipe pair."""
+        with self._lock:
+            self._shutdown_requested = True
+            real = self._real
+        if real is not None:
+            try:
+                shutdown = getattr(real, 'shutdown', None)
+                if callable(shutdown):
+                    shutdown()
+            except Exception:
+                pass
 
     def available(self) -> bool:
         with self._lock:
@@ -609,15 +625,25 @@ class DeferredWaylandBackend:
             log.info('failed to start toplevel backend: %s', exc)
             return
         with self._lock:
-            self._real = real
-            if self._callback is not None:
-                real.connect(self._callback)
-            if self._state_callback is not None:
-                connect_state = getattr(real, 'connect_state', None)
-                if callable(connect_state):
-                    connect_state(self._state_callback)
-            ready = list(self._ready_callbacks)
-            self._ready_callbacks.clear()
+            aborted = self._shutdown_requested
+            if not aborted:
+                self._real = real
+                if self._callback is not None:
+                    real.connect(self._callback)
+                if self._state_callback is not None:
+                    connect_state = getattr(real, 'connect_state', None)
+                    if callable(connect_state):
+                        connect_state(self._state_callback)
+                ready = list(self._ready_callbacks)
+                self._ready_callbacks.clear()
+            else:
+                ready = []
+        if aborted:
+            try:
+                real.shutdown()
+            except Exception:
+                pass
+            return
         for callback in ready:
             _post_to_main(callback)
 
@@ -656,6 +682,7 @@ class ToplevelManager:
         self._activated: object | None = None
         self._activated_callbacks: list[object] = []
         self._current_active: str | None = None
+        self._generation = 0
         if backend is not None:
             # Bind before the first globals arrive: the backend is
             # non-blocking, so available() may still be False at construct.
@@ -714,6 +741,9 @@ class ToplevelManager:
         with self._lock:
             self._registry.clear()
             self._activated = None
+            # A re-bind replays every open window under fresh handles. The
+            # shell must not mistake that replay for newly mapped windows.
+            self._generation += 1
         if backend is None:
             backend = _make_default_backend()
         self._backend = backend
@@ -745,23 +775,45 @@ class ToplevelManager:
         """Currently activated app toplevel's app_id, or None."""
         return self._current_active
 
-    def _notify(self) -> None:
-        if threading.current_thread() is threading.main_thread():
-            self._emit_change()
-            return
-        from gi.repository import GLib
-        main_depth = getattr(GLib, 'main_depth', None)
-        if callable(main_depth) and main_depth() == 0:
-            # No main loop is running (headless tests, early boot before
-            # Gtk.main takes over): an idle source would never fire, so
-            # deliver directly instead of losing the change.
-            self._emit_change()
-            return
-        GLib.idle_add(self._emit_change_idle)
+    @property
+    def generation(self) -> int:
+        """Re-bind count. Changes on every resync so the shell can tell a
+        replay of already-known windows apart from newly mapped ones."""
+        return self._generation
 
-    def _emit_change_idle(self) -> bool:
-        self._emit_change()
+    def _marshal_to_main(self, callback: object, *args: object) -> None:
+        """Run ``callback`` on the GTK main thread.
+
+        Directly when already there; otherwise via idle_add. The old
+        ``GLib.main_depth() == 0`` probe meant "no loop running", but the
+        depth is counted per thread, so on the wayland thread it always
+        read 0 and GTK widgets were touched off-thread. Off-thread callers
+        with no GLib (or an already-owned context) still deliver directly
+        instead of losing the change.
+        """
+        if threading.current_thread() is threading.main_thread():
+            callback(*args)  # type: ignore[operator]
+            return
+        try:
+            from gi.repository import GLib
+        except Exception:
+            callback(*args)  # type: ignore[operator]
+            return
+        try:
+            if GLib.MainContext.default().is_owner():
+                callback(*args)  # type: ignore[operator]
+                return
+        except Exception:
+            pass
+        GLib.idle_add(self._run_once, callback, args)
+
+    @staticmethod
+    def _run_once(callback: object, args: object) -> bool:
+        callback(*args)  # type: ignore[operator]
         return False
+
+    def _notify(self) -> None:
+        self._marshal_to_main(self._emit_change)
 
     def _emit_change(self) -> None:
         for cb in self._callbacks:
@@ -771,6 +823,9 @@ class ToplevelManager:
                 log.error('toplevel change callback failed: %s', exc)
 
     def _notify_activated(self, app_id: str | None) -> None:
+        self._marshal_to_main(self._emit_activated, app_id)
+
+    def _emit_activated(self, app_id: str | None) -> None:
         for cb in self._activated_callbacks:
             try:
                 cb(app_id)

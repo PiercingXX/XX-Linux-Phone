@@ -431,9 +431,20 @@ has_openrc() {
         command -v openrc-run >/dev/null 2>&1; }
 }
 
+write_openrc_conf() {
+    # The OpenRC service runs as $XX_WM_USER: record the installing user
+    # so the session starts as them instead of the literal default 'user'.
+    printf 'XX_WM_USER=%s\n' "$(id -un)" | \
+        $SUDO tee /etc/conf.d/xx-wm >/dev/null || \
+        echo "warn: could not write /etc/conf.d/xx-wm" >&2
+}
+
 enable_service() {
     if is_systemd; then
         systemctl --user daemon-reload 2>/dev/null || true
+        # Re-apply the saved charge limit and network blocks at boot.
+        $SUDO systemctl enable xx-wm-helper-boot.service 2>/dev/null || \
+            echo "warn: enable xx-wm-helper-boot.service failed" >&2
         if [ -f /usr/share/wayland-sessions/xx-wm.desktop ]; then
             # Idempotent: a previous install.sh always-enabled the unit.
             # --now stops a running duplicate if we are somehow inside a session.
@@ -448,8 +459,11 @@ enable_service() {
         fi
     elif has_openrc; then
         # OpenRC hosts (older pmOS images): no systemd unit to fight with.
+        write_openrc_conf
         $SUDO rc-update add xx-wm default 2>/dev/null || \
             echo "warn: rc-update add xx-wm default failed" >&2
+        $SUDO rc-update add xx-wm-helper-boot boot 2>/dev/null || \
+            echo "warn: rc-update add xx-wm-helper-boot boot failed" >&2
     else
         echo "warn: no supported init detected (neither systemd nor OpenRC) — start xx-wm-session from your display manager" >&2
     fi

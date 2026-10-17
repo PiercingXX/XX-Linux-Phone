@@ -24,4 +24,13 @@ depend() {
 
 start_pre() {
     checkpath -f -o "${XX_WM_USER}" "$output_log"
+    # Without an active logind session nothing creates the per-user
+    # runtime dir: make it here so the shell (and its IPC socket) lands
+    # in the same place it does under systemd.
+    _uid=$(id -u "${XX_WM_USER}" 2>/dev/null || id -u)
+    _rdir="/run/user/${_uid}"
+    mkdir -p "$_rdir" 2>/dev/null || true
+    chown "${_uid}" "$_rdir" 2>/dev/null || true
+    chmod 700 "$_rdir" 2>/dev/null || true
+    export XDG_RUNTIME_DIR="$_rdir"
 }

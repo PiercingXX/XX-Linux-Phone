@@ -232,7 +232,7 @@ class TestPlaceEmergencyCall:
             monitor, 'voice_create_and_start',
             lambda number, *a, **k: calls.append(number) or (True, '/c/1'))
         assert dialer.place_emergency_call('9-1-1') == (True, '/c/1')
-        assert calls == ['9-1-1']
+        assert calls == ['911']
 
     def test_modem_extra_accepted_end_to_end(self, monkeypatch):
         dialer = _dialer()
@@ -738,7 +738,7 @@ class TestEmergencySurface:
                             lambda number, *a, **k: placed.append(number) or (True, '/c/1'))
         lock._emg_digits = '9-1-1'
         lock_screen.LockScreen._on_emg_call(lock, None)
-        assert placed == ['9-1-1']
+        assert placed == ['911']
         assert lock._emg_status.text == 'Dialing…'
 
     def test_failed_call_reports_detail(self, emg_lock, monkeypatch):

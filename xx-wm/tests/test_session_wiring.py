@@ -62,9 +62,22 @@ def test_wrapper_supervises_python_instead_of_exec():
     src = WRAPPER.read_text(encoding='utf-8')
     assert 'while :;' in src
     assert 'wait "$_child"' in src
-    assert '[ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]' in src
+    # SIGUSR1 (138) respawns at once for deploy; SIGKILL (137) backs off
+    # like any other crash instead of tight-looping under the OOM killer.
+    assert '[ "$_st" -eq 138 ]' in src
+    assert '[ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]' not in src
+    assert '137' in src
     assert '[ "$_st" -eq 0 ]' in src and 'exit 0' in src
     assert 'exec @python@' not in src
+
+
+def test_wrapper_stops_when_compositor_dies():
+    """The wrapper is phoc's client: a respawn after phoc died would
+    attach to the next login's compositor, so every pass checks the
+    parent is still alive first."""
+    src = WRAPPER.read_text(encoding='utf-8')
+    assert '_phoc=$PPID' in src
+    assert 'kill -0 "$_phoc"' in src
 
 
 def test_main_does_not_restart_via_execv_or_sighup():

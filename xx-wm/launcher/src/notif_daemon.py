@@ -134,6 +134,22 @@ _REASON_EXPIRED = 1
 _REASON_DISMISSED = 2
 _REASON_CLOSED = 3
 
+# Notify ids are D-Bus uint32 (1..2^32-1). Shell-internal ids never come
+# from this counter: the reserved block plus the SMS/call ranges the
+# shell posts directly through the application path.
+_MAX_ID = 0xFFFFFFFF
+_RESERVED_IDS = frozenset({999901, 999902, 999903, 999904, 999905})
+_RESERVED_FLOOR = 1_900_000_000
+
+# Stored per-notification state is bounded: muted notifications are never
+# closed, so without a cap the store (and its image-data bytes) grows
+# for the whole session.
+_MAX_STORED = 128
+
+
+def _is_reserved(notif_id: int) -> bool:
+    return notif_id in _RESERVED_IDS or notif_id >= _RESERVED_FLOOR
+
 
 class NotificationDaemon:
     """
@@ -162,6 +178,7 @@ class NotificationDaemon:
         self._owns_name = False
         self._expire_timers: dict[int, int] = {}
         self._notif_hints: dict[int, dict] = {}
+        self._issued_ids: dict[int, None] = {}
         self._takes_actions: bool | None = None
         GLib.idle_add(self._start)
 
@@ -282,6 +299,31 @@ class NotificationDaemon:
                 self._takes_actions = False
         return self._takes_actions
 
+    def _issued_ids_dict(self) -> dict:
+        """Ids this daemon handed out and not yet closed.
+
+        Lazily created so older test seams that build the daemon without
+        __init__ keep working.
+        """
+        issued = getattr(self, '_issued_ids', None)
+        if issued is None:
+            issued = self._issued_ids = {}
+        return issued
+
+    def _fresh_id(self, issued: dict) -> int:
+        """Next free id: within 1..2^32-1, skipping live and reserved ids."""
+        candidate = self._next_id
+        while True:
+            if candidate < 1 or candidate > _MAX_ID:
+                candidate = 1
+            if candidate not in issued and not _is_reserved(candidate):
+                break
+            candidate += 1
+        self._next_id = candidate + 1
+        if self._next_id > _MAX_ID:
+            self._next_id = 1
+        return candidate
+
     def _handle_notify(self, params: GLib.Variant) -> int:
         parts = params.unpack()
         app_name = str(parts[0])
@@ -303,15 +345,29 @@ class NotificationDaemon:
             for i in range(0, len(items) - 1, 2)
         ]
 
-        notif_id = replaces_id if replaces_id else self._next_id
-        self._next_id = max(self._next_id, notif_id) + 1
+        issued = self._issued_ids_dict()
+        if replaces_id and replaces_id in issued:
+            notif_id = replaces_id
+        else:
+            # Client input never advances the counter: a forged replaces_id
+            # used to push _next_id past 2^32 (every later Notify then
+            # failed building its uint32 reply) or into shell-reserved ids.
+            notif_id = self._fresh_id(issued)
+        issued[notif_id] = None
+        while len(issued) > _MAX_STORED:
+            issued.pop(next(iter(issued)))
 
         # Cancel previous expire timer if replacing
         if notif_id in self._expire_timers:
             GLib.source_remove(self._expire_timers.pop(notif_id))
 
         clean_hints = hints if isinstance(hints, dict) else {}
-        self._notif_hints[notif_id] = dict(clean_hints)
+        stored = dict(clean_hints)
+        stored.pop('image-data', None)
+        stored.pop('image_data', None)
+        self._notif_hints[notif_id] = stored
+        while len(self._notif_hints) > _MAX_STORED:
+            self._notif_hints.pop(next(iter(self._notif_hints)))
 
         if self._takes_actions_arg():
             GLib.idle_add(self._on_notify, notif_id, app_name, summary, body,
@@ -338,6 +394,7 @@ class NotificationDaemon:
         hints = self._notif_hints.get(notif_id, {})
         if hints.get('transient', False):
             self._notif_hints.pop(notif_id, None)
+            self._issued_ids_dict().pop(notif_id, None)
             self._close_notification(self._bus, notif_id, _REASON_EXPIRED)
             return False
         try:
@@ -355,8 +412,11 @@ class NotificationDaemon:
     def _close_notification(
         self, conn: Gio.DBusConnection, notif_id: int, reason: int
     ) -> None:
-        self._expire_timers.pop(notif_id, None)
+        timer = self._expire_timers.pop(notif_id, None)
+        if timer is not None:
+            GLib.source_remove(timer)
         self._notif_hints.pop(notif_id, None)
+        self._issued_ids_dict().pop(notif_id, None)
         GLib.idle_add(self._on_close, notif_id)
         try:
             conn.emit_signal(

@@ -171,7 +171,10 @@ def test_open_settings_hops_over_apps():
     body = WINDOW_SRC.split('def _open_settings')[1].split('def _leave_settings')[0]
     assert "set_visible_child_name('settings')" in body
     assert 'present_over_apps()' in body
-    assert 'on_open_settings=self._open_settings' in WINDOW_SRC
+    # The shade deep link uses the public open_settings (section refresh +
+    # deferred scroll), which raises through _open_settings first.
+    assert 'on_open_settings=self.open_settings' in WINDOW_SRC
+    assert 'def open_settings' in WINDOW_SRC
 
 
 def test_leave_settings_drops_layer():

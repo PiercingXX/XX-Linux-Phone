@@ -516,17 +516,22 @@ class TestBlueZTrust:
         assert len(bus.calls) == calls_before + 1
         mon.stop()
 
-    def test_transport_failure_keeps_old_trust(self):
-        mon, bus = _monitor(_StubConfig(bt=[BT]))
+    def test_transport_failure_clears_trust(self):
+        """Fail closed: a re-query that errors must drop the cached trust
+        instead of granting PIN-less unlock with no device present."""
+        notified = []
+        mon, bus = _monitor(_StubConfig(bt=[BT]), notified=notified)
         bus.answer(0, _bluez_objects([('/d/0', BT, True, None)]))
         bus.answer(1, _nm_objects([]))
         assert mon.trusted_bt == [BT]
+        notified.clear()
         sid = bus.sub_id('PropertiesChanged', sender='org.bluez')
         bus.fire(sid, 'org.bluez', '/d/0',
                  'org.freedesktop.DBus.Properties', 'PropertiesChanged',
                  ('org.bluez.Device1', {'Connected': False}, []))
         bus.fail(len(bus.calls) - 1)
-        assert mon.trusted_bt == [BT]
+        assert mon.trusted_bt == []
+        assert notified != []
         mon.stop()
 
     def test_malformed_reply_ignored(self):

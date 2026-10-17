@@ -363,6 +363,9 @@ class SmartLockMonitor:
         try:
             objects = dict(conn.call_finish(result).unpack()[0])
         except Exception:
+            # A failed query must drop the cache, not keep stale trust
+            # that would waive the PIN with no device present.
+            self._emit_if_changed(bt=[])
             return
         try:
             trusted = set(self._config.smart_lock_bt_devices)
@@ -374,6 +377,7 @@ class SmartLockMonitor:
         try:
             objects = dict(conn.call_finish(result).unpack()[0])
         except Exception:
+            self._emit_if_changed(ssid=None)
             return
         try:
             trusted = set(self._config.smart_lock_wifi_ssids)

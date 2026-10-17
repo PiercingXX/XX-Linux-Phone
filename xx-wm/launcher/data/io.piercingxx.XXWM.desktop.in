@@ -6,3 +6,4 @@ Exec=@bindir@/xx-wm
 Terminal=false
 Categories=Utility;System;
 StartupNotify=true
+NoDisplay=true

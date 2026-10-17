@@ -354,6 +354,12 @@ def test_real_deferred_backend_wires_and_notifies_on_success(
     while not mgr.available and time.time() < deadline:
         time.sleep(0.01)
     assert mgr.available is True
+    # The ready notification now arrives from the bindings worker thread,
+    # so the change callback is marshalled to the main loop: pump it.
+    from gi.repository import GLib
+    while not fired and time.time() < deadline:
+        GLib.MainContext.default().iteration(False)
+        time.sleep(0.01)
     assert fired and fired[-1] is True
     mgr.activate('h1')
     assert activated == ['h1']

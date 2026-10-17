@@ -28,14 +28,16 @@ def test_default_user_is_dr3k(deploy_script):
 
 def test_targets_installed_datadir(deploy_script):
     assert '/usr/share/xx-wm/' in deploy_script
-    assert '/tmp/xx-wm-deploy' in deploy_script
+    assert 'mktemp -d' in deploy_script
+    assert 'STAGE=/tmp/xx-wm-deploy' not in deploy_script
     assert '~/xx-wm/src' not in deploy_script
     assert ':xx-wm/src/' not in deploy_script
 
 
 def test_rsyncs_to_usr_share_via_staging(deploy_script):
     assert '/usr/share/xx-wm' in deploy_script
-    assert '/tmp/xx-wm-deploy' in deploy_script
+    assert 'mktemp -d' in deploy_script
+    assert 'STAGE=/tmp/xx-wm-deploy' not in deploy_script
     assert '~/xx-wm/src' not in deploy_script
     assert ':xx-wm/src/' not in deploy_script
     assert '--chown=root:root' in deploy_script
@@ -100,7 +102,8 @@ def test_dry_run_prints_real_paths():
     assert result.returncode == 0, result.stderr
     out = result.stdout
     assert '/usr/share/xx-wm/' in out
-    assert '/tmp/xx-wm-deploy/' in out
+    assert 'mktemp -d' in out
+    assert '/tmp/xx-wm-deploy/' not in out
     assert 'xx-wm/src/' not in out
     assert 'SIGUSR1' in out
     assert '/usr/share/xx-wm/main.py' in out

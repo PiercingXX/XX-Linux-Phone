@@ -383,15 +383,20 @@ class CallWiring:
                         and not pending.get('consult_reached')
                         and info.get('direction') == 'incoming'):
                     silenced = pending.get('reason') or 'silenced'
-                    try:
-                        pending['reported'] = True
-                    except Exception:
-                        pass
                 self._report_call_end(info.get('number', ''),
                                       info.get('direction', 'incoming'),
                                       int(info.get('started_ms', now_ms)),
                                       bool(info.get('answered', False)),
                                       silenced)
+                # The legacy on_ended adapter reports the same call below:
+                # mark it reported so the log gets exactly one row.
+                try:
+                    pending = getattr(win, '_screen_pending', None)
+                    if (isinstance(pending, dict)
+                            and pending.get('number') == info.get('number')):
+                        pending['reported'] = True
+                except Exception:
+                    pass
             except Exception:
                 pass
 

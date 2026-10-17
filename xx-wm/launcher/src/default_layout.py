@@ -328,8 +328,14 @@ def compact_unresolved_home(
     Built-in members (no app_id, no cmd — the dialer) stay. Returns True
     when a write happened. Never re-seeds and never sets default_layout_applied.
     """
+    entries = getattr(app_index, 'entries', None) or []
+    if not entries:
+        # No index (transient session: flatpak exports missing, a package
+        # upgrade mid-flight, Gio returning nothing): compacting now would
+        # permanently delete the user's pins for apps that are installed.
+        return False
     ids: set[str] = set()
-    for entry in getattr(app_index, 'entries', None) or []:
+    for entry in entries:
         app_id = getattr(entry, 'app_id', '') or ''
         if not app_id:
             continue

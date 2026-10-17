@@ -33,7 +33,6 @@ if [ -z "$DEVICE" ]; then
 fi
 
 TARGET="${USER_NAME}@${DEVICE}"
-STAGE=/tmp/xx-wm-deploy
 DEST=/usr/share/xx-wm
 RSYNC_FLAGS="-az --delete --exclude __pycache__"
 
@@ -71,9 +70,10 @@ else
 fi'
 
 if [ "$DRY_RUN" = 1 ]; then
-    echo "[dry-run] rsync $RSYNC_FLAGS $REPO_DIR/launcher/src/ ${TARGET}:${STAGE}/"
-    echo "[dry-run] rsync -az $REPO_DIR/launcher/data/wayland.xml $REPO_DIR/launcher/data/wlr-foreign-toplevel-management-unstable-v1.xml $REPO_DIR/launcher/data/wlr-output-power-management-unstable-v1.xml $REPO_DIR/launcher/data/virtual-pointer-unstable-v1.xml $REPO_DIR/launcher/data/wlr-screencopy-unstable-v1.xml ${TARGET}:${STAGE}/"
-    echo "[dry-run] ssh $TARGET sudo rsync -a --chown=root:root ${STAGE}/ ${DEST}/"
+    echo "[dry-run] ssh $TARGET mktemp -d for a private staging dir"
+    echo "[dry-run] rsync $RSYNC_FLAGS $REPO_DIR/launcher/src/ ${TARGET}:<staging>/"
+    echo "[dry-run] rsync -az $REPO_DIR/launcher/data/wayland.xml $REPO_DIR/launcher/data/wlr-foreign-toplevel-management-unstable-v1.xml $REPO_DIR/launcher/data/wlr-output-power-management-unstable-v1.xml $REPO_DIR/launcher/data/virtual-pointer-unstable-v1.xml $REPO_DIR/launcher/data/wlr-screencopy-unstable-v1.xml ${TARGET}:<staging>/"
+    echo "[dry-run] ssh $TARGET sudo rsync -a --chown=root:root <staging>/ ${DEST}/"
     echo "[dry-run] restart: systemctl --user restart xx-wm if active, else SIGUSR1 unique python3 /usr/share/xx-wm/main.py (wrapper respawns)"
     exit 0
 fi
@@ -83,6 +83,12 @@ if ! ssh "$TARGET" 'sudo -n true'; then
     echo "passwordless sudo is required to write ${DEST}. Run scripts/grant-tablet-sudo.sh" >&2
     exit 1
 fi
+
+# A fixed staging path is pre-creatable by another local user, whose files
+# would then be copied into /usr/share/xx-wm as root. Stage in a private
+# mktemp dir instead, and remove it on the way out.
+STAGE=$(ssh "$TARGET" 'mktemp -d "${TMPDIR:-/tmp}/xx-wm-deploy.XXXXXXXX"') || exit 1
+trap 'ssh "$TARGET" "rm -rf $STAGE"' EXIT INT TERM
 
 echo "Deploying launcher/src/ -> ${TARGET}:${STAGE}/ then ${DEST}/"
 # shellcheck disable=SC2086  # RSYNC_FLAGS is intentionally word-split

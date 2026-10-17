@@ -252,7 +252,7 @@ def place_emergency_call(number: str, extra: object = None) -> tuple[bool, str]:
         return False, EMERGENCY_REFUSAL
     try:
         from modem_monitor import voice_create_and_start
-        return voice_create_and_start(number)
+        return voice_create_and_start(normalize_emergency_number(number))
     except Exception as err:
         return False, str(err)
 

@@ -1,4 +1,24 @@
 #!/bin/sh
+# A second wrapper must never start a second session: tapping the shell's
+# own drawer entry (or any double start) would spawn a second keyboard and
+# gesture daemon, and the duplicate python child exits 0 once the running
+# instance takes the activation — which this loop reads as session end
+# and tears the session down for. Bail out while the live shell still
+# serves its IPC socket (a stale socket file with no listener is ignored).
+_xx_probe_live() {
+    [ -S "$1/xx-wm.sock" ] && @python@ -c \
+        'import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(2)
+s.connect(sys.argv[1])' "$1/xx-wm.sock" 2>/dev/null
+}
+# ipc.py serves $XDG_RUNTIME_DIR/xx-wm.sock, falling back to
+# ~/.local/share/xx-wm/xx-wm.sock when it is unset: probe both.
+if _xx_probe_live "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
+    || _xx_probe_live "$HOME/.local/share/xx-wm"; then
+    echo "xx-wm: already running, not starting a second session" >&2
+    exit 0
+fi
 # Runs inside the phoc session. Start the on-screen keyboard (squeekboard,
 # with the PiercingXX Colemak layouts) before the shell; squeekboard shows
 # and hides itself on input-method activation, and the shade/lock windows
@@ -45,6 +65,9 @@ if command -v lisgd >/dev/null 2>&1; then
         (
             set --
             while IFS= read -r _binding; do
+                # An empty generator output still yields one empty heredoc
+                # line: skip it or lisgd execs with an empty -g binding.
+                [ -z "$_binding" ] && continue
                 set -- "$@" -g "$_binding"
             done <<EOF
 $(@python@ @shell_dir@/gesture_bindings.py --bindir @bindir@)
@@ -102,6 +125,10 @@ _xx_session_end() {
     if _xx_systemd_user; then
         systemctl --user stop xx-wm-session.target 2>/dev/null || true
     fi
+    # lisgd outlives the shell (rebinds detach it with start_new_session,
+    # and the session-start instance is this wrapper's child): kill it or
+    # every bezel gesture fires twice on the next login.
+    pkill -x -U "$(id -u)" lisgd 2>/dev/null || true
 }
 
 # Do not exec python: phoc -E must keep this wrapper as its client.
@@ -138,7 +165,12 @@ _xx_rotate_err_log() {
 }
 
 _backoff=1
+# phoc started this wrapper as its client (`phoc -E .../xx-wm`). When the
+# compositor is gone a respawned shell would attach to the next login's
+# compositor and race it, so every pass checks the parent is still alive.
+_phoc=$PPID
 while :; do
+    kill -0 "$_phoc" 2>/dev/null || { _xx_session_end; exit 0; }
     _started=$(date +%s)
     mkdir -p "$HOME/.local/share/xx-wm" 2>/dev/null || true
     chmod 700 "$HOME/.local/share/xx-wm" 2>/dev/null || true
@@ -154,12 +186,13 @@ while :; do
         exit 0
     fi
     # 138 = 128+SIGUSR1: deploy asked the child to die — restart immediately.
-    # 137 = 128+SIGKILL: same (last-resort iterate).
+    # 137 = 128+SIGKILL (including the OOM killer): back off like any
+    # other crash instead of tight-looping while the killer is active.
     # Other non-zero: crash. Back off 1, 2, 4 … 30 s so a shell that dies at
     # startup doesn't respawn every second forever; a run that lasted a
     # minute resets the delay.
     # If the wrapper itself was SIGTERM'd, the trap already exited.
-    if [ "$_st" -eq 138 ] || [ "$_st" -eq 137 ]; then
+    if [ "$_st" -eq 138 ]; then
         _backoff=1
         continue
     fi
