@@ -539,7 +539,7 @@ def test_qemu_fragment_content():
     cfg = configparser.ConfigParser()
     cfg.read(frag)
     assert cfg['core'].getboolean('xwayland') is False
-    assert cfg['output:Virtual-1']['scale'] == '2'
+    assert cfg['output:Virtual-1']['scale'] == '1.5'
 
 
 def test_meson_ships_qemu_fragment(meson_text):

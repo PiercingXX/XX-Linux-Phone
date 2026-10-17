@@ -22,7 +22,7 @@ EXPECTED = {
     'furiphone-flx1': ('HWCOMPOSER-1', '3'),
     'librem-5': ('DSI-1', '2'),
     'tablet': ('DSI-1', '1.5'),
-    'qemu': ('Virtual-1', '2'),
+    'qemu': ('Virtual-1', '1.5'),
 }
 
 

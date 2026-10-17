@@ -404,7 +404,7 @@ _ask_device() {
         "furiphone-flx1" "FLX1 — HWCOMPOSER-1, scale 3" \
         "librem-5"       "Librem 5 — DSI-1, scale 2" \
         "tablet"         "x86 tablet — DSI-1, scale 1.5" \
-        "qemu"           "QEMU/UTM VM — Virtual-1, scale 2" \
+        "qemu"           "QEMU/UTM VM — Virtual-1, scale 1.5" \
         3>&1 1>&2 2>&3
 }
 
