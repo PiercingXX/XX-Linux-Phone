@@ -13,8 +13,70 @@ the real client, so headless machines and tests use
 
 from __future__ import annotations
 
+import threading
+
 #: Address-book source name the publisher mirrors into.
 EDS_SOURCE_NAME = "XX Contacts"
+
+
+def _address_book_extension() -> str:
+    """EDS extension name listing address-book sources."""
+    try:
+        from gi.repository import EDataServer
+
+        return str(EDataServer.SOURCE_EXTENSION_ADDRESS_BOOK)
+    except (ImportError, ValueError, AttributeError):
+        return "Address Book"
+
+
+def find_xx_source(registry):
+    """Return the dedicated ``EDS_SOURCE_NAME`` source, or None.
+
+    Duck-typed on the registry (``list_sources`` + ``get_display_name``)
+    so tests can drive it without EDS typelibs.
+    """
+    try:
+        sources = registry.list_sources(_address_book_extension())
+    except Exception:
+        return None
+    for source in sources or ():
+        try:
+            name = source.get_display_name()
+        except Exception:
+            continue
+        if name == EDS_SOURCE_NAME:
+            return source
+    return None
+
+
+def ensure_xx_source(registry):
+    """Find or create the dedicated publish source; never the default.
+
+    Raises ``RuntimeError`` when it cannot be provided, so the caller
+    fails safe instead of writing to the user's real address book.
+    """
+    found = find_xx_source(registry)
+    if found is not None:
+        return found
+    try:
+        from gi.repository import EDataServer
+
+        scratch = EDataServer.Source.new(None, None)
+        scratch.set_display_name(EDS_SOURCE_NAME)
+        extension = scratch.get_extension(
+            EDataServer.SOURCE_EXTENSION_ADDRESS_BOOK)
+        extension.set_backend_name("local")
+        registry.commit_source_sync(scratch, None)
+    except Exception as exc:
+        raise RuntimeError(
+            f"could not create '{EDS_SOURCE_NAME}' address book: {exc}"
+        ) from exc
+    return find_xx_source(registry) or scratch
+
+
+def make_publish_client():
+    """EBookClient bound to the dedicated source (never the default)."""
+    return EBookClient(dedicated=True)
 
 
 def is_available() -> bool:
@@ -49,15 +111,20 @@ class FakeEBookClient:
 
 
 class EBookClient:
-    """Thin wrapper over the default (or named) EDS address book.
+    """Thin wrapper over an EDS address book.
 
+    Plain ``EBookClient()`` reads the default book (one-time import
+    only, never written). Publishing uses ``dedicated=True`` (or
+    :func:`make_publish_client`) for the ``EDS_SOURCE_NAME`` source so
+    stale-uid removal can never touch the user's real address book.
     Every method raises ``RuntimeError`` when EDS is not installed;
     callers surface that as "GNOME Contacts is not available" and keep
     working. Blocking sync calls are for worker threads only, never
     the GTK main loop.
     """
 
-    def __init__(self, source_uid: str | None = None) -> None:
+    def __init__(self, source_uid: str | None = None, *,
+                 dedicated: bool = False) -> None:
         if not is_available():
             raise RuntimeError("EDS typelibs are not installed")
         from gi.repository import EBook
@@ -65,6 +132,8 @@ class EBookClient:
         registry = EBook.SourceRegistry.new_sync(None)
         if source_uid:
             source = registry.ref_source(source_uid)
+        elif dedicated:
+            source = ensure_xx_source(registry)
         else:
             source = registry.ref_default_address_book()
         self._client = EBook.BookClient.connect_sync(source, None)
@@ -207,12 +276,18 @@ class EdsPublisher:
             records = self._read_records()
         except Exception:
             return False
+        worker = threading.Thread(target=self._flush_records,
+                                  args=(records,), daemon=True)
+        worker.start()
+        return False
+
+    def _flush_records(self, records) -> None:
+        """Blocking mirror pass; always runs on a worker thread."""
         try:
             client = self._make_client()
         except Exception:
-            return False
+            return
         try:
             sync_to_eds(records, client)
         except Exception:
             pass
-        return False

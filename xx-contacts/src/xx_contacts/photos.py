@@ -20,6 +20,7 @@ import base64
 import binascii
 import os
 import stat
+import uuid
 
 from xx_contacts.privacy import ensure_private_dir, fix_file_mode
 
@@ -203,15 +204,28 @@ def delete_photo(photo_path: str) -> None:
             pass
 
 
+def is_jpeg_bytes(blob: bytes | None) -> bool:
+    """True when *blob* starts with the JPEG magic bytes."""
+    return bool(blob) and bytes(blob[:2]) == b"\xff\xd8"
+
+
 def read_photo_bytes(photo_path: str) -> bytes | None:
-    """Raw JPEG bytes for a stored photo, or None when unreadable."""
+    """Raw JPEG bytes for a stored photo, or None when unreadable.
+
+    Only JPEG data is ever returned: a ``photo_path`` pointing at an
+    arbitrary file (e.g. an imported ``PHOTO;VALUE=URI`` outside the
+    photo dir) must never have its bytes embedded in an export.
+    """
     if not photo_path:
         return None
     try:
         with open(photo_path, "rb") as handle:
-            return handle.read()
+            blob = handle.read()
     except OSError:
         return None
+    if not is_jpeg_bytes(blob):
+        return None
+    return blob
 
 
 def photo_file_mode_ok(photo_path: str) -> bool:
@@ -265,6 +279,49 @@ def photo_bytes_from_extra(extra_lines) -> bytes | None:
         if blob:
             return blob
     return None
+
+
+def stage_photo_from_extra(data, photos_dir: str,
+                           uid: str) -> tuple[str, str]:
+    """Stage an embedded PHOTO to a temp file; return ``(tmp, final)``.
+
+    Crash-safe variant of :func:`adopt_photo_from_extra`: nothing at
+    the final path is touched until the caller replaces it after the
+    contact row commits. ``data.photo_path`` is set to the final path
+    and the adopted line dropped, so the row already references it.
+    Returns ``("", "")`` when no decodable photo is carried.
+    """
+    blob = photo_bytes_from_extra(data.extra)
+    if not blob:
+        return "", ""
+    processed = process_photo(blob)
+    final = photo_path_for(photos_dir, uid)
+    tmp = f"{final}.{uuid.uuid4().hex}.tmp"
+    secure_write_bytes(tmp, processed)
+    data.photo_path = final
+    for index, line in enumerate(data.extra):
+        if (line.prop or "").upper() != "PHOTO":
+            continue
+        if photo_bytes_from_value(line.params or "",
+                                  line.value or "") is not None:
+            del data.extra[index]
+            break
+    return tmp, final
+
+
+def commit_staged_photo(tmp_path: str, final_path: str) -> None:
+    """Atomically replace the final photo with a staged temp file."""
+    os.replace(tmp_path, final_path)
+    fix_file_mode(final_path, PHOTO_MODE)
+
+
+def discard_staged_photo(tmp_path: str) -> None:
+    """Remove a staged temp photo; missing files are not an error."""
+    if tmp_path:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 def adopt_photo_from_extra(data, photos_dir: str, uid: str) -> str:

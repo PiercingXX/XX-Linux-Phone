@@ -225,7 +225,8 @@ class ThreadPage(Gtk.Box):
         """Replace raw senders with xx-contacts names when available.
 
         Async and off the lookup path: each distinct address resolves
-        through contacts → EDS → raw header, then its rows rebind.
+        through the exact contacts email lookup → EDS → raw header,
+        then its rows rebind.
         """
         seen: set[str] = set()
         for message in self._messages:
@@ -249,7 +250,7 @@ class ThreadPage(Gtk.Box):
                     count = self._store.get_n_items()
                     self._store.items_changed(0, count, count)
 
-            contacts_mod.search_contacts_async(address, _done)
+            contacts_mod.lookup_email_async(address, _done)
 
     def _attachments_for(self, message_id: str) -> list:
         entry = self._full.get(message_id, {})

@@ -71,6 +71,11 @@ INTROSPECTION_XML = """\
       <arg direction="in" type="u" name="limit"/>
       <arg direction="out" type="a(sss)" name="results"/>
     </method>
+    <method name="LookupEmail">
+      <arg direction="in" type="s" name="email"/>
+      <arg direction="out" type="s" name="uid"/>
+      <arg direction="out" type="s" name="display_name"/>
+    </method>
     <method name="Get">
       <arg direction="in" type="s" name="uid"/>
       <arg direction="out" type="s" name="vcard"/>
@@ -266,6 +271,17 @@ class ContactsService:
         capped = max(0, min(int(limit), 500))
         return self._store.search(query, capped)
 
+    def lookup_email(self, email: str) -> tuple[str, str]:
+        """Exact email owner: ``(uid, display_name)``, else ``("", "")``.
+
+        Never an error on a miss (like ``LookupNumber``); sender and
+        autocomplete callers fall back to the raw address.
+        """
+        hit = self._store.lookup_email(email)
+        if hit is None:
+            return "", ""
+        return hit[0], hit[1]
+
     def get(self, uid: str) -> str:
         from xx_contacts import vcard as vcard_module
         from xx_contacts.store import NotFoundError
@@ -280,24 +296,55 @@ class ContactsService:
                      ) -> tuple[int, list[str], list[str]]:
         return self._store.list_changes(int(since_revision))
 
-    def _adopt_photo(self, data, provisional_uid: str) -> None:
-        """Materialize an embedded vCard PHOTO into the photo file.
+    def _sanitize_photo_path(self, data) -> None:
+        """Drop a URI photo path that escapes the photo dir.
 
-        The codec carries photo bytes losslessly as a data-URI PHOTO
-        line decoded into ``data.extra``; the file write (normalize,
-        EXIF strip, mode 0600) happens here so clients send one vCard
-        and the GUI never touches the photo dir. Undecodable payloads
-        stay in ``extra`` and round-trip, exactly as before.
+        An imported ``PHOTO;VALUE=URI:/elsewhere`` must never reach the
+        database: export/share would otherwise embed that file's bytes.
+        Embedded payloads (``data.extra``) are unaffected; they are
+        staged through the photo file below.
+        """
+        path = (getattr(data, "photo_path", "") or "")
+        if not path or not self._photos_dir:
+            return
+        if not _is_within_directory(path, self._photos_dir):
+            data.photo_path = ""
+
+    def _stage_photo(self, data, provisional_uid: str
+                     ) -> tuple[str, str]:
+        """Stage an embedded vCard PHOTO to a temp file.
+
+        Returns ``(tmp, final)``; the caller replaces the final path
+        only after the row commits, so a failed write never destroys
+        the photo already stored there. Undecodable payloads stay in
+        ``extra`` and round-trip, exactly as before.
         """
         if not self._photos_dir:
+            return "", ""
+        from xx_contacts import photos as photos_module
+
+        try:
+            return photos_module.stage_photo_from_extra(
+                data, self._photos_dir, provisional_uid)
+        except Exception:
+            return "", ""
+
+    def _commit_staged_photo(self, tmp_path: str, final_path: str) -> None:
+        if not tmp_path:
             return
         from xx_contacts import photos as photos_module
 
         try:
-            photos_module.adopt_photo_from_extra(
-                data, self._photos_dir, provisional_uid)
+            photos_module.commit_staged_photo(tmp_path, final_path)
         except Exception:
-            pass
+            photos_module.discard_staged_photo(tmp_path)
+
+    def _discard_staged_photo(self, tmp_path: str) -> None:
+        if not tmp_path:
+            return
+        from xx_contacts import photos as photos_module
+
+        photos_module.discard_staged_photo(tmp_path)
 
     def _drop_replaced_photo(self, old_path: str, new_path: str) -> None:
         """Delete a photo file the write just orphaned; guarded to stay
@@ -315,7 +362,12 @@ class ContactsService:
 
     def create(self, vcard_text: str) -> str:
         from xx_contacts import vcard as vcard_module
-        from xx_contacts.store import StoreError, is_valid_uid, new_uid
+        from xx_contacts.store import (
+            NotFoundError,
+            StoreError,
+            is_valid_uid,
+            new_uid,
+        )
 
         try:
             data, hint = vcard_module.contact_from_vcard(
@@ -323,15 +375,20 @@ class ContactsService:
         except ValueError as exc:
             raise ValueError(f"no vCard block found: {exc}") from exc
         chosen = hint if is_valid_uid(hint) else new_uid()
-        adopted_path = data.photo_path
-        self._adopt_photo(data, chosen)
-        adopted = bool(data.photo_path) and data.photo_path != adopted_path
+        try:
+            self._store.get(chosen)
+        except NotFoundError:
+            pass
+        else:
+            raise StoreError(f"contact already exists: {chosen}")
+        self._sanitize_photo_path(data)
+        tmp_path, final_path = self._stage_photo(data, chosen)
         try:
             uid = self._store.create(data, chosen)
         except StoreError:
-            if adopted:
-                self._drop_replaced_photo(data.photo_path, "")
+            self._discard_staged_photo(tmp_path)
             raise
+        self._commit_staged_photo(tmp_path, final_path)
         self._reindex_record(uid)
         revision = self._store.get_revision()
         self._emit_changed(revision, [uid])
@@ -350,15 +407,14 @@ class ContactsService:
             old = self._store.get(uid)
         except NotFoundError as exc:
             raise LookupError(str(exc)) from exc
-        had_photo_path = data.photo_path
-        self._adopt_photo(data, uid)
-        adopted = bool(data.photo_path) and data.photo_path != had_photo_path
+        self._sanitize_photo_path(data)
+        tmp_path, final_path = self._stage_photo(data, uid)
         try:
             revision = self._store.update(uid, data)
         except NotFoundError as exc:
-            if adopted:
-                self._drop_replaced_photo(data.photo_path, "")
+            self._discard_staged_photo(tmp_path)
             raise LookupError(str(exc)) from exc
+        self._commit_staged_photo(tmp_path, final_path)
         self._drop_replaced_photo(old.photo_path or "", data.photo_path or "")
         self._reindex_record(uid)
         self._emit_changed(revision, [uid])
@@ -426,37 +482,38 @@ class ContactsService:
             raise ValueError("no vCard block found")
         plan = import_export_module.plan_import(
             self._store.all_records(), incoming, self._default_region)
-        adopted: list[tuple[object, str, str]] = []
+        staged: list[tuple[str, str, str]] = []
         for item in plan.creates:
-            before = item.data.photo_path
-            self._adopt_photo(item.data, item.uid)
-            if item.data.photo_path != before:
-                adopted.append((item.data, item.data.photo_path, ""))
+            self._sanitize_photo_path(item.data)
+            tmp_path, final_path = self._stage_photo(item.data, item.uid)
+            if tmp_path:
+                staged.append((tmp_path, final_path, ""))
         for item in plan.updates:
             try:
                 old = self._store.get(item.uid)
             except Exception:
                 old = None
-            before = item.data.photo_path
-            self._adopt_photo(item.data, item.uid)
-            if item.data.photo_path != before:
-                adopted.append(
-                    (item.data, item.data.photo_path,
+            self._sanitize_photo_path(item.data)
+            tmp_path, final_path = self._stage_photo(item.data, item.uid)
+            if tmp_path:
+                staged.append(
+                    (tmp_path, final_path,
                      old.photo_path if old is not None else ""))
         try:
             revision, created, updated = self._store.apply_import(
                 [(item.uid, item.data) for item in plan.creates],
                 [(item.uid, item.data) for item in plan.updates])
         except (StoreError, LookupError):
-            for _data, new_path, _old in adopted:
-                self._drop_replaced_photo(new_path, "")
+            for tmp_path, _final, _old in staged:
+                self._discard_staged_photo(tmp_path)
             raise
         for uid in created + updated:
             self._reindex_record(uid)
         if revision:
-            for _data, new_path, old_path in adopted:
+            for tmp_path, final_path, old_path in staged:
+                self._commit_staged_photo(tmp_path, final_path)
                 if old_path:
-                    self._drop_replaced_photo(old_path, new_path)
+                    self._drop_replaced_photo(old_path, final_path)
             self._emit_changed(revision, created + updated)
         return len(created), len(updated), plan.skipped
 
@@ -486,6 +543,10 @@ class ContactsService:
                 results = self.search(*args)
                 invocation.return_value(
                     GLib.Variant("(a(sss))", (results,)))
+            elif method_name == "LookupEmail":
+                uid, name = self.lookup_email(*args)
+                invocation.return_value(
+                    GLib.Variant("(ss)", (uid, name)))
             elif method_name == "Get":
                 invocation.return_value(
                     GLib.Variant("(s)", (self.get(*args),)))

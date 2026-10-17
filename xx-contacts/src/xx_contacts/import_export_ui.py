@@ -77,7 +77,7 @@ class ImportExportPage(Adw.NavigationPage):
         self._pending_backup: list = []
         self._pending_groups_applied = 0
         self._publisher = eds_module.EdsPublisher(
-            eds_module.EBookClient, store.all_records,
+            eds_module.make_publish_client, store.all_records,
             enabled=bool(getattr(config, "publish_to_eds", False)))
 
         toolbar = Adw.ToolbarView()

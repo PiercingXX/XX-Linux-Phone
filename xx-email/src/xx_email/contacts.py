@@ -5,13 +5,15 @@ sender display names come from xx-contacts' D-Bus API
 (bus ``io.piercingxx.Contacts``, path ``/io/piercingxx/Contacts``,
 interface ``io.piercingxx.Contacts1``; ``Search`` takes
 ``(query: s, limit: u)`` and returns ``a(sss)`` rows of
-``(uid, display_name, primary)`` per
+``(uid, display_name, primary)``, and ``LookupEmail`` takes
+``(email: s)`` for an exact address match per
 ``ref/xx-contacts/src/xx_contacts/service.py``), which owns the user's
-contacts. When xx-contacts isn't installed, fall back to a read-only
-EDS lookup, then to the raw header name. The pure
-``resolve_sender_display`` decides the winner; the async helpers below
-fetch candidates without ever blocking the main loop (async D-Bus
-calls, results posted with GLib.idle_add).
+contacts. Senders always resolve through ``LookupEmail`` (exact, never
+a digit match); autocomplete uses ``Search``. When xx-contacts isn't
+installed, fall back to a read-only EDS lookup, then to the raw
+header name. The pure ``resolve_sender_display`` decides the winner;
+the async helpers below fetch candidates without ever blocking the
+main loop (async D-Bus calls, results posted with GLib.idle_add).
 """
 
 from __future__ import annotations
@@ -39,6 +41,47 @@ def resolve_sender_display(from_header: str,
     if address.strip():
         return address.strip()
     return (from_header or "").strip() or "?"
+
+
+def lookup_email_async(email: str, done) -> None:
+    """Async xx-contacts ``LookupEmail``; done(name or None) on return.
+
+    Exact, case-insensitive address match — never a digit or substring
+    match — so a sender address cannot resolve to an unrelated contact.
+    Uses the application session connection with an async call (never
+    a blocking round-trip). Falls back to done(None) when the app is
+    unregistered or xx-contacts is absent — the caller then tries EDS,
+    then the raw header. GLib-free environments (tests) get done(None)
+    directly.
+    """
+    try:
+        from gi.repository import Gio, GLib
+    except (ImportError, ValueError):
+        done(None)
+        return
+    try:
+        app = Gio.Application.get_default()
+        connection = app.get_dbus_connection() \
+            if app is not None else None
+    except Exception:
+        connection = None
+    if connection is None:
+        done(None)
+        return
+
+    def _reply(conn, result) -> None:
+        try:
+            _uid, name = conn.call_finish(result).unpack()
+        except Exception:
+            name = None
+        if not isinstance(name, str) or not name.strip():
+            name = None
+        GLib.idle_add(done, name)
+
+    connection.call(
+        CONTACTS_BUS_NAME, CONTACTS_OBJECT_PATH, CONTACTS_INTERFACE,
+        "LookupEmail", GLib.Variant("(s)", (email,)), None,
+        Gio.DBusCallFlags.NONE, 5000, None, _reply)
 
 
 def search_contacts_async(query: str, done) -> None:

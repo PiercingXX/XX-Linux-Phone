@@ -78,9 +78,9 @@ def test_introspection_lists_full_interface():
     iface = node.interfaces[0]
     assert iface.name == INTERFACE
     methods = {m.name: m for m in iface.methods}
-    assert set(methods) == {"LookupNumber", "Search", "Get", "List", "Create",
-                            "Update", "Delete", "SetTags", "UpdateTags",
-                            "Import", "Pick"}
+    assert set(methods) == {"LookupNumber", "LookupEmail", "Search", "Get",
+                            "List", "Create", "Update", "Delete", "SetTags",
+                            "UpdateTags", "Import", "Pick"}
     assert methods["LookupNumber"].in_args[0].signature == "s"
     assert methods["List"].in_args[0].signature == "t"
     assert methods["SetTags"].in_args[1].signature == "as"
@@ -285,13 +285,14 @@ def test_update_keeps_uri_photo_path_without_deleting(tmp_path):
     try:
         handle = ContactsService(store, LookupIndex(), "US")
         handle._connection = FakeConnection()
+        kept = str(tmp_path / "photos" / "keep.jpg")
         card = ("BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Ada Lovelace\r\n"
-                "PHOTO;VALUE=URI:/tmp/elsewhere/pic.jpg\r\n"
+                f"PHOTO;VALUE=URI:{kept}\r\n"
                 "END:VCARD\r\n")
         uid = _out(_call(handle, "Create", "(s)", card))[0]
-        assert store.get(uid).photo_path == "/tmp/elsewhere/pic.jpg"
+        assert store.get(uid).photo_path == kept
         assert _out(_call(handle, "Update", "(ss)", uid, card)) == ()
-        assert store.get(uid).photo_path == "/tmp/elsewhere/pic.jpg"
+        assert store.get(uid).photo_path == kept
     finally:
         store.close()
 

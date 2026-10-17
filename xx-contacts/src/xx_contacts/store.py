@@ -744,8 +744,57 @@ class ContactStore:
             row = cur.execute("SELECT COUNT(*) AS n FROM contacts").fetchone()
             return int(row["n"])
 
+    def lookup_email(self, address: str | None
+                     ) -> tuple[str, str] | None:
+        """Exact email lookup: ``(uid, display_name)`` or None.
+
+        Case-insensitive on the whole address, never a substring or
+        digit match, so a sender address cannot resolve to an
+        unrelated contact.
+        """
+        key = (address or "").strip()
+        if not key or "@" not in key:
+            return None
+        with self._lock:
+            cur = self._conn.cursor()
+            row = cur.execute(
+                "SELECT contact_uid FROM emails"
+                " WHERE lower(address) = lower(?)"
+                " ORDER BY contact_uid LIMIT 1",
+                (key,)).fetchone()
+            if row is None:
+                return None
+            try:
+                record = self._read_record(cur, row["contact_uid"])
+            except NotFoundError:
+                return None
+            return record.uid, record.display_name
+
+    @staticmethod
+    def _primary_contact_value(record) -> str:
+        """Best single contact value: primary email, else primary phone."""
+        for email in record.emails:
+            if email.is_primary and (email.address or "").strip():
+                return email.address
+        for email in record.emails:
+            if (email.address or "").strip():
+                return email.address
+        for phone in record.phones:
+            if phone.is_primary and (phone.number_raw or "").strip():
+                return phone.number_raw
+        if record.phones:
+            return record.phones[0].number_raw
+        return ""
+
     def search(self, query: str, limit: int = 50) -> list[tuple[str, str, str]]:
-        """Search name, number digits and email; number hits rank first."""
+        """Search name, number digits and email; number hits rank first.
+
+        Number matching is skipped for email-like queries and for
+        queries with fewer than 3 digits, so an address such as
+        ``john1@example.com`` cannot match every ``+1...`` contact. The
+        third field is the primary email when the contact has one,
+        else the primary phone.
+        """
         from xx_contacts import phones as phone_util
 
         folded = (query or "").casefold().strip()
@@ -763,7 +812,7 @@ class ContactStore:
                 " ORDER BY display_name, uid",
                 (like, like)).fetchall()
             number_hits: list[str] = []
-            if digits:
+            if digits and "@" not in folded and len(digits) >= 3:
                 for prow in cur.execute(
                         "SELECT DISTINCT contact_uid, number_digits"
                         " FROM phones"):
@@ -785,7 +834,7 @@ class ContactStore:
                     record = self._read_record(cur, uid)
                 except NotFoundError:
                     continue
-                primary = record.phones[0].number_raw if record.phones else ""
+                primary = self._primary_contact_value(record)
                 results.append((uid, record.display_name, primary))
         return results
 

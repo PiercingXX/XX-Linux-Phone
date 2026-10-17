@@ -334,6 +334,8 @@ def export_text(records, photo_reader=None) -> str:
                 photo = photo_reader(path)
             except OSError:
                 photo = None
+            if photo is not None and photo[:2] != b"\xff\xd8":
+                photo = None
         chunks.append(vcard_module.contact_to_vcard(record,
                                                     photo_bytes=photo))
     return "".join(chunks)
