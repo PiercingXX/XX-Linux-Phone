@@ -71,10 +71,14 @@ class YouTubeMusicEngine(e.Engine):
             return e.SearchResults()
         if kind == e.ItemKind.MOOD:
             return e.SearchResults()
-        return self.catalog.fetch(
+        found = self.catalog.fetch(
             e.SEARCH, "search", parse.parse_search, query,
             filter=_SEARCH_FILTER.get(kind) if kind is not None else None,
             limit=limit)
+        # ytmusicapi's limit is a page-size floor, not a cap
+        return e.SearchResults(
+            tracks=found.tracks[:limit], albums=found.albums[:limit],
+            artists=found.artists[:limit], playlists=found.playlists[:limit])
 
     def suggestions(self, query: str) -> list[str]:
         if not query.strip():

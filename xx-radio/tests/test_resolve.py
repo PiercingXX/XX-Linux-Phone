@@ -357,3 +357,13 @@ def test_real_child_process_with_fake_yt_dlp(tmp_path, monkeypatch):
     assert done.returncode == 0, done.stderr
     (result,) = json.loads(done.stdout)["results"]
     assert result["ok"] and result["uri"].startswith("https://")
+
+
+def test_worker_env_puts_the_app_package_first():
+    # the engine venv python must still find xx_radio (seen on the FLX1)
+    import os
+    from pathlib import Path
+    from xx_radio.youtube import resolver
+    env = resolver._worker_env()
+    first = env["PYTHONPATH"].split(os.pathsep)[0]
+    assert (Path(first) / "xx_radio" / "youtube" / "resolve_worker.py").is_file()

@@ -153,6 +153,14 @@ def test_search_uses_server_filter_and_limit(tmp_path):
     assert fake.calls[-1][2] == {"filter": None, "limit": 20}
 
 
+def test_search_caps_to_limit(tmp_path):
+    # ytmusicapi returns a whole page (20) even when asked for 3: seen on
+    # the FLX1
+    engine, fake = _engine(tmp_path)
+    fake.answers["search"] = load("search_songs.json")
+    assert len(engine.search("get lucky", e.ItemKind.TRACK, limit=3).tracks) == 3
+
+
 def test_search_blank_and_mood_make_no_call(tmp_path):
     engine, fake = _engine(tmp_path)
     assert engine.search("   ").empty

@@ -150,6 +150,16 @@ def _result_to_error(track_id: str, item: dict[str, Any]) -> EngineError:
     return EngineError(kind, detail, retry_after)
 
 
+def _worker_env() -> dict[str, str]:
+    """The child may be the engine venv's python, which knows nothing of
+    where this app is installed: put our package root on its path."""
+    env = dict(os.environ)
+    root = str(Path(__file__).resolve().parents[2])
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (root, env.get("PYTHONPATH", "")) if p)
+    return env
+
+
 class Resolver:
     """Expiry-caching, batching front end to the resolve worker.
 
@@ -280,7 +290,7 @@ class Resolver:
         try:
             done = subprocess.run(
                 [python, "-m", WORKER_MODULE],
-                input=json.dumps(payload).encode(),
+                input=json.dumps(payload).encode(), env=_worker_env(),
                 capture_output=True, timeout=self.timeout_s, check=False,
                 preexec_fn=_be_nice if os.name == "posix" else None)
         except subprocess.TimeoutExpired as exc:
