@@ -112,6 +112,7 @@ def export_backup(config) -> dict:
         'font': config.data.get('font', 'jetbrains-mono-nerd'),
         'text_size_scale': config.text_size_scale,
         'home_alignment': config.home_alignment,
+        'drawer_sort': config.drawer_sort,
         'auto_lock_timeout': config.auto_lock_timeout,
         'lock_screen_notifications': config.lock_screen_notifications,
         # Medical ID is user data, not a secret: it travels with the
@@ -205,6 +206,9 @@ def validate_backup(payload: dict) -> tuple[bool, str | None]:
 
     if payload.get('home_alignment', 'center') not in ('left', 'center', 'right'):
         return False, 'home_alignment must be left/center/right'
+
+    if payload.get('drawer_sort', 'default') not in ('default', 'az', 'install'):
+        return False, 'drawer_sort must be default/az/install'
 
     if payload.get('lock_screen_notifications', 'summary') not in ('summary', 'count', 'off'):
         return False, 'lock_screen_notifications must be summary/count/off'
@@ -307,7 +311,7 @@ def restore_backup(config, payload: dict) -> bool:
         ('app_labels', dict), ('widgets', dict), ('theme', str),
         ('custom_background', str), ('font', str), ('custom_font_family', str),
         ('home_alignment', str), ('lock_screen_notifications', str),
-        ('pinned', list),
+        ('drawer_sort', str), ('pinned', list),
     )
     for key, expected in passthrough:
         if isinstance(payload.get(key), expected):

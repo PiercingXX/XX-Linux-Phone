@@ -54,6 +54,18 @@ def origin_is_bottom_edge(
     return origin[1] >= height - margin
 
 
+def origin_is_top_edge(
+        origin: tuple[float, float] | None,
+        margin: float = _EDGE_GUARD_PX) -> bool:
+    """True when a swipe began at the top edge (shade territory)."""
+    if origin is None:
+        return False
+    try:
+        return float(origin[1]) <= margin
+    except (TypeError, ValueError):
+        return False
+
+
 _PAGE_ORDER = ['home', 'apps', 'settings']
 
 # Pages whose widgets take text input (drawer search, settings entries and
@@ -566,6 +578,8 @@ class ShellWindow(Adw.ApplicationWindow):
             real_name_fn=lambda app_id: next(
                 (entry.name for entry in self.app_index.entries
                  if entry.app_id == app_id), None),
+            on_launch=self.drop_to_background,
+            on_open_page=self.open_app_page,
         )
 
         # Flat search with the text after the icon, like xx_ui's search_bar
@@ -777,12 +791,24 @@ class ShellWindow(Adw.ApplicationWindow):
         root.append(self.stack)
         return root
 
+    def _drawer_swipe_down_home(self) -> bool:
+        """True when a drawer swipe-down closes the drawer instead of
+        opening the shade: the list is parked at the top and the swipe did
+        not start at the top edge (the shade stays reachable from there)."""
+        from drawer_page import decide_drawer_swipe_down, drawer_list_at_top
+        return decide_drawer_swipe_down(
+            origin_is_top_edge(self._swipe_origin),
+            drawer_list_at_top(self)) == 'home'
+
     def _on_stack_swipe(self, _gesture: Gtk.GestureSwipe, vel_x: float, vel_y: float) -> None:
         # Vertical swipes match the PiercingXX Android launcher: up opens the
         # app drawer, down runs the configured action (default: shade)
         current = self.stack.get_visible_child_name()
         if abs(vel_y) > abs(vel_x) * 1.5:
             if vel_y > 300:
+                if current == 'apps' and self._drawer_swipe_down_home():
+                    self.go_home()
+                    return
                 self._dispatch_gesture_action(
                     self.gesture_config.get('swipe_down_top') or 'notification_shade')
             elif vel_y < 0:
@@ -1972,6 +1998,11 @@ class ShellWindow(Adw.ApplicationWindow):
         self._home_launcher.refresh(preserve_folder=True)
         self._populate_apps(self.apps_search.get_text())
 
+    def open_app_page(self, page: str, entry: AppEntry) -> bool:
+        """Open the existing per-app settings page for an App info button."""
+        from app_item_actions import open_app_page
+        return open_app_page(self, page, entry)
+
     # -- home edit mode (home_page.py) -----------------------------------------
 
     def _on_home_long_press(self, gesture: Gtk.GestureLongPress, _x: float, _y: float) -> None:
@@ -2022,6 +2053,9 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _make_settings_row(self) -> Gtk.ListBoxRow:
         return _drawer(self)._make_settings_row()
+
+    def _make_web_row(self, query: str) -> Gtk.ListBoxRow:
+        return _drawer(self)._make_web_row(query)
 
     def _replace_rows(
         self,

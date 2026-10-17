@@ -60,6 +60,7 @@ DEFAULT_CONFIG = {
     'home_slots': [],
     'home_to_recents': False,
     'search_auto_launch': False,
+    'drawer_sort': 'default',
     'preload_gesture_apps': False,
     'default_layout_applied': False,
     'app_labels': {},
@@ -107,6 +108,10 @@ DEFAULT_CONFIG = {
 # Free-form string keys (docs/config.md); a container value here would
 # crash set_text() consumers when the settings page is built.
 _STRING_KEYS = ('apn', 'apn_user', 'apn_pass', 'weather_location')
+
+# Drawer sort modes (docs/config.md): 'default' pins first then A–Z,
+# 'az' is plain A–Z with no pin priority, 'install' is newest first.
+_DRAWER_SORTS = ('default', 'az', 'install')
 
 # Escalating-lockout resume point (fail count + wall-clock lockout-until).
 # Private device-local state: kept out of backups and restores.
@@ -731,6 +736,16 @@ class ShellConfig:
     def set_search_auto_launch(self, enabled: bool) -> None:
         self.data['search_auto_launch'] = bool(enabled)
         self.save()
+
+    @property
+    def drawer_sort(self) -> str:
+        val = self.data.get('drawer_sort', DEFAULT_CONFIG['drawer_sort'])
+        return val if val in _DRAWER_SORTS else 'default'
+
+    def set_drawer_sort(self, mode: str) -> None:
+        if mode in _DRAWER_SORTS:
+            self.data['drawer_sort'] = mode
+            self.save()
 
     @property
     def preload_gesture_apps(self) -> bool:

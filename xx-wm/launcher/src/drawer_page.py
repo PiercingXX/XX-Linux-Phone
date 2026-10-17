@@ -6,7 +6,169 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app_index import AppEntry
 
+from app_index import fold_for_search
+
 _WEB_SEARCH_URL = 'https://duckduckgo.com/?q='
+
+# Drawer sheet geometry (design.md "App drawer"): the top fraction stays
+# an open transparent gap so the drawer reads as a sheet; tapping it
+# closes the drawer.
+SHEET_GAP_FRACTION = 0.12
+
+_DRAWER_SORT_MODES = ('default', 'az', 'install')
+_DRAWER_SORT_LABELS = {
+    'default': 'Default',
+    'az': 'A-Z',
+    'install': 'Install date',
+}
+
+_SETTINGS_ROW_LABEL = 'launcher settings'
+
+# An install counts as new for the row marker while under an hour old.
+_NEW_APP_SECONDS = 3600.0
+
+
+def next_drawer_sort(mode: str) -> str:
+    """Next sort mode for the toggle button: default → az → install."""
+    if mode not in _DRAWER_SORT_MODES:
+        return 'default'
+    return _DRAWER_SORT_MODES[
+        (_DRAWER_SORT_MODES.index(mode) + 1) % len(_DRAWER_SORT_MODES)]
+
+
+def drawer_sort_label(mode: str) -> str:
+    """Toggle button label for a sort mode."""
+    return _DRAWER_SORT_LABELS.get(mode, _DRAWER_SORT_LABELS['default'])
+
+
+def drawer_sort_of(win) -> str:
+    """Effective drawer sort mode: the persisted config, with the legacy
+    in-memory `_sort_mode` (bare test doubles) as the fallback."""
+    mode = getattr(win, '_sort_mode', None)
+    try:
+        mode = win.config.drawer_sort
+    except Exception:
+        pass
+    return mode if mode in _DRAWER_SORT_MODES else 'default'
+
+
+def settings_row_visible(query: str) -> bool:
+    """The Launcher Settings row matches like Android: the settings label
+    contains the query (fold-insensitive), or there is no query."""
+    trimmed = (query or '').strip().casefold()
+    if not trimmed:
+        return True
+    folded = fold_for_search(trimmed)
+    return (trimmed in _SETTINGS_ROW_LABEL
+            or bool(folded) and folded in fold_for_search(_SETTINGS_ROW_LABEL))
+
+
+def web_search_row_query(raw_query: str, result_count: int) -> str | None:
+    """Web-search row query, or None when no row shows: a `!` query always
+    shows it (past the bare `!`), otherwise only with zero app matches."""
+    text = raw_query or ''
+    if text.startswith('!'):
+        return text[1:].strip() or None
+    if result_count == 0 and text.strip():
+        return text.strip()
+    return None
+
+
+def should_auto_launch(raw_text: str, result_count: int,
+                       settings_visible: bool, enabled: bool) -> bool:
+    """Single-result auto-launch gate, mirroring Android: a leading space
+    suppresses it, a matching Launcher Settings row suppresses it, and a
+    `!` web query never fires it."""
+    if not enabled or result_count != 1 or settings_visible:
+        return False
+    text = raw_text or ''
+    if text.startswith(' '):
+        return False
+    stripped = text.strip()
+    return bool(stripped) and not stripped.startswith('!')
+
+
+def app_is_new(entry: AppEntry, now: float | None = None) -> bool:
+    """True when the .desktop install mtime is under an hour old."""
+    if now is None:
+        import time
+        now = time.time()
+    try:
+        filename = entry.desktop_app.get_filename()
+        mtime = Path(filename).stat().st_mtime if filename else 0.0
+    except OSError:
+        return False
+    return (now - mtime) < _NEW_APP_SECONDS
+
+
+def row_title(name: str, pinned: bool, is_new: bool,
+              paused: bool = False, limited: bool = False) -> str:
+    """Drawer row text: `⊙` marks pinned apps, `•` newly installed ones."""
+    title = name
+    if pinned:
+        title += '  ⊙'
+    if is_new:
+        title += '  •'
+    if paused:
+        title += ' · paused'
+    if limited:
+        title += ' · time limit'
+    return title
+
+
+def accessible_label(name: str, pinned: bool = False, is_new: bool = False,
+                     paused: bool = False, limited: bool = False) -> str:
+    """Spoken row label carrying the same facts as the markers."""
+    parts = [name]
+    if pinned:
+        parts.append('pinned')
+    if is_new:
+        parts.append('new app')
+    if paused:
+        parts.append('paused')
+    if limited:
+        parts.append('time limit')
+    return ', '.join(parts)
+
+
+def set_row_accessible_label(row, text: str) -> None:
+    """Set a list row's accessible label; never fails the row build."""
+    try:
+        from gi.repository import GObject, Gtk
+        value = GObject.Value()
+        value.init(GObject.TYPE_STRING)
+        value.set_string(text)
+        row.update_property([Gtk.AccessibleProperty.LABEL], [value])
+    except Exception:
+        pass
+
+
+def decide_drawer_swipe_down(top_edge_origin: bool,
+                             scrolled_to_top: bool) -> str:
+    """Drawer swipe-down destination: the top edge always keeps the shade;
+    otherwise a list parked at the top closes the drawer (goes home)."""
+    if top_edge_origin or not scrolled_to_top:
+        return 'shade'
+    return 'home'
+
+
+def drawer_list_at_top(win) -> bool:
+    """True when the drawer list is scrolled to the top."""
+    try:
+        return float(
+            win.apps_scroller.get_vadjustment().get_value()) <= 0.0
+    except Exception:
+        return False
+
+
+def gap_tap_closes(y: float, height: float,
+                   fraction: float = SHEET_GAP_FRACTION) -> bool:
+    """True when a tap landing at height `y` is inside the transparent gap
+    above the drawer sheet."""
+    try:
+        return float(height) > 0 and float(y) < float(height) * fraction
+    except (TypeError, ValueError):
+        return False
 
 
 def drawer_folder_title(label: str, member_count: int) -> str:
@@ -50,12 +212,11 @@ class DrawerPage:
         # Android launcher — never an inset grey panel.
         outer.add_css_class('drawer-sheet')
 
-        win._sort_mode = 'az'
         win._drawer_open_hidden = False
 
         # No 'All apps' header or count — the drawer is just the list, like
         # the PiercingXX Android launcher; the sort toggle rides alone, dim
-        win._sort_btn = Gtk.Button(label='A-Z')
+        win._sort_btn = Gtk.Button(label=drawer_sort_label(drawer_sort_of(win)))
         win._sort_btn.add_css_class('flat')
         win._sort_btn.add_css_class('dim-label')
         win._sort_btn.set_halign(Gtk.Align.END)
@@ -112,12 +273,12 @@ class DrawerPage:
         outer.append(list_row)
         outer.append(win.apps_search)
 
-        # The drawer list starts at the top of the screen, like the
-        # PiercingXX Android launcher — no gap above it. The layout manager
-        # stays so the page minimum is the content's own (a fixed spacer
+        # The drawer reads as a sheet: the top fraction stays an open
+        # transparent gap (tapping it closes the drawer). The layout manager
+        # keeps the page minimum at the content's own (a fixed spacer
         # widget would bake reserved space into it and push search off).
         class _SheetTopGapLayout(Gtk.LayoutManager):
-            _GAP_FRACTION = 0.0
+            _GAP_FRACTION = SHEET_GAP_FRACTION
 
             def do_measure(self, widget, orientation, for_size):
                 child = widget.get_first_child()
@@ -141,12 +302,37 @@ class DrawerPage:
         sheet.set_vexpand(True)
         sheet.set_layout_manager(_SheetTopGapLayout())
         sheet.append(outer)
+        win._drawer_sheet = sheet
+        gap_tap = Gtk.GestureClick.new()
+        gap_tap.set_touch_only(False)
+        gap_tap.connect('pressed', self._on_drawer_gap_tap)
+        sheet.add_controller(gap_tap)
         return sheet
+
+    def _on_drawer_gap_tap(self, _gesture, _n_press: int,
+                           _x: float, y: float) -> None:
+        """A tap inside the transparent gap above the sheet closes the
+        drawer; taps on the sheet itself carry a larger y and fall through."""
+        win = self._win
+        sheet = getattr(win, '_drawer_sheet', None)
+        try:
+            height = float(sheet.get_height())
+        except Exception:
+            return
+        if gap_tap_closes(y, height):
+            win.go_home()
 
     def _toggle_sort_mode(self, _btn) -> None:
         win = self._win
-        win._sort_mode = 'install' if win._sort_mode == 'az' else 'az'
-        win._sort_btn.set_label('Install date' if win._sort_mode == 'install' else 'A-Z')
+        nxt = next_drawer_sort(drawer_sort_of(win))
+        try:
+            win.config.set_drawer_sort(nxt)
+        except Exception:
+            win._sort_mode = nxt
+        try:
+            win._sort_btn.set_label(drawer_sort_label(nxt))
+        except Exception:
+            pass
         win._populate_apps(win.apps_search.get_text())
 
     def _home_slot_app_ids(self) -> set[str]:
@@ -207,30 +393,46 @@ class DrawerPage:
         from gi.repository import GLib, Gtk
 
         win = self._win
-        results = win.app_index.search(query)
+        raw = query or ''
+        trimmed = raw.strip().casefold()
+        folded = fold_for_search(trimmed)
         labels = win.config.app_labels
-        trimmed = query.strip().casefold()
+        bang = trimmed.startswith('!')
+        sort_mode = drawer_sort_of(win)
 
-        if trimmed:
+        if bang:
+            # `!query` skips app matching entirely and offers only the web row
+            results = []
+        else:
+            results = win.app_index.search(raw)
+
+        if trimmed and not bang:
             # Search surfaces everything: hidden apps, home-slot apps, folder
-            # members — plus matches against renamed labels.
+            # members — plus fold-insensitive matches against renamed labels.
             matched = {e.app_id for e in results}
             renamed_hits = [
                 e for e in win.app_index.entries
-                if e.app_id not in matched and trimmed in labels.get(e.app_id, '').casefold()
+                if e.app_id not in matched and (
+                    trimmed in labels.get(e.app_id, '').casefold()
+                    or bool(folded) and folded in fold_for_search(
+                        labels.get(e.app_id, '')))
             ]
             results = results + renamed_hits
-        else:
-            # The browse list hides hidden apps and everything already on home
-            browse_hidden = set(win.config.hidden_apps) | win._home_slot_app_ids()
+        elif not trimmed:
+            # The browse list hides hidden apps and everything already on
+            # home — except pinned apps, which stay listed (Android rule).
+            pinned_ids = set(win.config.pinned or ())
+            home_ids = set(win._home_slot_app_ids()) - pinned_ids
+            browse_hidden = set(win.config.hidden_apps) | home_ids
             results = [e for e in results if e.app_id not in browse_hidden]
-            if getattr(win, '_sort_mode', 'az') == 'install':
+            if sort_mode == 'install':
                 results = sorted(results, key=win._install_time, reverse=True)
-            # Pinned apps surface first, in their pinned order
-            pinned_order = {app_id: i for i, app_id in enumerate(win.config.pinned)}
-            pinned = sorted((e for e in results if e.app_id in pinned_order),
-                            key=lambda e: pinned_order[e.app_id])
-            results = pinned + [e for e in results if e.app_id not in pinned_order]
+            if sort_mode != 'az':
+                # Pinned apps surface first, in their pinned order
+                pinned_order = {app_id: i for i, app_id in enumerate(win.config.pinned)}
+                pinned = sorted((e for e in results if e.app_id in pinned_order),
+                                key=lambda e: pinned_order[e.app_id])
+                results = pinned + [e for e in results if e.app_id not in pinned_order]
 
         win._last_search_results = results if trimmed else []
 
@@ -293,8 +495,15 @@ class DrawerPage:
                     insert_at += 1
 
         # Synthetic "Launcher Settings" entry always sits at the very end
-        if not trimmed or trimmed in 'launcher settings':
+        settings_visible = settings_row_visible(raw) and not bang
+        if settings_visible:
             win.apps_list.append(win._make_settings_row())
+
+        # A visible "Web: <query>" row ends the results when nothing
+        # matches, or for a `!` web query; tapping it web-searches like Enter
+        web_query = web_search_row_query(raw, len(results))
+        if web_query:
+            win.apps_list.append(win._make_web_row(web_query))
 
         # Search results anchor at the bottom, above the search field, within
         # thumb reach; a set that overflows the view still reads from the top.
@@ -522,17 +731,18 @@ class DrawerPage:
         from gi.repository import Gtk, Pango
 
         win = self._win
-        display_name = win.config.label_for(entry.app_id, entry.name)
+        base_name = win.config.label_for(entry.app_id, entry.name)
+        pinned = entry.app_id in (win.config.pinned or ())
+        new = app_is_new(entry)
         paused = win.focus_state.is_paused_app(entry.app_id)
-        if paused:
-            display_name += ' · paused'
         from settings_screentime import is_limited_today
         limited = is_limited_today(win, entry.app_id)
-        if limited:
-            display_name += ' · time limit'
         # Single-line centered rows, name only — matches the PiercingXX
         # Android launcher's drawer; descriptions were noise at phone size
-        title = Gtk.Label(label=display_name, xalign=0.5)
+        title = Gtk.Label(
+            label=row_title(base_name, pinned, new,
+                            paused=paused, limited=limited),
+            xalign=0.5)
         title.add_css_class('app-name')
         title.set_ellipsize(Pango.EllipsizeMode.END)
 
@@ -552,6 +762,29 @@ class DrawerPage:
 
         row = Gtk.ListBoxRow(selectable=False, activatable=False)
         row.set_child(launch_btn)
+        set_row_accessible_label(
+            row, accessible_label(base_name, pinned=pinned, is_new=new,
+                                  paused=paused, limited=limited))
+        return row
+
+    def _make_web_row(self, query: str):
+        from gi.repository import Gtk, Pango
+
+        win = self._win
+        title = Gtk.Label(label='Web: ' + query, xalign=0.5)
+        title.add_css_class('app-name')
+        title.set_ellipsize(Pango.EllipsizeMode.END)
+        title.set_hexpand(True)
+
+        btn = Gtk.Button()
+        btn.add_css_class('flat')
+        btn.add_css_class('app-entry')
+        btn.set_child(title)
+        btn.connect('clicked', lambda _b: win._open_web_search(query))
+
+        row = Gtk.ListBoxRow(selectable=False, activatable=False)
+        row.set_child(btn)
+        set_row_accessible_label(row, 'Web search for ' + query)
         return row
 
     def _launch_entry(self, entry: AppEntry) -> None:
@@ -578,23 +811,8 @@ class DrawerPage:
             return
         if getattr(win, '_pick_exempt_mode', False):
             win._pick_exempt_mode = False
-            try:
-                from app_standby import normalize_app_id
-            except ImportError:
-                normalize_app_id = None
-            try:
-                exempt = list(win.config.standby_exempt)
-                wanted = (normalize_app_id(entry.app_id)
-                          if normalize_app_id is not None
-                          else entry.app_id.strip().casefold())
-                if not any((normalize_app_id(e)
-                            if normalize_app_id is not None
-                            else str(e).strip().casefold()) == wanted
-                           for e in exempt):
-                    exempt.append(entry.app_id)
-                    win.config.set_standby_exempt(exempt)
-            except Exception:
-                pass
+            from app_item_actions import add_standby_exempt
+            add_standby_exempt(win.config, entry.app_id)
             _open_settings(win)
             win._show_status(
                 f'{win.config.label_for(entry.app_id, entry.name)} '
@@ -617,10 +835,12 @@ class DrawerPage:
         win = self._win
         text = entry.get_text()
         win._populate_apps(text)
-        # Auto-launch the single result while typing, when enabled
-        query = text.strip()
-        if (win.config.search_auto_launch and query and not query.startswith('!')
-                and len(win._last_search_results) == 1):
+        # Auto-launch the single result while typing, when enabled: a
+        # leading space suppresses it, a matching settings row keeps the
+        # list on screen, and a `!` web query never fires it.
+        if should_auto_launch(text, len(win._last_search_results),
+                               settings_row_visible(text),
+                               bool(win.config.search_auto_launch)):
             entry.set_text('')
             win._launch_entry(win._last_search_results[0])
 

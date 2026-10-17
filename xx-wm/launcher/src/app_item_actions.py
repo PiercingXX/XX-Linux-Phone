@@ -41,6 +41,64 @@ def validate_folder_name(slots: list[dict], name: str,
     return None
 
 
+def add_standby_exempt(config, app_id: str) -> bool:
+    """Add an app to the never-freeze exemptions. True when added."""
+    try:
+        from app_standby import normalize_app_id
+    except ImportError:
+        def normalize_app_id(value: str) -> str:
+            text = str(value or '').strip()
+            if text.lower().endswith('.desktop'):
+                text = text[:-8]
+            return text.casefold()
+    try:
+        exempt = list(config.standby_exempt or [])
+    except Exception:
+        return False
+    wanted = normalize_app_id(app_id)
+    if any(normalize_app_id(entry) == wanted for entry in exempt):
+        return False
+    exempt.append(app_id)
+    try:
+        config.set_standby_exempt(exempt)
+    except Exception:
+        return False
+    return True
+
+
+def open_app_page(win, page: str, entry: AppEntry) -> bool:
+    """Open the existing per-app settings page for an info-popover button:
+    the permissions app detail (which also holds network access), the
+    standby section (adding the exemption first), or the screen-time
+    section with the app selected. Duck-typed so bare doubles record it."""
+    app_id = getattr(entry, 'app_id', '') or ''
+    if not app_id:
+        return False
+    try:
+        sections = win._settings_page
+        if page in ('permissions', 'network access'):
+            win.open_settings('permissions')
+            section = sections.section('permissions')
+            if section is not None:
+                section._open_app_view(win, app_id)
+        elif page == 'standby exemption':
+            add_standby_exempt(win.config, app_id)
+            win.open_settings('standby')
+            section = sections.section('standby')
+            if section is not None:
+                section._render_exempt(win)
+        elif page == 'screen-time limit':
+            win.open_settings('screentime')
+            section = sections.section('screentime')
+            if section is not None:
+                section._select(win, app_id)
+        else:
+            return False
+    except Exception:
+        return False
+    return True
+
+
 class AppItemActions:
     """Builds and shows item action popovers; mutations go through config."""
 
@@ -50,7 +108,9 @@ class AppItemActions:
                  focus_state: object | None = None,
                  on_popover_changed: Callable[[bool], None] | None = None,
                  on_keyboard: Callable[[bool], None] | None = None,
-                 real_name_fn: Callable[[str], str | None] | None = None) -> None:
+                 real_name_fn: Callable[[str], str | None] | None = None,
+                 on_launch: Callable[[], None] | None = None,
+                 on_open_page=None) -> None:
         self._config = config
         self._on_changed = on_changed
         self._on_status = on_status
@@ -58,6 +118,8 @@ class AppItemActions:
         self._on_popover_changed = on_popover_changed
         self._on_keyboard = on_keyboard
         self._real_name_fn = real_name_fn
+        self._on_launch = on_launch
+        self._on_open_page = on_open_page
 
     def _real_name(self, app_id: str) -> str | None:
         """The app's current desktop Name, for blank-rename resets."""
@@ -67,6 +129,32 @@ class AppItemActions:
             return self._real_name_fn(app_id)
         except Exception:
             return None
+
+    @staticmethod
+    def desktop_action_items(entry: AppEntry) -> list[tuple[str, str]]:
+        """(localized label, action id) for the row's Desktop Actions
+        (the Linux counterpart of Android's pinned shortcuts)."""
+        try:
+            actions = entry.desktop_app.list_actions() or ()
+        except Exception:
+            return []
+        items = []
+        for action in actions:
+            try:
+                name = entry.desktop_app.get_action_name(action)
+            except Exception:
+                name = None
+            items.append((name or str(action), str(action)))
+        return items
+
+    @staticmethod
+    def launch_desktop_action(entry: AppEntry, action_id: str) -> bool:
+        """Launch one Desktop Action; False when the backend refuses."""
+        try:
+            entry.desktop_app.launch_action(action_id, None)
+        except Exception:
+            return False
+        return True
 
     # -- popover plumbing --------------------------------------------------
 
@@ -217,11 +305,15 @@ class AppItemActions:
 
     # -- drawer app rows ---------------------------------------------------
 
-    def show_app_menu(self, anchor: Gtk.Widget, entry: AppEntry,
-                      hidden_view: bool = False) -> None:
+    def _build_app_menu_actions(
+            self, anchor: Gtk.Widget, entry: AppEntry,
+            hidden_view: bool = False) -> list[tuple[str, Callable[[], None]]]:
         config = self._config
         actions: list[tuple[str, Callable[[], None]]] = []
         actions.append(('App info', lambda: self._show_app_info(anchor, entry)))
+        for display, action_id in self.desktop_action_items(entry):
+            actions.append((display, lambda aid=action_id, lb=display:
+                            self._run_desktop_action(entry, aid, lb)))
         actions.append(('Rename', lambda: self._show_rename(anchor, entry)))
         actions.append(('Add to folder', lambda: self._show_add_to_folder(anchor, entry)))
         actions.append(('Add to Home', lambda: self._add_to_home(
@@ -247,8 +339,47 @@ class AppItemActions:
                                 lambda: self._show_pinned_reorder(anchor)))
         else:
             actions.append(('Pin', lambda: self._set_pinned(entry, True)))
-        display = config.label_for(entry.app_id, entry.name)
-        self._show_action_menu(anchor, display, actions)
+        import app_uninstall
+        if app_uninstall.plan_uninstall(entry)[0] != 'unsupported':
+            actions.append(('Uninstall',
+                            lambda: self._confirm_uninstall(anchor, entry)))
+        return actions
+
+    def show_app_menu(self, anchor: Gtk.Widget, entry: AppEntry,
+                      hidden_view: bool = False) -> None:
+        display = self._config.label_for(entry.app_id, entry.name)
+        self._show_action_menu(
+            anchor, display,
+            self._build_app_menu_actions(anchor, entry, hidden_view))
+
+    def info_page_items(self, entry: AppEntry) -> list[tuple[str, str]]:
+        """(button label, page key) for the App info popover: the existing
+        per-app pages and actions."""
+        items = [('Permissions', 'permissions'),
+                 ('Network access', 'network access'),
+                 ('Standby exemption', 'standby exemption'),
+                 ('Screen-time limit', 'screen-time limit')]
+        if self._focus is not None:
+            if self._focus.is_focus_app(entry.app_id):
+                items.append(('Focus: unpause this app', 'focus unpause'))
+            else:
+                items.append(('Focus: pause this app', 'focus pause'))
+        items.append(('Disable for…', 'disable'))
+        return items
+
+    def _open_info_page(self, anchor: Gtk.Widget, page: str,
+                        entry: AppEntry) -> None:
+        name = self._config.label_for(entry.app_id, entry.name)
+        if page == 'disable':
+            self._show_disable_for(anchor, entry.app_id, name)
+        elif page == 'focus pause':
+            self._set_focus_app(entry, True)
+        elif page == 'focus unpause':
+            self._set_focus_app(entry, False)
+        elif self._on_open_page is not None:
+            self._on_open_page(page, entry)
+        else:
+            self._on_status('No settings page is wired for %s.' % page)
 
     def _show_app_info(self, anchor: Gtk.Widget, entry: AppEntry) -> None:
         lines = [entry.name]
@@ -267,7 +398,74 @@ class AppItemActions:
             else:
                 self._cap_item_label(lbl)
             box.append(lbl)
+        for label, page in self.info_page_items(entry):
+            btn = Gtk.Button(label=label)
+            btn.add_css_class('xx-menu-row')
+            child = btn.get_child()
+            child.set_xalign(0)
+            self._cap_item_label(child)
+            btn.connect('clicked',
+                        lambda _b, p=page: self._open_info_page(anchor, p, entry))
+            box.append(btn)
         self._show_popover(anchor, box)
+
+    def _run_desktop_action(self, entry: AppEntry, action_id: str,
+                            display: str) -> None:
+        if self.launch_desktop_action(entry, action_id):
+            try:
+                self._config.record_launch(entry.app_id)
+            except Exception:
+                pass
+            if self._on_launch is not None:
+                self._on_launch()
+        else:
+            self._on_status('Could not open %s.' % display)
+
+    def _confirm_uninstall(self, anchor: Gtk.Widget, entry: AppEntry) -> None:
+        import app_uninstall
+        if app_uninstall.plan_uninstall(entry)[0] == 'unsupported':
+            return
+        name = self._config.label_for(entry.app_id, entry.name)
+        self._show_action_menu(
+            anchor, 'Uninstall %s?' % name,
+            [('Uninstall', lambda: self._run_uninstall(entry)),
+             ('Cancel', lambda: None)])
+
+    def _run_uninstall(self, entry: AppEntry) -> None:
+        import threading
+
+        import app_uninstall
+        from gi.repository import GLib
+        plan = app_uninstall.plan_uninstall(entry)
+        name = self._config.label_for(entry.app_id, entry.name)
+
+        def _done(ok: bool, message: str) -> None:
+            self._on_status(message)
+            if ok:
+                self._on_changed()
+
+        if plan[0] == 'flatpak':
+            _scope, ref = plan[1], plan[2]
+            self._on_status('Uninstalling %s…' % name)
+
+            def _work() -> None:
+                result: list = []
+
+                def _collect(ok: bool, message: str) -> None:
+                    result.append((ok, message))
+
+                app_uninstall.run_flatpak_uninstall(_scope, ref, _collect)
+                ok, message = result[0] if result else (False, 'Uninstall failed.')
+                GLib.idle_add(lambda: _done(ok, message) or False)
+
+            threading.Thread(target=_work, daemon=True).start()
+        elif plan[0] == 'packagekit':
+            self._on_status('Uninstalling %s…' % name)
+            remover = app_uninstall.PackageKitRemover(
+                on_done=lambda ok, message: _done(ok, message))
+            remover.start(plan[1])
+        else:
+            self._on_status('Uninstall is not supported for %s.' % name)
 
     def _show_rename(self, anchor: Gtk.Widget, entry: AppEntry) -> None:
         current = self._config.label_for(entry.app_id, entry.name)

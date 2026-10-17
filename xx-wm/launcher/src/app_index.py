@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 
 from gi.repository import Gio, GLib
 
 from app_standby import launch_with_pid
+
+
+# Separators dropped from both sides of the folded search comparison,
+# mirroring the Android launcher's SEARCH_SEPARATORS.
+_SEARCH_SEPARATORS = frozenset(('-', '_', '+', ',', '.', ' '))
+
+
+def fold_for_search(text: str) -> str:
+    """NFD-decompose, drop combining marks and separators, casefold.
+
+    Both the query and each candidate go through this, so `cafe` finds
+    Café and `eink` finds E-Ink."""
+    decomposed = unicodedata.normalize('NFD', text or '')
+    return ''.join(
+        char for char in decomposed
+        if not unicodedata.combining(char) and char not in _SEARCH_SEPARATORS
+    ).casefold()
 
 
 @dataclass(frozen=True)
@@ -159,8 +177,25 @@ class AppIndex:
         trimmed = query.strip().casefold()
         if not trimmed:
             return list(self.entries)
-        prefix_matches = [e for e in self.entries if e.name.casefold().startswith(trimmed)]
-        contains_matches = [e for e in self.entries if trimmed in e.search_text and e not in prefix_matches]
+        folded = fold_for_search(trimmed)
+        folded_names = {e.app_id: fold_for_search(e.name) for e in self.entries}
+        folded_texts = {e.app_id: fold_for_search(e.search_text)
+                        for e in self.entries}
+
+        def _is_prefix(entry: AppEntry) -> bool:
+            if entry.name.casefold().startswith(trimmed):
+                return True
+            return bool(folded) and folded_names[entry.app_id].startswith(folded)
+
+        def _is_contains(entry: AppEntry) -> bool:
+            if trimmed in entry.search_text:
+                return True
+            return bool(folded) and folded in folded_texts[entry.app_id]
+
+        prefix_matches = [e for e in self.entries if _is_prefix(e)]
+        in_prefix = {e.app_id for e in prefix_matches}
+        contains_matches = [e for e in self.entries
+                            if e.app_id not in in_prefix and _is_contains(e)]
         return prefix_matches + contains_matches
 
     def launch(self, entry: AppEntry, tracker: object = None) -> tuple[bool, str | None]:
