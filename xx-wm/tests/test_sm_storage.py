@@ -178,7 +178,7 @@ class FakeInvocation:
         self.error = (name, message)
 
 
-def _allow(conn, sender, action, callback):
+def _allow(conn, sender, action, interactive, callback):
     _allow.seen.append(action)
     callback(True, UID, None)
 
@@ -186,7 +186,7 @@ def _allow(conn, sender, action, callback):
 _allow.seen = []
 
 
-def _deny(conn, sender, action, callback):
+def _deny(conn, sender, action, interactive, callback):
     callback(False, UID, None)
 
 

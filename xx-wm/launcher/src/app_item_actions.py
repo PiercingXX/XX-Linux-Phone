@@ -132,7 +132,9 @@ class AppItemActions:
                  real_name_fn: Callable[[str], str | None] | None = None,
                  on_launch: Callable[[], None] | None = None,
                  on_open_page=None,
-                 on_muted: Callable[[str], None] | None = None) -> None:
+                 on_muted: Callable[[str], None] | None = None,
+                 on_uninstall: Callable[[object, AppEntry], None] | None = None,
+                 ) -> None:
         self._config = config
         self._on_changed = on_changed
         self._on_status = on_status
@@ -143,6 +145,7 @@ class AppItemActions:
         self._on_launch = on_launch
         self._on_open_page = on_open_page
         self._on_muted = on_muted
+        self._on_uninstall = on_uninstall
 
     def _real_name(self, app_id: str) -> str | None:
         """The app's current desktop Name, for blank-rename resets."""
@@ -369,10 +372,9 @@ class AppItemActions:
                                 lambda: self._show_pinned_reorder(anchor)))
         else:
             actions.append(('Pin', lambda: self._set_pinned(entry, True)))
-        import app_uninstall
-        if app_uninstall.plan_uninstall(entry)[0] != 'unsupported':
+        if self._on_uninstall is not None:
             actions.append(('Uninstall',
-                            lambda: self._confirm_uninstall(anchor, entry)))
+                            lambda: self._ask_uninstall(anchor, entry)))
         return actions
 
     def show_app_menu(self, anchor: Gtk.Widget, entry: AppEntry,
@@ -411,6 +413,10 @@ class AppItemActions:
             self._on_open_page(page, entry)
         else:
             self._on_status('No settings page is wired for %s.' % page)
+
+    def _ask_uninstall(self, anchor: Gtk.Widget, entry: AppEntry) -> None:
+        if callable(self._on_uninstall):
+            self._on_uninstall(anchor, entry)
 
     def _show_app_info(self, anchor: Gtk.Widget, entry: AppEntry) -> None:
         lines = [entry.name]
@@ -451,52 +457,6 @@ class AppItemActions:
                 self._on_launch()
         else:
             self._on_status('Could not open %s.' % display)
-
-    def _confirm_uninstall(self, anchor: Gtk.Widget, entry: AppEntry) -> None:
-        import app_uninstall
-        if app_uninstall.plan_uninstall(entry)[0] == 'unsupported':
-            return
-        name = self._config.label_for(entry.app_id, entry.name)
-        self._show_action_menu(
-            anchor, 'Uninstall %s?' % name,
-            [('Uninstall', lambda: self._run_uninstall(entry)),
-             ('Cancel', lambda: None)])
-
-    def _run_uninstall(self, entry: AppEntry) -> None:
-        import threading
-
-        import app_uninstall
-        from gi.repository import GLib
-        plan = app_uninstall.plan_uninstall(entry)
-        name = self._config.label_for(entry.app_id, entry.name)
-
-        def _done(ok: bool, message: str) -> None:
-            self._on_status(message)
-            if ok:
-                self._on_changed()
-
-        if plan[0] == 'flatpak':
-            _scope, ref = plan[1], plan[2]
-            self._on_status('Uninstalling %s…' % name)
-
-            def _work() -> None:
-                result: list = []
-
-                def _collect(ok: bool, message: str) -> None:
-                    result.append((ok, message))
-
-                app_uninstall.run_flatpak_uninstall(_scope, ref, _collect)
-                ok, message = result[0] if result else (False, 'Uninstall failed.')
-                GLib.idle_add(lambda: _done(ok, message) or False)
-
-            threading.Thread(target=_work, daemon=True).start()
-        elif plan[0] == 'packagekit':
-            self._on_status('Uninstalling %s…' % name)
-            remover = app_uninstall.PackageKitRemover(
-                on_done=lambda ok, message: _done(ok, message))
-            remover.start(plan[1])
-        else:
-            self._on_status('Uninstall is not supported for %s.' % name)
 
     def _show_rename(self, anchor: Gtk.Widget, entry: AppEntry) -> None:
         current = self._config.label_for(entry.app_id, entry.name)

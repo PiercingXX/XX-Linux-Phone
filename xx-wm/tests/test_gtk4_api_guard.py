@@ -27,9 +27,16 @@ def _gi_signal_names() -> set[str]:
     gi.require_version('Gtk', '4.0')
     gi.require_version('Adw', '1')
     from gi.repository import Adw, Gdk, Gio, GObject, Gtk
+    modules = [Gtk, Gdk, Adw, Gio]
+    try:
+        gi.require_version('PolkitAgent', '1.0')
+        from gi.repository import PolkitAgent
+        modules.append(PolkitAgent)
+    except (ImportError, ValueError):
+        pass
     names: set[str] = set()
     warnings.simplefilter('ignore')
-    for module in (Gtk, Gdk, Adw, Gio):
+    for module in modules:
         for attr in dir(module):
             obj = getattr(module, attr, None)
             gtype = getattr(obj, '__gtype__', None)

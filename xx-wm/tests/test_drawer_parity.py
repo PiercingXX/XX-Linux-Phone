@@ -2,7 +2,7 @@
 suppression, persisted drawer_sort, pinned browse, row markers, drawer
 close, desktop actions, app-info pages, uninstall planning.
 
-Pure helpers live in app_index/drawer_page/app_uninstall/app_item_actions
+Pure helpers live in app_index/drawer_page/app_item_actions
 so they run headless; _populate_apps/_on_stack_swipe/show_app_menu wiring
 is driven through bare doubles with stubbed row makers (no display).
 """
@@ -177,11 +177,6 @@ try:
     names = [label for label, _thunk in actions]
     check('New Window' in names, 'desktop action row, got %r' % (names,))
     check('Uninstall' in names, 'uninstall row, got %r' % (names,))
-    ghost = entry('ghost.desktop', 'Ghost')
-    ghost_names = [label for label, _thunk in
-                   win.item_actions._build_app_menu_actions(win.apps_list,
-                                                            ghost)]
-    check('Uninstall' not in ghost_names, 'unsupported hides uninstall')
     thunk = dict(actions)['New Window']
     thunk()
     check(calc.desktop_app.launched_actions == ['new-window'],
@@ -669,145 +664,3 @@ class TestAppInfoActions:
         assert ('perm-view', 'edit.desktop') in calls
         assert ('exempt', ['edit.desktop']) in calls
         assert ('select', 'edit.desktop') in calls
-
-
-class TestUninstall:
-    def test_flatpak_user_scope(self, tmp_path):
-        import app_uninstall
-        home = tmp_path / 'home'
-        path = (home / '.local' / 'share' / 'flatpak' / 'exports' /
-                'share' / 'applications' / 'org.foo.Bar.desktop')
-        path.parent.mkdir(parents=True)
-        path.write_text('[Desktop Entry]\n')
-        entry = _entry('org.foo.Bar.desktop', 'Bar',
-                       filename=str(path))
-        monkeypatch_home = home
-        plan = app_uninstall.plan_uninstall(
-            entry, home_dir=str(monkeypatch_home))
-        assert plan == ('flatpak', 'user', 'org.foo.Bar')
-
-    def test_flatpak_system_scope(self, tmp_path):
-        import app_uninstall
-        root = tmp_path / 'sys' / 'flatpak' / 'exports'
-        root.mkdir(parents=True)
-        path = root / 'org.foo.Bar.desktop'
-        path.write_text('[Desktop Entry]\n')
-        entry = _entry('org.foo.Bar.desktop', 'Bar',
-                       filename=str(path))
-        plan = app_uninstall.plan_uninstall(
-            entry, home_dir='/nonexistent-home',
-            system_flatpak_dirs=(str(tmp_path / 'sys' / 'flatpak'),))
-        assert plan == ('flatpak', 'system', 'org.foo.Bar')
-
-    def test_native_goes_to_packagekit(self, tmp_path):
-        import app_uninstall
-        path = tmp_path / 'app.desktop'
-        path.write_text('[Desktop Entry]\n')
-        entry = _entry('app.desktop', 'App', filename=str(path))
-        plan = app_uninstall.plan_uninstall(entry, home_dir='/nonexistent')
-        assert plan[0] == 'packagekit' and plan[1] == str(path)
-
-    def test_missing_file_is_unsupported(self):
-        import app_uninstall
-        entry = _entry('ghost.desktop', 'Ghost', filename='')
-        assert app_uninstall.plan_uninstall(entry) == ('unsupported',)
-
-    def test_flatpak_runs_without_touching_real_system(self, tmp_path):
-        import app_uninstall
-        calls = []
-        on_done = []
-        app_uninstall.run_flatpak_uninstall(
-            'user', 'org.foo.Bar',
-            on_done=lambda ok, msg: on_done.append((ok, msg)),
-            runner=lambda argv, **kw: calls.append(argv) or types.
-            SimpleNamespace(returncode=0, stderr=''))
-        assert calls == [['flatpak', 'uninstall', '-y', '--user',
-                          'org.foo.Bar']]
-        assert on_done == [(True, 'org.foo.Bar uninstalled.')]
-
-    def test_packagekit_sequence_with_fakes(self):
-        import app_uninstall
-
-        class Result:
-            def __init__(self, payload):
-                self._payload = payload
-
-            def unpack(self):
-                return self._payload
-
-        calls = []
-        handlers = {}
-
-        class FakeConn:
-            def call(self, bus, path, iface, method, params,
-                     _reply, _flags, _timeout, _cancel, callback):
-                calls.append((bus, path, iface, method,
-                              params.unpack() if params else None))
-                if method == 'CreateTransaction':
-                    callback(self, Result(('/txn/1',)))
-                elif method == 'SearchFiles':
-                    handlers['package'](
-                        self, 'sender', '/txn/1', 'iface', 'Package',
-                        Result((0, 'firefox;131.0;x86_64;fedora', 'Web')))
-                    handlers['finished'](
-                        self, 'sender', '/txn/1', 'iface', 'Finished',
-                        Result((0, 0)))
-                elif method == 'RemovePackages':
-                    handlers['remove-finished'](
-                        self, 'sender', '/txn/1', 'iface', 'Finished',
-                        Result((0, 0)))
-
-            def signal_subscribe(self, _sender, _iface, member, path,
-                                 _arg0, _flags, callback):
-                handlers['package' if member == 'Package'
-                         else 'finished' if path == '/txn/1' and
-                         member == 'Finished' and 'finished' not in handlers
-                         else 'remove-finished'] = callback
-                return 1
-
-        done = []
-        remover = app_uninstall.PackageKitRemover(
-            connect=lambda: FakeConn(),
-            on_done=lambda ok, msg: done.append((ok, msg)))
-        remover.start('/usr/share/applications/firefox.desktop')
-        methods = [call[3] for call in calls]
-        assert methods == ['CreateTransaction', 'SearchFiles',
-                           'RemovePackages']
-        remove = next(call for call in calls
-                      if call[3] == 'RemovePackages')
-        assert remove[4][1] == ['firefox;131.0;x86_64;fedora']
-        assert done and done[0][0] is True
-
-    def test_packagekit_no_match_reports_failure(self):
-        import app_uninstall
-
-        class Result:
-            def __init__(self, payload):
-                self._payload = payload
-
-            def unpack(self):
-                return self._payload
-
-        handlers = {}
-
-        class FakeConn:
-            def call(self, bus, path, iface, method, params,
-                     _reply, _flags, _timeout, _cancel, callback):
-                if method == 'CreateTransaction':
-                    callback(self, Result(('/txn/2',)))
-                elif method == 'SearchFiles':
-                    handlers['finished'](
-                        self, 'sender', '/txn/2', 'iface', 'Finished',
-                        Result((0, 0)))
-
-            def signal_subscribe(self, _sender, _iface, member, path,
-                                 _arg0, _flags, callback):
-                handlers['finished'] = callback
-                return 1
-
-        done = []
-        remover = app_uninstall.PackageKitRemover(
-            connect=lambda: FakeConn(),
-            on_done=lambda ok, msg: done.append((ok, msg)))
-        remover.start('/usr/share/applications/ghost.desktop')
-        assert done and done[0][0] is False

@@ -688,6 +688,7 @@ class ShellWindow(Adw.ApplicationWindow):
             on_launch=self.drop_to_background,
             on_open_page=self.open_app_page,
             on_muted=self._mute_app_notifications,
+            on_uninstall=self._on_drawer_uninstall,
         )
 
         # Flat search with the text after the icon, like xx_ui's search_bar
@@ -2470,6 +2471,13 @@ class ShellWindow(Adw.ApplicationWindow):
     def _make_app_row(self, entry: AppEntry) -> Gtk.ListBoxRow:
         return _drawer(self)._make_app_row(entry)
 
+    def _on_drawer_uninstall(self, anchor: Gtk.Widget,
+                             entry: AppEntry) -> None:
+        """Drawer long-press Uninstall: the single helper-path flow."""
+        import settings_apps
+
+        settings_apps.begin_uninstall(self, anchor, entry)
+
     def _launch_entry(self, entry: AppEntry) -> None:
         return _drawer(self)._launch_entry(entry)
 
@@ -2484,6 +2492,15 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _on_update_clicked(self, _btn: Gtk.Button | None = None) -> None:
         return _settings(self)._on_update_clicked(_btn)
+
+    def _on_update_now(self, _btn: Gtk.Button | None = None) -> None:
+        return _settings(self)._on_update_now(_btn)
+
+    def _on_dots_update(self, _btn: Gtk.Button | None = None) -> None:
+        return _settings(self)._on_dots_update(_btn)
+
+    def _refresh_apps_section(self) -> None:
+        return _settings(self)._refresh_apps_section()
 
     def _on_check_updates_clicked(self, _btn: Gtk.Button) -> None:
         return _settings(self)._on_check_updates_clicked(_btn)

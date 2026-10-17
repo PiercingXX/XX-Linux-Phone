@@ -5,7 +5,7 @@ from gesture_config import IPC_VERBS, VALID_ACTIONS
 
 # Settings sections a quick-tile long-press can deep-link to (quick_actions
 # tile_settings_section emits these); anything else opens the top of the page.
-_SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'appearance',
+_SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'apps', 'appearance',
                           'display', 'keyboard', 'lock', 'launcher',
                           'standby', 'permissions', 'smart_lock',
                           'charging', 'batteryuse', 'screentime', 'medical',
@@ -43,6 +43,7 @@ _VERB_LABELS = {
 }
 
 _UPDATE_NOTIF_ID = 999901
+_UPDATE_RESULT_ID = 999902
 
 
 def _link_button(label_text: str, css: str):
@@ -164,6 +165,12 @@ class SystemSection(_Section):
     key = 'system'
     title = 'System'
 
+    def __init__(self) -> None:
+        self._status = None
+        self._reboot = None
+        self._log = None
+        self._body = None
+
     def build(self, win) -> list:
         from gi.repository import Gtk
         from xx_ui import widgets
@@ -174,9 +181,49 @@ class SystemSection(_Section):
             widgets.caps_button(
                 'Check', lambda: win._on_check_updates_clicked(None)),
             last=True))
+        self._status = _section_placeholder('Not checked yet.')
+        body.append(self._status)
+        self._reboot = _section_placeholder('')
+        body.append(self._reboot)
+        self._log = _section_placeholder('')
+        body.append(self._log)
+        body.append(widgets.primary_button(
+            'Update now', lambda btn: win._on_update_now(btn)))
         body.append(widgets.outline_button(
-            'Update system', lambda: win._on_update_clicked(None)))
+            'Open in terminal', lambda btn: win._on_update_clicked(btn)))
+        try:
+            import settings_updates
+
+            if settings_updates.dots_bootstrap_available():
+                body.append(widgets.outline_button(
+                    'Update PiercingXX scripts',
+                    lambda btn: win._on_dots_update(btn)))
+        except Exception:
+            pass
+        self._body = body
+        self.refresh(win)
         return [_section_title(self.title), body]
+
+    def refresh(self, win) -> None:
+        try:
+            import settings_updates
+
+            reason = settings_updates.reboot_required()
+            if self._reboot is not None:
+                self._reboot.set_text(
+                    'Restart to finish update: %s' % reason if reason else '')
+                self._reboot.set_visible(bool(reason))
+            if self._log is not None:
+                found = settings_updates.latest_update_log()
+                if found is None:
+                    self._log.set_text('')
+                    self._log.set_visible(False)
+                else:
+                    name, tail = found
+                    self._log.set_text('Last update log (%s):\n%s' % (name, tail))
+                    self._log.set_visible(True)
+        except Exception:
+            pass
 
 
 class WifiSection(_Section):
@@ -834,6 +881,7 @@ class GesturesSection(_Section):
 # modules (plain module imports, not from-imports: those modules read
 # settings_page attributes at call time, so either import order works
 # and the no-circular-imports test stays green).
+import settings_apps
 import settings_battery_use
 import settings_charging
 import settings_display
@@ -862,6 +910,7 @@ SETTINGS_SECTIONS: list[tuple[str, type[_Section]]] = [
     ('security', settings_security.SecuritySection),
     ('lock', settings_lock.LockSection),
     ('mobile', MobileSection),
+    ('apps', settings_apps.AppsSection),
     ('appearance', AppearanceSection),
     ('display', settings_display.DisplaySection),
     ('keyboard', settings_keyboard.KeyboardSection),
@@ -1263,8 +1312,9 @@ class SettingsPage:
         import system_settings
         win._run_bg(system_settings.list_audio_sinks, win._show_sinks)
         win._run_bg(system_settings.list_bt_devices, win._show_bt_devices)
-        for key in ('battery', 'about', 'display', 'launcher', 'standby',
-                    'permissions', 'smart_lock', 'recording'):
+        for key in ('system', 'apps', 'battery', 'about', 'display',
+                    'launcher', 'standby', 'permissions', 'smart_lock',
+                    'recording'):
             section = self._sections.get(key)
             if section is not None:
                 try:
@@ -1486,29 +1536,100 @@ class SettingsPage:
 
         win._run_bg(_work, lambda _result: None)
 
+    def _update_status_text(self, text: str) -> None:
+        win = self._win
+        try:
+            section = self._sections.get('system')
+            if section is not None and section._status is not None:
+                section._status.set_text(text)
+        except Exception:
+            pass
+        win._show_status(text)
+
     def _on_update_clicked(self, _btn=None) -> None:
+        """Terminal update path: the configured update script, or the
+        native in-shell flow when the script is missing."""
         from update_checker import run_update_script
 
         win = self._win
-        ok, detail = run_update_script(win.config.update_script)
+        script = win.config.update_script
+        from pathlib import Path as _Path
+
+        if not _Path(script).expanduser().exists():
+            import system_settings
+
+            if system_settings.detect_backend() == 'apk':
+                win._show_status('Update script not found — using in-shell update.')
+                win._on_update_now(_btn)
+                return
+            win._show_status('Update script not found: %s' % script)
+            return
+        ok, detail = run_update_script(script)
         if ok:
             win._show_status('Update running in terminal.')
         else:
             win._show_status(detail)
 
     def _on_check_updates_clicked(self, _btn) -> None:
-        win = self._win
-        win._show_status('Checking for updates...')
-        win._update_checker.check_now(win._on_manual_check_result)
+        """Manual check: refresh the index first (helper, harmless),
+        then count repo plus Flatpak updates on a worker."""
+        import helper_client
 
-    def _on_manual_check_result(self, count: int | None) -> None:
+        self._update_status_text('Checking for updates…')
+        helper_client.refresh_package_index(
+            lambda ok, err: self._on_index_refreshed(ok, err))
+
+    def _on_index_refreshed(self, ok: bool, err) -> None:
+        refresh_err = None if ok else str(err or 'index refresh failed')
+
+        def _work():
+            import system_settings
+            import update_checker
+
+            try:
+                repo = update_checker.count_updates()
+            except Exception:
+                repo = None
+            try:
+                flatpak = system_settings.flatpak_updates_available()
+            except Exception:
+                flatpak = None
+            return repo, flatpak
+
+        _run_bg(_work, lambda result: self._on_counted(result, refresh_err))
+
+    def _on_counted(self, result, refresh_err=None) -> None:
+        import settings_updates
+
+        win = self._win
+        try:
+            repo, flatpak = result
+        except Exception:
+            repo, flatpak = None, None
+        text = settings_updates.format_count(repo, flatpak)
+        if refresh_err is not None and (repo is None and flatpak is None):
+            text = 'Index refresh failed: %s' % refresh_err
+        total = (repo or 0) + (flatpak or 0)
+        if repo is None and flatpak is None:
+            self._update_status_text(text)
+        elif total > 0:
+            self._update_status_text(text)
+            win._on_updates_available(total)
+        else:
+            self._update_status_text(text)
+
+    def _on_manual_check_result(self, count: int | None, flatpak=None,
+                                refresh_err=None) -> None:
+        """Scheduled/snoozed check result (UpdateChecker calls with one
+        arg); the manual Check button reports through _on_counted."""
         win = self._win
         if count is None:
-            win._show_status('Update status unknown — package index is stale.')
+            self._update_status_text(
+                'Update status unknown — package index is stale.')
         elif count > 0:
             win._on_updates_available(count)
         else:
-            win._show_status('System is up to date.')
+            self._update_status_text('System is up to date.')
 
     def _on_updates_available(self, count: int) -> None:
         win = self._win
@@ -1519,11 +1640,149 @@ class SettingsPage:
             'Updates available',
             f'{count} package{plural} can be updated.',
             actions=[
-                ('Update now', win._on_update_clicked),
+                ('Update now', win._on_update_now),
                 ('Snooze 1 week', win._snooze_updates),
             ],
         )
-        win._show_status(f'{count} update{plural} available — see notifications.')
+        self._update_status_text(
+            f'{count} update{plural} available — see notifications.')
+
+    def _on_update_now(self, anchor=None) -> None:
+        """'Update now': confirm first, then the native path on apk
+        (in-shell upgrade + Flatpak), the terminal script on pacman."""
+        import system_settings
+
+        win = self._win
+        backend = system_settings.detect_backend()
+        if backend == 'apk':
+            self._confirm_native_update(anchor)
+        elif backend == 'pacman':
+            self._confirm_terminal_update(anchor)
+        else:
+            win._on_update_clicked(anchor)
+
+    def _confirm_native_update(self, anchor) -> None:
+        win = self._win
+        if anchor is None:
+            self._update_status_text(
+                'Tap Update now to install system updates.')
+            return
+        try:
+            actions = win.item_actions
+        except Exception:
+            self._update_status_text('Cannot confirm here.')
+            return
+        actions._show_action_menu(
+            anchor, 'Install system updates now? Requires power.',
+            [('Install updates', lambda: self._execute_native_update()),
+             ('Cancel', lambda: None)])
+
+    def _confirm_terminal_update(self, anchor) -> None:
+        win = self._win
+        if anchor is None:
+            win._on_update_clicked(None)
+            return
+        try:
+            actions = win.item_actions
+        except Exception:
+            win._on_update_clicked(None)
+            return
+        actions._show_action_menu(
+            anchor, 'Open the system update in a terminal?',
+            [('Open terminal', lambda: win._on_update_clicked(None)),
+             ('Cancel', lambda: None)])
+
+    def _execute_native_update(self) -> None:
+        import system_settings
+
+        ok, reason = system_settings.power_for_update()
+        if not ok:
+            self._update_status_text(
+                'Update cancelled: %s' % reason)
+            return
+        self._update_status_text(
+            'Updating system packages… (%s)' % reason)
+        import helper_client
+
+        helper_client.upgrade_system(
+            lambda ok, output: self._on_apk_upgraded(ok, output))
+
+    def _on_apk_upgraded(self, ok: bool, output) -> None:
+        import settings_updates
+        import system_settings
+
+        log_path = settings_updates.new_log_path()
+        settings_updates.append_log(
+            log_path, '== apk upgrade ==\n%s\n' % (output or ''))
+        if not ok:
+            self._update_status_text(
+                'System update failed: %s' % (output or 'unknown error'))
+            self._refresh_updates_section()
+            return
+        self._update_status_text('System packages done — updating Flatpaks…')
+
+        def _work():
+            return system_settings.flatpak_update_all()
+
+        _run_bg(_work, lambda result: self._on_flatpak_updated(
+            result, log_path))
+
+    def _on_flatpak_updated(self, result, log_path: str) -> None:
+        import settings_updates
+
+        win = self._win
+        ok, output = result if result else (False, 'Flatpak update failed.')
+        settings_updates.append_log(
+            log_path, '== flatpak update ==\n%s\n' % (output or ''))
+        reason = settings_updates.reboot_required()
+        if ok:
+            body = 'System and Flatpak updates finished.'
+            if reason:
+                body += ' %s' % reason
+            body += ' Log: %s' % log_path
+            try:
+                win._ensure_shade().add_notification(
+                    _UPDATE_RESULT_ID, 'System', 'System update finished',
+                    body)
+            except Exception:
+                pass
+            self._update_status_text('System update finished.')
+        else:
+            self._update_status_text('Flatpak update failed: %s' % output)
+        self._refresh_updates_section()
+
+    def _refresh_updates_section(self) -> None:
+        try:
+            section = self._sections.get('system')
+            if section is not None:
+                section.refresh(self._win)
+        except Exception:
+            pass
+
+    def _refresh_apps_section(self) -> None:
+        try:
+            section = self._sections.get('apps')
+            if section is not None:
+                section.refresh(self._win)
+        except Exception:
+            pass
+
+    def _on_dots_update(self, _btn=None) -> None:
+        """Run scripts/bootstrap-dots.sh in a terminal (the row only
+        shows when the phone profile exists, so this path is live)."""
+        import settings_updates
+        from update_checker import run_update_script
+
+        win = self._win
+        script = settings_updates.bootstrap_script()
+        if script is None:
+            win._show_status('Bootstrap script not found on this device.')
+            return
+        ok, detail = run_update_script(script)
+        if ok:
+            win._show_status('PiercingXX update running in terminal.')
+        else:
+            win._show_status(detail)
 
     def _snooze_updates(self) -> None:
         win = self._win

@@ -72,6 +72,7 @@ class XXWMApplication(Adw.Application):
         self._shell.present()
         _log.info('shell window presented')
         self._replay_pending_ipc()
+        self._start_polkit_agent()
         self._start_xxdb()
 
         # App standby (Doze parity): track shell-launched apps in systemd
@@ -172,6 +173,20 @@ class XXWMApplication(Adw.Application):
         self._pending_ipc = []
         for command in pending:
             self._on_ipc_command(command)
+
+    def _start_polkit_agent(self) -> None:
+        """Register the in-shell polkit authentication agent for the
+        session, so helper auth_admin_keep actions (and NetworkManager /
+        Flatpak system prompts) can ask for the device password. A
+        missing authority degrades to no agent; the shell itself is
+        never affected."""
+        self._polkit_agent = None
+        try:
+            import polkit_agent
+            self._polkit_agent = polkit_agent.start_agent()
+        except Exception as exc:
+            _log.warning('polkit agent unavailable: %s', exc)
+            self._polkit_agent = None
 
     def _wire_usage_lock(self) -> None:
         """Feed shell lock transitions to the usage tracker."""

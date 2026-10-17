@@ -203,3 +203,38 @@ def read_log(name: str, on_done: ResultCallback) -> None:
         return
     _call_helper('ReadLog', params, lambda ok, result: on_done(
         ok, str(result or '') if ok else result))
+
+
+def refresh_package_index(on_done: ResultCallback) -> None:
+    """Refresh the apk package index (harmless, ``allow_active=yes``).
+
+    ``on_done(True, None)`` on success, ``(False, error)`` otherwise.
+    """
+    _call_helper('RefreshPackageIndex', None,
+                 lambda ok, _result: on_done(ok, None if ok else _result))
+
+
+def upgrade_system(on_done: ResultCallback) -> None:
+    """Run ``apk upgrade`` through the helper (``auth_admin_keep``: the
+    in-shell polkit agent prompts for the device password).
+
+    ``on_done(True, output)`` with the upgrade output tail for the
+    shell's update log, ``(False, error)`` otherwise.
+    """
+    _call_helper('UpgradeSystem', None, on_done)
+
+
+def remove_package(pkg: str, on_done: ResultCallback) -> None:
+    """Remove one distro package (``auth_admin_keep``: the in-shell
+    polkit agent prompts; the helper refuses the protected list).
+
+    ``on_done(True, None)`` on success, ``(False, error)`` otherwise.
+    """
+    try:
+        _Gio, GLib = _gio()
+        params = GLib.Variant('(s)', (str(pkg),))
+    except ImportError as err:
+        on_done(False, 'D-Bus unavailable: %s' % err)
+        return
+    _call_helper('RemovePackage', params,
+                 lambda ok, _result: on_done(ok, None if ok else _result))

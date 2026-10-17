@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -575,3 +576,240 @@ def connect_bt_device(address: str) -> tuple[bool, str]:
         return True, 'Connected'
     except Exception as error:
         return False, getattr(error, 'message', None) or str(error)
+
+
+# ------------------------------------------------- software updates (sm_auth)
+#
+# Distro package and Flatpak backends for the Settings System section.
+# Every command routes through the module `_run` chokepoint and runs on
+# settings-page worker threads, never the GTK loop. Helpers take an
+# injectable `run` so tests never execute the real package managers.
+
+def detect_backend(which=None) -> str | None:
+    """'apk' (postmarketOS) first, then 'pacman' (Arch), then 'apt'
+    where trivial; None when no supported manager is installed."""
+    which_fn = which or shutil.which
+    for binary in ('apk', 'pacman', 'apt'):
+        if which_fn(binary):
+            return binary
+    return None
+
+
+def power_for_update(sysfs: str = '/sys') -> tuple[bool, str]:
+    """Update power guard: AC mains online, a Charging/Full battery, or
+    at least 30% charge. Reads sysfs directly (no D-Bus round trip).
+
+    Returns (ok, reason): a device with no readable battery is on mains
+    power by definition, so unknown allows with a note instead of
+    stranding desktop and VM installs behind a sensor they lack.
+    """
+    base = os.path.join(sysfs, 'class', 'power_supply')
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return True, 'No battery detected.'
+    if not names:
+        return True, 'No battery detected.'
+    for name in names:
+        try:
+            with open(os.path.join(base, name, 'type'),
+                      encoding='utf-8') as handle:
+                kind = handle.read().strip()
+        except OSError:
+            continue
+        if kind != 'Mains':
+            continue
+        try:
+            with open(os.path.join(base, name, 'online'),
+                      encoding='utf-8') as handle:
+                if handle.read().strip() == '1':
+                    return True, 'AC power connected.'
+        except OSError:
+            continue
+    best = -1
+    status = ''
+    for name in names:
+        try:
+            with open(os.path.join(base, name, 'type'),
+                      encoding='utf-8') as handle:
+                if handle.read().strip() != 'Battery':
+                    continue
+            with open(os.path.join(base, name, 'capacity'),
+                      encoding='utf-8') as handle:
+                pct = int(handle.read().strip())
+            try:
+                with open(os.path.join(base, name, 'status'),
+                          encoding='utf-8') as handle:
+                    status = handle.read().strip()
+            except OSError:
+                status = ''
+        except (OSError, ValueError):
+            continue
+        best = max(best, pct)
+        if status in ('Charging', 'Full'):
+            return True, 'Battery %s (%d%%).' % (status.lower(), pct)
+    if best < 0:
+        return True, 'No battery detected.'
+    if best >= 30:
+        return True, 'Battery at %d%%.' % best
+    return False, 'Battery at %d%% — connect AC power or charge to 30%%.' % best
+
+
+def parse_flatpak_updates(output: str) -> int:
+    """Count `flatpak remote-ls --updates` lines (one ref per line)."""
+    return sum(1 for line in (output or '').splitlines() if line.strip())
+
+
+def flatpak_updates_available(run: _RunFn = _run) -> int | None:
+    """Unprivileged Flatpak update count; None when Flatpak is missing
+    or the listing failed."""
+    try:
+        result = run(['flatpak', 'remote-ls', '--updates'], timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_flatpak_updates(result.stdout)
+
+
+def flatpak_update_all(run: _RunFn = _run) -> tuple[bool, str]:
+    """`flatpak update -y` for user installs, then system ones (system
+    auth goes through Flatpak's own polkit prompt, served by the
+    in-shell agent). Returns (ok, combined output tail)."""
+    outputs = []
+    for scope in ('--user', '--system'):
+        try:
+            result = run(['flatpak', 'update', scope, '-y',
+                          '--noninteractive'], timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return False, 'Flatpak update (%s) failed: %s' % (scope, error)
+        outputs.append(result.stdout or '')
+        if result.returncode != 0:
+            detail = ((result.stderr or result.stdout or '').strip()
+                      .splitlines())
+            return False, 'Flatpak update (%s) failed: %s' % (
+                scope, detail[-1] if detail else 'exit %d' % result.returncode)
+    return True, ''.join(outputs)[-4000:]
+
+
+def parse_apk_who_owns(output: str) -> tuple[str | None, str]:
+    """Owner package from `apk info --who-owns <path>` output: the path
+    `is owned by <pkg>-<version>`, with the version suffix stripped.
+    (None, 'apk') when nothing owns the path."""
+    import re
+    match = re.search(r'is owned by (\S+)\s*$', output or '',
+                      re.MULTILINE)
+    if not match:
+        return None, 'apk'
+    owned = match.group(1)
+    versioned = re.match(r'^(.*)-[0-9][^-]*-r[0-9]+$', owned)
+    return (versioned.group(1) if versioned else owned), 'apk'
+
+
+def resolve_apk_owner(desktop_path: str,
+                      run: _RunFn = _run) -> tuple[str | None, str]:
+    """(owner, 'apk') for a .desktop path; unowned paths give (None)."""
+    try:
+        result = run(['apk', 'info', '--who-owns', desktop_path], timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None, 'apk'
+    if result.returncode != 0:
+        return None, 'apk'
+    return parse_apk_who_owns(result.stdout)
+
+
+def resolve_pacman_owner(desktop_path: str,
+                         run: _RunFn = _run) -> tuple[str | None, str]:
+    """(owner, 'pacman') via `pacman -Qqo`; unowned paths give (None)."""
+    try:
+        result = run(['pacman', '-Qqo', desktop_path], timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None, 'pacman'
+    if result.returncode != 0:
+        return None, 'pacman'
+    name = (result.stdout or '').strip().splitlines()
+    if not name or not name[0].strip():
+        return None, 'pacman'
+    return name[0].strip(), 'pacman'
+
+
+def resolve_dpkg_owner(desktop_path: str,
+                       run: _RunFn = _run) -> tuple[str | None, str]:
+    """(owner, 'apt') via `dpkg -S`; unowned paths give (None)."""
+    try:
+        result = run(['dpkg', '-S', desktop_path], timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None, 'apt'
+    if result.returncode != 0:
+        return None, 'apt'
+    for line in (result.stdout or '').splitlines():
+        if not line.strip():
+            continue
+        name = line.split(':')[0].split(',')[0].strip()
+        if name:
+            return name, 'apt'
+    return None, 'apt'
+
+
+def parse_flatpak_app_id(desktop_text: str) -> str | None:
+    """The `X-Flatpak` app id from a .desktop file, if it has one."""
+    for line in (desktop_text or '').splitlines():
+        if line.startswith('X-Flatpak='):
+            app_id = line.split('=', 1)[1].strip()
+            if app_id:
+                return app_id
+    return None
+
+
+def removal_preview(pkg: str, backend: str,
+                    run: _RunFn = _run) -> str:
+    """What the manager would remove: `apk del -s` / `pacman -Rns
+    --print`, shown verbatim in the confirm dialog."""
+    argv = (['apk', 'del', '-s', pkg] if backend == 'apk'
+            else ['pacman', '-Rns', '--print', pkg])
+    try:
+        result = run(argv, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return 'Preview unavailable: %s' % (error,)
+    output = ((result.stdout or '') + (result.stderr or '')).strip()
+    if not output:
+        return 'No preview output.'
+    lines = output.splitlines()
+    if len(lines) > 25:
+        lines = lines[:25] + ['… (%d more lines)' % (len(lines) - 25)]
+    return '\n'.join(lines)
+
+
+def flatpak_installation(app_id: str, run: _RunFn = _run) -> str | None:
+    """'user' when the app is a user install, 'system' when system,
+    else None. User installs need no root to remove."""
+    for scope in ('--user', '--system'):
+        try:
+            result = run(['flatpak', 'list', '--app', scope,
+                          '--columns=application'], timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            continue
+        if any(line.strip() == app_id
+               for line in (result.stdout or '').splitlines()):
+            return scope[2:]
+    return None
+
+
+def flatpak_uninstall(app_id: str, installation: str,
+                      run: _RunFn = _run) -> tuple[bool, str]:
+    """`flatpak uninstall` for one app id; system installs auth through
+    Flatpak's own polkit prompt. Returns (ok, message)."""
+    if installation not in ('user', 'system'):
+        return False, 'Unknown Flatpak installation.'
+    try:
+        result = run(['flatpak', 'uninstall', '--%s' % installation,
+                      '-y', app_id], timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return False, 'Flatpak uninstall failed: %s' % (error,)
+    if result.returncode != 0:
+        detail = ((result.stderr or result.stdout or '').strip()
+                  .splitlines())
+        return False, detail[-1] if detail else 'Flatpak uninstall failed.'
+    return True, 'Uninstalled %s.' % (app_id,)

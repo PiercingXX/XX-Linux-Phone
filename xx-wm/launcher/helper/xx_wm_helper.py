@@ -34,6 +34,66 @@ ACTION_NETWORK = BUS_NAME + '.app-network'
 ACTION_FREEZE = BUS_NAME + '.freeze'
 ACTION_CLEAN = BUS_NAME + '.clean-system'
 ACTION_READLOG = BUS_NAME + '.read-log'
+ACTION_REFRESH = BUS_NAME + '.refresh-packages'
+ACTION_UPGRADE = BUS_NAME + '.upgrade-system'
+ACTION_REMOVE = BUS_NAME + '.remove-package'
+
+# Destructive actions pass AllowUserInteraction (flag 1) so the in-shell
+# polkit agent can prompt; harmless probes stay non-interactive (flag 0).
+ALLOW_INTERACTION = 0x1
+
+# Packages the RemovePackage method always refuses. Exact names plus the
+# linux* / postmarketos-base* kernel families: removing any of these can
+# leave the phone unbootable or without privilege escalation, the shell
+# or its stack. Mirrored for UX pre-checks by settings_apps; a test pins
+# the two implementations to the same verdicts.
+PROTECTED_EXACT = frozenset({
+    'base', 'alpine-base', 'musl', 'openrc', 'systemd', 'apk-tools',
+    'pacman', 'doas', 'sudo',
+    'xx-wm', 'gtk4', 'python3', 'phoc', 'squeekboard', 'networkmanager',
+    'modemmanager',
+})
+PROTECTED_PREFIXES = ('linux', 'postmarketos-base')
+
+# apk/pacman package names: lowercase alnum plus . + - _ (leading alnum).
+# Anything else (spaces, slashes, shell metacharacters, NUL) is rejected
+# before any backend runs, so the argv list can never escape the package
+# slot. 128 chars bounds absurd input without touching real names.
+_PKG_RE = None
+
+
+def _pkg_re():
+    global _PKG_RE
+    if _PKG_RE is None:
+        import re
+        _PKG_RE = re.compile(r'[a-z0-9][a-z0-9.+_-]{0,127}')
+    return _PKG_RE
+
+
+def is_protected_package(name: str) -> bool:
+    """True when ``name`` must never be removed through the helper."""
+    lowered = str(name or '').lower()
+    if lowered in PROTECTED_EXACT:
+        return True
+    return any(lowered.startswith(prefix)
+               for prefix in PROTECTED_PREFIXES)
+
+
+def validate_package_name(pkg: object) -> str:
+    """Return ``pkg`` when it is a safe single package name.
+
+    Raises InvalidArgs for anything malformed and NotAuthorized for the
+    protected list (from the caller's perspective it is simply not
+    permitted).
+    """
+    if not isinstance(pkg, str):
+        raise HelperError(ERROR_INVALID_ARGS, 'package name is not text')
+    if _pkg_re().fullmatch(pkg) is None:
+        raise HelperError(ERROR_INVALID_ARGS,
+                          'invalid package name: %r' % (pkg,))
+    if is_protected_package(pkg):
+        raise _denied('protected package: %s' % (pkg,))
+    return pkg
 
 POLKIT_BUS = 'org.freedesktop.PolicyKit1'
 POLKIT_PATH = '/org/freedesktop/PolicyKit1/Authority'
@@ -82,6 +142,14 @@ INTROSPECT_XML = """\
     <method name="ReadLog">
       <arg name="name" type="s" direction="in"/>
       <arg name="text" type="s" direction="out"/>
+    </method>
+    <method name="RefreshPackageIndex">
+    </method>
+    <method name="UpgradeSystem">
+      <arg name="output" type="s" direction="out"/>
+    </method>
+    <method name="RemovePackage">
+      <arg name="pkg" type="s" direction="in"/>
     </method>
   </interface>
 </node>
@@ -466,6 +534,77 @@ class HelperCore:
                          '1\n' if frozen else '0\n')
         return bool(frozen)
 
+    # ------------------------------------------------- software maintenance
+
+    def _backend(self, which=None) -> str | None:
+        """'apk' when present, else 'pacman', else None. ``which`` is
+        injectable so tests never probe the real machine."""
+        which_fn = which or shutil.which
+        if which_fn('apk'):
+            return 'apk'
+        if which_fn('pacman'):
+            return 'pacman'
+        return None
+
+    def refresh_package_index(self, which=None) -> None:
+        """Refresh the apk index (``apk update``): harmless and
+        non-destructive, so its policy stays ``allow_active=yes``.
+
+        Never ``pacman -Sy``: a partial pacman sync breaks the system on
+        Arch, so Arch counts come from ``checkupdates`` (own temp db) and
+        upgrades run in a terminal instead."""
+        which_fn = which or shutil.which
+        if not which_fn('apk'):
+            raise _failed('apk not available on this system')
+        try:
+            proc = self._run(['apk', 'update'])
+        except OSError as err:
+            raise _failed('apk update failed to start: %s' % err) from None
+        if proc.returncode != 0:
+            raise _failed('apk update: %s' % (
+                (getattr(proc, 'stderr', '') or '').strip()
+                or 'exit %d' % proc.returncode))
+
+    def upgrade_system(self, which=None) -> str:
+        """Run ``apk upgrade`` and return the combined output tail for the
+        shell's update log. Interactive ``auth_admin_keep``: the agent
+        prompts for the device password."""
+        if (which or shutil.which)('apk') is None:
+            raise _failed('apk not available on this system')
+        try:
+            proc = self._run(['apk', 'upgrade'])
+        except OSError as err:
+            raise _failed('apk upgrade failed to start: %s' % err) from None
+        output = ((getattr(proc, 'stdout', '') or '')
+                  + (getattr(proc, 'stderr', '') or ''))
+        if proc.returncode != 0:
+            raise _failed('apk upgrade: %s' % (
+                output.strip()[-2000:] or 'exit %d' % proc.returncode))
+        return output[-4000:]
+
+    def remove_package(self, pkg: str, which=None) -> str:
+        """Remove one validated, non-protected distro package.
+
+        ``auth_admin_keep`` with interaction: the agent prompts for the
+        device password. Returns the backend used ('apk' or 'pacman').
+        """
+        name = validate_package_name(pkg)
+        backend = self._backend(which)
+        if backend is None:
+            raise _failed('no supported package manager on this system')
+        argv = (['apk', 'del', name] if backend == 'apk'
+                else ['pacman', '-Rns', '--noconfirm', name])
+        try:
+            proc = self._run(argv)
+        except OSError as err:
+            raise _failed('%s failed to start: %s' % (argv[0], err)) from None
+        if proc.returncode != 0:
+            raise _failed('%s %s: %s' % (
+                argv[0], name,
+                ((getattr(proc, 'stderr', '') or '').strip()
+                 or 'exit %d' % proc.returncode)))
+        return backend
+
     # ----------------------------------------------------------------- state
 
     def load_state(self) -> dict:
@@ -555,11 +694,15 @@ def get_connection_uid(connection, sender, callback) -> None:
     )
 
 
-def check_polkit_authorization(connection, sender, action, callback) -> None:
+def check_polkit_authorization(connection, sender, action, callback,
+                                interactive: bool = False) -> None:
     """Async polkit check with subject ``system-bus-name`` = sender.
 
     ``callback(authorized, uid, error)`` fires exactly once: ``uid`` is
     the sender's Unix uid for slice scoping, ``error`` a detail string.
+    ``interactive`` passes AllowUserInteraction so the session's agent
+    prompts for the device password; it is True only for actions whose
+    policy is ``auth_admin_keep`` (upgrade, removal).
     """
     Gio, GLib = _require_gio()
 
@@ -587,7 +730,7 @@ def check_polkit_authorization(connection, sender, action, callback) -> None:
         params = GLib.Variant(
             '((sa{sv})sa{ss}u)',
             (('system-bus-name', {'name': GLib.Variant('s', sender)}),
-             action, {}, 0),
+             action, {}, ALLOW_INTERACTION if interactive else 0),
         )
         try:
             connection.call(
@@ -601,12 +744,17 @@ def check_polkit_authorization(connection, sender, action, callback) -> None:
     get_connection_uid(connection, sender, _on_uid)
 
 
+# Method -> (polkit action, interactive): interactive passes
+# AllowUserInteraction and is reserved for auth_admin_keep actions.
 _METHOD_ACTIONS = {
-    'SetChargeLimit': ACTION_CHARGE,
-    'SetAppNetwork': ACTION_NETWORK,
-    'FreezeCgroup': ACTION_FREEZE,
-    'CleanSystem': ACTION_CLEAN,
-    'ReadLog': ACTION_READLOG,
+    'SetChargeLimit': (ACTION_CHARGE, False),
+    'SetAppNetwork': (ACTION_NETWORK, False),
+    'FreezeCgroup': (ACTION_FREEZE, False),
+    'RefreshPackageIndex': (ACTION_REFRESH, False),
+    'UpgradeSystem': (ACTION_UPGRADE, True),
+    'RemovePackage': (ACTION_REMOVE, True),
+    'CleanSystem': (ACTION_CLEAN, False),
+    'ReadLog': (ACTION_READLOG, False),
 }
 
 
@@ -664,15 +812,16 @@ class HelperService:
                        for key, value in caps.items()}
             invocation.return_value(GLib.Variant('(a{sv})', (payload,)))
             return
-        action = _METHOD_ACTIONS.get(method)
-        if action is None or conn is None:
+        entry = _METHOD_ACTIONS.get(method)
+        if entry is None or conn is None:
             invocation.return_dbus_error(
                 ERROR_INVALID_ARGS, 'unknown method: %s' % (method,))
             return
+        action, interactive = entry
         args = params.unpack() if params is not None else ()
         try:
             self._authorize(
-                conn, sender, action,
+                conn, sender, action, interactive,
                 lambda ok, uid, err: self._on_authorized(
                     invocation, method, args, ok, uid, err),
             )
@@ -712,6 +861,16 @@ class HelperService:
                 Gio, GLib = _require_gio()
                 invocation.return_value(GLib.Variant('(s)', (text,)))
                 return
+            elif method == 'RefreshPackageIndex':
+                self.core.refresh_package_index()
+            elif method == 'UpgradeSystem':
+                Gio, GLib = _require_gio()
+                invocation.return_value(
+                    GLib.Variant('(s)', (self.core.upgrade_system(),)))
+                return
+            elif method == 'RemovePackage':
+                (pkg,) = args
+                self.core.remove_package(str(pkg))
             else:
                 invocation.return_dbus_error(
                     ERROR_INVALID_ARGS, 'unknown method: %s' % (method,))

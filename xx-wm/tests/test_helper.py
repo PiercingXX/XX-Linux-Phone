@@ -303,13 +303,13 @@ class FakeInvocation:
         self.error = (name, message)
 
 
-def allow_all(conn, sender, action, callback):
-    allow_all.seen.append(action)
+def allow_all(conn, sender, action, interactive, callback):
+    allow_all.seen.append((action, interactive))
     callback(True, UID, None)
 
 
-def deny_all(conn, sender, action, callback):
-    deny_all.seen.append(action)
+def deny_all(conn, sender, action, interactive, callback):
+    deny_all.seen.append((action, interactive))
     callback(False, UID, None)
 
 
@@ -333,8 +333,9 @@ def test_service_authorizes_each_method_with_own_action(layout):
                                 invocation)
         assert invocation.error is None, (method, invocation.error)
         assert invocation.value is not None
-    assert allow_all.seen == [helper.ACTION_CHARGE, helper.ACTION_NETWORK,
-                              helper.ACTION_FREEZE]
+    assert allow_all.seen == [(helper.ACTION_CHARGE, False),
+                              (helper.ACTION_NETWORK, False),
+                              (helper.ACTION_FREEZE, False)]
 
 
 def test_service_denied_maps_to_not_authorized(layout):
@@ -360,7 +361,7 @@ def test_service_uid_scoping_uses_sender_uid_not_path(layout):
 
     core.set_app_network = spy
 
-    def authorize_as_other(conn, sender, action, callback):
+    def authorize_as_other(conn, sender, action, interactive, callback):
         callback(True, UID + 1, None)
 
     service = helper.HelperService(connection=object(), core=core,
@@ -376,7 +377,7 @@ def test_service_uid_scoping_uses_sender_uid_not_path(layout):
 
 
 def test_service_capabilities_need_no_auth(layout):
-    def explosive(conn, sender, action, callback):
+    def explosive(conn, sender, action, interactive, callback):
         raise AssertionError('GetCapabilities must not authorize')
 
     service = helper.HelperService(connection=None, core=make_core(layout),
@@ -457,6 +458,10 @@ class ScriptConn:
     """Fake system bus speaking the real Gio callback contract:
     ``call(..., cancellable, callback)`` with a two-arg callback."""
 
+    #: CheckAuthorization flags per action: only auth_admin_keep actions
+    #: (upgrade, removal) pass AllowUserInteraction (1).
+    EXPECTED_FLAGS = {}
+
     def __init__(self, uid, authorized=True, challenge=False,
                  details=None, auth_error=None):
         self.uid = uid
@@ -479,8 +484,10 @@ class ScriptConn:
             assert subject[0] == 'system-bus-name'
             assert subject[1]['name'] == ':1.7'
             assert action in (helper.ACTION_CHARGE, helper.ACTION_NETWORK,
-                              helper.ACTION_FREEZE)
-            assert details == {} and flags == 0
+                              helper.ACTION_FREEZE, helper.ACTION_REFRESH,
+                              helper.ACTION_UPGRADE, helper.ACTION_REMOVE)
+            assert details == {}
+            assert flags == self.EXPECTED_FLAGS.get(action, 0), action
             if self.auth_error is not None:
                 callback(self, FakeAuthFailure(self.auth_error))
             else:
@@ -545,7 +552,7 @@ def test_polkit_error_denies_without_authorizing():
 
 
 def test_service_auth_error_maps_to_not_authorized(layout):
-    def failing_auth(conn, sender, action, callback):
+    def failing_auth(conn, sender, action, interactive, callback):
         callback(False, UID, 'polkit exploded')
 
     service = helper.HelperService(connection=object(),
@@ -561,7 +568,7 @@ def test_service_auth_error_maps_to_not_authorized(layout):
 
 
 def test_service_unknown_method_never_reaches_core_or_auth(layout):
-    def explosive(conn, sender, action, callback):
+    def explosive(conn, sender, action, interactive, callback):
         raise AssertionError('unknown method must not authorize')
 
     run = FakeRun()
@@ -703,18 +710,23 @@ def test_client_helper_error_propagates(fake_gio):
 DATA = Path(__file__).parent.parent / 'launcher' / 'data'
 
 
-def test_shipped_policy_has_three_actions_with_console_defaults():
+def test_shipped_policy_actions_and_defaults():
     text = (DATA / 'polkit-1' / 'actions'
             / 'io.piercingxx.XXWM.Helper.policy').read_text()
     for action in ('io.piercingxx.XXWM.Helper1.set-charge-limit',
                    'io.piercingxx.XXWM.Helper1.app-network',
                    'io.piercingxx.XXWM.Helper1.freeze',
                    'io.piercingxx.XXWM.Helper1.clean-system',
-                   'io.piercingxx.XXWM.Helper1.read-log'):
+                   'io.piercingxx.XXWM.Helper1.read-log',
+                   'io.piercingxx.XXWM.Helper1.refresh-packages'):
         assert ('action id="%s"' % action) in text
-    assert text.count('<allow_active>yes</allow_active>') == 5
-    assert text.count('<allow_inactive>no</allow_inactive>') == 5
-    assert text.count('<allow_any>no</allow_any>') == 5
+    for action in ('io.piercingxx.XXWM.Helper1.upgrade-system',
+                   'io.piercingxx.XXWM.Helper1.remove-package'):
+        assert ('action id="%s"' % action) in text
+    assert text.count('<allow_active>yes</allow_active>') == 6
+    assert text.count('<allow_active>auth_admin_keep</allow_active>') == 2
+    assert text.count('<allow_inactive>no</allow_inactive>') == 8
+    assert text.count('<allow_any>no</allow_any>') == 8
 
 
 def test_shipped_bus_policy_allows_default_callers_without_at_console():

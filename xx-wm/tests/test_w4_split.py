@@ -76,6 +76,7 @@ _SETTINGS_METHODS = [
     '_connect_wifi', '_refresh_bluetooth', '_show_bt_devices',
     '_on_bt_selected', '_settings_row', '_on_apn_save',
     '_gsm_connection_name', '_apply_apn', '_on_update_clicked',
+    '_on_update_now', '_on_dots_update', '_refresh_apps_section',
     '_on_check_updates_clicked', '_on_manual_check_result',
     '_on_updates_available', '_snooze_updates', '_on_export_backup',
     '_on_restore_backup', '_confirm_restore_backup', '_restore_from_path',
@@ -164,8 +165,9 @@ def test_settings_registry_order_and_shape():
     assert keys == ['system', 'wifi', 'bluetooth', 'sound', 'battery',
                     'charging', 'batteryuse', 'screentime',
                     'backup', 'storage', 'security', 'lock', 'mobile',
-                    'appearance', 'display', 'keyboard', 'launcher',
-                    'standby', 'permissions', 'smart_lock', 'medical',
+                    'apps', 'appearance', 'display', 'keyboard',
+                    'launcher', 'standby', 'permissions', 'smart_lock',
+                    'medical',
                     'recording', 'captions', 'nearby', 'findmy',
                     'about', 'shell', 'developer', 'gestures']
     for key, cls in settings_page.SETTINGS_SECTIONS:

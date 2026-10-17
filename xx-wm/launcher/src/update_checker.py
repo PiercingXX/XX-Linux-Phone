@@ -80,10 +80,12 @@ def run_update_script(script_path: str) -> tuple[bool, str]:
 # index must never be presented as "up to date". A backend is only trusted
 # while one of its index paths has been written within _INDEX_MAX_AGE. The
 # shell never refreshes indexes itself — that needs root.
+# `checkupdates` syncs its own temporary database on every run, so it
+# needs no freshness gate: gating it on /var/lib/pacman/sync only hides
+# real updates behind a stale system sync.
 _INDEX_PATHS: dict[str, list[str]] = {
     'apt': ['/var/lib/apt/lists'],
     'apk': ['/var/cache/apk', '/lib/apk/db'],
-    'checkupdates': ['/var/lib/pacman/sync'],
     'pacman': ['/var/lib/pacman/sync'],
 }
 _INDEX_MAX_AGE = 24 * 3600

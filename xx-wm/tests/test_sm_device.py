@@ -355,7 +355,7 @@ class TestHelperReadLog:
 
         svc = helper.HelperService(
             connection=None, core=core,
-            authorize=lambda _c, _s, _a, cb: cb(True, 1000, None))
+            authorize=lambda _c, _s, _a, _i, cb: cb(True, 1000, None))
         svc._on_authorized(FakeInvocation(), 'ReadLog', ('messages',),
                            True, 1000, None)
         assert seen and seen[0][0] == 'ok'
@@ -365,7 +365,7 @@ class TestHelperReadLog:
                 / 'polkit-1' / 'actions'
                 / 'io.piercingxx.XXWM.Helper.policy').read_text()
         assert 'action id="io.piercingxx.XXWM.Helper1.read-log"' in text
-        assert text.count('<allow_active>yes</allow_active>') == 5
+        assert text.count('<allow_active>yes</allow_active>') == 6
 
     def test_introspection_lists_read_log(self):
         assert '<method name="ReadLog">' in helper.INTROSPECT_XML
