@@ -84,4 +84,54 @@
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
   </action>
+
+  <action id="io.piercingxx.XXWM.Helper1.service-manage">
+    <description>Start, stop, restart, enable or disable a system service</description>
+    <message>Authentication is required to change a system service.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.piercingxx.XXWM.Helper1.service-remote">
+    <description>Start or enable the SSH server</description>
+    <message>Authentication is required to open remote SSH access.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.piercingxx.XXWM.Helper1.rfkill">
+    <description>Block or unblock a WiFi or Bluetooth radio</description>
+    <message>Authentication is required to change a radio block.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.piercingxx.XXWM.Helper1.firewall-open">
+    <description>Open an inbound port or disable the firewall</description>
+    <message>Authentication is required to open inbound access.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.piercingxx.XXWM.Helper1.firewall-restrict">
+    <description>Close an inbound port or enable the firewall</description>
+    <message>Authentication is required to restrict inbound access.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

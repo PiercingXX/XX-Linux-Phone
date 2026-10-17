@@ -484,8 +484,13 @@ class ScriptConn:
             assert subject[0] == 'system-bus-name'
             assert subject[1]['name'] == ':1.7'
             assert action in (helper.ACTION_CHARGE, helper.ACTION_NETWORK,
-                              helper.ACTION_FREEZE, helper.ACTION_REFRESH,
-                              helper.ACTION_UPGRADE, helper.ACTION_REMOVE)
+                              helper.ACTION_FREEZE, helper.ACTION_CLEAN,
+                              helper.ACTION_READLOG, helper.ACTION_REFRESH,
+                              helper.ACTION_UPGRADE, helper.ACTION_REMOVE,
+                              helper.ACTION_SERVICE,
+                              helper.ACTION_SERVICE_REMOTE,
+                              helper.ACTION_RFKILL, helper.ACTION_FW_OPEN,
+                              helper.ACTION_FW_RESTRICT)
             assert details == {}
             assert flags == self.EXPECTED_FLAGS.get(action, 0), action
             if self.auth_error is not None:
@@ -718,15 +723,20 @@ def test_shipped_policy_actions_and_defaults():
                    'io.piercingxx.XXWM.Helper1.freeze',
                    'io.piercingxx.XXWM.Helper1.clean-system',
                    'io.piercingxx.XXWM.Helper1.read-log',
-                   'io.piercingxx.XXWM.Helper1.refresh-packages'):
+                   'io.piercingxx.XXWM.Helper1.refresh-packages',
+                   'io.piercingxx.XXWM.Helper1.service-manage',
+                   'io.piercingxx.XXWM.Helper1.rfkill',
+                   'io.piercingxx.XXWM.Helper1.firewall-restrict'):
         assert ('action id="%s"' % action) in text
     for action in ('io.piercingxx.XXWM.Helper1.upgrade-system',
-                   'io.piercingxx.XXWM.Helper1.remove-package'):
+                   'io.piercingxx.XXWM.Helper1.remove-package',
+                   'io.piercingxx.XXWM.Helper1.service-remote',
+                   'io.piercingxx.XXWM.Helper1.firewall-open'):
         assert ('action id="%s"' % action) in text
-    assert text.count('<allow_active>yes</allow_active>') == 6
-    assert text.count('<allow_active>auth_admin_keep</allow_active>') == 2
-    assert text.count('<allow_inactive>no</allow_inactive>') == 8
-    assert text.count('<allow_any>no</allow_any>') == 8
+    assert text.count('<allow_active>yes</allow_active>') == 9
+    assert text.count('<allow_active>auth_admin_keep</allow_active>') == 4
+    assert text.count('<allow_inactive>no</allow_inactive>') == 13
+    assert text.count('<allow_any>no</allow_any>') == 13
 
 
 def test_shipped_bus_policy_allows_default_callers_without_at_console():

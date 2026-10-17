@@ -73,11 +73,137 @@ def list_wifi(run: _RunFn = _run) -> list[WifiNetwork] | None:
     return parse_nmcli_wifi(result.stdout)
 
 
+def nm_running(run: _RunFn = _run) -> bool:
+    """True when NetworkManager reports RUNNING=running (ref wifi-manager)."""
+    try:
+        result = run(['nmcli', '-t', '-f', 'RUNNING', 'general'], timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == 'running'
+
+
+def wifi_enabled(run: _RunFn = _run) -> bool | None:
+    """WiFi radio state: True/False, None when it cannot be read."""
+    try:
+        result = run(['nmcli', '-t', '-f', 'WIFI', 'general'], timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    state = result.stdout.strip().lower()
+    if state == 'enabled':
+        return True
+    if state == 'disabled':
+        return False
+    return None
+
+
+def set_wifi_enabled(enabled: bool, run: _RunFn = _run) -> bool:
+    """Switch the WiFi radio on or off through NetworkManager's polkit."""
+    try:
+        result = run(['nmcli', 'radio', 'wifi',
+                      'on' if enabled else 'off'], timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def _wifi_result(ssid: str, result: subprocess.CompletedProcess) -> tuple[bool, str]:
     if result.returncode == 0:
         return True, f'Connected to {ssid}'
     detail = (result.stderr or result.stdout or '').strip().splitlines()
     return False, detail[-1] if detail else 'Connection failed'
+
+
+def disconnect_wifi(ssid: str, run: _RunFn = _run) -> tuple[bool, str]:
+    """Take the active `ssid` profile down (NetworkManager polkit)."""
+    try:
+        result = run(['nmcli', 'connection', 'down', ssid], timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, 'NetworkManager unavailable'
+    if result.returncode == 0:
+        return True, f'Disconnected from {ssid}'
+    detail = (result.stderr or result.stdout or '').strip().splitlines()
+    return False, detail[-1] if detail else 'Disconnect failed'
+
+
+def forget_wifi(ssid: str, run: _RunFn = _run) -> tuple[bool, str]:
+    """Delete the saved `ssid` profile (NetworkManager polkit)."""
+    try:
+        result = run(['nmcli', 'connection', 'delete', ssid], timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return False, 'NetworkManager unavailable'
+    if result.returncode == 0:
+        return True, f'Forgot {ssid}'
+    detail = (result.stderr or result.stdout or '').strip().splitlines()
+    return False, detail[-1] if detail else 'Forget failed'
+
+
+def wifi_details(ssid: str, run: _RunFn = _run) -> dict | None:
+    """IP, gateway, DNS and MAC of the active `ssid` connection.
+
+    None when the profile is not active or NetworkManager can't be asked.
+    Terse `device show` lines split on the FIRST colon only: MACs and
+    IPv6 addresses hold colons of their own."""
+    try:
+        active = run(['nmcli', '-t', '-f', 'NAME,TYPE,DEVICE', 'connection',
+                      'show', '--active'], timeout=10)
+        if active.returncode != 0:
+            return None
+        import re
+        device = None
+        for line in active.stdout.splitlines():
+            # NAME may hold escaped colons; TYPE and DEVICE never do.
+            parts = [p.replace('\\:', ':')
+                     for p in re.split(r'(?<!\\):', line)]
+            if len(parts) < 3:
+                continue
+            name = ':'.join(parts[:-2]).strip()
+            kind, dev = parts[-2].strip(), parts[-1].strip()
+            if (name == ssid and kind in ('wifi', '802-11-wireless')
+                    and dev):
+                device = dev
+                break
+        if device is None:
+            return None
+        shown = run(['nmcli', '-t', 'device', 'show', device], timeout=10)
+        if shown.returncode != 0:
+            return None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    fields: dict[str, list[str]] = {}
+    for line in shown.stdout.splitlines():
+        key, sep, value = line.partition(':')
+        if not sep:
+            continue
+        fields.setdefault(key.strip(), []).append(value.strip())
+    addresses = [addr.split('/')[0]
+                 for addr in fields.get('IP4.ADDRESS[1]', []) if addr]
+    dns = [server for index in ('IP4.DNS[1]', 'IP4.DNS[2]')
+           for server in fields.get(index, []) if server]
+    macs = fields.get('GENERAL.HWADDR', [])
+    gateways = fields.get('IP4.GATEWAY', [])
+    return {
+        'ip': addresses[0] if addresses else '',
+        'gateway': gateways[0] if gateways else '',
+        'dns': ', '.join(dns),
+        'mac': macs[0] if macs else '',
+    }
+
+
+def wifi_details_text(ssid: str, details: dict | None) -> str:
+    """One multiline summary for the Details menu; never raises."""
+    if not details:
+        return f'{ssid}\nDetails unavailable.'
+    def _line(label, value):
+        return f'{label} {value or "unknown"}'
+    return '\n'.join([
+        ssid,
+        _line('IP', details.get('ip')),
+        _line('Gateway', details.get('gateway')),
+        _line('DNS', details.get('dns')),
+        _line('MAC', details.get('mac')),
+    ])
 
 
 def _key_mgmt_for(security: str | None) -> str:
@@ -137,7 +263,8 @@ def _is_secrets_error(result: subprocess.CompletedProcess) -> bool:
 
 def connect_wifi(ssid: str, password: str | None = None,
                  run: _RunFn = _run,
-                 security: str | None = None) -> tuple[bool, str]:
+                 security: str | None = None,
+                 hidden: bool = False) -> tuple[bool, str]:
     """Connect to `ssid`. Secrets go through nmcli's passwd-file channel
     (nmcli(1): `connection up ... [passwd-file file]`, lines of the form
     `802-11-wireless-security.psk:<password>`) so the PSK never appears in
@@ -152,8 +279,11 @@ def connect_wifi(ssid: str, password: str | None = None,
     again when activation fails on secrets; pre-existing profiles are
     never deleted."""
     if not password:
+        cmd = ['nmcli', 'dev', 'wifi', 'connect', ssid]
+        if hidden:
+            cmd += ['hidden', 'yes']
         try:
-            result = run(['nmcli', 'dev', 'wifi', 'connect', ssid], timeout=45)
+            result = run(cmd, timeout=45)
         except (OSError, subprocess.TimeoutExpired):
             return False, 'NetworkManager unavailable'
         return _wifi_result(ssid, result)
@@ -163,11 +293,13 @@ def connect_wifi(ssid: str, password: str | None = None,
         return False, 'NetworkManager unavailable'
     created = False
     if ssid not in profiles:
+        add_cmd = ['nmcli', 'connection', 'add', 'type', 'wifi',
+                   'con-name', ssid, 'ssid', ssid,
+                   'wifi-sec.key-mgmt', _key_mgmt_for(security)]
+        if hidden:
+            add_cmd += ['wifi.hidden', 'yes']
         try:
-            add = run(['nmcli', 'connection', 'add', 'type', 'wifi',
-                       'con-name', ssid, 'ssid', ssid,
-                       'wifi-sec.key-mgmt', _key_mgmt_for(security)],
-                      timeout=15)
+            add = run(add_cmd, timeout=15)
         except (OSError, subprocess.TimeoutExpired):
             return False, 'NetworkManager unavailable'
         if add.returncode == 0:
@@ -203,19 +335,37 @@ class AudioSink:
     is_default: bool
 
 
-def parse_pactl_sinks(list_json: str, default_name: str) -> list[AudioSink]:
+# Descriptions the output list hides unless asked (ref
+# audio-input-manager.sh PIERCINGXX_AUDIO_SKIP): S/PDIF "Digital Stereo
+# (IEC958)" ports, plus virtual sinks that only loop audio back.
+_OUTPUT_SKIP_RE = 'iec958'
+
+
+def _is_virtual_sink(entry: dict) -> bool:
+    props = entry.get('properties')
+    return isinstance(props, dict) and props.get('node.virtual') is True
+
+
+def parse_pactl_sinks(list_json: str, default_name: str,
+                      hide_special: bool = True) -> list[AudioSink]:
     try:
         sinks = json.loads(list_json)
     except json.JSONDecodeError:
         return []
     out: list[AudioSink] = []
     for sink in sinks if isinstance(sinks, list) else []:
+        if not isinstance(sink, dict):
+            continue
         name = str(sink.get('name', ''))
         if not name:
             continue
+        description = str(sink.get('description', name))
+        if hide_special and (_OUTPUT_SKIP_RE in description.lower()
+                             or _is_virtual_sink(sink)):
+            continue
         out.append(AudioSink(
             name=name,
-            description=str(sink.get('description', name)),
+            description=description,
             is_default=(name == default_name),
         ))
     return out
@@ -235,6 +385,60 @@ def list_audio_sinks(run: _RunFn = _run) -> list[AudioSink] | None:
 def set_default_sink(name: str, run: _RunFn = _run) -> bool:
     try:
         return run(['pactl', 'set-default-sink', name], timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+# -------------------------------------------------------------- Microphone
+
+@dataclass(frozen=True)
+class AudioSource:
+    name: str
+    description: str
+    is_default: bool
+
+
+def parse_pactl_sources(list_json: str,
+                        default_name: str) -> list[AudioSource]:
+    """PipeWire/Pulse sources minus monitor ports (`.monitor` names and
+    `device.class=monitor`, ref audio-input-manager.sh)."""
+    try:
+        sources = json.loads(list_json)
+    except json.JSONDecodeError:
+        return []
+    out: list[AudioSource] = []
+    for source in sources if isinstance(sources, list) else []:
+        if not isinstance(source, dict):
+            continue
+        name = str(source.get('name', ''))
+        if not name or name.endswith('.monitor'):
+            continue
+        props = source.get('properties')
+        if isinstance(props, dict) and props.get('device.class') == 'monitor':
+            continue
+        out.append(AudioSource(
+            name=name,
+            description=str(source.get('description', name)),
+            is_default=(name == default_name),
+        ))
+    return out
+
+
+def list_audio_sources(run: _RunFn = _run) -> list[AudioSource] | None:
+    try:
+        listing = run(['pactl', '-f', 'json', 'list', 'sources'], timeout=10)
+        default = run(['pactl', 'get-default-source'], timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if listing.returncode != 0:
+        return None
+    return parse_pactl_sources(listing.stdout, (default.stdout or '').strip())
+
+
+def set_default_source(name: str, run: _RunFn = _run) -> bool:
+    try:
+        return run(['pactl', 'set-default-source', name],
+                   timeout=10).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -576,6 +780,255 @@ def connect_bt_device(address: str) -> tuple[bool, str]:
         return True, 'Connected'
     except Exception as error:
         return False, getattr(error, 'message', None) or str(error)
+
+
+def disconnect_bt_device(address: str) -> tuple[bool, str]:
+    """Device1.Disconnect one paired device; never raises."""
+    try:
+        from gi.repository import Gio
+        bus = _bluez_bus()
+        adapter = _adapter_path(bus)
+        if adapter is None:
+            return False, 'No Bluetooth adapter found'
+        path = _device_path(bus, adapter, address)
+        bus.call_sync(_BLUEZ, path, _DEVICE_IFACE, 'Disconnect', None, None,
+                      Gio.DBusCallFlags.NONE, 15000, None)
+        return True, 'Disconnected'
+    except Exception as error:
+        return False, getattr(error, 'message', None) or str(error)
+
+
+def forget_bt_device(address: str) -> tuple[bool, str]:
+    """Adapter1.RemoveDevice: drop pairing (the UI confirms first)."""
+    try:
+        from gi.repository import Gio, GLib
+        bus = _bluez_bus()
+        adapter = _adapter_path(bus)
+        if adapter is None:
+            return False, 'No Bluetooth adapter found'
+        path = _device_path(bus, adapter, address)
+        bus.call_sync(_BLUEZ, adapter, _ADAPTER_IFACE, 'RemoveDevice',
+                      GLib.Variant('(o)', (path,)), None,
+                      Gio.DBusCallFlags.NONE, 15000, None)
+        return True, 'Forgotten'
+    except Exception as error:
+        return False, getattr(error, 'message', None) or str(error)
+
+
+def rename_bt_device(address: str, alias: str) -> tuple[bool, str]:
+    """Set the device Alias (the name shown for it); never raises."""
+    name = (alias or '').strip()
+    if not name:
+        return False, 'Name is empty'
+    try:
+        bus = _bluez_bus()
+        adapter = _adapter_path(bus)
+        if adapter is None:
+            return False, 'No Bluetooth adapter found'
+        path = _device_path(bus, adapter, address)
+        _set_prop(bus, path, _DEVICE_IFACE, 'Alias', 's', name)
+        return True, 'Renamed'
+    except Exception as error:
+        return False, getattr(error, 'message', None) or str(error)
+
+
+def bt_powered(bus=None) -> bool | None:
+    """Adapter1 Powered: True/False, None when BlueZ can't be asked."""
+    try:
+        own = bus if bus is not None else _bluez_bus()
+        adapter = _adapter_path(own)
+        if adapter is None:
+            return None
+        return bool(_get_prop(own, adapter, _ADAPTER_IFACE, 'Powered'))
+    except Exception:
+        return None
+
+
+def set_bt_powered(enabled: bool, bus=None) -> bool:
+    """Switch the adapter power through BlueZ (its own polkit)."""
+    try:
+        own = bus if bus is not None else _bluez_bus()
+        adapter = _adapter_path(own)
+        if adapter is None:
+            return False
+        _set_prop(own, adapter, _ADAPTER_IFACE, 'Powered', 'b',
+                  bool(enabled))
+        return True
+    except Exception:
+        return False
+
+
+# ------------------------------------------------------------------ rfkill
+
+RFKILL_TYPE_WLAN = 1
+RFKILL_TYPE_BLUETOOTH = 2
+RFKILL_TYPES = {'wifi': RFKILL_TYPE_WLAN, 'bluetooth': RFKILL_TYPE_BLUETOOTH}
+RFKILL_OP_CHANGE_ALL = 3
+
+
+def rfkill_event_bytes(rfkill_type: int) -> bytes:
+    """One `struct rfkill_event` unblocking every switch of `rfkill_type`:
+    idx 0, op CHANGE_ALL, soft 0 (unblock). `<IBBBB` is u32 idx + u8
+    type/op/soft/hard."""
+    import struct
+    return struct.pack('<IBBBB', 0, rfkill_type, RFKILL_OP_CHANGE_ALL, 0, 0)
+
+
+def bt_soft_blocked(sysfs: str = '/sys') -> bool:
+    """True when an rfkill switch of type bluetooth reports soft-blocked
+    (ref bluetooth-manager.sh). Missing sysfs reads as not blocked."""
+    base = os.path.join(sysfs, 'class', 'rfkill')
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return False
+    for name in names:
+        try:
+            with open(os.path.join(base, name, 'type'),
+                      encoding='utf-8') as handle:
+                kind = handle.read().strip()
+            if kind != 'bluetooth':
+                continue
+            with open(os.path.join(base, name, 'soft'),
+                      encoding='utf-8') as handle:
+                if handle.read().strip() == '1':
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def rfkill_unblock(rtype: str, dev: str = '/dev/rfkill',
+                   _access=os.access, _open=os.open,
+                   _write=os.write, _close=os.close) -> bool:
+    """Unblock `rtype` (wifi/bluetooth) through /dev/rfkill, which logind
+    hands to the active session (uaccess) — no root needed when writable.
+    False when the device is not writable: the caller falls back to the
+    privileged helper's SetRfkill. Never raises."""
+    rfkill_type = RFKILL_TYPES.get(rtype)
+    if rfkill_type is None:
+        return False
+    try:
+        if not _access(dev, os.W_OK):
+            return False
+        fd = _open(dev, os.O_WRONLY | os.O_CLOEXEC)
+    except OSError:
+        return False
+    try:
+        _write(fd, rfkill_event_bytes(rfkill_type))
+        return True
+    except OSError:
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            _close(fd)
+
+
+# ----------------------------------------------------------------- Services
+
+_SYSTEMD_BUS = 'org.freedesktop.systemd1'
+_SYSTEMD_MANAGER_PATH = '/org/freedesktop/systemd1'
+_SYSTEMD_MANAGER_IFACE = 'org.freedesktop.systemd1.Manager'
+_SYSTEMD_UNIT_IFACE = 'org.freedesktop.systemd1.Unit'
+
+
+def detect_init(root: str = '/') -> str:
+    """Running init: 'systemd' when its runtime dir exists (never infer
+    from the package manager — pmOS ships apk with OpenRC or systemd),
+    'openrc' when openrc-run is installed, else 'unknown'."""
+    if os.path.isdir(os.path.join(root, 'run', 'systemd', 'system')):
+        return 'systemd'
+    for candidate in ('sbin/openrc-run', 'bin/openrc-run',
+                      'usr/bin/openrc-run', 'usr/sbin/openrc-run'):
+        if os.path.isfile(os.path.join(root, candidate)):
+            return 'openrc'
+    return 'unknown'
+
+
+def _systemd_bus():
+    from gi.repository import Gio
+    return Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+
+
+def _systemd_unpack(reply):
+    value = reply.unpack()[0]
+    return value.unpack() if hasattr(value, 'unpack') else value
+
+
+def systemd_unit_state(unit: str, bus=None) -> tuple | None:
+    """(ActiveState, UnitFileState) for `unit`; None when unknown.
+
+    Unprivileged read on the system bus. `bus` is injectable for tests."""
+    try:
+        from gi.repository import Gio, GLib
+        own = bus if bus is not None else _systemd_bus()
+        path = own.call_sync(
+            _SYSTEMD_BUS, _SYSTEMD_MANAGER_PATH, _SYSTEMD_MANAGER_IFACE,
+            'GetUnit', GLib.Variant('(s)', (unit,)),
+            GLib.VariantType('(o)'),
+            Gio.DBusCallFlags.NONE, 5000, None,
+        ).unpack()[0]
+        active = _systemd_unpack(own.call_sync(
+            _SYSTEMD_BUS, path, 'org.freedesktop.DBus.Properties', 'Get',
+            GLib.Variant('(ss)', (_SYSTEMD_UNIT_IFACE, 'ActiveState')),
+            GLib.VariantType('(v)'),
+            Gio.DBusCallFlags.NONE, 5000, None,
+        ))
+        enabled = own.call_sync(
+            _SYSTEMD_BUS, _SYSTEMD_MANAGER_PATH, _SYSTEMD_MANAGER_IFACE,
+            'GetUnitFileState', GLib.Variant('(s)', (unit,)),
+            GLib.VariantType('(s)'),
+            Gio.DBusCallFlags.NONE, 5000, None,
+        ).unpack()[0]
+        return (str(active), str(enabled))
+    except Exception:
+        return None
+
+
+def openrc_service_state(svc: str,
+                         run: _RunFn = _run) -> tuple[bool | None,
+                                                      bool | None]:
+    """(running, enabled-in-default) for an OpenRC service.
+
+    Unprivileged: `rc-service status` exits 0 while running;
+    `rc-update show` lists `name | runlevels`. (None, None) when OpenRC
+    can't be asked."""
+    try:
+        status = run(['rc-service', svc, 'status'], timeout=10)
+        shown = run(['rc-update', 'show'], timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return (None, None)
+    if shown.returncode != 0:
+        return (None, None)
+    enabled = False
+    for line in shown.stdout.splitlines():
+        name, sep, levels = line.partition('|')
+        if sep and name.strip() == svc:
+            enabled = 'default' in levels.split()
+            break
+    return (status.returncode == 0, enabled)
+
+
+def list_failed_units(init: str, run: _RunFn = _run,
+                      bus=None) -> list[str]:
+    """Read-only failed/crashed units for the Failed list. Never raises."""
+    try:
+        if init == 'systemd':
+            result = run(['systemctl', '--failed', '--no-pager',
+                          '--no-legend'], timeout=15)
+            if result.returncode != 0:
+                return []
+            return [line.split()[0] for line in result.stdout.splitlines()
+                    if line.split()]
+        if init == 'openrc':
+            result = run(['rc-status', 'default'], timeout=15)
+            if result.returncode != 0:
+                return []
+            return [line.split()[0] for line in result.stdout.splitlines()
+                    if 'crashed' in line and line.split()]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return []
 
 
 # ------------------------------------------------- software updates (sm_auth)

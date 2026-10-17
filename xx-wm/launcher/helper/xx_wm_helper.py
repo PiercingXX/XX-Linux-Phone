@@ -37,6 +37,11 @@ ACTION_READLOG = BUS_NAME + '.read-log'
 ACTION_REFRESH = BUS_NAME + '.refresh-packages'
 ACTION_UPGRADE = BUS_NAME + '.upgrade-system'
 ACTION_REMOVE = BUS_NAME + '.remove-package'
+ACTION_SERVICE = BUS_NAME + '.service-manage'
+ACTION_SERVICE_REMOTE = BUS_NAME + '.service-remote'
+ACTION_RFKILL = BUS_NAME + '.rfkill'
+ACTION_FW_OPEN = BUS_NAME + '.firewall-open'
+ACTION_FW_RESTRICT = BUS_NAME + '.firewall-restrict'
 
 # Destructive actions pass AllowUserInteraction (flag 1) so the in-shell
 # polkit agent can prompt; harmless probes stay non-interactive (flag 0).
@@ -106,6 +111,50 @@ NFT_FAMILY = 'inet'
 NFT_TABLE = 'xxwm'
 NFT_CHAIN = 'output'
 
+NFT_IN_TABLE = 'xxwm-inbound'
+NFT_IN_CHAIN = 'input'
+
+INBOUND_FILE_NAME = 'inbound.json'
+NFT_DROPIN_DIR = '/etc/nftables.d'
+NFT_DROPIN_NAME = '10-xxwm.nft'
+
+# Curated services ManageService may touch — nothing else, in
+# particular never xx-wm itself, dbus or logind. Mirrors the
+# ServicesSection catalog (launcher/src/settings_services.py); the
+# ssh entry covers both spellings (Arch sshd.service, apt ssh.service).
+SERVICE_ALLOW = ('modem', 'eg25', 'network', 'bluetooth', 'ssh',
+                 'tailscale', 'waydroid')
+SERVICE_ACTIONS = ('start', 'stop', 'restart', 'enable', 'disable')
+SERVICE_UNITS = {
+    'modem': {'systemd': ('ModemManager.service',),
+              'openrc': ('modemmanager',)},
+    'eg25': {'systemd': ('eg25-manager.service',),
+             'openrc': ('eg25-manager',)},
+    'network': {'systemd': ('NetworkManager.service',),
+                'openrc': ('networkmanager',)},
+    'bluetooth': {'systemd': ('bluetooth.service',),
+                  'openrc': ('bluetooth',)},
+    'ssh': {'systemd': ('sshd.service', 'ssh.service'),
+            'openrc': ('sshd',)},
+    'tailscale': {'systemd': ('tailscaled.service',),
+                  'openrc': ('tailscaled',)},
+    'waydroid': {'systemd': ('waydroid-container.service',),
+                 'openrc': ('waydroid',)},
+}
+
+RFKILL_ALLOW = ('wifi', 'bluetooth')
+
+# Inbound presets SetInboundPreset may toggle. Mirrors the
+# FirewallSection catalog (launcher/src/settings_firewall.py): ports are
+# ints or (lo, hi) ranges per protocol.
+INBOUND_PRESETS = {
+    'nearby': {'tcp': (53317,), 'udp': (53317,)},
+    'xxdb': {'tcp': ((37000, 37999),), 'udp': ()},
+    'ssh': {'tcp': (22,), 'udp': ()},
+    'kdeconnect': {'tcp': ((1714, 1764),), 'udp': ((1714, 1764),)},
+    'syncthing': {'tcp': (22000,), 'udp': (22000, 21027)},
+}
+
 SYSFS_DEFAULT = '/sys'
 CGROUP_ROOT_DEFAULT = '/sys/fs/cgroup'
 MOUNTS_FILE_DEFAULT = '/proc/mounts'
@@ -150,6 +199,24 @@ INTROSPECT_XML = """\
     </method>
     <method name="RemovePackage">
       <arg name="pkg" type="s" direction="in"/>
+    </method>
+    <method name="ManageService">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="action" type="s" direction="in"/>
+    </method>
+    <method name="SetRfkill">
+      <arg name="type" type="s" direction="in"/>
+      <arg name="blocked" type="b" direction="in"/>
+    </method>
+    <method name="SetInboundPreset">
+      <arg name="name" type="s" direction="in"/>
+      <arg name="allowed" type="b" direction="in"/>
+    </method>
+    <method name="SetFirewallEnabled">
+      <arg name="enabled" type="b" direction="in"/>
+    </method>
+    <method name="GetFirewallState">
+      <arg name="state" type="a{sv}" direction="out"/>
     </method>
   </interface>
 </node>
@@ -231,6 +298,7 @@ class HelperCore:
         mounts_file: str = MOUNTS_FILE_DEFAULT,
         state_file: str = os.path.join(STATE_DIR_DEFAULT, STATE_FILE_NAME),
         nft_bin: str = 'nft',
+        nft_dropin_dir: str = NFT_DROPIN_DIR,
         log_dir: str = LOG_DIR_DEFAULT,
         run=_default_run,
     ) -> None:
@@ -239,6 +307,7 @@ class HelperCore:
         self.mounts_file = mounts_file
         self.state_file = state_file
         self.nft_bin = nft_bin
+        self.nft_dropin_dir = nft_dropin_dir
         self.log_dir = log_dir
         self._run = run
 
@@ -605,6 +674,334 @@ class HelperCore:
                  or 'exit %d' % proc.returncode)))
         return backend
 
+    # ------------------------------------------------------- init/services
+
+    def _run_cmd(self, argv: list[str]) -> str:
+        """Run an argv list (never a shell); nonzero exits become Failed."""
+        try:
+            proc = self._run(argv)
+        except OSError as err:
+            raise _failed('%s failed to start: %s' % (argv[0], err)) from None
+        stderr = getattr(proc, 'stderr', '') or ''
+        if proc.returncode != 0:
+            raise _failed('%s: %s' % (
+                ' '.join(argv), stderr.strip() or 'exit %d' % proc.returncode))
+        return getattr(proc, 'stdout', '') or ''
+
+    def init_system(self) -> str:
+        """'systemd' when its runtime dir exists (never inferred from the
+        package manager: pmOS ships apk with OpenRC or systemd), 'openrc'
+        when rc-service is installed, else 'unknown'."""
+        if os.path.isdir('/run/systemd/system'):
+            return 'systemd'
+        if shutil.which('rc-service') is not None:
+            return 'openrc'
+        return 'unknown'
+
+    def resolve_unit(self, key: str) -> str:
+        """Concrete unit/service name for `key` on this init, probing the
+        known spellings (sshd.service vs ssh.service) in order."""
+        table = SERVICE_UNITS[key]
+        init = self.init_system()
+        if init == 'systemd':
+            for unit in table['systemd']:
+                try:
+                    self._run_cmd(['systemctl', 'cat', unit])
+                    return unit
+                except HelperError:
+                    continue
+            return table['systemd'][0]
+        if init == 'openrc':
+            for name in table['openrc']:
+                if os.path.isfile(os.path.join('/etc', 'init.d', name)):
+                    return name
+            return table['openrc'][0]
+        raise _failed('unsupported init system: %s' % init)
+
+    def manage_service(self, name: str, action: str) -> str:
+        """start/stop/restart/enable/disable one allowlisted service.
+
+        Anything outside SERVICE_ALLOW/SERVICE_ACTIONS is InvalidArgs —
+        this is the only gate, so no caller can reach another unit, let
+        alone xx-wm, dbus or logind. Argv lists only, never a shell."""
+        if name not in SERVICE_ALLOW or action not in SERVICE_ACTIONS:
+            raise HelperError(
+                ERROR_INVALID_ARGS,
+                'unknown service or action: %r %r' % (name, action))
+        unit = self.resolve_unit(name)
+        init = self.init_system()
+        if init == 'systemd':
+            if action in ('start', 'stop', 'restart'):
+                self._run_cmd(['systemctl', action, unit])
+            else:
+                self._run_cmd(['systemctl', action, unit])
+        elif init == 'openrc':
+            if action in ('start', 'stop', 'restart'):
+                self._run_cmd(['rc-service', unit, action])
+            elif action == 'enable':
+                self._run_cmd(['rc-update', 'add', unit, 'default'])
+            else:
+                self._run_cmd(['rc-update', 'del', unit, 'default'])
+        else:
+            raise _failed('unsupported init system: %s' % init)
+        return action
+
+    # ---------------------------------------------------------------- rfkill
+
+    def set_rfkill(self, rtype: str, blocked: bool) -> bool:
+        """Block/unblock the wifi or bluetooth rfkill switch. Only those
+        two types are accepted; anything else is InvalidArgs."""
+        if rtype not in RFKILL_ALLOW:
+            raise HelperError(ERROR_INVALID_ARGS,
+                              'unknown rfkill type: %r' % (rtype,))
+        self._run_cmd(['rfkill', 'block' if blocked else 'unblock', rtype])
+        return bool(blocked)
+
+    # ------------------------------------------------------- inbound firewall
+
+    def inbound_file(self) -> str:
+        directory = os.path.dirname(self.state_file) or '.'
+        return os.path.join(directory, INBOUND_FILE_NAME)
+
+    def load_inbound(self) -> dict:
+        """Persisted ``{'enabled': bool|None, 'allowed': [preset]}``;
+        corrupt state degrades to defaults."""
+        try:
+            with open(self.inbound_file(), 'r', encoding='utf-8') as handle:
+                raw = json.load(handle)
+        except (OSError, ValueError):
+            return {'enabled': None, 'allowed': []}
+        if not isinstance(raw, dict):
+            return {'enabled': None, 'allowed': []}
+        enabled = raw.get('enabled')
+        allowed = raw.get('allowed')
+        names = [name for name in allowed
+                 if isinstance(name, str) and name in INBOUND_PRESETS] \
+            if isinstance(allowed, list) else []
+        return {
+            'enabled': enabled if isinstance(enabled, bool) else None,
+            'allowed': sorted(names),
+        }
+
+    def save_inbound(self, state: dict) -> None:
+        directory = os.path.dirname(self.inbound_file()) or '.'
+        try:
+            os.makedirs(directory, mode=0o755, exist_ok=True)
+            tmp = os.path.join(directory, '.inbound.json.tmp')
+            with open(tmp, 'w', encoding='utf-8') as handle:
+                json.dump(state, handle, indent=2, sort_keys=True)
+                handle.write('\n')
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, self.inbound_file())
+        except OSError as err:
+            raise _failed('cannot persist inbound state: %s'
+                          % (err.strerror or err)) from None
+
+    def firewall_backend(self) -> str:
+        """'ufw' when installed, else 'nftables' when nft exists (the pmOS
+        path: a drop-in under /etc/nftables.d), else 'none'."""
+        if shutil.which('ufw') is not None:
+            return 'ufw'
+        if self.nft_available():
+            return 'nftables'
+        return 'none'
+
+    @staticmethod
+    def ufw_specs(name: str) -> list[str]:
+        """ufw rule specs for a preset (`53317/tcp`, `1714:1764/udp`)."""
+        preset = INBOUND_PRESETS[name]
+
+        def _spec(port, proto: str) -> str:
+            if isinstance(port, tuple):
+                return '%d:%d/%s' % (port[0], port[1], proto)
+            return '%d/%s' % (port, proto)
+
+        return ([_spec(port, 'tcp') for port in preset['tcp']]
+                + [_spec(port, 'udp') for port in preset['udp']])
+
+    @staticmethod
+    def nft_port(port) -> str:
+        if isinstance(port, tuple):
+            return '%d-%d' % (port[0], port[1])
+        return str(port)
+
+    def render_inbound_nft(self, allowed) -> str:
+        lines = ['# xx-wm inbound presets (managed; do not edit).',
+                 '# An accept here cannot override a drop in another '
+                 'base chain.',
+                 'table inet %s {' % NFT_IN_TABLE,
+                 '    chain %s {' % NFT_IN_CHAIN,
+                 '        type filter hook input priority filter; '
+                 'policy accept;']
+        for name in sorted(allowed):
+            preset = INBOUND_PRESETS[name]
+            for port in preset['tcp']:
+                lines.append('        tcp dport %s accept comment "xxwm %s";'
+                             % (self.nft_port(port), name))
+            for port in preset['udp']:
+                lines.append('        udp dport %s accept comment "xxwm %s";'
+                             % (self.nft_port(port), name))
+        lines += ['    }', '}']
+        return '\n'.join(lines) + '\n'
+
+    def write_inbound_dropin(self, allowed) -> None:
+        """Persist the pmOS-style nftables drop-in for the allowed set."""
+        try:
+            os.makedirs(self.nft_dropin_dir, mode=0o755, exist_ok=True)
+            tmp = os.path.join(self.nft_dropin_dir,
+                               '.%s.tmp' % NFT_DROPIN_NAME)
+            with open(tmp, 'w', encoding='utf-8') as handle:
+                handle.write(self.render_inbound_nft(allowed))
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, os.path.join(self.nft_dropin_dir,
+                                         NFT_DROPIN_NAME))
+        except OSError as err:
+            raise _failed('cannot write nftables drop-in: %s'
+                          % (err.strerror or err)) from None
+
+    def apply_inbound(self, allowed) -> None:
+        """Reconcile the live `inet xxwm-inbound` table with `allowed`:
+        our own table and chain only — other tables are never touched."""
+        self._nft(['add', 'table', NFT_FAMILY, NFT_IN_TABLE],
+                  allow_exists=True)
+        self._nft([
+            'add', 'chain', NFT_FAMILY, NFT_IN_TABLE, NFT_IN_CHAIN,
+            '{', 'type', 'filter', 'hook', 'input', 'priority', 'filter',
+            ';', 'policy', 'accept', ';', '}',
+        ], allow_exists=True)
+        self._nft(['flush', 'chain', NFT_FAMILY, NFT_IN_TABLE, NFT_IN_CHAIN])
+        for name in sorted(allowed):
+            preset = INBOUND_PRESETS[name]
+            for port in preset['tcp']:
+                self._nft(['add', 'rule', NFT_FAMILY, NFT_IN_TABLE,
+                           NFT_IN_CHAIN, 'tcp', 'dport',
+                           self.nft_port(port), 'accept'])
+            for port in preset['udp']:
+                self._nft(['add', 'rule', NFT_FAMILY, NFT_IN_TABLE,
+                           NFT_IN_CHAIN, 'udp', 'dport',
+                           self.nft_port(port), 'accept'])
+
+    def _nft_preset_allowed(self, ruleset: str, name: str) -> bool:
+        preset = INBOUND_PRESETS[name]
+        for port in list(preset['tcp']) + list(preset['udp']):
+            if 'dport %s' % self.nft_port(port) not in ruleset:
+                return False
+        return True
+
+    def get_firewall_state(self) -> dict:
+        """Backend, on/off and per-preset state for the section. The ufw
+        answer is the live ruleset; the nftables answer is the live
+        ruleset plus our persisted set. `foreign_drop` flags a drop in
+        another base chain, which our accepts cannot override."""
+        backend = self.firewall_backend()
+        if backend == 'ufw':
+            try:
+                proc = self._run(['ufw', 'status'])
+                status = getattr(proc, 'stdout', '') or ''
+            except OSError as err:
+                raise _failed('ufw status failed: %s' % err) from None
+            lines = status.splitlines()
+            enabled = bool(lines) and lines[0].strip() == 'Status: active'
+            return {
+                'backend': 'ufw',
+                'enabled': enabled,
+                'allowed': {name: all(spec in status for spec in
+                                      self.ufw_specs(name))
+                            for name in sorted(INBOUND_PRESETS)},
+                'foreign_drop': enabled,
+            }
+        if backend == 'nftables':
+            try:
+                proc = self._run(['nft', 'list', 'ruleset'])
+                ruleset = getattr(proc, 'stdout', '') or ''
+            except OSError as err:
+                raise _failed('nft list failed: %s' % err) from None
+            installed = 'table %s %s' % (NFT_FAMILY, NFT_IN_TABLE) in ruleset
+            persisted = self.load_inbound()
+            return {
+                'backend': 'nftables',
+                'enabled': installed,
+                'allowed': {name: (self._nft_preset_allowed(ruleset, name)
+                                   if installed
+                                   else name in persisted['allowed'])
+                            for name in sorted(INBOUND_PRESETS)},
+                'foreign_drop': 'policy drop' in ruleset,
+            }
+        return {'backend': 'none', 'enabled': False, 'allowed': {},
+                'foreign_drop': False}
+
+    def set_inbound_preset(self, name: str, allowed: bool) -> bool:
+        """Allow (open) or forbid (close) one preset's ports. Presets only:
+        anything outside INBOUND_PRESETS is InvalidArgs."""
+        if name not in INBOUND_PRESETS:
+            raise HelperError(ERROR_INVALID_ARGS,
+                              'unknown inbound preset: %r' % (name,))
+        backend = self.firewall_backend()
+        if backend == 'ufw':
+            for spec in self.ufw_specs(name):
+                if allowed:
+                    self._run_cmd(['ufw', 'allow', spec])
+                else:
+                    self._run_cmd(['ufw', '--force', 'delete',
+                                   'allow', spec])
+        elif backend == 'nftables':
+            if not self.nft_available():
+                raise _failed('nftables not available')
+            state = self.load_inbound()
+            current = set(state['allowed'])
+            if allowed:
+                current.add(name)
+            else:
+                current.discard(name)
+            state['allowed'] = sorted(current)
+            self.apply_inbound(state['allowed'])
+            self.write_inbound_dropin(state['allowed'])
+            self.save_inbound(state)
+        else:
+            raise _failed('no firewall backend available')
+        if backend == 'ufw':
+            state = self.load_inbound()
+            current = set(state['allowed'])
+            if allowed:
+                current.add(name)
+            else:
+                current.discard(name)
+            state['allowed'] = sorted(current)
+            self.save_inbound(state)
+        return bool(allowed)
+
+    def set_firewall_enabled(self, enabled: bool) -> bool:
+        """Enable (restrict incoming) or disable the firewall. Enabling
+        keeps SSH reachable on a remote box (ref firewall-manager.sh):
+        port 22 is allowed when SSH_CONNECTION is set."""
+        backend = self.firewall_backend()
+        if backend == 'ufw':
+            if enabled:
+                self._run_cmd(['ufw', 'default', 'deny', 'incoming'])
+                self._run_cmd(['ufw', 'default', 'allow', 'outgoing'])
+                if os.environ.get('SSH_CONNECTION'):
+                    self._run_cmd(['ufw', 'allow', '22/tcp'])
+                self._run_cmd(['ufw', '--force', 'enable'])
+            else:
+                self._run_cmd(['ufw', 'disable'])
+        elif backend == 'nftables':
+            if enabled:
+                state = self.load_inbound()
+                self.apply_inbound(state['allowed'])
+                self.write_inbound_dropin(state['allowed'])
+                state['enabled'] = True
+                self.save_inbound(state)
+            else:
+                self._nft(['flush', 'chain', NFT_FAMILY, NFT_IN_TABLE,
+                           NFT_IN_CHAIN])
+                self._nft(['delete', 'table', NFT_FAMILY, NFT_IN_TABLE])
+                state = self.load_inbound()
+                state['enabled'] = False
+                self.save_inbound(state)
+        else:
+            raise _failed('no firewall backend available')
+        return bool(enabled)
+
     # ----------------------------------------------------------------- state
 
     def load_state(self) -> dict:
@@ -642,9 +1039,9 @@ class HelperCore:
                           % (err.strerror or err)) from None
 
     def apply_saved(self) -> dict:
-        """Boot re-apply: charge limit, then the nft blocked set. One leg
-        failing must not skip the other, so errors are collected and
-        reported together."""
+        """Boot re-apply: charge limit, then the nft blocked set, then the
+        inbound preset set. One leg failing must not skip the others, so
+        errors are collected and reported together."""
         state = self.load_state()
         applied: dict = {'charge_limit': None, 'blocked': [], 'errors': []}
         limit = state.get('charge_limit')
@@ -663,6 +1060,17 @@ class HelperCore:
                     applied['blocked'] = sorted(blocked)
                 except HelperError as err:
                     applied['errors'].append(str(err))
+        inbound = self.load_inbound()
+        if inbound['allowed'] or inbound['enabled']:
+            try:
+                if self.firewall_backend() == 'nftables':
+                    self.apply_inbound(inbound['allowed'])
+                    self.write_inbound_dropin(inbound['allowed'])
+                    applied['inbound'] = sorted(inbound['allowed'])
+                else:
+                    applied['inbound'] = sorted(inbound['allowed'])
+            except HelperError as err:
+                applied['errors'].append(str(err))
         return applied
 
 
@@ -702,7 +1110,8 @@ def check_polkit_authorization(connection, sender, action, callback,
     the sender's Unix uid for slice scoping, ``error`` a detail string.
     ``interactive`` passes AllowUserInteraction so the session's agent
     prompts for the device password; it is True only for actions whose
-    policy is ``auth_admin_keep`` (upgrade, removal).
+    policy is ``auth_admin_keep`` (upgrade, removal, sshd start/enable,
+    opening an inbound port, disabling the firewall).
     """
     Gio, GLib = _require_gio()
 
@@ -746,6 +1155,10 @@ def check_polkit_authorization(connection, sender, action, callback,
 
 # Method -> (polkit action, interactive): interactive passes
 # AllowUserInteraction and is reserved for auth_admin_keep actions.
+# Argument-dependent methods (ManageService, SetInboundPreset,
+# SetFirewallEnabled) are NOT listed here: policy_for() below decides
+# them from the already-validated arguments. GetCapabilities and
+# GetFirewallState need no auth and are dispatched before any lookup.
 _METHOD_ACTIONS = {
     'SetChargeLimit': (ACTION_CHARGE, False),
     'SetAppNetwork': (ACTION_NETWORK, False),
@@ -755,7 +1168,50 @@ _METHOD_ACTIONS = {
     'RemovePackage': (ACTION_REMOVE, True),
     'CleanSystem': (ACTION_CLEAN, False),
     'ReadLog': (ACTION_READLOG, False),
+    'SetRfkill': (ACTION_RFKILL, False),
 }
+
+
+def policy_for(method: str, args) -> tuple | None:
+    """(polkit action, interactive) for a method call, or None.
+
+    Every call goes through here. Plain methods map statically.
+    Argument-dependent ones decide from the already-validated
+    arguments: opening remote access (sshd start/enable), opening an
+    inbound port or disabling the firewall needs auth_admin_keep with
+    user interaction (True); closing a port, enabling the firewall and
+    every other allowlisted service change stay allow_active (False).
+    None means refused before any authorization: unknown methods,
+    unauthenticated probes (GetCapabilities, GetFirewallState) and
+    anything outside the allowlists.
+    """
+    if method == 'ManageService':
+        try:
+            name, action = args
+        except (TypeError, ValueError):
+            return None
+        if name not in SERVICE_ALLOW or action not in SERVICE_ACTIONS:
+            return None
+        if name == 'ssh' and action in ('start', 'enable'):
+            return (ACTION_SERVICE_REMOTE, True)
+        return (ACTION_SERVICE, False)
+    if method == 'SetInboundPreset':
+        try:
+            name, allowed = args
+        except (TypeError, ValueError):
+            return None
+        if name not in INBOUND_PRESETS:
+            return None
+        return (ACTION_FW_OPEN, True) if allowed else (ACTION_FW_RESTRICT,
+                                                      False)
+    if method == 'SetFirewallEnabled':
+        try:
+            (enabled,) = args
+        except (TypeError, ValueError):
+            return None
+        return (ACTION_FW_RESTRICT, False) if enabled else (ACTION_FW_OPEN,
+                                                           True)
+    return _METHOD_ACTIONS.get(method)
 
 
 class HelperService:
@@ -812,13 +1268,31 @@ class HelperService:
                        for key, value in caps.items()}
             invocation.return_value(GLib.Variant('(a{sv})', (payload,)))
             return
-        entry = _METHOD_ACTIONS.get(method)
-        if entry is None or conn is None:
+        if method == 'GetFirewallState':
+            try:
+                state = self.core.get_firewall_state()
+            except Exception as err:
+                invocation.return_dbus_error(ERROR_FAILED, str(err))
+                return
+            Gio, GLib = _require_gio()
+            payload = {
+                'backend': GLib.Variant('s', str(state.get('backend'))),
+                'enabled': GLib.Variant('b', bool(state.get('enabled'))),
+                'allowed': GLib.Variant(
+                    'a{sb}', {key: bool(value) for key, value in
+                               (state.get('allowed') or {}).items()}),
+                'foreign_drop': GLib.Variant(
+                    'b', bool(state.get('foreign_drop'))),
+            }
+            invocation.return_value(GLib.Variant('(a{sv})', (payload,)))
+            return
+        args = params.unpack() if params is not None else ()
+        policy = policy_for(method, args)
+        if policy is None or conn is None:
             invocation.return_dbus_error(
                 ERROR_INVALID_ARGS, 'unknown method: %s' % (method,))
             return
-        action, interactive = entry
-        args = params.unpack() if params is not None else ()
+        action, interactive = policy
         try:
             self._authorize(
                 conn, sender, action, interactive,
@@ -871,6 +1345,18 @@ class HelperService:
             elif method == 'RemovePackage':
                 (pkg,) = args
                 self.core.remove_package(str(pkg))
+            elif method == 'ManageService':
+                name, action = args
+                self.core.manage_service(str(name), str(action))
+            elif method == 'SetRfkill':
+                rtype, blocked = args
+                self.core.set_rfkill(str(rtype), bool(blocked))
+            elif method == 'SetInboundPreset':
+                name, allowed = args
+                self.core.set_inbound_preset(str(name), bool(allowed))
+            elif method == 'SetFirewallEnabled':
+                (enabled,) = args
+                self.core.set_firewall_enabled(bool(enabled))
             else:
                 invocation.return_dbus_error(
                     ERROR_INVALID_ARGS, 'unknown method: %s' % (method,))

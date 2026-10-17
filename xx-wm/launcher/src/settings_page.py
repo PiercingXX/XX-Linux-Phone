@@ -10,7 +10,7 @@ _SETTINGS_SECTION_KEYS = ('wifi', 'bluetooth', 'mobile', 'apps', 'appearance',
                           'standby', 'permissions', 'smart_lock',
                           'charging', 'batteryuse', 'screentime', 'medical',
                           'recording', 'captions', 'nearby', 'findmy', 'about',
-                          'storage', 'security')
+                          'storage', 'security', 'services', 'firewall')
 
 # Home side-swipe gestures the user can bind to an app in Settings
 _GESTURE_TITLES = {
@@ -232,12 +232,26 @@ class WifiSection(_Section):
 
     def build(self, win) -> list:
         from gi.repository import Gtk
+        from xx_ui import widgets
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        win._wifi_switch = widgets.make_switch(False)
+        win._wifi_switch.connect(
+            'notify::active',
+            lambda s, p: win._on_wifi_switch_flipped(s, p))
+        win._wifi_switch_updating = False
+        body.append(widgets.setting_row('WiFi', '', win._wifi_switch))
         win._wifi_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         body.append(win._wifi_list_box)
         body.append(_outline_action(
             'Scan for networks', lambda: win._refresh_wifi()))
+        body.append(_outline_action(
+            'Add hidden network…', lambda: win._on_add_hidden()))
+        win._wifi_saved_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.append(_section_title('Saved networks'))
+        body.append(win._wifi_saved_box)
+        win._wifi_service_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        body.append(win._wifi_service_box)
         return [_section_title(self.title), body]
 
     def refresh(self, win) -> None:
@@ -250,12 +264,28 @@ class BluetoothSection(_Section):
 
     def build(self, win) -> list:
         from gi.repository import Gtk
+        from xx_ui import widgets
 
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        win._bt_switch = widgets.make_switch(False)
+        win._bt_switch.connect(
+            'notify::active',
+            lambda s, p: win._on_bt_switch_flipped(s, p))
+        win._bt_switch_updating = False
+        body.append(widgets.setting_row('Bluetooth', '', win._bt_switch))
         win._bt_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         body.append(win._bt_list_box)
         body.append(_outline_action(
             'Scan for devices', lambda: win._refresh_bluetooth(scan=True)))
+        win._bt_unblock_btn = _outline_action(
+            'Unblock Bluetooth', lambda: win._on_bt_unblock())
+        try:
+            win._bt_unblock_btn.set_visible(False)
+        except Exception:
+            pass
+        body.append(win._bt_unblock_btn)
+        win._bt_service_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        body.append(win._bt_service_box)
         return [_section_title(self.title), body]
 
     def refresh(self, win) -> None:
@@ -264,13 +294,15 @@ class BluetoothSection(_Section):
 
 class SoundSection(_Section):
     key = 'sound'
-    title = 'Sound output'
+    title = 'Sound'
 
     def build(self, win) -> list:
         from gi.repository import Gtk
 
         win._sink_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        return [_section_title(self.title), win._sink_list_box]
+        win._source_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        return [_section_title('Sound output'), win._sink_list_box,
+                _section_title('Microphone'), win._source_list_box]
 
 
 class BatterySection(_Section):
@@ -885,6 +917,7 @@ import settings_apps
 import settings_battery_use
 import settings_charging
 import settings_display
+import settings_firewall
 import settings_keyboard
 import settings_launcher
 import settings_lock
@@ -892,6 +925,7 @@ import settings_medical
 import settings_permissions
 import settings_screentime
 import settings_security
+import settings_services
 import settings_smart_lock
 import settings_standby
 import settings_storage
@@ -910,6 +944,8 @@ SETTINGS_SECTIONS: list[tuple[str, type[_Section]]] = [
     ('security', settings_security.SecuritySection),
     ('lock', settings_lock.LockSection),
     ('mobile', MobileSection),
+    ('services', settings_services.ServicesSection),
+    ('firewall', settings_firewall.FirewallSection),
     ('apps', settings_apps.AppsSection),
     ('appearance', AppearanceSection),
     ('display', settings_display.DisplaySection),
@@ -1311,10 +1347,11 @@ class SettingsPage:
         win._refresh_xxdb_section()
         import system_settings
         win._run_bg(system_settings.list_audio_sinks, win._show_sinks)
+        win._run_bg(system_settings.list_audio_sources, win._show_sources)
         win._run_bg(system_settings.list_bt_devices, win._show_bt_devices)
         for key in ('system', 'apps', 'battery', 'about', 'display',
                     'launcher', 'standby', 'permissions', 'smart_lock',
-                    'recording'):
+                    'recording', 'services', 'firewall'):
             section = self._sections.get(key)
             if section is not None:
                 try:
@@ -1359,13 +1396,208 @@ class SettingsPage:
                 win._run_bg(system_settings.list_audio_sinks, win._show_sinks)),
         )
 
-    def _refresh_wifi(self) -> None:
+    def _show_sources(self, sources) -> None:
+        from xx_ui import widgets
+
+        win = self._win
+        box = getattr(win, '_source_list_box', None)
+        if box is None:
+            return
+        if sources is None:
+            _replace_box_children(
+                box, [_section_placeholder('Audio system unavailable.')])
+            return
+        items = list(sources)
+        rows = []
+        for index, source in enumerate(items):
+            row = widgets.list_row(
+                source.description,
+                'Default input' if source.is_default else '',
+                last=index == len(items) - 1)
+            row.connect(
+                'clicked', lambda _b, s=source: win._on_source_selected(s))
+            rows.append(row)
+        _replace_box_children(
+            box, rows or [_section_placeholder('No input devices.')])
+
+    def _on_source_selected(self, source) -> None:
         import system_settings
 
         win = self._win
+        win._run_bg(
+            lambda: system_settings.set_default_source(source.name),
+            lambda ok: (win._show_status(
+                f'Input set to {source.description}.'
+                if ok else 'Could not switch input.'),
+                win._run_bg(system_settings.list_audio_sources,
+                             win._show_sources)),
+        )
+
+    def _refresh_wifi(self) -> None:
+        win = self._win
         _replace_box_children(
             win._wifi_list_box, [_section_placeholder('Scanning…')])
-        win._run_bg(system_settings.list_wifi, win._show_wifi)
+        win._run_bg(self._wifi_snapshot, win._show_wifi_full)
+
+    @staticmethod
+    def _wifi_snapshot():
+        """Worker thread: radio, daemon and network state. Never raises."""
+        import system_settings
+
+        try:
+            enabled = system_settings.wifi_enabled()
+        except Exception:
+            enabled = None
+        try:
+            running = system_settings.nm_running()
+        except Exception:
+            running = False
+        try:
+            networks = system_settings.list_wifi()
+        except Exception:
+            networks = None
+        try:
+            saved = system_settings.saved_wifi_ssids()
+        except Exception:
+            saved = None
+        return {'enabled': enabled, 'nm_running': running,
+                'networks': networks, 'saved': saved}
+
+    def _show_wifi_full(self, res) -> None:
+        win = self._win
+        if not isinstance(res, dict):
+            res = {}
+        switch = getattr(win, '_wifi_switch', None)
+        if switch is not None:
+            win._wifi_switch_updating = True
+            try:
+                switch.set_active(bool(res.get('enabled')))
+            except Exception:
+                pass
+            finally:
+                win._wifi_switch_updating = False
+        self._show_wifi(res.get('networks'))
+        self._show_wifi_saved(res.get('saved'))
+        self._show_wifi_service(res)
+
+    def _show_wifi_service(self, res) -> None:
+        """Start-service row when NetworkManager is down but installed."""
+        from xx_ui import widgets
+
+        win = self._win
+        box = getattr(win, '_wifi_service_box', None)
+        if box is None:
+            return
+        if res.get('nm_running') or res.get('networks') is not None:
+            _replace_box_children(box, [])
+            return
+        import shutil
+        if shutil.which('nmcli') is None:
+            _replace_box_children(
+                box, [_section_placeholder('WiFi unavailable on this device.')])
+            return
+        note = _section_placeholder('NetworkManager is not running.')
+        start = widgets.outline_button(
+            'Start service', lambda: win._on_start_network_service())
+        _replace_box_children(box, [note, start])
+
+    def _show_wifi_saved(self, saved) -> None:
+        from xx_ui import widgets
+
+        win = self._win
+        box = getattr(win, '_wifi_saved_box', None)
+        if box is None:
+            return
+        if saved is None:
+            _replace_box_children(box, [])
+            return
+        items = list(saved)
+        if not items:
+            _replace_box_children(
+                box, [_section_placeholder('No saved networks.')])
+            return
+        rows = []
+        for index, ssid in enumerate(items):
+            row = widgets.list_row(
+                ssid, 'Saved', last=index == len(items) - 1)
+            row.connect(
+                'clicked',
+                lambda _b, s=ssid, w=row: win._on_saved_wifi_selected(s, w))
+            rows.append(row)
+        _replace_box_children(box, rows)
+
+    def _on_wifi_switch_flipped(self, switch, _pspec) -> None:
+        import system_settings
+
+        win = self._win
+        if getattr(win, '_wifi_switch_updating', False):
+            return
+        enabled = bool(switch.get_active())
+
+        def _work():
+            return system_settings.set_wifi_enabled(enabled)
+
+        def _done(ok) -> None:
+            if not ok:
+                win._show_status('Could not switch WiFi.')
+            win._refresh_wifi()
+
+        win._run_bg(_work, _done)
+
+    def _on_start_network_service(self) -> None:
+        win = self._win
+        win._show_status('Starting NetworkManager…')
+        try:
+            import helper_client
+        except ImportError as err:
+            win._show_status(f'Could not start service: {err}')
+            return
+
+        def _done(ok: bool, detail) -> None:
+            win._show_status('NetworkManager started.'
+                             if ok else f'Could not start service: {detail}')
+            win._refresh_wifi()
+
+        try:
+            helper_client.manage_service('network', 'start', _done)
+        except Exception as err:
+            win._show_status(f'Could not start service: {err}')
+
+    def _on_add_hidden(self) -> None:
+        win = self._win
+        anchor = getattr(win, '_wifi_list_box', None)
+        win.item_actions._show_entry_dialog(
+            anchor, 'Network name', '', 'Next',
+            lambda ssid: self._on_hidden_password(anchor, ssid))
+
+    def _on_hidden_password(self, anchor, ssid: str) -> None:
+        win = self._win
+        win.item_actions._show_entry_dialog(
+            anchor, f'Password for {ssid}', '', 'Connect',
+            lambda password: win._connect_wifi(ssid, password or None,
+                                               None, hidden=True),
+            password=True)
+
+    def _on_saved_wifi_selected(self, ssid: str, widget) -> None:
+        win = self._win
+        win.item_actions._show_action_menu(
+            widget, ssid,
+            [('Connect', lambda: win._connect_wifi(ssid, None)),
+             ('Forget', lambda: self._confirm_forget_wifi(widget, ssid)),
+             ('Cancel', lambda: None)])
+
+    def _confirm_forget_wifi(self, anchor, ssid: str) -> None:
+        import system_settings
+
+        win = self._win
+        win.item_actions._show_action_menu(
+            anchor, f'Forget {ssid}?',
+            [('Forget', lambda: win._run_bg(
+                lambda: system_settings.forget_wifi(ssid),
+                lambda result: (
+                    win._show_status(result[1] if result else 'Forget failed.'),
+                    win._refresh_wifi()))),
+             ('Cancel', lambda: None)])
 
     def _show_wifi(self, networks) -> None:
         from xx_ui import widgets
@@ -1400,7 +1632,12 @@ class SettingsPage:
     def _on_wifi_selected(self, net, widget) -> None:
         win = self._win
         if net.in_use:
-            win._show_status(f'Already connected to {net.ssid}.')
+            win.item_actions._show_action_menu(
+                widget, net.ssid,
+                [('Disconnect', lambda: self._on_wifi_disconnect(net)),
+                 ('Forget',
+                  lambda: self._confirm_forget_wifi(widget, net.ssid)),
+                 ('Details', lambda: self._on_wifi_details(net, widget))])
             return
         if net.security == 'open':
             win._connect_wifi(net.ssid, None, net.security)
@@ -1410,14 +1647,41 @@ class SettingsPage:
             lambda password: win._connect_wifi(net.ssid, password, net.security),
             password=True)
 
+    def _on_wifi_disconnect(self, net) -> None:
+        import system_settings
+
+        win = self._win
+        win._show_status(f'Disconnecting from {net.ssid}…')
+        win._run_bg(
+            lambda: system_settings.disconnect_wifi(net.ssid),
+            lambda result: (win._show_status(
+                result[1] if result else 'Disconnect failed.'),
+                win._refresh_wifi()),
+        )
+
+    def _on_wifi_details(self, net, widget) -> None:
+        import system_settings
+
+        win = self._win
+        win._run_bg(
+            lambda: system_settings.wifi_details(net.ssid),
+            lambda details: win.item_actions._show_action_menu(
+                widget,
+                system_settings.wifi_details_text(net.ssid, details),
+                [('Close', lambda: None)]),
+        )
+
     def _connect_wifi(self, ssid: str, password: str | None,
-                      security: str | None = None) -> None:
+                      security: str | None = None,
+                      hidden: bool = False) -> None:
         import system_settings
 
         win = self._win
         win._show_status(f'Connecting to {ssid}…')
         win._run_bg(
-            lambda: system_settings.connect_wifi(ssid, password, security=security),
+            lambda: system_settings.connect_wifi(ssid, password,
+                                                 security=security,
+                                                 hidden=hidden),
             lambda result: (win._show_status(result[1] if result else 'Connection failed.'),
                             win._refresh_wifi()),
         )
@@ -1433,9 +1697,137 @@ class SettingsPage:
             system_settings.start_bt_discovery()
             GLib.timeout_add_seconds(
                 6, lambda: win._run_bg(system_settings.list_bt_devices,
-                                       win._show_bt_devices) or False)
+                                       win._show_bt_full) or False)
             return
-        win._run_bg(system_settings.list_bt_devices, win._show_bt_devices)
+        win._run_bg(self._bt_snapshot, win._show_bt_full)
+
+    @staticmethod
+    def _bt_snapshot():
+        """Worker thread: devices, power and rfkill state. Never raises."""
+        import system_settings
+
+        try:
+            devices = system_settings.list_bt_devices()
+        except Exception:
+            devices = None
+        try:
+            powered = system_settings.bt_powered()
+        except Exception:
+            powered = None
+        try:
+            blocked = system_settings.bt_soft_blocked()
+        except Exception:
+            blocked = False
+        return {'devices': devices, 'powered': powered, 'blocked': blocked}
+
+    def _show_bt_full(self, res) -> None:
+        win = self._win
+        if isinstance(res, dict):
+            devices = res.get('devices')
+        elif isinstance(res, list) or res is None:
+            devices = res
+        else:
+            devices = None
+        self._show_bt_devices(devices)
+        switch = getattr(win, '_bt_switch', None)
+        if switch is not None and isinstance(res, dict):
+            win._bt_switch_updating = True
+            try:
+                switch.set_active(bool(res.get('powered')))
+            except Exception:
+                pass
+            finally:
+                win._bt_switch_updating = False
+        unblock = getattr(win, '_bt_unblock_btn', None)
+        if unblock is not None:
+            try:
+                unblock.set_visible(bool(isinstance(res, dict)
+                                         and res.get('blocked')))
+            except Exception:
+                pass
+        self._show_bt_service(devices)
+
+    def _show_bt_service(self, devices) -> None:
+        """Start-service row when bluetoothd is down."""
+        from xx_ui import widgets
+
+        win = self._win
+        box = getattr(win, '_bt_service_box', None)
+        if box is None:
+            return
+        if devices is not None:
+            _replace_box_children(box, [])
+            return
+        note = _section_placeholder(
+            'Bluetooth is unavailable — the service may be stopped.')
+        start = widgets.outline_button(
+            'Start service', lambda: win._on_start_bluetooth_service())
+        _replace_box_children(box, [note, start])
+
+    def _on_bt_switch_flipped(self, switch, _pspec) -> None:
+        import system_settings
+
+        win = self._win
+        if getattr(win, '_bt_switch_updating', False):
+            return
+        enabled = bool(switch.get_active())
+
+        def _work():
+            return system_settings.set_bt_powered(enabled)
+
+        def _done(ok) -> None:
+            if not ok:
+                win._show_status('Could not switch Bluetooth.')
+            win._refresh_bluetooth()
+
+        win._run_bg(_work, _done)
+
+    def _on_bt_unblock(self) -> None:
+        import system_settings
+
+        win = self._win
+        try:
+            if system_settings.rfkill_unblock('bluetooth'):
+                win._show_status('Bluetooth unblocked.')
+                win._refresh_bluetooth()
+                return
+        except Exception:
+            pass
+        win._show_status('Unblocking Bluetooth…')
+        try:
+            import helper_client
+        except ImportError as err:
+            win._show_status(f'Could not unblock: {err}')
+            return
+
+        def _done(ok: bool, detail) -> None:
+            win._show_status('Bluetooth unblocked.'
+                             if ok else f'Could not unblock: {detail}')
+            win._refresh_bluetooth()
+
+        try:
+            helper_client.set_rfkill('bluetooth', False, _done)
+        except Exception as err:
+            win._show_status(f'Could not unblock: {err}')
+
+    def _on_start_bluetooth_service(self) -> None:
+        win = self._win
+        win._show_status('Starting Bluetooth…')
+        try:
+            import helper_client
+        except ImportError as err:
+            win._show_status(f'Could not start service: {err}')
+            return
+
+        def _done(ok: bool, detail) -> None:
+            win._show_status('Bluetooth started.'
+                             if ok else f'Could not start service: {detail}')
+            win._refresh_bluetooth()
+
+        try:
+            helper_client.manage_service('bluetooth', 'start', _done)
+        except Exception as err:
+            win._show_status(f'Could not start service: {err}')
 
     def _show_bt_devices(self, devices) -> None:
         from xx_ui import widgets
@@ -1468,14 +1860,65 @@ class SettingsPage:
         import system_settings
 
         win = self._win
-        action = (system_settings.connect_bt_device if dev.paired
-                  else system_settings.pair_bt_device)
-        win._show_status(f'{"Connecting" if dev.paired else "Pairing"} {dev.name}…')
+        if not dev.paired:
+            win._show_status(f'Pairing {dev.name}…')
+            win._run_bg(
+                lambda: system_settings.pair_bt_device(dev.address),
+                lambda result: (win._show_status(
+                    result[1] if result else 'Bluetooth error.'),
+                    win._refresh_bluetooth()),
+            )
+            return
+        link = ('Disconnect' if dev.connected else 'Connect')
+        win.item_actions._show_action_menu(
+            getattr(win, '_bt_list_box', None),
+            dev.name or dev.address,
+            [(link, lambda: self._on_bt_link(dev)),
+             ('Forget', lambda: self._confirm_forget_bt(dev)),
+             ('Rename', lambda: self._on_bt_rename(dev))])
+
+    def _on_bt_link(self, dev) -> None:
+        import system_settings
+
+        win = self._win
+        action = (system_settings.disconnect_bt_device if dev.connected
+                  else system_settings.connect_bt_device)
+        win._show_status(
+            f'{"Disconnecting" if dev.connected else "Connecting"} '
+            f'{dev.name}…')
         win._run_bg(
             lambda: action(dev.address),
-            lambda result: (win._show_status(result[1] if result else 'Bluetooth error.'),
-                            win._refresh_bluetooth()),
+            lambda result: (win._show_status(
+                result[1] if result else 'Bluetooth error.'),
+                win._refresh_bluetooth()),
         )
+
+    def _confirm_forget_bt(self, dev) -> None:
+        import system_settings
+
+        win = self._win
+        win.item_actions._show_action_menu(
+            getattr(win, '_bt_list_box', None),
+            f'Forget {dev.name or dev.address}?',
+            [('Forget', lambda: win._run_bg(
+                lambda: system_settings.forget_bt_device(dev.address),
+                lambda result: (
+                    win._show_status(result[1] if result else 'Forget failed.'),
+                    win._refresh_bluetooth()))),
+             ('Cancel', lambda: None)])
+
+    def _on_bt_rename(self, dev) -> None:
+        import system_settings
+
+        win = self._win
+        win.item_actions._show_entry_dialog(
+            getattr(win, '_bt_list_box', None), 'Rename',
+            dev.name or '', 'Rename',
+            lambda alias: win._run_bg(
+                lambda: system_settings.rename_bt_device(dev.address, alias),
+                lambda result: (
+                    win._show_status(result[1] if result else 'Rename failed.'),
+                    win._refresh_bluetooth())))
 
     def _settings_row(self, title: str, control):
         return _settings_row(title, control)

@@ -616,10 +616,18 @@ class TestWifiPasswordMode:
         assert w.shown == []
         assert w.connected == [('Cafe', None, 'open')]
 
-    def test_current_network_is_noop(self, window):
+    def test_current_network_opens_menu(self, window):
         w = self._bare_wifi(window)
+        w.menus = []
+        w.item_actions = SimpleNamespace(
+            _show_entry_dialog=lambda *args, **kwargs: w.shown.append(
+                (args, kwargs)),
+            _show_action_menu=lambda *args: w.menus.append(args))
         net = SimpleNamespace(ssid='HomeNet', security='WPA2', in_use=True)
         w._on_wifi_selected(net, object())
         assert w.shown == []
         assert w.connected == []
-        assert w.statuses == ['Already connected to HomeNet.']
+        assert w.statuses == []
+        assert len(w.menus) == 1
+        assert [label for label, _cb in w.menus[0][2]] == [
+            'Disconnect', 'Forget', 'Details']

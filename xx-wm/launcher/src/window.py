@@ -2027,6 +2027,12 @@ class ShellWindow(Adw.ApplicationWindow):
     def _on_sink_selected(self, sink) -> None:
         return _settings(self)._on_sink_selected(sink)
 
+    def _show_sources(self, sources) -> None:
+        return _settings(self)._show_sources(sources)
+
+    def _on_source_selected(self, source) -> None:
+        return _settings(self)._on_source_selected(source)
+
     def _refresh_wifi(self) -> None:
         return _settings(self)._refresh_wifi()
 
@@ -2036,9 +2042,23 @@ class ShellWindow(Adw.ApplicationWindow):
     def _on_wifi_selected(self, net, widget: Gtk.Widget) -> None:
         return _settings(self)._on_wifi_selected(net, widget)
 
+    def _on_saved_wifi_selected(self, ssid: str, widget: Gtk.Widget) -> None:
+        return _settings(self)._on_saved_wifi_selected(ssid, widget)
+
+    def _on_add_hidden(self) -> None:
+        return _settings(self)._on_add_hidden()
+
+    def _on_wifi_switch_flipped(self, switch, pspec) -> None:
+        return _settings(self)._on_wifi_switch_flipped(switch, pspec)
+
+    def _on_start_network_service(self) -> None:
+        return _settings(self)._on_start_network_service()
+
     def _connect_wifi(self, ssid: str, password: str | None,
-                      security: str | None = None) -> None:
-        return _settings(self)._connect_wifi(ssid, password, security)
+                      security: str | None = None,
+                      hidden: bool = False) -> None:
+        return _settings(self)._connect_wifi(ssid, password, security,
+                                             hidden)
 
     def _refresh_bluetooth(self, scan: bool = False) -> None:
         return _settings(self)._refresh_bluetooth(scan)
@@ -2048,6 +2068,15 @@ class ShellWindow(Adw.ApplicationWindow):
 
     def _on_bt_selected(self, dev) -> None:
         return _settings(self)._on_bt_selected(dev)
+
+    def _on_bt_switch_flipped(self, switch, pspec) -> None:
+        return _settings(self)._on_bt_switch_flipped(switch, pspec)
+
+    def _on_bt_unblock(self) -> None:
+        return _settings(self)._on_bt_unblock()
+
+    def _on_start_bluetooth_service(self) -> None:
+        return _settings(self)._on_start_bluetooth_service()
 
     def _settings_row(self, title: str, control: Gtk.Widget) -> Gtk.Widget:
         # Title above the control: label + entry side by side forced width.

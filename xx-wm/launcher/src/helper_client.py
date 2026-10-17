@@ -238,3 +238,87 @@ def remove_package(pkg: str, on_done: ResultCallback) -> None:
         return
     _call_helper('RemovePackage', params,
                  lambda ok, _result: on_done(ok, None if ok else _result))
+
+
+def manage_service(name: str, action: str, on_done: ResultCallback) -> None:
+    """Start/stop/restart/enable/disable one curated service by key
+    (``bluetooth``, ``ssh``, … — the helper allowlists the rest).
+
+    ``on_done(True, None)`` on success, ``(False, error)`` otherwise.
+    """
+    try:
+        Gio, GLib = _gio()
+        params = GLib.Variant('(ss)', (str(name), str(action)))
+    except ImportError as err:
+        on_done(False, 'D-Bus unavailable: %s' % err)
+        return
+    _call_helper('ManageService', params,
+                 lambda ok, _result: on_done(ok, None if ok else _result))
+
+
+def set_rfkill(rtype: str, blocked: bool, on_done: ResultCallback) -> None:
+    """Block (``blocked`` True) or unblock the wifi/bluetooth radio.
+
+    ``on_done(True, None)`` on success, ``(False, error)`` otherwise.
+    """
+    try:
+        Gio, GLib = _gio()
+        params = GLib.Variant('(sb)', (str(rtype), bool(blocked)))
+    except ImportError as err:
+        on_done(False, 'D-Bus unavailable: %s' % err)
+        return
+    _call_helper('SetRfkill', params,
+                 lambda ok, _result: on_done(ok, None if ok else _result))
+
+
+def set_inbound_preset(name: str, allowed: bool,
+                       on_done: ResultCallback) -> None:
+    """Allow (``allowed`` True) or forbid one inbound preset's ports.
+
+    ``on_done(True, None)`` on success, ``(False, error)`` otherwise.
+    """
+    try:
+        Gio, GLib = _gio()
+        params = GLib.Variant('(sb)', (str(name), bool(allowed)))
+    except ImportError as err:
+        on_done(False, 'D-Bus unavailable: %s' % err)
+        return
+    _call_helper('SetInboundPreset', params,
+                 lambda ok, _result: on_done(ok, None if ok else _result))
+
+
+def set_firewall_enabled(enabled: bool, on_done: ResultCallback) -> None:
+    """Enable (``enabled`` True) or disable the inbound firewall.
+
+    ``on_done(True, None)`` on success, ``(False, error)`` otherwise.
+    """
+    try:
+        Gio, GLib = _gio()
+        params = GLib.Variant('(b)', (bool(enabled),))
+    except ImportError as err:
+        on_done(False, 'D-Bus unavailable: %s' % err)
+        return
+    _call_helper('SetFirewallEnabled', params,
+                 lambda ok, _result: on_done(ok, None if ok else _result))
+
+
+def get_firewall_state(on_done: ResultCallback) -> None:
+    """Read backend, on/off and per-preset inbound state (no auth needed).
+
+    ``on_done(True, {'backend': ..., 'enabled': bool,
+    'allowed': {name: bool}, 'foreign_drop': bool})`` or ``(False, error)``
+    where a missing helper yields ``HELPER_NOT_INSTALLED``.
+    """
+    def _on_reply(ok: bool, result) -> None:
+        if not ok:
+            on_done(False, HELPER_NOT_INSTALLED
+                    if _is_missing_service(str(result)) else result)
+            return
+        if isinstance(result, dict):
+            on_done(True, {key: result.get(key) for key in
+                           ('backend', 'enabled', 'allowed',
+                            'foreign_drop')})
+            return
+        on_done(False, result)
+
+    _call_helper('GetFirewallState', None, _on_reply)

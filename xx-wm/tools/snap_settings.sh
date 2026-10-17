@@ -70,11 +70,13 @@ shot_nav screentime 'screentime' 0
 shot_nav standby 'standby' 0
 shot_nav privacy 'permissions' 0
 shot_nav smartlock 'smart_lock' 0
+shot_nav services 'services' 0
+shot_nav firewall 'firewall' 0
 shot_nav medical 'medical' 0
 shot_nav extras 'recording' 0
 shot_nav about 'about' 0
 shot_nav bottom '' 1
-SHOTS="top wifi charging screentime standby privacy smartlock medical extras about bottom"
+SHOTS="top wifi charging screentime standby privacy smartlock services firewall medical extras about bottom"
 
 run_one() {
     _home=$1 _out=$2 _nav=$3

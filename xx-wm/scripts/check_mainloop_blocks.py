@@ -182,6 +182,12 @@ ALLOW = {
         'settings _run_bg worker (user-initiated pair).',
     ('system_settings.py', 'connect_bt_device'):
         'settings _run_bg worker (user-initiated connect).',
+    ('system_settings.py', 'disconnect_bt_device'):
+        'settings _run_bg worker (user-initiated disconnect).',
+    ('system_settings.py', 'forget_bt_device'):
+        'settings _run_bg worker (user-initiated forget).',
+    ('system_settings.py', 'systemd_unit_state'):
+        'settings _run_bg worker (unprivileged state read).',
     ('system_status.py', 'wifi_ssid'):
         'status_line_async worker, --rescan no.',
     ('system_status.py', 'modem_paths'):
