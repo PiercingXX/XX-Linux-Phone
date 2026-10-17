@@ -26,3 +26,9 @@ main_en-US.dict and main_en-GB.dict, copied byte-identical from
 ref/xx-keyboard/app/src/main/assets/dicts/. AOSP wordlist lineage
 (via the HeliBoard aosp-dictionaries collection), Apache-2.0, ver4
 binary tries. No license attribute is embedded in the binaries.
+
+JNI header (include/jni.h)
+--------------------------
+AOSP libnativehelper's VM-neutral jni.h, copied unchanged from the
+Android NDK 28.0.13004108 sysroot. Apache License 2.0. The decoder
+uses only its types, so the build needs no JDK.

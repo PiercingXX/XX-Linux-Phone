@@ -52,7 +52,7 @@ jclass shimFindClass(JNIEnv *, const char *) { return nullptr; }
 void shimExceptionClear(JNIEnv *) {}
 
 JNIEnv *makeHostJniEnv() {
-    static JNINativeInterface_ iface;
+    static JNINativeInterface iface;
     static JNIEnv env;
     memset(&iface, 0, sizeof(iface));
     iface.GetArrayLength = shimGetArrayLength;

@@ -5,26 +5,9 @@
 # The rest of Stevia is C; the decoder needs C++ only when glide is on.
 add_languages('cpp', required : true)
 
-javac = find_program('javac', required : true)
-jdk_bin_dir = run_command('dirname', javac.full_path(), check : true).stdout().strip()
-jdk_home = run_command('dirname', jdk_bin_dir, check : true).stdout().strip()
-# javac is usually a symlink (alternatives); resolve to the real JDK home.
-jdk_real = run_command('readlink', '-f', javac.full_path(), check : true).stdout().strip()
-jdk_home = run_command('dirname', run_command('dirname', jdk_real, check : true).stdout().strip(),
-  check : true).stdout().strip()
-if host_machine.system() == 'darwin'
-  jni_platform = 'darwin'
-elif host_machine.system() == 'windows'
-  jni_platform = 'win32'
-else
-  jni_platform = 'linux'
-endif
-
-xxglide_inc = include_directories(
-  'latinime',
-  jdk_home / 'include',
-  jdk_home / 'include' / jni_platform,
-)
+# include/jni.h is AOSP's VM-neutral JNI header (Apache-2.0, from the NDK
+# sysroot): the decoder only needs the JNI types, never a JDK.
+xxglide_inc = include_directories('latinime', 'include')
 
 # Same selection as tools/glide-replay's Makefile: every .cpp under latinime/.
 latinime_srcs = run_command(
