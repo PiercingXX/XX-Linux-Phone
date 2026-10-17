@@ -152,6 +152,9 @@ discovery, and pins R's fingerprint for every TLS connection below.
    verifies the received bytes and answers `422` on mismatch
    (protocol §4.2: "the receiver should verify the received data
    against it and respond with `422` on a mismatch").
+   Official senders stream the body with `Transfer-Encoding: chunked`
+   (no `Content-Length`); xx-share decodes chunked framing, enforcing
+   the declared file size while streaming.
 4. **Completion.** When all accepted files of the session are uploaded,
    the transfer is complete. Either side may then close local state.
 5. **Cancel.** `POST /api/localsend/v2/cancel?sessionId=<s>` (no body,

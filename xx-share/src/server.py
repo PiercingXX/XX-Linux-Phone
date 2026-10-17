@@ -347,6 +347,12 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args: object) -> None:
         pass
 
+    def _access_log(self, code: int, size: int) -> None:
+        # Query strings carry session tokens: log the endpoint path only.
+        path = urlparse(self.path).path
+        logger.info("%s %s -> %d (%d bytes)",
+                    self.command, path, code, size)
+
     def _send_json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(code)
@@ -354,6 +360,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        self._access_log(code, len(body))
 
     def _error(self, code: int, message: str) -> None:
         self._send_json(code, {"message": message})
@@ -362,6 +369,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Length", "0")
         self.end_headers()
+        self._access_log(code, 0)
 
     def _read_json(self) -> object:
         try:
@@ -483,7 +491,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, build_prepare_response(session.session_id, tokens))
 
-    def _drain_body(self, length: int) -> None:
+    def _drain_body(self, length: int | None) -> None:
+        if length is None:
+            self._drain_chunked()
+            return
         try:
             remaining = min(max(length, 0), self._share.max_transfer_bytes)
         except (TypeError, ValueError):
@@ -497,19 +508,105 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             remaining -= len(chunk)
 
+    def _read_chunk_size(self) -> int | None:
+        line = self.rfile.readline(8192)
+        if not line:
+            return None
+        if not line.endswith(b"\n"):
+            raise ValueError("bad chunk framing")
+        try:
+            return int(line.strip().split(b";", 1)[0], 16)
+        except ValueError:
+            raise ValueError("bad chunk framing") from None
+
+    def _drain_chunked(self) -> None:
+        try:
+            total = 0
+            cap = self._share.max_transfer_bytes
+            while True:
+                size = self._read_chunk_size()
+                if size is None or size == 0:
+                    return
+                total += size
+                if total > cap:
+                    return
+                remaining = size
+                while remaining > 0:
+                    try:
+                        piece = self.rfile.read(min(65536, remaining))
+                    except (OSError, ValueError):
+                        return
+                    if not piece:
+                        return
+                    remaining -= len(piece)
+                try:
+                    terminator = self.rfile.readline(8192)
+                except (OSError, ValueError):
+                    return
+                if terminator != b"\r\n":
+                    return
+        except (OSError, ValueError):
+            return
+
+    def _store_chunked(self, handle, digest, session, cap: int) -> None:
+        # Oversize bodies are discarded (not stored) until the final
+        # chunk so the client still gets a clean 400 answer; the
+        # discard is bounded by max_transfer_bytes like _drain_body.
+        total = 0
+        over = False
+        share = self._share
+        drain_cap = share.max_transfer_bytes
+        while True:
+            size = self._read_chunk_size()
+            if size is None:
+                raise ValueError("truncated body")
+            if size == 0:
+                break
+            total += size
+            if total > cap:
+                over = True
+            if over and total > drain_cap:
+                raise ValueError("bad body size")
+            remaining = size
+            while remaining > 0:
+                piece = self.rfile.read(min(65536, remaining))
+                if not piece:
+                    raise ValueError("truncated body")
+                remaining -= len(piece)
+                if not over:
+                    handle.write(piece)
+                    digest.update(piece)
+                    with share.lock:
+                        if session.state == ACCEPTED:
+                            session.last_activity = time.monotonic()
+            if self.rfile.readline(8192) != b"\r\n":
+                raise ValueError("bad chunk framing")
+        for _ in range(100):
+            line = self.rfile.readline(8192)
+            if not line or line in (b"\r\n", b"\n"):
+                break
+        else:
+            raise ValueError("bad chunk framing")
+        if over:
+            raise ValueError("bad body size")
+
     def _handle_upload(self, query: dict) -> None:
         session_id = query.get("sessionId", [None])[0]
         file_id = query.get("fileId", [None])[0]
         token = query.get("token", [None])[0]
         share = self._share
-        try:
-            length = int(self.headers.get("Content-Length", "-1"))
-        except ValueError:
-            self._error(400, "bad Content-Length")
-            return
-        if length < 0:
-            self._error(400, "bad Content-Length")
-            return
+        chunked = "chunked" in (self.headers.get("Transfer-Encoding")
+                                or "").lower()
+        length: int | None = None
+        if not chunked:
+            try:
+                length = int(self.headers.get("Content-Length", "-1"))
+            except ValueError:
+                self._error(400, "bad Content-Length")
+                return
+            if length < 0:
+                self._error(400, "bad Content-Length")
+                return
         with share.lock:
             session = share.sessions.get(session_id or "")
             if session is None:
@@ -538,29 +635,38 @@ class _Handler(BaseHTTPRequestHandler):
                 self._error(403, "transfer not accepted yet")
                 return
             meta = session.files[file_id]
-        if length > meta.size:
+        if length is not None and length > meta.size:
             self._drain_body(length)
             self._error(400, "bad body size")
             return
         staged = share.stage_path(session, file_id)
         try:
             digest = hashlib.sha256()
-            remaining = length
             with open(staged, "wb") as handle:
-                while remaining > 0:
-                    chunk = self.rfile.read(min(65536, remaining))
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-                    digest.update(chunk)
-                    remaining -= len(chunk)
-                    with share.lock:
-                        if session.state == ACCEPTED:
-                            session.last_activity = time.monotonic()
-            if remaining:
-                staged.unlink(missing_ok=True)
-                self._error(400, "truncated body")
-                return
+                if chunked:
+                    try:
+                        self._store_chunked(handle, digest, session,
+                                            meta.size)
+                    except ValueError as error:
+                        staged.unlink(missing_ok=True)
+                        self._error(400, str(error))
+                        return
+                else:
+                    remaining = length or 0
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(65536, remaining))
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+                        digest.update(chunk)
+                        remaining -= len(chunk)
+                        with share.lock:
+                            if session.state == ACCEPTED:
+                                session.last_activity = time.monotonic()
+                    if remaining:
+                        staged.unlink(missing_ok=True)
+                        self._error(400, "truncated body")
+                        return
             if meta.sha256 and digest.hexdigest() != meta.sha256.lower():
                 staged.unlink(missing_ok=True)
                 self._error(422, "checksum mismatch")
