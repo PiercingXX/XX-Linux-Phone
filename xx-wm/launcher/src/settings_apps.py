@@ -17,6 +17,7 @@ itself never touches subprocess or D-Bus directly.
 from __future__ import annotations
 
 import settings_page
+import settings_ui as ui
 
 # Mirror of the helper's protected list for UX pre-checks (the helper
 # enforces it server-side; a test pins both to the same verdicts).
@@ -246,36 +247,73 @@ def _refresh_apps(win) -> None:
 
 # ------------------------------------------------------------------ section
 
+# app_id -> package subtitle ('' when nothing owns the desktop file),
+# filled once per app by a settings worker: owner lookups shell out.
+_PACKAGES: dict = {}
+
+
+def package_subtitle(info) -> str:
+    """Apps-row subtitle from resolve_owner_for_entry: the package name,
+    'Flatpak · <id>', or '' (never the desktop id)."""
+    if not isinstance(info, dict):
+        return ''
+    if info.get('flatpak'):
+        return 'Flatpak · %s' % info['flatpak']
+    return str(info.get('owner') or '')
+
+
+def lookup_packages(entries) -> dict:
+    """(Blocking: worker only.) Package subtitles for apps not cached."""
+    found = {}
+    for entry in entries:
+        app_id = getattr(entry, 'app_id', None)
+        if not app_id or app_id in _PACKAGES:
+            continue
+        try:
+            found[app_id] = package_subtitle(resolve_owner_for_entry(entry))
+        except Exception:
+            found[app_id] = ''
+    return found
+
+
 class AppsSection(settings_page._Section):
     """Settings section: the installed-apps list; a tap starts the
     uninstall flow for that app."""
 
     key = 'apps'
-    title = 'Apps'
+    title = 'Installed apps'
 
     def __init__(self) -> None:
         self._list_box = None
+        self._looking = False
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from settings_page import (_section_placeholder, _section_title)
-
-        self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                 spacing=0)
+        built = ui.group(self.title, note='Tap an app to review and '
+                         'uninstall it. System packages are protected.')
+        self._list_box = built[1]
         self._render(win)
-        note = _section_placeholder(
-            'Tap an app to review and uninstall it. System packages '
-            'are protected.')
-        return [_section_title(self.title), self._list_box, note]
+        return built
 
     def refresh(self, win) -> None:
         self._render(win)
+        try:
+            entries = list(win.app_index.entries)
+        except Exception:
+            return
+        if self._looking or all(getattr(e, 'app_id', None) in _PACKAGES
+                                for e in entries):
+            return
+        self._looking = True
+        _run_bg(lambda: lookup_packages(entries),
+                lambda found: self._on_packages(win, found))
+
+    def _on_packages(self, win, found) -> None:
+        self._looking = False
+        if isinstance(found, dict):
+            _PACKAGES.update(found)
+        self._render(win)
 
     def _render(self, win) -> None:
-        from settings_page import (_replace_box_children,
-                                   _section_placeholder)
-        from xx_ui import widgets
-
         if self._list_box is None:
             return
         try:
@@ -283,17 +321,11 @@ class AppsSection(settings_page._Section):
         except Exception:
             entries = []
         if not entries:
-            _replace_box_children(
-                self._list_box,
-                [_section_placeholder('No apps indexed yet.')])
+            ui.fill(self._list_box, [ui.note_row('No apps indexed yet.')])
             return
-        rows = []
-        for index, entry in enumerate(entries):
-            row = widgets.list_row(
-                _display_name(win, entry), getattr(entry, 'app_id', ''),
-                last=index == len(entries) - 1)
-            row.connect(
-                'clicked',
-                lambda _b, e=entry, r=row: begin_uninstall(win, r, e))
-            rows.append(row)
-        _replace_box_children(self._list_box, rows)
+        rows = [ui.row(_display_name(win, entry),
+                       _PACKAGES.get(getattr(entry, 'app_id', ''), ''),
+                       on_activate=lambda r, e=entry: begin_uninstall(
+                           win, r, e))
+                for entry in entries]
+        ui.fill(self._list_box, rows)

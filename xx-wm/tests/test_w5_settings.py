@@ -325,6 +325,19 @@ class _FakeWidget:
         self.props = {}
         self.handlers = {}
 
+    def set_visible(self, value):
+        self.props['visible'] = bool(value)
+
+    def get_visible(self):
+        return self.props.get('visible', True)
+
+    def __getattr__(self, name):
+        # Any other setter the settings row builders call is recorded.
+        if name.startswith('set_'):
+            return lambda *args: self.props.__setitem__(
+                name[4:], args[0] if len(args) == 1 else args)
+        raise AttributeError(name)
+
     @classmethod
     def new(cls, *args, **kwargs):
         return cls(*args, **kwargs)
@@ -711,6 +724,12 @@ def _buttons(box):
     return found
 
 
+def _click(widget):
+    """Fire a tappable row or button the way a tap does."""
+    callback, _args = widget.handlers['clicked']
+    callback(widget)
+
+
 def _switches(box):
     found = []
 
@@ -737,15 +756,15 @@ class TestStandbySection:
         win = _bare_win()
         widgets = self._section().build(win)
         titles = [w.label_text() for w in widgets
-                  if isinstance(w, _FakeLabel)]
+                  if 'xx-set-caption' in w.classes]
         assert titles == ['BATTERY SAVER', 'APP STANDBY']
-        assert all('xx-section-label' in w.classes
-                   for w in widgets if isinstance(w, _FakeLabel))
+        assert [w for w in widgets if 'xx-set-card' in w.classes]
 
     def test_saver_effects_and_builtins_listed(self, fake_gtk):
         win = _bare_win()
         widgets = self._section().build(win)
-        texts = _labels(widgets[1]) + _labels(widgets[3])
+        notes = [w for w in widgets if 'xx-set-footnote' in w.classes]
+        texts = [w.label_text() for w in notes]
         assert any('weather' in text for text in texts)
         for name in ('Dialer', 'TxxT daemon', 'Calls', 'Clock & alarms',
                      'Media playing'):
@@ -755,10 +774,10 @@ class TestStandbySection:
         win = _bare_win()
         section = self._section()
         section.build(win)
-        assert 'Frozen now: 0' in _labels(win._standby_frozen_label)
+        assert '0 apps frozen now' in _labels(win._standby_frozen_label)
         win.standby.frozen_apps = ['a.desktop', 'b.desktop']
         section.refresh(win)
-        assert 'Frozen now: 2' in _labels(win._standby_frozen_label)
+        assert '2 apps frozen now' in _labels(win._standby_frozen_label)
 
     def test_saver_flip_drives_controller_and_config(self, fake_gtk):
         win = _bare_win()
@@ -771,41 +790,40 @@ class TestStandbySection:
         assert win._saver_set is True
         assert win.config.battery_saver is True
 
-    def test_threshold_segments(self, fake_gtk):
+    def test_threshold_row_opens_choices(self, fake_gtk):
         win = _bare_win()
         section = self._section()
         section.build(win)
-        segments = _buttons(section._threshold_box)
-        assert {btn.label_text() for btn in segments} == {
-            '10%', '15%', '20%', '25%'}
-        twenty = next(btn for btn in segments
-                      if btn.label_text() == '20%')
-        callback, _args = twenty.handlers['clicked']
-        callback(twenty)
+        assert _labels(section._threshold_box) == ['Turn on at',
+                                                   '15% battery']
+        _click(section._threshold_box)
+        assert win._menus[-1][0] == 'Turn on at'
+        choices = dict(win._menus[-1][1])
+        assert set(choices) == {'10%', '15%', '20%', '25%'}
+        choices['20%']()
         assert win.config.battery_saver_auto_pct == 20
-        selected = [btn for btn in _buttons(section._threshold_box)
-                    if 'seg-selected' in btn.classes]
-        assert [btn.label_text() for btn in selected] == ['20%']
+        assert _labels(section._threshold_box) == ['Turn on at',
+                                                   '20% battery']
 
     def test_timeout_row_shows_stock_default(self, fake_gtk):
         win = _bare_win()
         section = self._section()
         section.build(win)
-        assert _labels(section._timeout_box) == ['Freeze after', '10 min']
+        assert _labels(section._timeout_box) == ['Freeze unused apps',
+                                                 'After 10 min']
 
     def test_timeout_pick_never(self, fake_gtk):
         win = _bare_win()
         section = self._section()
         section.build(win)
-        (row,) = _buttons(section._timeout_box)
-        callback, _args = row.handlers['clicked']
-        callback(row)
+        _click(section._timeout_box)
         assert win._menus and win._menus[-1][0] == 'Freeze after'
         choices = dict(win._menus[-1][1])
         assert set(choices) == {'5 min', '15 min', '30 min', 'Never'}
         choices['Never']()
         assert win.config.app_standby_minutes == 0
-        assert _labels(section._timeout_box) == ['Freeze after', 'Never']
+        assert _labels(section._timeout_box) == ['Freeze unused apps',
+                                                 'Never']
 
     def test_exempt_add_remove(self, fake_gtk):
         win = _bare_win()
@@ -814,13 +832,13 @@ class TestStandbySection:
         section = self._section()
         section.build(win)
         assert 'A App' in _labels(win._standby_exempt_box)
-        remove = [btn for btn in _buttons(win._standby_exempt_box)
-                  if btn.label_text() == 'Remove']
-        assert len(remove) == 1
-        callback, _args = remove[0].handlers['clicked']
-        callback(remove[0])
+        row = next(btn for btn in _buttons(win._standby_exempt_box)
+                   if 'A App' in _labels(btn))
+        _click(row)
+        assert win._menus[-1][0] == 'A App'
+        dict(win._menus[-1][1])['Allow freezing']()
         assert win.config.standby_exempt == []
-        assert 'Every app may freeze.' in _labels(win._standby_exempt_box)
+        assert 'A App' not in _labels(win._standby_exempt_box)
 
     def test_add_enters_drawer_pick_mode(self, fake_gtk):
         win = _bare_win()
@@ -849,9 +867,10 @@ class TestPermissionsSection:
         nav = _labels(win._perm_nav_box)
         assert nav == ['Camera', '0 allowed', 'Microphone', '0 allowed',
                        'Location', '0 allowed', 'Network', '0 blocked']
-        assert 'No use in the last 24 h.' in _labels(win._perm_recent_box)
-        assert any('Native apps reach camera' in text
-                   for text in _labels(widgets[3]))
+        assert 'No use in the last 24 h.' in [
+            w.label_text() for w in win._perm_recent_box.children]
+        assert any('Native apps reach camera' in (w.label_text() or '')
+                   for w in widgets if 'xx-set-footnote' in w.classes)
 
     def test_indicator_flip(self, fake_gtk):
         win = _bare_win()
@@ -870,10 +889,15 @@ class TestPermissionsSection:
                                         flatpak=False)]
         win.app_index.entries[0] = _entry('org.flat.App', 'Flat',
                                          flatpak=True)
-        self._section().build(win)
+        section = self._section()
+        section.build(win)
+        assert _labels(win._perm_apps_box) == [
+            'Choose an app', '2 apps · 1 can be limited']
+        section._open_app_list(win)
         rows = _labels(win._perm_apps_box)
-        assert rows == ['Flat', 'Flatpak app',
-                        'Native', 'Native app — no limits']
+        assert rows == ['Flat', 'Flatpak · can be limited',
+                        'Native', 'Native · no limits',
+                        'Close the app list', '']
 
     def test_perm_view_lists_states(self, fake_gtk):
         win = _bare_win()
@@ -882,15 +906,16 @@ class TestPermissionsSection:
                           'microphone': {}, 'location': {}}
         self._section()._open_perm_view(win, 'camera')
         texts = _labels(win._perm_apps_box)
-        assert 'org.x — allowed' in texts
-        assert 'org.y — denied' in texts
+        assert texts[:4] == ['org.x', 'Camera · Allowed',
+                             'org.y', 'Camera · Denied']
 
     def test_network_view_lists_blocks(self, fake_gtk):
         win = _bare_win()
         win.config.network_denied_apps = ['org.a.App']
         self._section().build(win)
         self._section()._open_perm_view(win, 'network')
-        assert 'org.a.App — blocked' in _labels(win._perm_apps_box)
+        assert _labels(win._perm_apps_box)[:2] == ['org.a.App',
+                                                   'Network blocked']
 
     def test_app_detail_switches(self, fake_gtk):
         win = _bare_win()
@@ -946,10 +971,9 @@ class TestPermissionsSection:
                           'microphone': {}, 'location': {}}
         self._section()._open_app_view(win, 'a')
         reset_btn = [btn for btn in _buttons(win._perm_apps_box)
-                     if btn.label_text() == 'Reset all to ask']
+                     if 'Reset all to ask' in _labels(btn)]
         assert len(reset_btn) == 1
-        callback, _args = reset_btn[0].handlers['clicked']
-        callback(reset_btn[0])
+        _click(reset_btn[0])
         assert reset == ['a']
         assert win.config.network_denied_apps == []
 
@@ -1000,9 +1024,8 @@ class TestSmartLockSection:
         win = _bare_win()
         assert settings_smart_lock.trust_status(win) == ('Off', '')
         widgets = self._section().build(win)
-        texts = _labels(widgets[1])
-        assert 'Off' in texts
-        assert 'PIN re-check every 4 h.' in texts
+        assert 'Off' in _labels(widgets[1])
+        assert widgets[2].label_text() == settings_smart_lock.reauth_text()
 
     def test_unlocked_by_device(self, fake_gtk, trusted_live):
         win = _bare_win()
@@ -1034,11 +1057,12 @@ class TestSmartLockSection:
         self._section().build(win)
         assert 'AA:BB:CC:DD:EE:FF' in _labels(win._slock_bt_box)
         assert 'Home' in _labels(win._slock_wifi_box)
-        remove = [btn for btn in _buttons(win._slock_wifi_box)
-                  if btn.label_text() == 'Remove'][0]
-        callback, _args = remove.handlers['clicked']
-        callback(remove)
+        home = next(btn for btn in _buttons(win._slock_wifi_box)
+                    if 'Home' in _labels(btn))
+        _click(home)
+        dict(win._menus[-1][1])['Remove']()
         assert win.config.smart_lock_wifi_ssids == []
+        assert 'Home' not in _labels(win._slock_wifi_box)
 
     def test_bt_picker_adds_paired(self, fake_gtk, monkeypatch):
         devs = [SimpleNamespace(address='AA:BB:CC:DD:EE:FF',
@@ -1078,7 +1102,8 @@ class TestSmartLockSection:
         assert win.config.smart_lock_wifi_ssids == ['Home', 'Cafe']
 
     def test_reauth_text(self):
-        assert settings_smart_lock.reauth_text() == 'PIN re-check every 4 h.'
+        assert settings_smart_lock.reauth_text() == (
+            'Even while trusted, the PIN is asked again every 4 h.')
 
 
 # ------------------------------------------------------------------

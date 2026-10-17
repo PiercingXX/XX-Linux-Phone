@@ -16,6 +16,7 @@ import shutil
 import subprocess
 
 import settings_page
+import settings_ui as ui
 
 DEFAULT_TEMP = 2200
 MIN_TEMP = 2200
@@ -231,32 +232,30 @@ class DisplaySection(settings_page._Section):
     """Night light (wlsunset/gammastep) plus the power-profile picker."""
 
     key = 'display'
-    title = 'Display'
+    title = 'Night light'
 
     def __init__(self) -> None:
         self._status = None
         self._night_box = None
         self._profile_box = None
+        self._profile_row = None
         self._updating = False
-        self._temp_label = None
         self._profile_name: str | None = None
         self._profiles: list[str] = []
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from settings_page import _section_placeholder, _section_title
-        self._status = _section_placeholder('Checking display state…')
-        self._night_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                  spacing=8)
-        self._profile_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                    spacing=8)
+        night = ui.group(self.title)
+        self._night_box = night[1]
+        self._profile_row = ui.nav_row(
+            'Power profile', 'Checking…', lambda r: self._show_profiles(win))
+        power = ui.group('Performance', [self._profile_row], note='')
+        self._profile_box = power[1]
+        self._status = power[2]
         self._render_night(win)
-        return [_section_title(self.title), self._night_box,
-                self._profile_box, self._status]
+        return night + power
 
     def refresh(self, win) -> None:
         from settings_page import _run_bg
-        self._say('Checking display state…')
 
         def _work():
             profile = read_power_profile()
@@ -276,13 +275,6 @@ class DisplaySection(settings_page._Section):
         self._active_profile = res.get('active')
         self._render_night(win)
         self._render_profiles(win)
-        active = res.get('active')
-        if self._profile_name is None:
-            self._say('No power-profiles-daemon on this device.')
-        elif active:
-            self._say('Power profile: %s.' % active)
-        else:
-            self._say('')
 
     def _config(self, win, key: str, default):
         try:
@@ -295,71 +287,62 @@ class DisplaySection(settings_page._Section):
 
     def _render_night(self, win) -> None:
         from gi.repository import Gtk
-        from xx_ui import widgets
-        from settings_page import (_replace_box_children,
-                                   _section_placeholder)
+        import settings_launcher
+
         if self._night_box is None:
             return
         if night_tool() is None:
-            _replace_box_children(self._night_box, [_section_placeholder(
-                'Night light needs wlsunset or gammastep installed.')])
+            ui.fill(self._night_box, [ui.row(
+                'Night light', 'Needs wlsunset or gammastep installed')])
             return
-        rows = [widgets.caption('NIGHT LIGHT')]
-        switch = widgets.make_switch(night_light_running())
-        switch.connect('notify::active',
-                       lambda sw, _p: self._on_night_flipped(win, sw))
-        rows.append(widgets.setting_row(
-            'Night light', '%d K' % clamp_temp(
-                self._config(win, 'night_light_temp', DEFAULT_TEMP)),
-            switch))
+        temp = clamp_temp(self._config(win, 'night_light_temp',
+                                       DEFAULT_TEMP))
+        night = ui.switch_row('Night light', 'Warm, easier on the eyes',
+                              night_light_running())
+        night.switch.connect('notify::active',
+                             lambda sw, _p: self._on_night_flipped(win, sw))
+        self._night_row = night
         scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, MIN_TEMP, MAX_TEMP, 100)
-        scale.set_value(float(clamp_temp(
-            self._config(win, 'night_light_temp', DEFAULT_TEMP))))
+        scale.set_value(float(temp))
+        scale.set_draw_value(False)
         scale.set_hexpand(True)
+        warmth = settings_launcher._scale_row(
+            'Color temperature', '%d K' % temp, scale)
         scale.connect('value-changed',
-                      lambda adj: self._on_temp_changed(win, adj))
-        rows.append(scale)
-        sched = widgets.make_switch(bool(
-            self._config(win, 'night_light_schedule', False)))
-        sched.connect('notify::active',
-                      lambda sw, _p: self._on_schedule_flipped(win, sw))
-        rows.append(widgets.setting_row(
-            'Sunset to sunrise', 'Uses the weather location', sched,
-            last=True))
+                      lambda adj: self._on_temp_changed(win, adj, warmth))
         try:
             lat = win.config.data.get('weather_lat')
             lon = win.config.data.get('weather_lon')
         except Exception:
             lat, lon = None, None
-        if (lat is None or lon is None) and bool(
-                self._config(win, 'night_light_schedule', False)):
-            rows.append(_section_placeholder(
-                'Set a weather location for the schedule.'))
-        _replace_box_children(self._night_box, rows)
+        scheduled = bool(self._config(win, 'night_light_schedule', False))
+        detail = ('Set a manual weather location first'
+                  if scheduled and (lat is None or lon is None)
+                  else 'Uses the weather location')
+        sched = ui.switch_row('Sunset to sunrise', detail, scheduled)
+        sched.switch.connect(
+            'notify::active',
+            lambda sw, _p: self._on_schedule_flipped(win, sw))
+        ui.fill(self._night_box, [night, warmth, sched])
 
     def _render_profiles(self, win) -> None:
-        from xx_ui import widgets
-        from settings_page import _replace_box_children
         if self._profile_box is None:
             return
         if self._profile_name is None:
-            _replace_box_children(self._profile_box, [])
+            ui.fill(self._profile_box, [ui.row(
+                'Power profile', 'Not available on this device')])
             return
-        current = self._current_profile(win) or 'Unknown'
-        change = widgets.outline_button(
-            'Change…', lambda: self._show_profiles(win))
-        _replace_box_children(self._profile_box, [
-            widgets.caption('POWER PROFILE'),
-            widgets.setting_row('Power profile', current, change,
-                                last=True)])
+        ui.set_subtitle(self._profile_row,
+                        self._current_profile(win) or 'Unknown')
+        ui.fill(self._profile_box, [self._profile_row])
 
     def _show_profiles(self, win) -> None:
         actions = [(profile, lambda profile=profile: self._on_profile(
             win, profile)) for profile in self._profiles]
         actions.append(('Cancel', lambda: None))
         win.item_actions._show_action_menu(
-            self._profile_box, 'Power profile', actions)
+            self._profile_row, 'Power profile', actions)
 
     def _current_profile(self, win) -> str:
         configured = str(self._config(win, 'power_profile', ''))
@@ -393,8 +376,10 @@ class DisplaySection(settings_page._Section):
             pass
         self._say('' if ok or not enabled else 'Could not start night light.')
 
-    def _on_temp_changed(self, win, scale) -> None:
+    def _on_temp_changed(self, win, scale, row=None) -> None:
         temp = clamp_temp(scale.get_value())
+        if row is not None:
+            row.value_label.set_text('%d K' % temp)
         try:
             win.config.set('night_light_temp', temp)
         except Exception:
@@ -427,16 +412,12 @@ class DisplaySection(settings_page._Section):
         def _work():
             return set_power_profile(name, profile)
 
+        ui.set_subtitle(self._profile_row, profile)
         _run_bg(_work, lambda ok: self._say(
-            'Power profile: %s.' % profile if ok
-            else 'Could not set power profile.'))
+            '' if ok else 'Could not set power profile.'))
 
     def _say(self, text: str) -> None:
-        try:
-            if self._status is not None:
-                self._status.set_text(text)
-        except Exception:
-            pass
+        ui.say(self._status, text)
 
 
 def _read_active(bus_name: str) -> str | None:

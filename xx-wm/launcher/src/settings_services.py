@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import settings_page
+import settings_ui as ui
 
 try:
     from power_menu import ConfirmState
@@ -98,16 +99,14 @@ class ServicesSection(settings_page._Section):
         self._confirm = ConfirmState()
 
     def build(self, win) -> list:
-        from settings_page import _section_title
-        from gi.repository import Gtk
-
-        label = _section_title(self.title)
-        self._rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                 spacing=0)
-        failed_title = _section_title('Failed')
-        self._failed_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                   spacing=0)
-        return [label, self._rows_box, failed_title, self._failed_box]
+        services = ui.group(self.title, [ui.note_row('Checking…')],
+                            note='Tap a service to start, stop, restart, '
+                                 'enable or disable it.')
+        self._rows_box = services[1]
+        failed = ui.group('Failed units')
+        self._failed_box = failed[1]
+        ui.fill(self._failed_box, [], hide_empty=True)
+        return services + failed
 
     def refresh(self, win) -> None:
         from settings_page import _run_bg
@@ -203,38 +202,25 @@ class ServicesSection(settings_page._Section):
             failed = res.get('failed', [])
         except AttributeError:
             return
-        from settings_page import _replace_box_children
-        from xx_ui import widgets
-
         rows = []
         visible = [entry for entry in SERVICES
                    if entry.key != 'eg25' or eg25]
-        for index, entry in enumerate(visible):
-            row = widgets.list_row(
+        for entry in visible:
+            row = ui.nav_row(
                 entry.title, state_text(states.get(entry.key)),
-                last=index == len(visible) - 1,
-                on_activate=lambda e=entry: self._on_service_menu(win, e))
+                lambda r, e=entry: self._on_service_menu(win, e, r))
             rows.append(row)
-        _replace_box_children(self._rows_box, rows)
+        ui.fill(self._rows_box, rows)
         self._show_failed(win, failed)
 
     def _show_failed(self, win, failed) -> None:
         if self._failed_box is None:
             return
-        from settings_page import (_replace_box_children,
-                                   _section_placeholder)
-        from xx_ui import widgets
-
         items = [unit for unit in (failed or []) if unit]
-        if not items:
-            _replace_box_children(
-                self._failed_box, [_section_placeholder('No failed units.')])
-            return
-        _replace_box_children(self._failed_box, [
-            widgets.setting_row(unit, 'failed', last=index == len(items) - 1)
-            for index, unit in enumerate(items)])
+        ui.fill(self._failed_box, [ui.row(unit, 'Failed') for unit in items],
+                hide_empty=True)
 
-    def _on_service_menu(self, win, entry) -> None:
+    def _on_service_menu(self, win, entry, anchor=None) -> None:
         actions = []
         for action in SERVICE_ACTIONS:
             if action == 'Stop':
@@ -247,7 +233,7 @@ class ServicesSection(settings_page._Section):
                          win, e, a)))
         actions.append(('Cancel', lambda: None))
         win.item_actions._show_action_menu(
-            self._rows_box, entry.title, actions)
+            anchor or self._rows_box, entry.title, actions)
 
     def _stop_key(self, key: str) -> str:
         return 'stop:%s' % key

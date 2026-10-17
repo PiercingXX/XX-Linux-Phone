@@ -145,8 +145,10 @@ def test_card_wiring_pins_both_row_sets(window):
     assert '_GESTURE_TITLES' in src
     assert '_SYSTEM_GESTURE_TITLES' in src
     assert '_pick_system_gesture' in src
-    assert '_reset_system_gesture' in src
-    assert 'System-level gestures apply immediately' in src
+    # Back to the default binding is the last choice of each row's menu.
+    pick = inspect.getsource(settings_page.SettingsPage._pick_system_gesture)
+    assert '_reset_system_gesture' in pick
+    assert "'Default'" in pick
 
 
 def test_rebind_restarts_lisgd(window):

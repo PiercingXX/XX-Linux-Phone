@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 
 import settings_page
+import settings_ui as ui
 
 PERM_KINDS = (('camera', 'Camera'), ('microphone', 'Microphone'),
               ('location', 'Location'), ('network', 'Network'))
@@ -165,41 +166,27 @@ class PermissionsSection(settings_page._Section):
     title = 'App permissions'
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
-        head = settings_page._section_title(self.title)
-        switch = widgets.make_switch(self._indicators_on(win))
-        switch.connect(
+        indicators = ui.switch_row('Privacy indicators',
+                                   'Shows when mic, camera or location '
+                                   'is in use', self._indicators_on(win))
+        indicators.switch.connect(
             'notify::active',
             lambda sw, _p: self._on_indicators_flipped(win, sw))
-        win._perm_ind_switch = switch
-        indicators = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        indicators.append(widgets.setting_row(
-            'Privacy indicators', 'Mic, camera and location',
-            switch))
-        indicators.append(settings_page._section_title('Recently used'))
-        recent_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        win._perm_recent_box = recent_box
-        indicators.append(recent_box)
-
-        apps_head = settings_page._section_title('Apps')
-        apps_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        nav_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        win._perm_nav_box = nav_box
-        apps_body.append(nav_box)
-        apps_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        win._perm_apps_box = apps_box
-        apps_body.append(apps_box)
-        apps_body.append(settings_page._section_placeholder(
-            'Only Flatpak apps can be limited here. '
-            'Native apps reach camera, mic and location directly — '
-            'watch the indicators.'))
-
+        win._perm_ind_switch = indicators.switch
+        head = ui.group(self.title, [indicators])
+        recent = ui.group('Recently used')
+        win._perm_recent_box = recent[1]
+        kinds = ui.group('By permission')
+        win._perm_nav_box = kinds[1]
+        apps = ui.group(
+            'By app', note='Only Flatpak apps can be limited here. Native '
+            'apps reach camera, mic and location directly; the indicators '
+            'show when they do.')
+        win._perm_apps_box = apps[1]
         self._render_recent(win, getattr(win, '_perm_recent', None),
                             getattr(win, '_perm_recent_at', None) or time.time())
         self._render_apps(win)
-        return [head, indicators, apps_head, apps_body]
+        return head + recent + kinds + apps
 
     def refresh(self, win) -> None:
         self._sync_indicators(win)
@@ -293,73 +280,77 @@ class PermissionsSection(settings_page._Section):
             return
         rows = []
         if isinstance(recent, list):
-            from xx_ui import widgets
             items = [item for item in recent[:8]
                      if isinstance(item, dict) and item.get('app')]
-            for index, item in enumerate(items):
+            for item in items:
                 kind = _RECENT_KIND_LABELS.get(item.get('kind'),
                                               item.get('kind'))
                 try:
                     seen = float(item.get('at'))
                 except (TypeError, ValueError):
                     continue
-                rows.append(widgets.setting_row(
-                    item.get('app'),
-                    '%s · %s' % (kind, age_text(seen, at)),
-                    last=index == len(items) - 1))
-        settings_page._replace_box_children(
-            box, rows or [settings_page._section_placeholder(
-                'No use in the last 24 h.')])
+                rows.append(ui.row(item.get('app'), '%s · %s' % (
+                    kind, age_text(seen, at))))
+        ui.fill(box, rows or [ui.note_row('No use in the last 24 h.')])
 
     def _render_apps(self, win) -> None:
-        from xx_ui import widgets
         nav = getattr(win, '_perm_nav_box', None)
         box = getattr(win, '_perm_apps_box', None)
         if nav is None or box is None:
             return
         counts = self._perm_counts(win)
         nav_rows = []
-        kinds = list(PERM_KINDS)
-        for index, (kind, label) in enumerate(kinds):
+        for kind, label in PERM_KINDS:
             if kind == 'network':
                 detail = '%d blocked' % counts[kind]
             else:
                 detail = '%d allowed' % counts[kind]
-            row = widgets.list_row(
-                label, detail, trailing=widgets.chevron(),
-                last=index == len(kinds) - 1)
-            row.connect(
-                'clicked', lambda _b, k=kind: self._open_perm_view(win, k))
-            nav_rows.append(row)
-        settings_page._replace_box_children(nav, nav_rows)
+            nav_rows.append(ui.nav_row(
+                label, detail,
+                lambda _r, k=kind: self._open_perm_view(win, k)))
+        ui.fill(nav, nav_rows)
         view = getattr(win, '_perm_view', None)
         if isinstance(view, tuple) and view and view[0] == 'app':
             self._render_app_detail(win, box, view[1])
         elif isinstance(view, tuple) and view and view[0] == 'perm':
             self._render_perm_view(win, box, view[1])
-        else:
+        elif isinstance(view, tuple) and view and view[0] == 'list':
             self._render_app_list(win, box)
+        else:
+            self._render_apps_closed(win, box)
+
+    def _back_row(self, win):
+        return ui.nav_row('All apps', 'Back to the app list',
+                          lambda _r: self._open_app_list(win))
+
+    def _render_apps_closed(self, win, box) -> None:
+        """The app list stays one row until asked for: a phone can have
+        a hundred apps, and the page holds more than this list."""
+        entries = list(_entries(win))
+        limited = sum(1 for entry in entries if _is_flatpak(entry))
+        ui.fill(box, [ui.nav_row(
+            'Choose an app', '%d apps · %d can be limited' % (
+                len(entries), limited),
+            lambda _r: self._open_app_list(win))])
 
     def _render_app_list(self, win, box) -> None:
-        from xx_ui import widgets
-
-        entries = list(_entries(win))
         rows = []
-        for index, entry in enumerate(entries):
-            name = _display_name(win, entry)
-            tag = ('Flatpak app' if _is_flatpak(entry)
-                   else 'Native app — no limits')
-            row = widgets.list_row(
-                name, tag, trailing=widgets.chevron(),
-                last=index == len(entries) - 1)
-            row.connect(
-                'clicked',
-                lambda _b, e=entry: self._open_app_view(win, e.app_id))
-            rows.append(row)
-        settings_page._replace_box_children(
-            box, rows or [settings_page._section_placeholder('No apps.')])
+        for entry in _entries(win):
+            tag = ('Flatpak · can be limited' if _is_flatpak(entry)
+                   else 'Native · no limits')
+            rows.append(ui.nav_row(
+                _display_name(win, entry), tag,
+                lambda _r, e=entry: self._open_app_view(win, e.app_id)))
+        rows.append(ui.nav_row('Close the app list', '',
+                               lambda _r: self._close_views(win)))
+        ui.fill(box, rows if len(rows) > 1 else [ui.note_row('No apps.')])
+
+    def _close_views(self, win) -> None:
+        win._perm_view = None
+        self._render_apps(win)
 
     def _render_perm_view(self, win, box, kind: str) -> None:
+        label = dict(PERM_KINDS).get(kind, kind)
         rows = []
         if kind == 'network':
             try:
@@ -367,64 +358,52 @@ class PermissionsSection(settings_page._Section):
                                       None) or ())
             except Exception:
                 denied = []
-            for app_id in denied:
-                rows.append(settings_page._section_placeholder(
-                    '%s — blocked' % app_id))
+            rows = [ui.row(app_id, 'Network blocked') for app_id in denied]
         else:
             maps = getattr(win, '_perm_maps', None)
             table = maps.get(kind) if isinstance(maps, dict) else None
             if isinstance(table, dict):
                 for app_id in sorted(table):
                     state = stored_state(maps, kind, app_id)
-                    text = {True: 'allowed', False: 'denied'}.get(
-                        state, 'ask')
-                    rows.append(settings_page._section_placeholder(
-                        '%s — %s' % (app_id, text)))
+                    text = {True: 'Allowed', False: 'Denied'}.get(
+                        state, 'Ask')
+                    rows.append(ui.row(app_id, '%s · %s' % (label, text)))
             elif maps is None:
-                rows.append(settings_page._section_placeholder(
-                    'Permission store unavailable.'))
-        back = settings_page._text_action(
-            'Back to apps', lambda: self._open_app_list(win))
-        rows.append(back)
-        settings_page._replace_box_children(box, rows or [
-            settings_page._section_placeholder('Nobody has this access.'),
-            back])
+                rows.append(ui.note_row('Permission store unavailable.'))
+        if not rows:
+            rows = [ui.note_row('No app has %s access.' % label.lower())]
+        ui.fill(box, rows + [ui.nav_row(
+            'Done', '', lambda _r: self._close_views(win))])
 
     def _render_app_detail(self, win, box, app_id: str) -> None:
-        from xx_ui import widgets
-
-        rows = [widgets.label(app_id, 'xx-title')]
         maps = getattr(win, '_perm_maps', None)
+        net_supported = getattr(win, '_perm_net_supported', None)
+        rows = [ui.row(app_id, 'Flatpak app')]
         switches = {}
-        kinds = list(PERM_KINDS)
-        for index, (kind, label) in enumerate(kinds):
-            switch = widgets.make_switch()
+        for kind, label in PERM_KINDS:
+            detail = ''
             if kind == 'network':
-                switch.set_active(not network_denied(win, app_id))
-                supported = getattr(win, '_perm_net_supported', None)
-                if supported is False:
-                    switch.set_sensitive(False)
+                active = not network_denied(win, app_id)
+                if net_supported is False:
+                    detail = 'Needs the helper service'
             else:
-                switch.set_active(stored_state(maps, kind, app_id) is True)
-            switch.connect(
+                active = stored_state(maps, kind, app_id) is True
+            row = ui.switch_row(label, detail, active)
+            if kind == 'network' and net_supported is False:
+                row.switch.set_sensitive(False)
+            row.switch.connect(
                 'notify::active',
                 lambda sw, _p, k=kind: self._on_perm_flipped(win, app_id, k, sw))
-            switches[kind] = switch
-            rows.append(widgets.setting_row(
-                label, '', switch, last=index == len(kinds) - 1))
-            if kind == 'network' and getattr(
-                    win, '_perm_net_supported', None) is False:
-                rows.append(settings_page._section_placeholder(
-                    'Needs the helper service.'))
+            switches[kind] = row.switch
+            rows.append(row)
         win._perm_detail_switches = switches
-        rows.append(settings_page._text_action(
-            'Reset all to ask', lambda: self._on_reset_app(win, app_id)))
-        rows.append(settings_page._text_action(
-            'Back to apps', lambda: self._open_app_list(win)))
-        settings_page._replace_box_children(box, rows)
+        rows.append(ui.nav_row('Reset all to ask', '',
+                               lambda _r: self._on_reset_app(win, app_id)))
+        rows.append(self._back_row(win))
+        ui.fill(box, rows)
 
     def _open_app_list(self, win) -> None:
-        win._perm_view = None
+        win._perm_view = ('list',)
         self._render_apps(win)
 
     def _open_app_view(self, win, app_id: str) -> None:

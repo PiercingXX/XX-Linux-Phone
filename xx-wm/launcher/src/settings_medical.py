@@ -1,8 +1,8 @@
 """Medical ID editor settings section.
 
 Edits the config Medical ID fields (name, blood type, allergies,
-medications, conditions, emergency contacts) plus the "Show on lock
-screen" switch. Emergency contacts are picked through the xx-contacts
+medications, conditions) in a sheet, the emergency contacts and the
+"Show on lock screen" switch; every change saves at once. Emergency contacts are picked through the xx-contacts
 session service ``io.piercingxx.Contacts1`` Search (async, never
 call_sync on the main loop); the shapes below mirror its introspection
 XML (bus io.piercingxx.Contacts, path /io/piercingxx/Contacts,
@@ -12,6 +12,7 @@ number — a static test pins them to ref/xx-contacts).
 from __future__ import annotations
 
 import settings_page
+import settings_ui as ui
 
 CONTACTS_BUS = 'io.piercingxx.Contacts'
 CONTACTS_PATH = '/io/piercingxx/Contacts'
@@ -94,186 +95,167 @@ def search_contacts(query: str, on_done, limit: int = _SEARCH_LIMIT) -> None:
         _fail(str(err))
 
 
+def fields_summary(medical) -> str:
+    """Medical ID row value: how many fields are filled, never the
+    values themselves (the page can be seen over a shoulder)."""
+    if not isinstance(medical, dict):
+        return 'Not set'
+    filled = sum(1 for field, _title in MEDICAL_FIELDS if medical.get(field))
+    if not filled:
+        return 'Not set'
+    return '%d of %d fields' % (filled, len(MEDICAL_FIELDS))
+
+
 class MedicalSection(settings_page._Section):
-    """Settings section: Medical ID editor + lock-screen switch."""
+    """Settings section: Medical ID (fields sheet), emergency contacts
+    and the lock-screen switch. Every change saves at once."""
 
     key = 'medical'
     title = 'Medical ID'
 
     def __init__(self) -> None:
-        self._entries: dict = {}
+        self._row = None
         self._contacts_box = None
         self._results_box = None
-        self._search_entry = None
         self._show_switch = None
         self._note = None
-        self._draft_contacts: list = []
 
     def build(self, win) -> list:
-        from settings_page import (_section_placeholder, _section_title,
-                                   _settings_entry, _settings_row)
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
-        medical = getattr(win.config, 'medical_id', {})
-        head = _section_title(self.title)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        for field, title in MEDICAL_FIELDS:
-            try:
-                text = (medical.get(field, '')
-                        if isinstance(medical, dict) else '')
-            except Exception:
-                text = ''
-            entry = _settings_entry(win, title, text)
-            self._entries[field] = entry
-            body.append(_settings_row(title, entry))
-
-        body.append(widgets.caption('Emergency contacts'))
-        self._draft_contacts = [
-            dict(entry) for entry in (medical.get('emergency_contacts', [])
-                                      if isinstance(medical, dict) else [])
-            if isinstance(entry, dict)]
-        self._contacts_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        body.append(self._contacts_box)
-
-        self._search_entry = _settings_entry(win, 'Add: search contacts')
-        self._search_entry.connect('changed', lambda _e: self._on_search())
-        body.append(self._search_entry)
-        self._results_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        body.append(self._results_box)
-
-        self._show_switch = widgets.make_switch()
-        try:
-            self._show_switch.set_active(
-                bool(getattr(win.config, 'lock_screen_medical_id', True)))
-        except Exception:
-            pass
-        body.append(widgets.setting_row(
-            'Show on lock screen',
-            'First responders see it without unlocking.',
-            self._show_switch))
-
-        body.append(widgets.primary_button(
-            'Save Medical ID', lambda: self._on_save(win)))
-
-        self._note = _section_placeholder('')
-        body.append(self._note)
-        self._render_contacts()
-        return [head, body]
+        self._row = ui.nav_row(self.title, '',
+                               lambda r: self._open_fields(win, r))
+        show = ui.switch_row(
+            'Show on lock screen', 'First responders see it without '
+            'unlocking', bool(getattr(win.config, 'lock_screen_medical_id',
+                                      True)))
+        self._show_switch = show.switch
+        self._show_switch.connect('notify::active',
+                                  lambda sw, _p: self._on_show(win, sw))
+        medical = ui.group(self.title, [self._row, show], note='')
+        self._note = medical[2]
+        contacts = ui.group('Emergency contacts')
+        self._contacts_box = contacts[1]
+        self._render(win)
+        return medical + contacts
 
     def refresh(self, win) -> None:
-        return None
+        self._render(win)
 
     # ------------------------------------------------------------ behavior
 
-    def _render_contacts(self) -> None:
-        from settings_page import (_replace_box_children,
-                                   _section_placeholder, _text_action)
-        from gi.repository import Gtk
-        from xx_ui import widgets
+    def _medical(self, win) -> dict:
+        medical = getattr(win.config, 'medical_id', {})
+        return dict(medical) if isinstance(medical, dict) else {}
+
+    def _contacts(self, win) -> list:
+        return [dict(entry) for entry in
+                self._medical(win).get('emergency_contacts', [])
+                if isinstance(entry, dict)]
+
+    def _render(self, win) -> None:
+        ui.set_subtitle(self._row, fields_summary(self._medical(win)))
         if self._contacts_box is None:
             return
         rows = []
-        for index, entry in enumerate(self._draft_contacts):
-            name = entry.get('name', '')
-            number = entry.get('number', '')
-            text = (f'{name} — {number}'.strip(' —')
-                    if name or number else 'Contact')
-            label = widgets.label(text, 'xx-secondary')
-            label.set_hexpand(True)
-            remove = _text_action(
-                'Remove', lambda i=index: self._remove_contact(i))
-            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                           spacing=8)
-            line.append(label)
-            line.append(remove)
-            rows.append(line)
-        if not rows:
-            rows = [_section_placeholder('No emergency contacts.')]
-        _replace_box_children(self._contacts_box, rows)
+        for index, entry in enumerate(self._contacts(win)):
+            rows.append(ui.row(
+                entry.get('name', '') or 'Contact', entry.get('number', ''),
+                on_activate=lambda r, i=index: self._ask_remove(win, r, i)))
+        rows.append(ui.nav_row('Add emergency contact…', 'From Contacts',
+                               lambda r: self._open_search(win, r)))
+        ui.fill(self._contacts_box, rows)
 
-    def _remove_contact(self, index: int) -> None:
+    def _save(self, win, medical: dict) -> bool:
         try:
-            del self._draft_contacts[index]
-        except IndexError:
-            pass
-        self._render_contacts()
-
-    def _on_search(self) -> None:
-        try:
-            query = self._search_entry.get_text()
-        except Exception:
-            return
-        if not query.strip():
-            self._render_results([])
-            return
-        search_contacts(query, self._on_search_done)
-
-    def _on_search_done(self, ok: bool, results) -> None:
-        if not ok:
-            self._render_results([], note=str(results))
-            return
-        self._render_results(results if isinstance(results, list) else [])
-
-    def _render_results(self, rows: list, note: str = '') -> None:
-        from settings_page import (_replace_box_children,
-                                   _section_placeholder, _text_action)
-        from gi.repository import Gtk
-        from xx_ui import widgets as _widgets
-        if self._results_box is None:
-            return
-        rendered = []
-        for uid, name, number in rows[:_SEARCH_LIMIT]:
-            text = (f'{name} — {number}'.strip(' —')
-                    if name or number else uid)
-            label = _widgets.label(text, 'xx-secondary')
-            label.set_hexpand(True)
-            add = _text_action(
-                'Add', lambda n=name, p=number: self._add_contact(n, p))
-            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                           spacing=8)
-            line.append(label)
-            line.append(add)
-            rendered.append(line)
-        if not rendered:
-            rendered = [_section_placeholder(
-                note or 'No matching contacts.')]
-        _replace_box_children(self._results_box, rendered)
-
-    def _add_contact(self, name: str, number: str) -> None:
-        self._draft_contacts.append({'name': name, 'number': number})
-        self._render_contacts()
-
-    def _on_save(self, win) -> None:
-        draft: dict = {}
-        for field, _title in MEDICAL_FIELDS:
-            entry = self._entries.get(field)
-            if entry is None:
-                continue
-            try:
-                text = entry.get_text().strip()
-            except Exception:
-                continue
-            if text:
-                draft[field] = text
-        draft['emergency_contacts'] = [
-            {k: v for k, v in entry.items() if k in ('name', 'number',
-                                                     'relation')}
-            for entry in self._draft_contacts]
-        try:
-            win.config.set_medical_id(draft)
-            win.config.set_lock_screen_medical_id(
-                bool(self._show_switch.get_active()))
+            win.config.set_medical_id(medical)
         except Exception as err:
             self._say(f'Could not save: {err}')
-            return
+            return False
+        self._say('')
+        self._render(win)
+        return True
+
+    def _open_fields(self, win, anchor):
+        medical = self._medical(win)
+        return ui.form_sheet(
+            win, anchor, self.title,
+            [(field, title, medical.get(field, ''), 'text')
+             for field, title in MEDICAL_FIELDS],
+            'Save', lambda values: self._on_save(win, values))
+
+    def _on_save(self, win, values: dict) -> str | None:
+        medical = {field: str(values.get(field, '')).strip()
+                   for field, _title in MEDICAL_FIELDS
+                   if str(values.get(field, '')).strip()}
+        medical['emergency_contacts'] = self._contacts(win)
+        if not self._save(win, medical):
+            return 'Could not save.'
         self._say('Saved.')
+        return None
+
+    def _on_show(self, win, switch) -> None:
+        try:
+            win.config.set_lock_screen_medical_id(bool(switch.get_active()))
+        except Exception as err:
+            self._say(f'Could not save: {err}')
+
+    def _ask_remove(self, win, anchor, index: int) -> None:
+        win.item_actions._show_action_menu(
+            anchor, 'Emergency contact',
+            [('Remove', lambda: self._remove_contact(win, index)),
+             ('Cancel', lambda: None)])
+
+    def _remove_contact(self, win, index: int) -> None:
+        medical = self._medical(win)
+        contacts = self._contacts(win)
+        try:
+            del contacts[index]
+        except IndexError:
+            return
+        medical['emergency_contacts'] = contacts
+        self._save(win, medical)
+
+    def _add_contact(self, win, name: str, number: str) -> None:
+        medical = self._medical(win)
+        medical['emergency_contacts'] = self._contacts(win) + [
+            {'name': name, 'number': number}]
+        self._save(win, medical)
+
+    def _open_search(self, win, anchor):
+        self._results_box = ui.card()
+        self._results_box.set_visible(False)
+        box, entries = ui.form_sheet(
+            win, anchor, 'Add emergency contact',
+            [('query', 'Search contacts', '', 'text')], 'Done',
+            lambda _values: None, extra=self._results_box)
+        self._sheet = box
+        entries['query'].connect(
+            'changed', lambda entry: self._on_search(win, entry.get_text()))
+        return box, entries
+
+    def _on_search(self, win, query: str) -> None:
+        if not query.strip():
+            self._render_results(win, [])
+            return
+        search_contacts(query, lambda ok, results: self._on_search_done(
+            win, ok, results))
+
+    def _on_search_done(self, win, ok: bool, results) -> None:
+        if not ok:
+            self._render_results(win, [], note='Contacts is not available.')
+            return
+        self._render_results(win, results if isinstance(results, list)
+                             else [])
+
+    def _render_results(self, win, rows: list, note: str = '') -> None:
+        if self._results_box is None:
+            return
+        rendered = [ui.row(name or uid, number,
+                           on_activate=lambda _r, n=name, p=number:
+                           self._add_contact(win, n, p))
+                    for uid, name, number in rows[:_SEARCH_LIMIT]]
+        if not rendered and note:
+            rendered = [ui.note_row(note)]
+        ui.fill(self._results_box, rendered, hide_empty=True)
 
     def _say(self, text: str) -> None:
-        try:
-            if self._note is not None:
-                self._note.set_text(text)
-        except Exception:
-            pass
+        ui.say(self._note, text)

@@ -165,15 +165,13 @@ class BatteryUseSection(settings_page._Section):
         self._note = None
 
     def build(self, win) -> list:
-        from settings_page import _section_placeholder, _section_title
-        from gi.repository import Gtk
-        from xx_ui import widgets
+        import settings_ui as ui
 
-        head = widgets.caption('Since full charge · estimated')
-        self._list_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self._note = _section_placeholder('')
-        return [_section_title(self.title), head, self._list_box, self._note]
+        built = ui.group('Battery use since full charge',
+                         [ui.note_row('Checking…')], note='')
+        self._list_box = built[1]
+        self._note = built[2]
+        return built
 
     def refresh(self, win) -> None:
         from settings_page import _run_bg
@@ -210,9 +208,7 @@ class BatteryUseSection(settings_page._Section):
         return (screen, cpu)
 
     def _render(self, win, res) -> None:
-        from settings_page import (_replace_box_children,
-                                   _section_placeholder)
-        from xx_ui import widgets
+        import settings_ui as ui
         if self._list_box is None:
             return
         try:
@@ -220,19 +216,12 @@ class BatteryUseSection(settings_page._Section):
         except (TypeError, ValueError):
             return
         rows = estimate_shares(screen, cpu)
-        if not rows:
-            rendered = [_section_placeholder('No usage yet.')]
-        else:
-            rendered = []
-            for index, row in enumerate(rows):
-                rendered.append(widgets.list_row(
-                    self._display_name(win, row[0]), format_share(row),
-                    last=index == len(rows) - 1))
-        _replace_box_children(self._list_box, rendered)
-        detail = ('Screen time today + CPU time · estimated'
-                  if cpu else 'Screen time today · estimated (CPU unattributed)')
-        if self._note is not None:
-            self._note.set_text(detail)
+        ui.fill(self._list_box, [
+            ui.row(self._display_name(win, row[0]), format_share(row))
+            for row in rows] or [ui.note_row('No usage yet.')])
+        ui.say(self._note, 'Estimated from screen time today plus CPU time.'
+               if cpu else 'Estimated from screen time today (CPU time is '
+               'not attributable here).')
 
     def _display_name(self, win, app_id: str) -> str:
         return friendly_app_name(win, app_id)

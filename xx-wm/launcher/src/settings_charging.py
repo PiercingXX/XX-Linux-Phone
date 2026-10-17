@@ -10,6 +10,7 @@ state comes from UPower through system_settings.battery_status.
 from __future__ import annotations
 
 import settings_page
+import settings_ui as ui
 
 import os
 
@@ -18,8 +19,6 @@ CHARGE_MAX = 100
 
 CHARGE_PRESETS: tuple = (('Off', None), ('80%', 80), ('85%', 85),
                          ('90%', 90))
-
-CUSTOM_PLACEHOLDER = 'Custom (50-100)'
 
 NO_KNOB_TEXT = ("This phone's battery driver "
                 "doesn't support a charge limit.")
@@ -83,12 +82,6 @@ def parse_custom_limit(text: str) -> int | None:
     return clamp_charge_limit(int(digits))
 
 
-def limit_label(limit: int | None) -> str:
-    if limit is None:
-        return 'Charge limit: Off'
-    return f'Charge limit: {int(limit)}%'
-
-
 class ChargingSection(settings_page._Section):
     """Settings section: charge-limit control gated on sysfs support."""
 
@@ -96,39 +89,20 @@ class ChargingSection(settings_page._Section):
     title = 'Charging'
 
     def __init__(self) -> None:
-        self._status = None
+        self._row = None
         self._note = None
-        self._options_box = None
-        self._custom_entry = None
-        self._apply_btn = None
         self._current: int | None = None
         self._supported: bool | None = None
 
     def build(self, win) -> list:
-        from settings_page import (_section_placeholder, _section_title,
-                                   _settings_entry)
-        from gi.repository import Gtk
-        from xx_ui import widgets
-
         self._current = getattr(win.config, 'charge_limit', None)
-        label = _section_title(self.title)
-        self._status = _section_placeholder(limit_label(self._current))
-
-        self._options_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=8)
-
-        self._custom_entry = _settings_entry(win, CUSTOM_PLACEHOLDER)
-        try:
-            self._custom_entry.set_input_purpose(Gtk.InputPurpose.NUMBER)
-        except Exception:
-            pass
-        self._apply_btn = widgets.outline_button(
-            'Set custom limit', lambda: self._on_custom(win))
-
-        self._note = _section_placeholder('')
+        self._row = ui.nav_row('Charge limit', '',
+                               lambda r: self._pick(win, r))
+        built = ui.group(self.title, note='')
+        self._card = built[1]
+        self._note = built[2]
         self._render_options(win)
-        return [label, self._status, self._options_box, self._custom_entry,
-                self._apply_btn, self._note]
+        return built
 
     def refresh(self, win) -> None:
         from settings_page import _run_bg
@@ -174,55 +148,47 @@ class ChargingSection(settings_page._Section):
 
     def _on_state(self, win, res) -> None:
         try:
-            supported, battery = res
+            supported, _battery = res
         except (TypeError, ValueError):
             return
         self._supported = bool(supported)
-        current = limit_label(getattr(win.config, 'charge_limit', None))
-        if battery:
-            current += f' — {battery}'
-        if self._status is not None:
-            self._status.set_text(current)
         self._render_options(win)
 
     def _render_options(self, win) -> None:
-        from settings_page import _replace_box_children, _section_placeholder
-        from xx_ui import widgets
-        if self._options_box is None:
+        """One row: the limit as a value row when the battery driver has
+        a knob, the honest no-knob sentence (no control) otherwise."""
+        if self._row is None:
             return
-        if self._supported is not True:
-            _replace_box_children(
-                self._options_box, [_section_placeholder(NO_KNOB_TEXT)])
-            self._set_custom_visible(False)
+        current = getattr(win.config, 'charge_limit', None)
+        if self._supported is True:
+            ui.set_subtitle(self._row, 'Off · charges to 100%'
+                            if current is None else 'Stops at %d%%' % current)
+            ui.fill(self._card, [self._row])
             return
-        _replace_box_children(self._options_box, [widgets.segmented([
-            (label, self._current == value,
-             lambda v=value: self._on_pick(win, v))
-            for label, value in CHARGE_PRESETS])])
-        self._set_custom_visible(True)
+        text = (NO_KNOB_TEXT if self._supported is False
+                else 'Checking battery support…')
+        ui.fill(self._card, [ui.row('Charge limit', text)])
 
-    def _set_custom_visible(self, visible: bool) -> None:
-        for widget in (self._custom_entry, self._apply_btn):
-            if widget is None:
-                continue
-            try:
-                widget.set_visible(visible)
-            except Exception:
-                pass
+    def _pick(self, win, anchor) -> None:
+        choices = [(label, lambda v=value: self._apply(win, v))
+                   for label, value in CHARGE_PRESETS]
+        choices.append(('Custom…', lambda: self._open_custom(win, anchor)))
+        win.item_actions._show_action_menu(anchor, 'Charge limit', choices)
 
-    def _on_pick(self, win, value: int | None) -> None:
-        self._apply(win, value)
+    def _open_custom(self, win, anchor):
+        current = getattr(win.config, 'charge_limit', None)
+        return ui.form_sheet(
+            win, anchor, 'Custom charge limit',
+            [('limit', 'Stop charging at (50–100 %)',
+              '' if current is None else current, 'number')],
+            'Set limit', lambda values: self._on_custom(win, values))
 
-    def _on_custom(self, win) -> None:
-        try:
-            text = self._custom_entry.get_text()
-        except Exception:
-            text = ''
-        picked = parse_custom_limit(text)
+    def _on_custom(self, win, values: dict) -> str | None:
+        picked = parse_custom_limit(values.get('limit', ''))
         if picked is None:
-            self._say('Enter a number from 50 to 100.')
-            return
+            return 'Enter a number from 50 to 100.'
         self._apply(win, picked)
+        return None
 
     def _apply(self, win, value: int | None) -> None:
         percent = 100 if value is None else clamp_charge_limit(value)
@@ -241,8 +207,6 @@ class ChargingSection(settings_page._Section):
             except Exception:
                 pass
             self._current = getattr(win.config, 'charge_limit', None)
-            if self._status is not None:
-                self._status.set_text(limit_label(self._current))
             self._render_options(win)
             self._say('')
 
@@ -252,8 +216,4 @@ class ChargingSection(settings_page._Section):
             self._say(f'Could not set limit: {err}')
 
     def _say(self, text: str) -> None:
-        try:
-            if self._note is not None:
-                self._note.set_text(text)
-        except Exception:
-            pass
+        ui.say(self._note, text)

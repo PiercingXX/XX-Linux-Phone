@@ -12,6 +12,7 @@ import re
 import subprocess
 
 import settings_page
+import settings_ui as ui
 
 DEFAULT_KEY = 'us+colemak'
 
@@ -92,27 +93,16 @@ class KeyboardSection(settings_page._Section):
     title = 'Keyboard'
 
     def __init__(self) -> None:
+        self._row = None
         self._status = None
-        self._custom_box = None
-        self._layout_entry = None
-        self._variant_entry = None
-        self._picker_box = None
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from settings_page import (_section_placeholder, _section_title,
-                                   _settings_entry)
-        self._status = _section_placeholder('')
-        self._picker_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                   spacing=8)
-        self._custom_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                   spacing=8)
-        self._layout_entry = _settings_entry(win, 'Layout (e.g. fr)')
-        self._variant_entry = _settings_entry(win, 'Variant (blank for none)')
+        self._row = ui.nav_row('Keyboard layout', '',
+                               lambda r: self._show_presets(win, r))
+        built = ui.group(self.title, [self._row], note='')
+        self._status = built[2]
         self._render(win)
-        return [_section_title(self.title), self._picker_box,
-                self._layout_entry, self._variant_entry, self._custom_box,
-                self._status]
+        return built
 
     def refresh(self, win) -> None:
         self._render(win)
@@ -124,29 +114,23 @@ class KeyboardSection(settings_page._Section):
             return DEFAULT_KEY
 
     def _render(self, win) -> None:
-        from xx_ui import widgets
-        from settings_page import _replace_box_children
-        if self._picker_box is None:
-            return
-        current = self._key(win)
-        change = widgets.outline_button(
-            'Change…', lambda: self._show_presets(win))
-        _replace_box_children(self._picker_box, [
-            widgets.setting_row('Layout', current_label(current), change,
-                                last=True)])
-        if self._custom_box is not None:
-            custom = widgets.outline_button(
-                'Apply custom', lambda: self._pick_custom(win))
-            _replace_box_children(self._custom_box, [custom])
+        ui.set_subtitle(self._row, current_label(self._key(win)))
 
-    def _show_presets(self, win) -> None:
+    def _show_presets(self, win, anchor) -> None:
         actions = [(label, lambda layout=layout, variant=variant:
                     self._pick(win, layout, variant))
                    for label, layout, variant in KEYBOARD_PRESETS]
-        actions.append(('Cancel', lambda: None))
-        anchor = self._picker_box
+        actions.append(('Custom…', lambda: self._open_custom(win, anchor)))
         win.item_actions._show_action_menu(anchor, 'Keyboard layout',
                                            actions)
+
+    def _open_custom(self, win, anchor):
+        layout, variant = parse_layout_key(self._key(win))
+        return ui.form_sheet(
+            win, anchor, 'Custom layout',
+            [('layout', 'Layout (e.g. fr)', layout, 'text'),
+             ('variant', 'Variant (blank for none)', variant, 'text')],
+            'Apply', lambda values: self._pick_custom(win, values))
 
     def _pick(self, win, layout: str, variant: str) -> None:
         try:
@@ -155,25 +139,17 @@ class KeyboardSection(settings_page._Section):
         except Exception:
             pass
         apply_keyboard_layout(layout, variant)
-        self._say('Layout: %s.' % current_label(
-            format_layout_key(layout, variant)))
+        self._say('')
         self._render(win)
 
-    def _pick_custom(self, win) -> None:
-        try:
-            layout = self._layout_entry.get_text().strip().lower()
-            variant = self._variant_entry.get_text().strip().lower()
-        except Exception:
-            layout, variant = '', ''
+    def _pick_custom(self, win, values: dict) -> str | None:
+        layout = str(values.get('layout', '')).strip().lower()
+        variant = str(values.get('variant', '')).strip().lower()
         error = validate_custom(layout, variant)
         if error is not None:
-            self._say(error)
-            return
+            return error
         self._pick(win, layout, variant)
+        return None
 
     def _say(self, text: str) -> None:
-        try:
-            if self._status is not None:
-                self._status.set_text(text)
-        except Exception:
-            pass
+        ui.say(self._status, text)

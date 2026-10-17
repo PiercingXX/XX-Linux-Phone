@@ -108,6 +108,7 @@ install_data(
     'src/settings_smart_lock.py',
     'src/settings_standby.py',
     'src/settings_storage.py',
+    'src/settings_ui.py',
     'src/settings_updates.py',
     'src/shell_log.py',
     'src/smart_lock.py',

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 
 import settings_page
+import settings_ui as ui
 
 USER_CLEAN_CATEGORIES = ('thumbnails', 'trash', 'browsers',
                          'flatpak-unused', 'flatpak-caches')
@@ -20,17 +21,18 @@ USER_CLEAN_CATEGORIES = ('thumbnails', 'trash', 'browsers',
 ROOT_CLEAN_CATEGORIES = ('apk-cache', 'paccache-keep', 'paccache-uninstalled',
                          'apt-clean', 'journal-vacuum')
 
+# (row title, what the cleanup keeps or skips) per category.
 CATEGORY_LABELS = {
-    'thumbnails': 'Thumbnail cache',
-    'trash': 'Trash',
-    'browsers': 'Browser caches (closed only)',
-    'flatpak-unused': 'Unused Flatpak runtimes',
-    'flatpak-caches': 'Flatpak app caches (stopped)',
-    'apk-cache': 'Package cache (apk)',
-    'paccache-keep': 'Package cache (keep 2)',
-    'paccache-uninstalled': 'Package cache (uninstalled)',
-    'apt-clean': 'Package cache (apt)',
-    'journal-vacuum': 'System journal (2 weeks)',
+    'thumbnails': ('Thumbnail cache', ''),
+    'trash': ('Trash', ''),
+    'browsers': ('Browser caches', 'closed browsers only'),
+    'flatpak-unused': ('Flatpak runtimes', 'unused ones only'),
+    'flatpak-caches': ('Flatpak app caches', 'stopped apps only'),
+    'apk-cache': ('Package cache', 'apk'),
+    'paccache-keep': ('Package cache', 'keeps 2 versions'),
+    'paccache-uninstalled': ('Uninstalled packages', 'cached copies'),
+    'apt-clean': ('Package cache', 'apt'),
+    'journal-vacuum': ('System journal', 'keeps 2 weeks'),
 }
 
 READONLY_LABELS = {
@@ -450,7 +452,10 @@ class StorageSection(settings_page._Section):
 
     def __init__(self) -> None:
         self._usage = None
+        self._system_row = None
+        self._home_row = None
         self._rows_box = None
+        self._other_box = None
         self._reports = None
         self._status = None
         self._clean_btn = None
@@ -459,20 +464,23 @@ class StorageSection(settings_page._Section):
         self._pkg = None
 
     def build(self, win) -> list:
-        from gi.repository import Gtk
-        from xx_ui import widgets
-        from settings_page import _section_placeholder, _section_title
-
-        self._usage = _section_placeholder('Measuring…')
-        self._rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                 spacing=8)
-        self._reports = _section_placeholder('')
-        self._status = _section_placeholder('')
-        self._clean_btn = widgets.primary_button(
-            'Clean', lambda: self._on_clean_pressed(win))
+        self._system_row = ui.row('System', 'Measuring…')
+        self._home_row = ui.row('Home', 'Measuring…')
+        self._reports = ui.nav_row('Warnings', 'Checking…',
+                                   lambda r: self._show_reports(win, r))
+        self._report_text = ''
+        self._usage = self._system_row.subtitle_label
+        usage = ui.group(self.title, [self._system_row, self._home_row,
+                                      self._reports])
+        self._clean_btn = ui.nav_row('Clean selected', '',
+                                     lambda _r: self._on_clean_pressed(win))
+        clean = ui.group('Free up space', note='')
+        self._rows_box = clean[1]
+        self._status = clean[2]
+        other = ui.group('Other space (read only)')
+        self._other_box = other[1]
         self._render_rows(win)
-        return [_section_title(self.title), self._usage, self._rows_box,
-                self._clean_btn, self._status, self._reports]
+        return usage + clean + other
 
     def refresh(self, win) -> None:
         from settings_page import _run_bg
@@ -486,30 +494,35 @@ class StorageSection(settings_page._Section):
         return rows
 
     def _render_rows(self, win) -> None:
-        from settings_page import _replace_box_children
-        from xx_ui import widgets
         if self._rows_box is None:
             return
-        items = []
+        rows = []
         for category in self._categories():
             size = self._sizes.get(category)
-            subtitle = format_bytes(size) if size is not None else '—'
-            switch = widgets.make_switch(
-                self._switches.get(category, True),
-                lambda active, c=category: self._switches.update(
-                    {c: bool(active)}))
             self._switches.setdefault(category, True)
-            items.append((CATEGORY_LABELS.get(category, category),
-                          subtitle, switch))
-        for key, label in READONLY_LABELS.items():
-            size = (self._sizes.get('readonly', {}) or {}).get(key)
-            items.append((label,
-                          format_bytes(size) if size is not None else '—',
-                          None))
-        rows = [widgets.setting_row(title, subtitle, trailing,
-                                    last=index == len(items) - 1)
-                for index, (title, subtitle, trailing) in enumerate(items)]
-        _replace_box_children(self._rows_box, rows)
+            title, note = CATEGORY_LABELS.get(category, (category, ''))
+            detail = format_bytes(size) if size is not None else '—'
+            rows.append(ui.switch_row(
+                title, '%s · %s' % (detail, note) if note else detail,
+                self._switches[category],
+                lambda active, c=category: self._on_pick(c, active)))
+        reclaim = sum((self._sizes.get(c) or 0) for c in self._selected()
+                      if isinstance(self._sizes.get(c), int))
+        ui.set_subtitle(self._clean_btn, 'Frees about %s' % format_bytes(
+            reclaim))
+        ui.fill(self._rows_box, rows + [self._clean_btn])
+        readonly = self._sizes.get('readonly', {}) or {}
+        ui.fill(self._other_box, [
+            ui.row(label, format_bytes(readonly[key])
+                   if readonly.get(key) is not None else '—')
+            for key, label in READONLY_LABELS.items()])
+
+    def _on_pick(self, category: str, active: bool) -> None:
+        self._switches[category] = bool(active)
+        reclaim = sum((self._sizes.get(c) or 0) for c in self._selected()
+                      if isinstance(self._sizes.get(c), int))
+        ui.set_subtitle(self._clean_btn, 'Frees about %s' % format_bytes(
+            reclaim))
 
     def _selected(self) -> list:
         return [c for c in self._categories()
@@ -523,30 +536,39 @@ class StorageSection(settings_page._Section):
         self._pkg = res.get('pkg')
         self._sizes = dict(res.get('sizes') or {})
         self._sizes['readonly'] = res.get('readonly') or {}
-        if self._usage is not None:
-            self._usage.set_text(
-                'System: %s. Home: %s.' % (usage_line(*root),
-                                           usage_line(*home)))
+        ui.set_subtitle(self._system_row, usage_line(*root))
+        ui.set_subtitle(self._home_row, usage_line(*home))
         self._render_rows(win)
         self._render_reports(res)
 
     def _render_reports(self, res) -> None:
         if self._reports is None:
             return
-        lines = []
+        lines, counts = [], []
         unmerged = res.get('unmerged') or []
         if unmerged:
+            counts.append('%d unmerged config%s' % (
+                len(unmerged), '' if len(unmerged) == 1 else 's'))
             lines.append('Unmerged configs: %s' % ', '.join(unmerged[:5])
                          + ('…' if len(unmerged) > 5 else ''))
         failed = res.get('failed') or []
         if failed:
+            counts.append('%d failed unit%s' % (
+                len(failed), '' if len(failed) == 1 else 's'))
             lines.append('Failed units: %s' % ', '.join(failed[:5])
                          + ('…' if len(failed) > 5 else ''))
         journal = res.get('journal')
         if journal:
+            counts.append('journal %s' % journal)
             lines.append('Journal: %s' % journal)
-        self._reports.set_text(
-            ' '.join(lines) if lines else 'No warnings.')
+        self._report_text = '\n'.join(lines)
+        ui.set_subtitle(self._reports,
+                        ' · '.join(counts) if counts else 'None')
+
+    def _show_reports(self, win, anchor) -> None:
+        win.item_actions._show_action_menu(
+            anchor, 'Warnings', [('Close', lambda: None)],
+            subtitle=self._report_text or 'No warnings.')
 
     def _on_clean_pressed(self, win) -> None:
         selected = self._selected()
@@ -623,9 +645,5 @@ class StorageSection(settings_page._Section):
         self.refresh(win)
 
     def _say(self, text: str) -> None:
-        try:
-            if self._status is not None:
-                self._status.set_text(text)
-        except Exception:
-            pass
+        ui.say(self._status, text)
 

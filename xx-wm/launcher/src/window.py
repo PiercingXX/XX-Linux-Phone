@@ -969,10 +969,10 @@ class ShellWindow(Adw.ApplicationWindow):
                 if action != 'none':
                     self._dispatch_gesture_action(action)
             return
-        # Settings is a leaf page: a horizontal swipe from either edge is an
-        # unconditional "back to home", so there is always a way out by gesture
+        # Settings: a horizontal swipe is back (subpage to the category
+        # menu, menu to home), so there is always a way out by gesture
         if current == 'settings' and abs(vel_x) > 200:
-            self._leave_settings()
+            self._settings_back()
             return
         idx = _PAGE_ORDER.index(current) if current in _PAGE_ORDER else 0
         if vel_x < -200 and idx < len(_PAGE_ORDER) - 1:
@@ -1344,7 +1344,7 @@ class ShellWindow(Adw.ApplicationWindow):
         # 4. Navigate back within the shell stack
         current = self.stack.get_visible_child_name()
         if current == 'settings':
-            self._leave_settings()
+            self._settings_back()
             return
         if current == 'apps':
             self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
@@ -1622,6 +1622,10 @@ class ShellWindow(Adw.ApplicationWindow):
         if self.stack.get_visible_child_name() == 'settings':
             self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
             self.stack.set_visible_child_name('home')
+        # The next visit starts at the category menu.
+        inner = getattr(self, '_settings_stack', None)
+        if inner is not None:
+            inner.set_visible_child_name('menu')
         if getattr(self, '_raised_for_settings', False):
             self._raised_for_settings = False
             self.drop_to_background()
@@ -1760,21 +1764,6 @@ class ShellWindow(Adw.ApplicationWindow):
     def _refresh_gesture_labels(self) -> None:
         return _settings(self)._refresh_gesture_labels()
 
-    def _build_gesture_row(self, title_text: str, binding: Gtk.Label,
-                           change: Gtk.Button, reset: Gtk.Button) -> Gtk.Widget:
-        """One gesture binding stacked title/binding/buttons: the binding
-        beside both buttons forced the settings page past 320 px."""
-        return _settings(self)._build_gesture_row(
-            title_text, binding, change, reset)
-
-    def _binding_label(self, key: str, store: dict[str, Gtk.Label]) -> Gtk.Label:
-        return _settings(self)._binding_label(key, store)
-
-    @staticmethod
-    def _link_button(label_text: str, css: str) -> Gtk.Button:
-        from settings_page import SettingsPage
-        return SettingsPage._link_button(label_text, css)
-
     def _build_gestures_card(self) -> Gtk.Widget:
         return _settings(self)._build_gestures_card()
 
@@ -1822,21 +1811,12 @@ class ShellWindow(Adw.ApplicationWindow):
         return _settings(self)._clear_gesture_app(key)
 
     def _build_settings_page(self) -> Gtk.Widget:
-        page = _settings(self)._build_settings_page()
-        try:
-            # ScrolledWindow.get_child() is the viewport, not the content
-            # box — prepend/append on it silently built nothing at all.
-            inner = page.get_child()
-            box = inner.get_child() if isinstance(inner, Gtk.Viewport) else inner
-            from xx_ui import widgets
-            back_btn = widgets.icon_button(
-                'go-previous-symbolic', lambda *_a: self._leave_settings())
-            back_btn.set_tooltip_text('Back')
-            back_btn.set_halign(Gtk.Align.START)
-            box.prepend(back_btn)
-        except Exception:
-            pass
-        return page
+        return _settings(self)._build_settings_page()
+
+    def _settings_back(self) -> None:
+        """Back inside Settings: a subpage returns to the category menu,
+        the menu leaves Settings."""
+        return _settings(self).back()
 
     def _build_appearance_card(self) -> Gtk.Widget:
         """Theme picker: every preset plus custom as swatches — a 40 px
@@ -2005,16 +1985,6 @@ class ShellWindow(Adw.ApplicationWindow):
     def _section_placeholder(self, text: str) -> Gtk.Label:
         return _settings(self)._section_placeholder(text)
 
-    @staticmethod
-    def _shrink_button_label(btn: Gtk.Button) -> None:
-        from settings_page import SettingsPage
-        return SettingsPage._shrink_button_label(btn)
-
-    @staticmethod
-    def _shrink_settings_entry(entry: Gtk.Entry) -> None:
-        from settings_page import SettingsPage
-        return SettingsPage._shrink_settings_entry(entry)
-
     def _refresh_system_sections(self) -> None:
         return _settings(self)._refresh_system_sections()
 
@@ -2078,10 +2048,6 @@ class ShellWindow(Adw.ApplicationWindow):
     def _on_start_bluetooth_service(self) -> None:
         return _settings(self)._on_start_bluetooth_service()
 
-    def _settings_row(self, title: str, control: Gtk.Widget) -> Gtk.Widget:
-        # Title above the control: label + entry side by side forced width.
-        return _settings(self)._settings_row(title, control)
-
     def _apply_theme(self, preset: ThemePreset | None = None) -> None:
         from font_theme import apply_global_font
         from home_launcher import theme_css as home_theme_css
@@ -2111,9 +2077,11 @@ class ShellWindow(Adw.ApplicationWindow):
             accent=theme.accent,
         )
         scale = self.config.text_size_scale
+        import settings_ui
         css = (base + '\n' + shell + '\n'
                + home_theme_css(theme, scale) + '\n'
-               + launcher_text_css(scale))
+               + launcher_text_css(scale) + '\n'
+               + settings_ui.css(theme, scale))
         self.theme_provider.load_from_data(css.encode('utf-8'))
 
     def _refresh_clock(self) -> None:
@@ -2452,8 +2420,8 @@ class ShellWindow(Adw.ApplicationWindow):
         active, or held) — the phone must never auto-lock under it."""
         return _calls(self)._call_live()
 
-    def _on_apn_save(self, _btn: Gtk.Button) -> None:
-        return _settings(self)._on_apn_save(_btn)
+    def _on_apn_save(self, values: dict) -> None:
+        return _settings(self)._on_apn_save(values)
 
     @staticmethod
     def _gsm_connection_name() -> str:
