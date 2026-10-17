@@ -245,7 +245,7 @@ class XXWMApplication(Adw.Application):
         if (config is not None and config.sound_notifications
                 and not dnd_silenced and not hints.get('suppress-sound')):
             import sound
-            sound.play('notify.wav')
+            sound.play('notify.ogg')
 
         # Screen-time count only (no content stored): notifications that
         # survived the mute/Focus discards. Muted and held notifications

@@ -151,10 +151,10 @@ install_data(
 )
 
 install_data(
-  'data/sounds/ringtone.mp3',
-  'data/sounds/notify.wav',
-  'data/sounds/comm-on.wav',
-  'data/sounds/alert.wav',
+  'data/sounds/ringtone.ogg',
+  'data/sounds/unknown.ogg',
+  'data/sounds/notify.ogg',
+  'data/sounds/NOTICE-original-sounds.txt',
   install_dir: join_paths(shell_datadir, 'sounds'),
 )
 

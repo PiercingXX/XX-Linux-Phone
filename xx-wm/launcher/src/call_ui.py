@@ -403,7 +403,7 @@ def trigger_feedback_params(glib=None):
 
 def _ringer_sound_play() -> None:
     import sound
-    sound.play('ringtone.mp3', loop=True)
+    sound.play('ringtone.ogg', loop=True)
 
 
 def _ringer_sound_stop() -> None:

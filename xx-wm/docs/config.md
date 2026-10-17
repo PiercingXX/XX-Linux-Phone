@@ -61,7 +61,7 @@ migration steps are ever required.
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `sound_ringtone` | bool | `true` | Loop the ringtone on incoming calls. |
-| `sound_notifications` | bool | `true` | Play `notify.wav` on notifications (DnD, mutes, and `suppress-sound` still win). |
+| `sound_notifications` | bool | `true` | Play `notify.ogg` on notifications (DnD, mutes, and `suppress-sound` still win). |
 | `muted_apps` | dict | `{}` | `{app_id: until_epoch}` from "Disable for…" — notifications are discarded until the deadline. Expires silently; excluded from backups. |
 | `lock_screen_notifications` | string | `"summary"` | `summary` (app + summary rows), `count`, or `off`. Hidden while DnD is active. |
 

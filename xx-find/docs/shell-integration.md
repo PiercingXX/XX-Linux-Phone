@@ -30,7 +30,7 @@ bus call as the shell's own `Ringer` (`ref/xx-wm/launcher/src/call_ui.py`):
   The agent never writes ALSA/PipeWire volumes (static test bans
   `amixer`, `set-sink-volume`, `wpctl set-volume`, etc.).
 - Fallback when feedbackd is absent: the injected `play`/`stop` loop,
-  same shape as the shell's `sound.play('ringtone.mp3', loop=True)`
+  same shape as the shell's `sound.play('ringtone.ogg', loop=True)`
   (`paplay`, else `pw-play`) in `ref/xx-wm/launcher/src/sound.py`.
 - `full_volume=True` is accepted for the `AgentDeps.ring` seam and
   intentionally changes no mixer; ring-through comes from the event

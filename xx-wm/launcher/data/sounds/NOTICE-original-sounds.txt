@@ -1,0 +1,6 @@
+ringtone.ogg, unknown.ogg and notify.ogg are original sounds synthesized for
+the XX apps from code: additive synthesis and exponential decays, no samples
+and no recordings. ringtone.ogg and unknown.ogg are the xx-dialer ringtone
+and unknown-caller tone; notify.ogg is the xx-calendar reminder chime.
+
+Copyright PiercingXX. All rights reserved.
