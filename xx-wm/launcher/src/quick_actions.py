@@ -924,7 +924,7 @@ _TILES: list[_TileDef] = [
     _TileDef('location', 'Location', lambda: None,                        lambda _v: None,                         2),
     _TileDef('hotspot',  'Hotspot',  _get_hotspot_state,                  _toggle_hotspot,                         2),
     _TileDef('night',    'Night',    _get_night_state,                    _set_night_state,                        2),
-    _TileDef('tailscale', 'Tailscale', _get_tailscale_state,              lambda _v: None,                         2),
+    _TileDef('tailscale', 'Tailnet',  _get_tailscale_state,               lambda _v: None,                         2),
 ]
 
 

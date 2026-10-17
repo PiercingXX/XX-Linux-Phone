@@ -163,6 +163,15 @@ def test_tile_shown_and_bound_when_installed():
     assert tile.set_state == panel._set_tailscale
 
 
+def test_label_fits_a_quarter_of_a_360px_shade():
+    # The four equal columns take their width from the widest label; a
+    # nine-letter TAILSCALE pushed the grid past a 360 px screen.
+    longest = max(len(t.label) for t in quick_actions._TILES)
+    tile = next(t for t in quick_actions._TILES if t.key == 'tailscale')
+    assert tile.label == 'Tailnet'
+    assert longest <= 8
+
+
 def test_sign_in_result_opens_link_and_labels_tile():
     opened = []
     panel = _bare_panel(True, opened)
