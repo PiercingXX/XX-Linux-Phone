@@ -93,6 +93,17 @@ def caption(text: str) -> Gtk.Label:
     return label(text.upper(), 'xx-caption')
 
 
+def wrap_label(text: str, cls: str = 'xx-secondary',
+               xalign: float = 0.0) -> Gtk.Label:
+    """Multi-line label: word-char wrap, never ellipsized (an ellipsized
+    wrapped label collapses to one truncated line)."""
+    widget = Gtk.Label(label=text)
+    widget.add_css_class(cls)
+    widget.set_xalign(xalign)
+    _fit_wrap(widget)
+    return widget
+
+
 def icon_image(name: str, px: int = BAR_ICON_PX) -> Gtk.Image:
     image = Gtk.Image.new_from_icon_name(name)
     image.set_pixel_size(px)
@@ -153,9 +164,11 @@ def page_header(title: str, caption_text: str | None = None,
 
 
 def compact_header(back_cb, title: str, subtitle: str = '',
-                   icon_name: str = '', icon_cb=None) -> Gtk.Box:
+                   icon_name: str = '', icon_cb=None,
+                   second_icon_name: str = '',
+                   second_icon_cb=None) -> Gtk.Box:
     """Sub-page header: 56 px bar, back chevron, caption-style title,
-    trailing symbolic icon. Everything vertically centered."""
+    up to two trailing symbolic icons. Everything vertically centered."""
     root = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
     root.add_css_class('xx-page-body')
     root.add_css_class('xx-compact-header')
@@ -168,16 +181,30 @@ def compact_header(back_cb, title: str, subtitle: str = '',
     title_label = caption(title)
     _fit_single(title_label, _ROW_CHARS)
     middle.append(title_label)
-    if subtitle:
-        sub = label(subtitle, 'xx-secondary')
-        _fit_single(sub, _ROW_CHARS)
-        middle.append(sub)
+    sub = label(subtitle, 'xx-secondary')
+    _fit_single(sub, _ROW_CHARS)
+    sub.set_visible(bool(subtitle))
+    middle.append(sub)
     root.append(middle)
+    if second_icon_name:
+        second = _icon_button(second_icon_name, second_icon_cb)
+        second.set_valign(Gtk.Align.CENTER)
+        root.append(second)
     if icon_name:
         button = _icon_button(icon_name, icon_cb)
         button.set_valign(Gtk.Align.CENTER)
         root.append(button)
     return root
+
+
+def count_badge(text: str) -> Gtk.Label:
+    """Small inverted unread-count pill for list-row trailing meta."""
+    widget = Gtk.Label(label=text)
+    widget.add_css_class('xx-count')
+    widget.set_xalign(1.0)
+    widget.set_valign(Gtk.Align.CENTER)
+    _fit_exact(widget, text, _META_CHARS)
+    return widget
 
 
 def avatar(initials: str, size: int = 40, dashed: bool = False) -> Gtk.Label:
@@ -444,7 +471,9 @@ def empty_state(text: str, action_label: str | None = None,
     root.append(prompt)
     if action_label:
         action = outline_button(action_label, callback)
-        action.set_halign(Gtk.Align.CENTER)
+        # Full-width: a centered button is allocated its minimum, which
+        # ellipsizes its own label.
+        action.set_hexpand(True)
         root.append(action)
     return root
 
@@ -526,6 +555,27 @@ def text_entry(placeholder: str = '') -> Gtk.Entry:
     entry.add_css_class('xx-entry')
     entry.set_placeholder_text(placeholder)
     entry.set_max_width_chars(_ENTRY_CHARS)
+    return entry
+
+
+def deferred_entry(placeholder: str = '') -> Gtk.Entry:
+    """Entry that stays unfocusable until tapped.
+
+    A window focuses its first focusable widget on activation, which pops
+    the on-screen keyboard on a phone. The CAPTURE-phase tap enables and
+    focuses the entry for the same tap, so typing still starts at once.
+    """
+    entry = text_entry(placeholder)
+    entry.set_can_focus(False)
+    tap = Gtk.GestureClick.new()
+    tap.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+
+    def _enable(*_args) -> None:
+        entry.set_can_focus(True)
+        entry.grab_focus()
+
+    tap.connect('pressed', _enable)
+    entry.add_controller(tap)
     return entry
 
 

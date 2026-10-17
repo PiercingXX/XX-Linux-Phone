@@ -6,6 +6,13 @@ project(
 
 python = import('python').find_installation('python3')
 
+# The UI runs on the shared xx_ui design system: install common/ first so
+# the xx_ui package is importable, here and on the device.
+xx_ui_check = run_command(python, '-c', 'import xx_ui', check: false)
+if xx_ui_check.returncode() != 0
+  error('txxt requires the xx_ui package: configure and install common/ first')
+endif
+
 prefix = get_option('prefix')
 datadir = join_paths(prefix, get_option('datadir'))
 bindir = join_paths(prefix, get_option('bindir'))
@@ -16,7 +23,6 @@ install_data(
     'src/txxt/__init__.py',
     'src/txxt/__main__.py',
     'src/txxt/main.py',
-    'src/txxt/theme.py',
     'src/txxt/settings.py',
     'src/txxt/backup.py',
     'src/txxt/blocking.py',
@@ -39,6 +45,7 @@ install_data(
     'src/txxt/settings_page.py',
     'src/txxt/blocking_page.py',
     'src/txxt/quarantine_page.py',
+    'src/txxt/new_conversation_page.py',
   ],
   install_dir: pkgdir,
 )

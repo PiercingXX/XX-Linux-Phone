@@ -11,9 +11,9 @@ Launches: ``txxt --open-thread ID`` and the
 action fires (the .desktop ``Exec`` carries ``%U`` so the URI lands
 in argv; ``do_open`` covers bus-activated opens).
 
-Phone rules: CSS providers attach to ``Gdk.Display.get_default()``
-(None-guarded; ``Adw.Application`` has no ``get_display``), header
-bars hide desktop window buttons, and no entry autofocuses — list
+Phone rules: the shared ``xx_ui`` design system paints everything
+(``xx_ui.apply`` once here, then per-window re-install for the manual
+theme pick); the window is chromeless and no entry autofocuses — list
 search and compose stay unfocusable until tapped.
 """
 
@@ -28,16 +28,49 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 gi.require_version('Gdk', '4.0')
 
-from gi.repository import Adw, Gio, Gtk, Gdk  # noqa: E402
+from gi.repository import Adw, Gio, Gdk  # noqa: E402
 
+import xx_ui  # noqa: E402
 from txxt import APP_ID  # noqa: E402
 from txxt import list_presenter as presenter  # noqa: E402
-from txxt import theme as txxt_theme  # noqa: E402
 from txxt.conversations import ConversationListPage  # noqa: E402
 from txxt.settings import load as load_settings  # noqa: E402
 from txxt.store import Store  # noqa: E402
 from txxt.thread_page import ThreadPage, sweep_staged_photos  # noqa: E402
 from txxt.txxt_client import TxxtClient  # noqa: E402
+
+#: In-app font toggle values to shared font families.
+MANUAL_FONTS = {
+    'space-mono': 'space-mono',
+    'jetbrains-mono': 'jetbrains-mono',
+    'system': 'system-light',
+}
+
+
+def manual_theme(settings) -> xx_ui.Theme:
+    """Shared theme object for the in-app manual pick (never raises)."""
+    preset = xx_ui.theme.PRESETS.get(
+        str(settings.theme_preset or '').strip().lower(),
+        xx_ui.theme.PRESETS['amoled'],
+    )
+    family = xx_ui.theme.FONT_FAMILIES.get(
+        MANUAL_FONTS.get(str(settings.font_mode or '').strip().lower(), 'space-mono'),
+        xx_ui.theme.FONT_FAMILIES['jetbrains-mono-nerd'],
+    )
+    shell = xx_ui.theme.load()
+    return xx_ui.Theme(
+        key=preset.key,
+        background=preset.background,
+        surface=preset.surface,
+        surface_alt=preset.surface_alt,
+        border=preset.border,
+        foreground=preset.foreground,
+        muted=preset.muted,
+        accent=preset.accent,
+        font_family=family,
+        scale=shell.scale,
+        dark=preset.key not in ('paper', 'mist'),
+    )
 
 
 def data_dir() -> Path:
@@ -64,10 +97,12 @@ class TxxtWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application, open_thread_id: int | None = None) -> None:
         super().__init__(application=app)
         self.set_title('TxxT')
+        self.set_decorated(False)
         self.set_default_size(360, 720)
         self.set_size_request(320, 640)
-        self._css = Gtk.CssProvider()
+        xx_ui.apply(Gdk.Display.get_default())
         self.apply_theme()
+        self._theme_watch = xx_ui.on_change(self._on_theme_changed)
         self._store = Store(str(ensure_data_dir() / 'txxt.db'))
         self._client: TxxtClient | None = None
         self._thread_pages: list[ThreadPage] = []
@@ -85,15 +120,13 @@ class TxxtWindow(Adw.ApplicationWindow):
         self.set_content(self._navigation)
 
         Gio.bus_get(Gio.BusType.SESSION, None, self._on_bus_ready)
-        self._theme_monitor = txxt_theme.watch_xxwm_config(
-            self._on_shell_config_changed,
-        )
         self._blocking_page = None
         self._quarantine_page = None
+        self._compose_page = None
         if open_thread_id is not None:
             self.open_thread(open_thread_id)
 
-    def _on_shell_config_changed(self, _shell_config) -> None:
+    def _on_theme_changed(self, _active) -> None:
         """Shell theme edits re-apply live; a manual pick still wins."""
         try:
             self.apply_theme()
@@ -102,30 +135,10 @@ class TxxtWindow(Adw.ApplicationWindow):
 
     def apply_theme(self) -> None:
         settings = load_settings()
-        shell_config = txxt_theme.load_xxwm_config()
         if settings.auto_sync_theme:
-            active = txxt_theme.resolve_theme(shell_config)
-            font = txxt_theme.resolve_font(shell_config)
-        else:
-            active = txxt_theme.resolve_theme({}, manual_preset=settings.theme_preset)
-            font = txxt_theme.manual_font_family(settings.font_mode)
+            return
         try:
-            scale = float(shell_config.get('text_size_scale', 1.0))
-        except (TypeError, ValueError):
-            scale = 1.0
-        css = txxt_theme.css_for_theme(active, font, scale)
-        display = Gdk.Display.get_default()
-        if display is not None:
-            Gtk.StyleContext.add_provider_for_display(
-                display, self._css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-            )
-            self._css.load_from_string(css)
-        try:
-            scheme = (
-                Adw.ColorScheme.PREFER_DARK if active.get('dark')
-                else Adw.ColorScheme.PREFER_LIGHT
-            )
-            Adw.StyleManager.get_default().set_color_scheme(scheme)
+            xx_ui.install(manual_theme(settings))
         except Exception:
             pass
 
@@ -148,7 +161,7 @@ class TxxtWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
             page.set_client(self._client)
-        for page in (self._blocking_page, self._quarantine_page):
+        for page in (self._blocking_page, self._quarantine_page, self._compose_page):
             if page is not None:
                 try:
                     page.set_resolver(self._resolver)
@@ -190,17 +203,17 @@ class TxxtWindow(Adw.ApplicationWindow):
         ]
         return False
 
-    def open_settings(self) -> None:
-        from txxt.settings_page import SettingsDialog  # noqa: E402
+    def open_settings(self):
+        from txxt.settings_page import SettingsPage  # noqa: E402
 
-        dialog = SettingsDialog(
-            self._store,
+        page = SettingsPage(
+            self._navigation, self, self._store,
             on_changed=self._on_settings_changed,
             on_open_blocking=lambda: self.open_blocking(),
             on_open_quarantine=lambda: self.open_quarantine(),
         )
-        dialog.present(self)
-        return dialog
+        self._navigation.push(page)
+        return page
 
     def _on_settings_changed(self) -> None:
         self.apply_theme()
@@ -236,6 +249,18 @@ class TxxtWindow(Adw.ApplicationWindow):
             self._quarantine_page.refresh()
         except Exception:
             pass
+
+    def open_new_conversation(self) -> None:
+        from txxt.new_conversation_page import NewConversationPage  # noqa: E402
+
+        if self._compose_page is None or not self._compose_page.get_visible():
+            self._compose_page = NewConversationPage(
+                self._navigation, self, self._store, self._resolver,
+                self.open_thread,
+            )
+            self._navigation.push(self._compose_page)
+        else:
+            self._navigation.pop_to_page(self._compose_page)
 
     def _on_filter_pages_changed(self) -> None:
         try:

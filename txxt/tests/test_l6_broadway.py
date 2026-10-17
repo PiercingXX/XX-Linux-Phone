@@ -1,8 +1,8 @@
-"""Broadway L6 smoke: settings dialog, blocking + quarantine pages.
+"""Broadway L6 smoke: settings page, blocking + quarantine pages.
 
 Seeds a temp store with realistic data (Android-style millisecond ids,
 a blocked number, keyword/phrase terms, one quarantined thread), builds
-the real :class:`TxxtWindow`, opens the settings dialog, the blocking
+the real :class:`TxxtWindow`, opens the settings page, the blocking
 page and the quarantine page, flips a theme control, and pumps the main
 loop without exceptions or Gtk warnings. Skips only when
 ``gtk4-broadwayd`` is missing.
@@ -116,22 +116,36 @@ def _child_main():
         window.present()
         pump(1.2)
         assert window._list_page._quarantine_banner.get_visible() is True
-        assert window._list_page._quarantine_banner.get_label() == "Quarantine (1)"
+        assert window._list_page._banner_label.get_text() == "1 held for review"
         assert focus_inside_entry(window) is False
 
-        dialog = window.open_settings()
+        page = window.open_settings()
         pump(0.8)
-        dialog.refresh_subtitles()
-        assert dialog._blocking_row.get_subtitle() == "1 numbers, 2 terms"
-        assert dialog._quarantine_row.get_subtitle() == "1 held"
+        page.refresh_subtitles()
+        assert page.blocking_subtitle() == "1 numbers, 2 terms"
+        assert page.quarantine_subtitle() == "1 held"
         assert load_settings().theme_preset == "amoled"
-        dialog._auto_sync_row.set_active(False)
-        keys = [key for key, _label in dialog._preset_options]
-        dialog._preset_row.set_selected(keys.index("forest"))
+        page._auto_sync_row.set_active(False)
+        pump(0.3)
+        page.set_preset("forest")
         pump(0.8)
         assert load_settings().auto_sync_theme is False
         assert load_settings().theme_preset == "forest"
-        dialog.close()
+        window._navigation.pop()
+        pump(0.5)
+
+        import json as _json
+
+        from xx_ui import theme as _xx_theme
+
+        config_path = os.path.join(
+            os.environ["XDG_CONFIG_HOME"], "xx-wm", "config.json")
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as handle:
+            _json.dump({"theme": "paper"}, handle)
+        pump(1.5)
+        assert _xx_theme.load().key == "paper"
+        window._navigation.pop()
         pump(0.5)
 
         window.open_blocking()
@@ -232,7 +246,8 @@ def test_broadway_l6_settings_blocking_quarantine():
         env["BROADWAY_DISPLAY"] = f":{number}"
         env["XDG_DATA_HOME"] = tmp.name
         env["XDG_CONFIG_HOME"] = tmp.name
-        env["PYTHONPATH"] = os.path.join(repo_root, "src") + os.pathsep + env.get(
+        common_root = os.path.join(os.path.dirname(repo_root), "common")
+        env["PYTHONPATH"] = os.path.join(repo_root, "src") + os.pathsep + common_root + os.pathsep + env.get(
             "PYTHONPATH", "")
         child = subprocess.run(
             [sys.executable, os.path.abspath(__file__), "--child"],

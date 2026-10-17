@@ -35,6 +35,15 @@ def _fail(text):
     raise SystemExit(1)
 
 
+def _walk_buttons(widget):
+    if isinstance(widget, Gtk.Button):
+        yield widget
+    child = widget.get_first_child()
+    while child is not None:
+        yield from _walk_buttons(child)
+        child = child.get_next_sibling()
+
+
 def main() -> None:
     seen = []
     xx_ui.on_change(seen.append)
@@ -53,6 +62,15 @@ def main() -> None:
                                     overflow_cb=lambda: None))
     rows.append(widgets.compact_header(None, 'Mara Voss', 'Mobile',
                                        'call-start-symbolic', None))
+    two_icon = widgets.compact_header(
+        None, 'Thread', 'sub', 'call-start-symbolic', None,
+        second_icon_name='system-search-symbolic')
+    assert len([b for b in _walk_buttons(two_icon)]) == 3, \
+        'compact header needs back + two icons'
+    badge = widgets.count_badge('3')
+    assert badge.get_text() == '3'
+    assert 'xx-count' in badge.get_css_classes()
+    rows.append(badge)
     for index, name in enumerate(('Ada Lovelace', 'Grace Hopper')):
         rows.append(widgets.list_row(
             name, '+1 555-010-0142', '21:44',

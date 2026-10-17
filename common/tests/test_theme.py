@@ -270,3 +270,24 @@ def test_never_raises(isolated_home, key, tmp_path):
         write_config(isolated_home, {'theme': key})
     active = load(path=tmp_path / 'does-not-exist.json')
     assert active.key == 'amoled'
+
+
+def test_install_applies_explicit_theme_object(isolated_home):
+    from xx_ui.theme import Theme
+
+    preset = THEME_PRESETS['forest']
+    manual = Theme(
+        key=preset.key, background=preset.background,
+        surface=preset.surface, surface_alt=preset.surface_alt,
+        border=preset.border, foreground=preset.foreground,
+        muted=preset.muted, accent=preset.accent,
+        font_family='Space Mono, Monospace', scale=1.0, dark=True,
+    )
+    assert css.install(manual) is manual
+    out = css.render(manual)
+    assert preset.background in out
+    assert '${' not in out
+
+
+def test_count_badge_css_exists(isolated_home):
+    assert '.xx-count' in css.render(load())

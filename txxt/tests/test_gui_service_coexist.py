@@ -211,8 +211,8 @@ def test_gui_starts_while_service_runs():
         env["GDK_BACKEND"] = "broadway"
         env["BROADWAY_DISPLAY"] = f":{number}"
         env["XDG_DATA_HOME"] = tmp.name
-        env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + env.get(
-            "PYTHONPATH", "")
+        env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + str(
+            ROOT.parent / "common") + os.pathsep + env.get("PYTHONPATH", "")
         child = subprocess.run(
             ["dbus-run-session", "--", sys.executable, str(helper)],
             env=env, capture_output=True, text=True, timeout=120,

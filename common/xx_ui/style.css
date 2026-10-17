@@ -332,6 +332,19 @@ scale slider {
   border-color: ${foreground};
 }
 
+/* ---- Count badge: small inverted pill for unread counts ---- */
+
+.xx-count {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background-color: ${foreground};
+  color: ${background};
+  font-size: ${chip_px}px;
+  font-weight: 400;
+}
+
 /* ---- Segmented: joined caps chips ---- */
 
 .xx-segmented {
@@ -367,6 +380,8 @@ scale slider {
 
 .xx-tab {
   min-height: 56px;
+  padding-left: 4px;
+  padding-right: 4px;
   border-radius: 0;
   font-size: ${tab_px}px;
   letter-spacing: 0.12em;

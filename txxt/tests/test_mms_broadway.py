@@ -109,13 +109,16 @@ def _child_main():
         pump(1.2)
         assert window._thread_pages, "mms thread page never opened"
         thread = window._thread_pages[-1]
-        assert thread._model.get_n_items() == 2
+        from txxt.thread_page import MessageItem
+        photos = [
+            thread._model.get_item(i)
+            for i in range(thread._model.get_n_items())
+            if isinstance(thread._model.get_item(i), MessageItem)
+        ]
+        assert len(photos) == 2
         assert thread._attach_button is not None
         assert thread._staged_row is not None
         assert thread._staged_row.get_visible() is False
-        photos = [
-            thread._model.get_item(i) for i in range(2)
-        ]
         assert all(item.is_photo for item in photos)
         assert sum(1 for item in photos if item.media_path) == 1
         assert sum(1 for item in photos if not item.media_path) == 1
@@ -132,7 +135,7 @@ def _child_main():
         pump(0.5)
         assert thread._staged_path is not None
         assert thread._staged_row.get_visible() is True
-        thread._on_staged_clear(thread._staged_clear)
+        thread._on_staged_clear()
         assert thread._staged_row.get_visible() is False
 
         views = []
@@ -253,7 +256,8 @@ def test_mms_broadway_attach_and_thumbnails():
         env["BROADWAY_DISPLAY"] = f":{number}"
         env["XDG_DATA_HOME"] = tmp.name
         env["TXXT_MMS_STAGE_SRC"] = stage_src
-        env["PYTHONPATH"] = os.path.join(repo_root, "src") + os.pathsep + env.get(
+        common_root = os.path.join(os.path.dirname(repo_root), "common")
+        env["PYTHONPATH"] = os.path.join(repo_root, "src") + os.pathsep + common_root + os.pathsep + env.get(
             "PYTHONPATH", "")
         child = subprocess.run(
             [sys.executable, os.path.abspath(__file__), "--child"],

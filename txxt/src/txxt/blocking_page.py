@@ -23,10 +23,10 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-gi.require_version('Pango', '1.0')
 
-from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from txxt import blocking as blocking_mod  # noqa: E402
 from txxt.conversations import tap_to_focus  # noqa: E402
 
@@ -139,68 +139,55 @@ class BlockingPage(Adw.NavigationPage):
         self._on_changed = on_changed
         self.set_title('Blocking')
 
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label='Blocking'))
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        toolbar.add_top_bar(header)
+        header = widgets.compact_header(
+            self._on_back, 'Blocking', 'Numbers, words, senders',
+        )
+        body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 16)
 
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        body.set_hexpand(True)
-        body.set_margin_start(12)
-        body.set_margin_end(12)
-        body.set_margin_top(6)
-        body.set_margin_bottom(6)
-
-        self._quarantine_row = Adw.SwitchRow()
-        self._quarantine_row.set_title('Hold unknown senders for review')
-        self._quarantine_row.set_subtitle('Off delivers everything not blocked')
-        hold_group = Adw.PreferencesGroup()
-        hold_group.set_title('Unknown senders')
-        hold_group.add(self._quarantine_row)
+        hold = widgets.setting_row(
+            'Hold unknown senders',
+            'Off delivers all but blocked',
+            widgets.make_switch(False),
+        )
+        self._hold_switch = hold.get_last_child()
+        self._hold_switch.connect('notify::active', self._on_quarantine_changed)
+        hold_group = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        hold_group.append(widgets.section_label('Unknown senders'))
+        hold_group.append(hold)
         body.append(hold_group)
-        self._quarantine_row.connect('notify::active', self._on_quarantine_changed)
 
         self._lists: dict[str, Gtk.ListBox] = {}
-        self._inputs: dict[str, Adw.EntryRow] = {}
+        self._inputs: dict[str, Gtk.Entry] = {}
         for kind, title, hint in (
             ('sender', 'Blocked numbers', 'Number to block'),
             ('keyword', 'Blocked keywords', 'Whole-word term'),
             ('phrase', 'Blocked phrases', 'Substring phrase'),
         ):
-            group = Adw.PreferencesGroup()
-            group.set_title(title)
-            entry = Adw.EntryRow()
-            entry.set_title(hint)
+            group = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+            group.append(widgets.section_label(title))
+            entry = widgets.text_entry(hint)
             tap_to_focus(entry)
             self._inputs[kind] = entry
-            group.add(entry)
-            add_button = Gtk.Button(label='Add')
+            group.append(entry)
+            add_button = widgets.outline_button('Add')
             add_button.connect('clicked', self._on_add_clicked, kind)
-            group.add(add_button)
+            group.append(add_button)
             rows = Gtk.ListBox()
             rows.set_selection_mode(Gtk.SelectionMode.NONE)
             self._lists[kind] = rows
-            group.add(rows)
+            group.append(rows)
             body.append(group)
 
-        dialer_group = Adw.PreferencesGroup()
-        dialer_group.set_title('Dialer')
-        self._import_button = Gtk.Button(label='Import dialer block list')
+        dialer_group = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+        dialer_group.append(widgets.section_label('Dialer'))
+        self._import_button = widgets.outline_button('Import dialer block list')
         self._import_button.connect('clicked', self._on_import_clicked)
-        dialer_group.add(self._import_button)
-        self._import_label = Gtk.Label(label='')
-        self._import_label.set_xalign(0.0)
-        self._import_label.set_ellipsize(Pango.EllipsizeMode.END)
-        dialer_group.add(self._import_label)
+        dialer_group.append(self._import_button)
+        self._import_label = widgets.label('', 'xx-secondary')
+        dialer_group.append(self._import_label)
         body.append(dialer_group)
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_child(body)
-        toolbar.set_content(scrolled)
-        self.set_child(toolbar)
+        self.set_child(widgets.page(header, body, None))
         self._ready = False
         self.refresh()
 
@@ -208,6 +195,12 @@ class BlockingPage(Adw.NavigationPage):
 
     def set_resolver(self, resolver) -> None:
         self._resolver = resolver
+
+    def _on_back(self) -> None:
+        try:
+            self._navigation.pop()
+        except Exception:
+            pass
 
     def refresh(self) -> None:
         worker = threading.Thread(target=self._load_in_worker, daemon=True)
@@ -232,7 +225,7 @@ class BlockingPage(Adw.NavigationPage):
     def _apply_loaded(self, entries: dict, quarantine: bool) -> bool:
         self._ready = False
         try:
-            self._quarantine_row.set_active(quarantine)
+            self._hold_switch.set_active(quarantine)
         except Exception:
             pass
         for kind, pairs in entries.items():
@@ -243,18 +236,20 @@ class BlockingPage(Adw.NavigationPage):
                     break
                 rows.remove(row)
             for _kind, value in sorted(pairs, key=lambda pair: pair[1].lower()):
-                label = Gtk.Label(label=value)
-                label.set_xalign(0.0)
+                label = widgets.label(value, 'xx-title')
                 label.set_hexpand(True)
-                label.set_ellipsize(Pango.EllipsizeMode.END)
-                label.set_max_width_chars(24)
-                remove = Gtk.Button(label='Remove')
+                remove = widgets.text_button('Remove')
                 remove.connect('clicked', self._on_remove_clicked, kind, value)
-                box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+                box.add_css_class('xx-row')
                 box.set_hexpand(True)
+                box.set_valign(Gtk.Align.CENTER)
                 box.append(label)
                 box.append(remove)
-                rows.append(box)
+                row = Gtk.ListBoxRow()
+                row.set_child(box)
+                row.set_activatable(False)
+                rows.append(row)
         self._ready = True
         return False
 

@@ -4,14 +4,15 @@ The page reads its thread from the SQLite store for display and sends
 through the daemon's ``io.piercingxx.TxxT1`` API (``TxxtClient``) —
 never the modem stack, never message rows behind the daemon. Opening the
 page marks the thread read via ``MarkRead``; refreshes arrive off the
-``MessagesChanged`` signal. Rows are text-first lines (never bubbles):
-inbound left, outbound right, timestamps and delivery state under each
-outbound row, a Retry action on held-unsent SMS rows.
+``MessagesChanged`` signal. Rows follow the shared design language:
+outgoing messages are inverted bubbles, incoming messages plain text,
+day separators sit between hairlines, and every timestamp is tiny and
+muted.
 
 Phone rules mirror the list page: ``Gtk.ListView`` with
-single-click activate over ``Gtk.NoSelection``, header bars without
-desktop window buttons, and a compose entry that stays unfocusable
-until tapped. Import-safe without a display.
+single-click activate over ``Gtk.NoSelection``, no header-bar chrome,
+and a compose entry that stays unfocusable until tapped.
+Import-safe without a display.
 """
 
 import gi
@@ -29,6 +30,7 @@ from pathlib import Path  # noqa: E402
 
 from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from txxt import compose as compose_mod  # noqa: E402
 from txxt import list_presenter as presenter  # noqa: E402
 from txxt.conversations import launch_uri, tap_to_focus  # noqa: E402
@@ -52,6 +54,13 @@ class MessageItem(GObject.Object):
     address = GObject.Property(type=str, default="")
     media_path = GObject.Property(type=str, default="")
     is_photo = GObject.Property(type=bool, default=False)
+
+
+class SeparatorItem(GObject.Object):
+    """One ``Gio.ListStore`` entry for a caps day separator."""
+
+    __gtype_name__ = "TxxtDaySeparatorItem"
+    day = GObject.Property(type=str, default="")
 
 
 def staging_dir() -> Path:
@@ -108,11 +117,55 @@ def format_size(size_bytes: int) -> str:
 
 
 def stamp_text(timestamp_millis: int) -> str:
+    """Short clock time; the day separator above already names the day."""
+    moment = datetime.fromtimestamp(timestamp_millis / 1000).astimezone()
+    return moment.strftime("%H:%M")
+
+
+def day_label(timestamp_millis: int) -> str:
+    """Caps day-separator text for a message timestamp."""
     moment = datetime.fromtimestamp(timestamp_millis / 1000).astimezone()
     now = datetime.now().astimezone()
-    if moment.date() == now.date():
-        return moment.strftime("%H:%M")
-    return moment.strftime("%Y-%m-%d %H:%M")
+    delta = (now.date() - moment.date()).days
+    if delta <= 0:
+        return "Today"
+    if delta == 1:
+        return "Yesterday"
+    if delta < 7:
+        return moment.strftime("%A")
+    return moment.strftime("%Y-%m-%d")
+
+
+def _widen(button: Gtk.Button, chars: int) -> Gtk.Button:
+    """Let a short outline button show its whole label unclipped."""
+    child = button.get_child()
+    if isinstance(child, Gtk.Label):
+        child.set_max_width_chars(chars)
+        if len(child.get_text()) > chars:
+            child.set_ellipsize(Pango.EllipsizeMode.END)
+        else:
+            child.set_ellipsize(Pango.EllipsizeMode.NONE)
+    return button
+
+
+def _find_class(root: Gtk.Widget, css_class: str) -> Gtk.Label | None:
+    """First descendant label carrying ``css_class`` (header/separator text)."""
+    found: Gtk.Label | None = None
+
+    def walk(widget: Gtk.Widget) -> None:
+        nonlocal found
+        if found is not None:
+            return
+        if isinstance(widget, Gtk.Label) and css_class in widget.get_css_classes():
+            found = widget
+            return
+        kid = widget.get_first_child()
+        while kid is not None and found is None:
+            walk(kid)
+            kid = kid.get_next_sibling()
+
+    walk(root)
+    return found
 
 
 class ThreadPage(Adw.NavigationPage):
@@ -142,48 +195,35 @@ class ThreadPage(Adw.NavigationPage):
         self._cursor = -1
         self._query_seq = 0
 
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        self._title = Gtk.Label(label="Thread")
-        self._title.set_ellipsize(Pango.EllipsizeMode.END)
-        self._title.set_max_width_chars(20)
-        header.set_title_widget(self._title)
-        self._call_button = Gtk.Button(label="Call")
-        self._call_button.connect("clicked", self._on_call_clicked)
-        header.pack_end(self._call_button)
-        self._search_toggle = Gtk.Button(label="Search")
-        self._search_toggle.connect("clicked", self._on_search_toggled)
-        header.pack_end(self._search_toggle)
-        toolbar.add_top_bar(header)
+        self._header = widgets.compact_header(
+            self._on_back, "Thread", "",
+            "call-start-symbolic", self._on_call_clicked,
+            second_icon_name="system-search-symbolic",
+            second_icon_cb=self._on_search_toggled,
+        )
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        content.set_hexpand(True)
-
+        body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
         self._search_bar = Gtk.SearchBar()
-        search_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        search_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
         search_box.set_hexpand(True)
-        search_box.set_margin_start(12)
-        search_box.set_margin_end(12)
         self._search_entry = Gtk.SearchEntry()
         self._search_entry.set_hexpand(True)
         self._search_entry.set_placeholder_text("Search in thread")
+        self._search_entry.set_max_width_chars(12)
         tap_to_focus(self._search_entry)
-        self._prev_button = Gtk.Button(label="Up")
-        self._prev_button.connect("clicked", self._on_prev_match)
-        self._next_button = Gtk.Button(label="Down")
-        self._next_button.connect("clicked", self._on_next_match)
-        self._count = Gtk.Label(label="")
-        self._count.add_css_class("txxt-timestamp")
+        self._prev_button = widgets.icon_button(
+            "go-up-symbolic", lambda: self._step_match(-1))
+        self._next_button = widgets.icon_button(
+            "go-down-symbolic", lambda: self._step_match(1))
+        self._count = widgets.label("", "xx-time", xalign=1.0)
         search_box.append(self._search_entry)
         search_box.append(self._prev_button)
         search_box.append(self._next_button)
         search_box.append(self._count)
         self._search_bar.set_child(search_box)
-        content.append(self._search_bar)
+        body.append(self._search_bar)
 
-        self._model = Gio.ListStore.new(MessageItem)
+        self._model = Gio.ListStore.new(GObject.Object)
         self._selection = Gtk.NoSelection.new(self._model)
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._on_item_setup)
@@ -191,52 +231,42 @@ class ThreadPage(Adw.NavigationPage):
         self._list = Gtk.ListView.new(self._selection, factory)
         self._list.set_single_click_activate(True)
         self._list.set_vexpand(True)
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        scrolled.set_child(self._list)
-        content.append(scrolled)
+        list_wrap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        list_wrap.append(self._list)
+        body.append(list_wrap)
 
+        bottom = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
         self._staged_path: str | None = None
-        self._staged_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._staged_row.set_margin_start(12)
-        self._staged_row.set_margin_end(12)
+        self._staged_row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+        self._staged_row.add_css_class("xx-page-body")
         self._staged_thumb = Gtk.Picture()
         self._staged_thumb.set_can_shrink(True)
         self._staged_thumb.set_size_request(96, 72)
-        self._staged_label = Gtk.Label(label="")
+        self._staged_label = widgets.label("", "xx-secondary")
         self._staged_label.set_hexpand(True)
-        self._staged_label.set_xalign(0.0)
-        self._staged_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self._staged_clear = Gtk.Button(label="✕")
-        self._staged_clear.connect("clicked", self._on_staged_clear)
+        self._staged_clear = widgets.icon_button(
+            "window-close-symbolic", self._on_staged_clear)
         self._staged_row.append(self._staged_thumb)
         self._staged_row.append(self._staged_label)
         self._staged_row.append(self._staged_clear)
         self._staged_row.set_visible(False)
-        content.append(self._staged_row)
+        bottom.append(self._staged_row)
 
-        compose = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        compose.add_css_class("txxt-compose")
-        compose.set_margin_start(12)
-        compose.set_margin_end(12)
-        compose.set_margin_top(8)
-        compose.set_margin_bottom(8)
-        self._attach_button = Gtk.Button(label="⊕")
-        self._attach_button.connect("clicked", self._on_attach_clicked)
-        self._entry = Gtk.Entry()
+        compose = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+        compose.add_css_class("xx-page-body")
+        self._attach_button = widgets.icon_button(
+            "mail-attachment-symbolic", self._on_attach_clicked)
+        self._entry = widgets.text_entry("Text message")
         self._entry.set_hexpand(True)
-        self._entry.set_placeholder_text("Message")
         tap_to_focus(self._entry)
-        self._send_button = Gtk.Button(label="Send")
-        self._send_button.add_css_class("suggested-action")
-        self._send_button.connect("clicked", self._on_send_clicked)
+        self._send_button = widgets.icon_button(
+            "go-next-symbolic", self._on_send_clicked)
         compose.append(self._attach_button)
         compose.append(self._entry)
         compose.append(self._send_button)
-        content.append(compose)
+        bottom.append(compose)
 
-        toolbar.set_content(content)
-        self.set_child(toolbar)
+        self.set_child(widgets.page(self._header, body, bottom))
         self.set_title("Thread")
 
         self._search_entry.connect("search-changed", self._on_thread_search)
@@ -264,6 +294,21 @@ class ThreadPage(Adw.NavigationPage):
     @property
     def conversation_id(self) -> int:
         return self._conversation_id
+
+    @property
+    def header_title(self) -> str:
+        """Visible thread title (caps caption in the compact header)."""
+        label = _find_class(self._header, "xx-caption")
+        try:
+            return label.get_text() if label is not None else ""
+        except Exception:
+            return ""
+
+    def _on_back(self) -> None:
+        try:
+            self._navigation.pop()
+        except Exception:
+            pass
 
     def refresh(self) -> None:
         self._query_seq += 1
@@ -369,26 +414,51 @@ class ThreadPage(Adw.NavigationPage):
     def _apply_missing(self, seq: int) -> bool:
         if seq != self._query_seq:
             return False
-        self._title.set_text("Thread gone")
+        self._set_header("Thread gone", "")
         return False
 
     def _apply_loaded(self, seq, name, address, messages) -> bool:
         if seq != self._query_seq:
             return False
-        self._title.set_text(name)
+        try:
+            from txxt import phone_numbers as _phones
+
+            sub = _phones.format_display_configured(address) or address
+        except Exception:
+            sub = address
+        if name == address or sub == name:
+            self._set_header(name, "")
+        else:
+            self._set_header(name, sub)
         self.set_title(name)
         self._address = address
         self._messages = list(messages or [])
         self._rebuild_model()
         return False
 
+    def _set_header(self, title: str, subtitle: str) -> None:
+        title_label = _find_class(self._header, "xx-caption")
+        if title_label is not None:
+            title_label.set_text(title.upper())
+        sub_label = _find_class(self._header, "xx-secondary")
+        if sub_label is not None:
+            sub_label.set_text(subtitle)
+            sub_label.set_visible(bool(subtitle))
+
     def _rebuild_model(self) -> None:
         query = self._search_entry.get_text()
         self._matches = presenter.filter_message_rows(self._messages, query)
-        shown = self._matches if (query or "").strip() else self._messages
+        searching = bool((query or "").strip())
+        shown = self._matches if searching else self._messages
         now = int(time.time() * 1000)
         self._model.remove_all()
+        last_day = ""
         for row in shown:
+            if not searching:
+                day = day_label(row.timestamp_millis)
+                if day != last_day:
+                    self._model.append(SeparatorItem(day=day))
+                    last_day = day
             outgoing = (row.direction or "").upper() == "OUTGOING"
             state, retry = presenter.message_state(
                 row.direction, row.sent, now, row.timestamp_millis)
@@ -413,7 +483,7 @@ class ThreadPage(Adw.NavigationPage):
                 media_path=media_path if has_file else "",
                 is_photo=bool(is_mms),
             ))
-        if (query or "").strip():
+        if searching:
             self._cursor = 0 if self._matches else -1
             total = len(self._matches)
             self._count.set_text(
@@ -421,62 +491,84 @@ class ThreadPage(Adw.NavigationPage):
         else:
             self._cursor = -1
             self._count.set_text("")
-        if len(shown) > 0:
+        if self._model.get_n_items() > 0:
             self._list.scroll_to(
-                len(shown) - 1, Gtk.ListScrollFlags.NONE, None)
+                self._model.get_n_items() - 1, Gtk.ListScrollFlags.NONE, None)
 
     # -------------------------------------------------------------- factory
 
     def _on_item_setup(self, _factory, list_item: Gtk.ListItem) -> None:
-        body = Gtk.Label()
-        body.set_wrap(True)
-        body.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        body.set_hexpand(True)
-        body.set_selectable(True)
-        body.add_css_class("txxt-body")
+        separator = widgets.day_separator("Today")
+        message = Gtk.Box.new(Gtk.Orientation.VERTICAL, 4)
+        message.set_hexpand(True)
+        stamp = widgets.label("", "xx-tiny")
+        message.append(stamp)
+        incoming = widgets.bubble("", outgoing=False)
+        incoming.set_selectable(True)
+        message.append(incoming)
+        outgoing = widgets.bubble("", outgoing=True)
+        outgoing.set_selectable(True)
+        message.append(outgoing)
         photo = Gtk.Picture()
         photo.set_can_shrink(True)
         photo.set_size_request(288, 160)
-        photo_button = Gtk.Button(label="Fetch photo")
+        message.append(photo)
+        photo_button = widgets.outline_button("Load photo")
+        _widen(photo_button, 12)
         photo_button.connect(
-            "clicked", lambda btn: self._on_fetch_clicked(list_item))
-        open_button = Gtk.Button(label="Open photo")
+            "clicked", lambda _btn: self._on_fetch_clicked(list_item))
+        message.append(photo_button)
+        open_button = widgets.outline_button("Open photo")
+        _widen(open_button, 12)
         open_button.connect(
-            "clicked", lambda btn: self._on_open_photo_clicked(list_item))
-        meta = Gtk.Label()
-        meta.add_css_class("txxt-timestamp")
-        links = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            "clicked", lambda _btn: self._on_open_photo_clicked(list_item))
+        message.append(open_button)
+        links = Gtk.Box.new(Gtk.Orientation.VERTICAL, 2)
         links.set_hexpand(True)
-        retry = Gtk.Button(label="Retry")
+        message.append(links)
+        retry = widgets.outline_button("Retry")
         retry.connect(
-            "clicked", lambda btn: self._on_retry_clicked(list_item))
-        row_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        row_box.set_hexpand(True)
-        row_box.append(body)
-        row_box.append(photo)
-        row_box.append(photo_button)
-        row_box.append(open_button)
-        row_box.append(meta)
-        row_box.append(links)
-        row_box.append(retry)
-        list_item.body = body
+            "clicked", lambda _btn: self._on_retry_clicked(list_item))
+        message.append(retry)
+        list_item.separator = separator
+        list_item.message = message
+        list_item.stamp = stamp
+        list_item.incoming = incoming
+        list_item.outgoing = outgoing
         list_item.photo = photo
         list_item.photo_button = photo_button
         list_item.open_button = open_button
-        list_item.meta = meta
         list_item.links = links
         list_item.retry = retry
-        list_item.row_box = row_box
-        list_item.set_child(row_box)
+        list_item.set_child(message)
 
     def _on_item_bind(self, _factory, list_item: Gtk.ListItem) -> None:
         item = list_item.get_item()
         list_item.set_activatable(True)
-        list_item.body.set_text(item.body)
-        list_item.body.set_xalign(1.0 if item.outgoing else 0.0)
+        if isinstance(item, SeparatorItem):
+            caption = _find_class(list_item.separator, "xx-caption")
+            if caption is not None:
+                caption.set_text(item.day.upper())
+            if list_item.get_child() is not list_item.separator:
+                list_item.set_child(list_item.separator)
+            return
+        if list_item.get_child() is not list_item.message:
+            list_item.set_child(list_item.message)
+        text = item.body
+        if item.outgoing:
+            list_item.incoming.set_visible(False)
+            list_item.outgoing.set_visible(True)
+            list_item.outgoing.set_text(text)
+            list_item.stamp.set_xalign(1.0)
+            list_item.stamp.set_halign(Gtk.Align.END)
+        else:
+            list_item.outgoing.set_visible(False)
+            list_item.incoming.set_visible(True)
+            list_item.incoming.set_text(text)
+            list_item.stamp.set_xalign(0.0)
+            list_item.stamp.set_halign(Gtk.Align.START)
         meta = item.stamp + (f" · {item.state}" if item.state else "")
-        list_item.meta.set_text(meta)
-        list_item.meta.set_xalign(1.0 if item.outgoing else 0.0)
+        list_item.stamp.set_text(meta)
         show_photo = bool(item.is_photo and item.media_path)
         show_fetch = bool(item.is_photo and not item.media_path)
         if show_photo:
@@ -491,6 +583,8 @@ class ThreadPage(Adw.NavigationPage):
                 list_item.photo.set_visible(False)
         else:
             list_item.photo.set_visible(False)
+        list_item.photo.set_halign(
+            Gtk.Align.END if item.outgoing else Gtk.Align.START)
         list_item.open_button.set_visible(show_photo)
         list_item.open_button.set_halign(
             Gtk.Align.END if item.outgoing else Gtk.Align.START)
@@ -506,12 +600,19 @@ class ThreadPage(Adw.NavigationPage):
             following = kid.get_next_sibling()
             box.remove(kid)
             kid = following
+        box.set_visible(False)
         for link in presenter.find_links(item.body):
-            button = Gtk.Button(label=link.url)
+            button = Gtk.Button.new_with_label(link.url)
+            button.add_css_class("xx-accent-text")
+            child = button.get_child()
+            if isinstance(child, Gtk.Label):
+                child.set_ellipsize(Pango.EllipsizeMode.END)
+                child.set_max_width_chars(28)
             button.set_halign(
                 Gtk.Align.END if item.outgoing else Gtk.Align.START)
             button.connect("clicked", self._on_link_clicked, link.url)
             box.append(button)
+            box.set_visible(True)
         list_item.retry.set_visible(bool(item.show_retry))
         list_item.retry.set_halign(
             Gtk.Align.END if item.outgoing else Gtk.Align.START)
@@ -523,7 +624,7 @@ class ThreadPage(Adw.NavigationPage):
 
     def _on_row_activated(self, _view: Gtk.ListView, position: int) -> None:
         item = self._model.get_item(position)
-        if item is None:
+        if item is None or isinstance(item, SeparatorItem):
             return
         if bool(getattr(item, "is_photo", False)) and not getattr(item, "media_path", ""):
             self._fetch_photo(int(item.message_id))
@@ -534,7 +635,7 @@ class ThreadPage(Adw.NavigationPage):
 
     def _on_fetch_clicked(self, list_item: Gtk.ListItem) -> None:
         item = list_item.get_item()
-        if item is None:
+        if item is None or isinstance(item, SeparatorItem):
             return
         self._fetch_photo(int(item.message_id))
 
@@ -596,13 +697,13 @@ class ThreadPage(Adw.NavigationPage):
 
     def _on_retry_clicked(self, list_item: Gtk.ListItem) -> None:
         item = list_item.get_item()
-        if item is None:
+        if item is None or isinstance(item, SeparatorItem):
             return
         self._send_text(item.body or "", via_retry=True)
 
     # --------------------------------------------------------------- search
 
-    def _on_search_toggled(self, _button: Gtk.Button) -> None:
+    def _on_search_toggled(self) -> None:
         self._search_bar.set_search_mode(
             not self._search_bar.get_search_mode())
 
@@ -610,12 +711,6 @@ class ThreadPage(Adw.NavigationPage):
         self._rebuild_model()
         if self._cursor >= 0:
             self._list.scroll_to(self._cursor, Gtk.ListScrollFlags.NONE, None)
-
-    def _on_prev_match(self, _button: Gtk.Button) -> None:
-        self._step_match(-1)
-
-    def _on_next_match(self, _button: Gtk.Button) -> None:
-        self._step_match(1)
 
     def _step_match(self, direction: int) -> None:
         total = len(self._matches)
@@ -627,7 +722,7 @@ class ThreadPage(Adw.NavigationPage):
 
     # --------------------------------------------------------------- actions
 
-    def _on_call_clicked(self, _button: Gtk.Button) -> None:
+    def _on_call_clicked(self) -> None:
         if self._address:
             launch_uri(self._window, f"tel:{self._address}")
 
@@ -657,7 +752,7 @@ class ThreadPage(Adw.NavigationPage):
         except Exception:
             pass
 
-    def _on_send_clicked(self, _button: Gtk.Button) -> None:
+    def _on_send_clicked(self) -> None:
         self._send_text(self._entry.get_text(), via_retry=False)
 
     def _send_text(self, body: str, via_retry: bool) -> None:
@@ -709,7 +804,7 @@ class ThreadPage(Adw.NavigationPage):
 
     # -------------------------------------------------- photo attach (L5)
 
-    def _on_attach_clicked(self, _button: Gtk.Button) -> None:
+    def _on_attach_clicked(self) -> None:
         dialog = Adw.AlertDialog.new("Attach photo", "Choose a photo to send")
         dialog.add_response("files", "Files")
         dialog.add_response("roll", "Camera roll")
@@ -824,7 +919,7 @@ class ThreadPage(Adw.NavigationPage):
             f"Photo staged · {format_size(size)}")
         self._staged_row.set_visible(True)
 
-    def _on_staged_clear(self, _button: Gtk.Button) -> None:
+    def _on_staged_clear(self) -> None:
         self._clear_staged_file()
         self._staged_row.set_visible(False)
 

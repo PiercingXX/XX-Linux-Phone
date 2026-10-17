@@ -131,6 +131,21 @@ def _force_adw_scheme(dark: bool) -> None:
         pass
 
 
+def install(active: _theme.Theme) -> _theme.Theme:
+    """Install one theme object on the default display (None-safe).
+
+    Lets apps honor an app-local manual pick while still rendering
+    through the shared stylesheet; ``apply``/``reload`` stay the
+    config-driven paths.
+    """
+    from gi.repository import Gdk
+    display = Gdk.Display.get_default()
+    if display is not None:
+        _install_css(render(active), display)
+    _force_adw_scheme(active.dark)
+    return active
+
+
 def reload() -> _theme.Theme:
     """Re-read the config and reinstall the CSS. Returns the new theme."""
     active = _theme.load()

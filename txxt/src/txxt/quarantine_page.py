@@ -16,11 +16,12 @@ import gi
 
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-gi.require_version('Pango', '1.0')
 
-from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
+from xx_ui import widgets  # noqa: E402
 from txxt import blocking as blocking_mod  # noqa: E402
+from txxt.conversations import avatar_for  # noqa: E402
 
 
 def resolve_quarantine_id(picked) -> int | None:
@@ -69,20 +70,9 @@ class QuarantinePage(Adw.NavigationPage):
         self.conversation_id = 0
         self.set_title('Quarantine')
 
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label='Quarantine'))
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        toolbar.add_top_bar(header)
-
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        body.set_hexpand(True)
-        body.set_margin_start(12)
-        body.set_margin_end(12)
-        body.set_margin_top(6)
-        body.set_margin_bottom(6)
-
+        header = widgets.compact_header(
+            self._on_back, 'Quarantine', 'Held for review',
+        )
         self._model = Gio.ListStore.new(QuarantineItem)
         selection = Gtk.NoSelection.new(self._model)
         factory = Gtk.SignalListItemFactory()
@@ -91,20 +81,17 @@ class QuarantinePage(Adw.NavigationPage):
         self._list = Gtk.ListView.new(selection, factory)
         self._list.set_single_click_activate(True)
         self._list.set_vexpand(True)
-        self._scrolled = Gtk.ScrolledWindow()
-        self._scrolled.set_vexpand(True)
-        self._scrolled.set_child(self._list)
-        body.append(self._scrolled)
-
-        self._empty = Adw.StatusPage()
-        self._empty.set_title('Nothing held')
-        self._empty.set_description('Unknown senders will appear here.')
+        rows_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        rows_box.append(self._list)
+        body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        body.append(rows_box)
+        empty_wrap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        self._empty = widgets.empty_state('Nothing is being held.')
         self._empty.set_vexpand(True)
         self._empty.set_visible(False)
-        body.append(self._empty)
-
-        toolbar.set_content(body)
-        self.set_child(toolbar)
+        empty_wrap.append(self._empty)
+        body.append(empty_wrap)
+        self.set_child(widgets.page(header, body, None))
 
         self._list.connect('activate', self._on_row_activated)
         long_press = Gtk.GestureLongPress.new()
@@ -116,6 +103,12 @@ class QuarantinePage(Adw.NavigationPage):
 
     def set_resolver(self, resolver) -> None:
         self._resolver = resolver
+
+    def _on_back(self) -> None:
+        try:
+            self._navigation.pop()
+        except Exception:
+            pass
 
     def held_count(self) -> int:
         """Held threads right now (badge source for the root page)."""
@@ -190,38 +183,55 @@ class QuarantinePage(Adw.NavigationPage):
                 address=address,
             ))
         has_rows = len(items) > 0
-        self._scrolled.set_visible(has_rows)
+        self._list.set_visible(has_rows)
         self._empty.set_visible(not has_rows)
         return False
 
     # ------------------------------------------------------------ factory
 
     def _on_item_setup(self, _factory, list_item: Gtk.ListItem) -> None:
-        name = Gtk.Label()
-        name.set_xalign(0.0)
-        name.set_hexpand(True)
-        name.set_ellipsize(Pango.EllipsizeMode.END)
-        name.set_max_width_chars(24)
-        snippet = Gtk.Label()
-        snippet.set_xalign(0.0)
-        snippet.set_hexpand(True)
-        snippet.set_ellipsize(Pango.EllipsizeMode.END)
-        snippet.set_max_width_chars(32)
-        snippet.add_css_class('txxt-muted')
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_hexpand(True)
-        box.append(name)
-        box.append(snippet)
-        list_item.set_child(box)
+        leading = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 0)
+        leading.set_valign(Gtk.Align.CENTER)
+        middle = Gtk.Box.new(Gtk.Orientation.VERTICAL, 2)
+        middle.set_hexpand(True)
+        middle.set_valign(Gtk.Align.CENTER)
+        title = widgets.label('', 'xx-title')
+        middle.append(title)
+        snippet = widgets.label('', 'xx-secondary')
+        middle.append(snippet)
+        row_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 12)
+        row_box.add_css_class('xx-row')
+        row_box.set_valign(Gtk.Align.CENTER)
+        row_box.append(leading)
+        row_box.append(middle)
+        list_item.leading = leading
+        list_item.title = title
+        list_item.snippet = snippet
+        list_item.row_box = row_box
+        list_item.set_child(row_box)
 
     def _on_item_bind(self, _factory, list_item: Gtk.ListItem) -> None:
         item = list_item.get_item()
-        box = list_item.get_child()
-        name = box.get_first_child()
-        snippet = name.get_next_sibling()
-        name.set_text(item.title)
-        snippet.set_text(item.snippet)
-        box._txxt_cid = int(item.conversation_id)
+        list_item.set_activatable(True)
+        list_item.title.set_text(item.title)
+        list_item.snippet.set_text(item.snippet)
+        leading = list_item.leading
+        kid = leading.get_first_child()
+        while kid is not None:
+            following = kid.get_next_sibling()
+            leading.remove(kid)
+            kid = following
+        leading.append(avatar_for(item.title))
+        list_item.row_box._txxt_cid = int(item.conversation_id)
+        try:
+            total = self._model.get_n_items()
+            last = list_item.get_position() == total - 1
+        except Exception:
+            last = False
+        if last:
+            list_item.row_box.add_css_class('last')
+        else:
+            list_item.row_box.remove_css_class('last')
 
     # ------------------------------------------------------------ actions
 

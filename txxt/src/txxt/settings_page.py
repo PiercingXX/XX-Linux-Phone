@@ -1,4 +1,4 @@
-"""Settings as an ``Adw.PreferencesDialog``.
+"""Settings as a navigation page over the txxt JSON config.
 
 Every Android setting with a real Linux effect (``ui/SettingsActivity``,
 ``ui/SettingsStore``, ``ui/FontMode``): lock-screen privacy posture,
@@ -9,8 +9,8 @@ sound picker (a sound-theme name would not ring anything here) and the
 channel-generation hack.
 
 Phone rules: no entry autofocuses (region stays unfocusable until
-tapped), header bars hide desktop window buttons — the dialog owns its
-own header.
+tapped); no header-bar chrome — the shared compact header carries the
+back chevron.
 """
 
 from __future__ import annotations
@@ -22,8 +22,9 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Adw, Gtk  # noqa: E402
 
+import xx_ui  # noqa: E402
+from xx_ui import widgets  # noqa: E402
 from txxt import settings as settings_mod  # noqa: E402
-from txxt import theme as txxt_theme  # noqa: E402
 from txxt.conversations import tap_to_focus  # noqa: E402
 
 LOCK_PRIVACY_OPTIONS = (
@@ -45,25 +46,17 @@ FONT_MODE_OPTIONS = (
 )
 
 
-def _labels(options) -> list[str]:
-    return [label for _value, label in options]
-
-
-def _index_of(options, value: str) -> int:
-    for index, (option_value, _label) in enumerate(options):
-        if option_value == value:
-            return index
-    return 0
-
-
-class SettingsDialog(Adw.PreferencesDialog):
-    """Preferences dialog over the txxt JSON config + rule-table counts."""
+class SettingsPage(Adw.NavigationPage):
+    """Settings page over the txxt JSON config + rule-table counts."""
 
     def __init__(
-        self, store, on_changed=None,
+        self, navigation: Adw.NavigationView, parent_window: Gtk.Window,
+        store, on_changed=None,
         on_open_blocking=None, on_open_quarantine=None,
     ) -> None:
         super().__init__()
+        self._navigation = navigation
+        self._window = parent_window
         self._store = store
         self._on_changed = on_changed
         self._on_open_blocking = on_open_blocking
@@ -71,90 +64,121 @@ class SettingsDialog(Adw.PreferencesDialog):
         self._settings = settings_mod.load()
         self._ready = False
         self.set_title('Settings')
+        self._preset_options = [
+            (key, xx_ui.theme.PRESETS[key].name) for key in xx_ui.theme.preset_keys()
+        ]
 
-        notifications = Adw.PreferencesGroup()
-        notifications.set_title('Notifications')
-        self._privacy_row = Adw.ComboRow()
-        self._privacy_row.set_title('Lock-screen privacy')
-        self._privacy_row.set_model(Gtk.StringList.new(_labels(LOCK_PRIVACY_OPTIONS)))
-        self._privacy_row.set_selected(_index_of(LOCK_PRIVACY_OPTIONS, self._settings.lock_screen_privacy))
-        self._privacy_row.connect('notify::selected', self._on_privacy_changed)
-        notifications.add(self._privacy_row)
-        self._alert_row = Adw.ComboRow()
-        self._alert_row.set_title('Alert style')
-        self._alert_row.set_model(Gtk.StringList.new(_labels(ALERT_STYLE_OPTIONS)))
-        self._alert_row.set_selected(_index_of(ALERT_STYLE_OPTIONS, self._settings.alert_style))
-        self._alert_row.connect('notify::selected', self._on_alert_changed)
-        notifications.add(self._alert_row)
+        header = widgets.compact_header(
+            self._on_back, 'Settings', 'On this device',
+        )
+        body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 16)
 
-        messages = Adw.PreferencesGroup()
-        messages.set_title('Messages')
-        self._region_row = Adw.EntryRow()
-        self._region_row.set_title('Default region')
+        notifications = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+        notifications.append(widgets.section_label('Notifications'))
+        notifications.append(widgets.caption('Lock-screen privacy'))
+        self._privacy_row = widgets.segmented([
+            (label, value == self._settings.lock_screen_privacy,
+             self._on_privacy_picked(value))
+            for value, label in LOCK_PRIVACY_OPTIONS
+        ])
+        notifications.append(self._privacy_row)
+        notifications.append(widgets.caption('Alert style'))
+        self._alert_row = widgets.segmented([
+            (label, value == self._settings.alert_style,
+             self._on_alert_picked(value))
+            for value, label in ALERT_STYLE_OPTIONS
+        ])
+        notifications.append(self._alert_row)
+        body.append(notifications)
+
+        messages = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+        messages.append(widgets.section_label('Messages'))
+        messages.append(widgets.caption('Default region'))
+        self._region_row = widgets.text_entry('US')
         self._region_row.set_text(self._settings.default_region)
         tap_to_focus(self._region_row)
         self._region_row.connect('changed', self._on_region_changed)
-        messages.add(self._region_row)
-        self._auto_download_row = Adw.SwitchRow()
-        self._auto_download_row.set_title('Download MMS photos automatically')
-        self._auto_download_row.set_subtitle('Off keeps tap-to-fetch')
-        self._auto_download_row.set_active(self._settings.mms_auto_download)
-        self._auto_download_row.connect('notify::active', self._on_auto_download_changed)
-        messages.add(self._auto_download_row)
-        self._auto_reply_row = Adw.SwitchRow()
-        self._auto_reply_row.set_title('Auto-reply to dropped voice MMS')
-        self._auto_reply_row.set_active(self._settings.mms_auto_reply)
-        self._auto_reply_row.connect('notify::active', self._on_auto_reply_changed)
-        messages.add(self._auto_reply_row)
+        messages.append(self._region_row)
+        self._auto_download_row = widgets.make_switch(
+            self._settings.mms_auto_download, self._on_auto_download_changed)
+        messages.append(widgets.setting_row(
+            'Auto-download MMS', 'Off keeps tap-to-fetch',
+            self._auto_download_row))
+        self._auto_reply_row = widgets.make_switch(
+            self._settings.mms_auto_reply, self._on_auto_reply_changed)
+        messages.append(widgets.setting_row(
+            'Auto-reply to voice MMS', '',
+            self._auto_reply_row, last=True))
+        body.append(messages)
 
-        appearance = Adw.PreferencesGroup()
-        appearance.set_title('Appearance')
-        self._auto_sync_row = Adw.SwitchRow()
-        self._auto_sync_row.set_title('Follow the shell theme')
-        self._auto_sync_row.set_active(self._settings.auto_sync_theme)
-        self._auto_sync_row.connect('notify::active', self._on_auto_sync_changed)
-        appearance.add(self._auto_sync_row)
-        preset_options = [
-            (key, txxt_theme.THEME_PRESETS[key]['display']) for key in txxt_theme.THEME_PRESETS
-        ]
-        self._preset_row = Adw.ComboRow()
-        self._preset_row.set_title('Theme preset')
-        self._preset_row.set_model(Gtk.StringList.new(_labels(preset_options)))
-        self._preset_row.set_selected(_index_of(
-            preset_options, txxt_theme.normalize_preset_key(self._settings.theme_preset),
-        ))
-        self._preset_row.connect('notify::selected', self._on_preset_changed)
-        appearance.add(self._preset_row)
-        self._font_row = Adw.ComboRow()
-        self._font_row.set_title('Font')
-        self._font_row.set_model(Gtk.StringList.new(_labels(FONT_MODE_OPTIONS)))
-        self._font_row.set_selected(_index_of(FONT_MODE_OPTIONS, self._settings.font_mode))
-        self._font_row.connect('notify::selected', self._on_font_changed)
-        appearance.add(self._font_row)
-        self._preset_options = preset_options
+        appearance = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+        appearance.append(widgets.section_label('Appearance'))
+        self._auto_sync_row = widgets.make_switch(
+            self._settings.auto_sync_theme, self._on_auto_sync_changed)
+        appearance.append(widgets.setting_row(
+            'Follow the shell theme', 'Off uses the preset below',
+            self._auto_sync_row))
+        appearance.append(widgets.caption('Theme preset'))
+        self._preset_wrap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        self._rebuild_preset_chips()
+        appearance.append(self._preset_wrap)
+        appearance.append(widgets.caption('Font'))
+        self._font_wrap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        self._rebuild_font_chips()
+        appearance.append(self._font_wrap)
+        body.append(appearance)
 
-        filtering = Adw.PreferencesGroup()
-        filtering.set_title('Filtering')
-        self._blocking_row = Adw.ActionRow()
-        self._blocking_row.set_title('Blocking')
-        self._blocking_row.set_activatable(True)
-        self._blocking_row.connect('activated', self._on_blocking_activated)
-        filtering.add(self._blocking_row)
-        self._quarantine_row = Adw.ActionRow()
-        self._quarantine_row.set_title('Quarantine')
-        self._quarantine_row.set_activatable(True)
-        self._quarantine_row.connect('activated', self._on_quarantine_activated)
-        filtering.add(self._quarantine_row)
+        filtering = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+        filtering.append(widgets.section_label('Filtering'))
+        self._blocking_sub = ''
+        self._blocking_row = widgets.list_row(
+            'Blocking', '', trailing=widgets.icon_image('go-next-symbolic'),
+            on_activate=self._on_blocking_activated)
+        filtering.append(self._blocking_row)
+        self._quarantine_sub = ''
+        self._quarantine_row = widgets.list_row(
+            'Quarantine', '', trailing=widgets.icon_image('go-next-symbolic'),
+            on_activate=self._on_quarantine_activated, last=True)
+        filtering.append(self._quarantine_row)
+        body.append(filtering)
 
-        for group in (notifications, messages, appearance, filtering):
-            page = Adw.PreferencesPage()
-            page.add(group)
-            self.add(page)
+        self.set_child(widgets.page(header, body, None))
         self._sync_manual_sensitivity()
         self.refresh_subtitles()
         self._ready = True
 
     # ------------------------------------------------------------ display
+
+    def _on_back(self) -> None:
+        try:
+            self._navigation.pop()
+        except Exception:
+            pass
+
+    def _rebuild_preset_chips(self) -> None:
+        kid = self._preset_wrap.get_first_child()
+        while kid is not None:
+            following = kid.get_next_sibling()
+            self._preset_wrap.remove(kid)
+            kid = following
+        current = str(self._settings.theme_preset or '').strip().lower()
+        self._preset_wrap.append(widgets.chip_bar([
+            (label, key == current, self._on_preset_picked(key))
+            for key, label in self._preset_options
+        ]))
+        self._preset_wrap.set_sensitive(not self._settings.auto_sync_theme)
+
+    def set_preset(self, key: str) -> None:
+        """Pick a theme preset programmatically (tests, snap scripts)."""
+        self._settings.theme_preset = key
+        self._rebuild_preset_chips()
+        self._save()
+
+    def blocking_subtitle(self) -> str:
+        return self._blocking_sub
+
+    def quarantine_subtitle(self) -> str:
+        return self._quarantine_sub
 
     def refresh_subtitles(self) -> None:
         """Re-read rule-table counts (call after blocking/quarantine edits)."""
@@ -164,8 +188,8 @@ class SettingsDialog(Adw.PreferencesDialog):
             phrases = self._store.blocklist_list('phrase')
         except Exception:
             senders, keywords, phrases = [], [], []
-        self._blocking_row.set_subtitle(
-            f'{len(senders)} numbers, {len(keywords) + len(phrases)} terms',
+        self._blocking_sub = (
+            f'{len(senders)} numbers, {len(keywords) + len(phrases)} terms'
         )
         try:
             held = sum(
@@ -174,9 +198,9 @@ class SettingsDialog(Adw.PreferencesDialog):
             )
         except Exception:
             held = 0
-        self._quarantine_row.set_subtitle(
-            f'{held} held' if held else 'Empty',
-        )
+        self._quarantine_sub = f'{held} held' if held else 'Empty'
+        _retitle(self._blocking_row, 'Blocking', self._blocking_sub)
+        _retitle(self._quarantine_row, 'Quarantine', self._quarantine_sub)
 
     # ------------------------------------------------------------ persist
 
@@ -191,22 +215,41 @@ class SettingsDialog(Adw.PreferencesDialog):
             except Exception:
                 pass
 
+    def _rebuild_font_chips(self) -> None:
+        kid = self._font_wrap.get_first_child()
+        while kid is not None:
+            following = kid.get_next_sibling()
+            self._font_wrap.remove(kid)
+            kid = following
+        current = str(self._settings.font_mode or '').strip().lower()
+        self._font_wrap.append(widgets.chip_bar([
+            (label, value == current, self._on_font_picked(value))
+            for value, label in FONT_MODE_OPTIONS
+        ]))
+        self._font_wrap.set_sensitive(not self._settings.auto_sync_theme)
+
     def _sync_manual_sensitivity(self) -> None:
         manual = not self._settings.auto_sync_theme
-        self._preset_row.set_sensitive(manual)
-        self._font_row.set_sensitive(manual)
+        self._preset_wrap.set_sensitive(manual)
+        self._font_wrap.set_sensitive(manual)
 
-    def _on_privacy_changed(self, row, _spec) -> None:
-        if not self._ready:
-            return
-        self._settings.lock_screen_privacy = LOCK_PRIVACY_OPTIONS[row.get_selected()][0]
-        self._save()
+    def _on_privacy_picked(self, value: str):
+        def _picked() -> None:
+            if not self._ready:
+                return
+            self._settings.lock_screen_privacy = value
+            self._save()
 
-    def _on_alert_changed(self, row, _spec) -> None:
-        if not self._ready:
-            return
-        self._settings.alert_style = ALERT_STYLE_OPTIONS[row.get_selected()][0]
-        self._save()
+        return _picked
+
+    def _on_alert_picked(self, value: str):
+        def _picked() -> None:
+            if not self._ready:
+                return
+            self._settings.alert_style = value
+            self._save()
+
+        return _picked
 
     def _on_region_changed(self, row) -> None:
         if not self._ready:
@@ -216,47 +259,78 @@ class SettingsDialog(Adw.PreferencesDialog):
             self._settings.default_region = region
             self._save()
 
-    def _on_auto_download_changed(self, row, _spec) -> None:
+    def _on_auto_download_changed(self, active: bool) -> None:
         if not self._ready:
             return
-        self._settings.mms_auto_download = bool(row.get_active())
+        self._settings.mms_auto_download = bool(active)
         self._save()
 
-    def _on_auto_reply_changed(self, row, _spec) -> None:
+    def _on_auto_reply_changed(self, active: bool) -> None:
         if not self._ready:
             return
-        self._settings.mms_auto_reply = bool(row.get_active())
+        self._settings.mms_auto_reply = bool(active)
         self._save()
 
-    def _on_auto_sync_changed(self, row, _spec) -> None:
+    def _on_auto_sync_changed(self, active: bool) -> None:
         if not self._ready:
             return
-        self._settings.auto_sync_theme = bool(row.get_active())
+        self._settings.auto_sync_theme = bool(active)
         self._sync_manual_sensitivity()
         self._save()
 
-    def _on_preset_changed(self, row, _spec) -> None:
-        if not self._ready:
-            return
-        self._settings.theme_preset = self._preset_options[row.get_selected()][0]
-        self._save()
+    def _on_preset_picked(self, key: str):
+        def _picked() -> None:
+            if not self._ready:
+                return
+            self.set_preset(key)
 
-    def _on_font_changed(self, row, _spec) -> None:
-        if not self._ready:
-            return
-        self._settings.font_mode = FONT_MODE_OPTIONS[row.get_selected()][0]
-        self._save()
+        return _picked
 
-    def _on_blocking_activated(self, _row) -> None:
+    def _on_font_picked(self, value: str):
+        def _picked() -> None:
+            if not self._ready:
+                return
+            self._settings.font_mode = value
+            self._rebuild_font_chips()
+            self._save()
+
+        return _picked
+
+    def _on_blocking_activated(self) -> None:
         if self._on_open_blocking is not None:
             try:
                 self._on_open_blocking()
             except Exception:
                 pass
 
-    def _on_quarantine_activated(self, _row) -> None:
+    def _on_quarantine_activated(self) -> None:
         if self._on_open_quarantine is not None:
             try:
                 self._on_open_quarantine()
             except Exception:
                 pass
+
+
+def _retitle(row_button: Gtk.Button, title: str, subtitle: str) -> None:
+    """Update an ``xx_ui`` list row's two labels in place."""
+    box = row_button.get_child()
+    if box is None:
+        return
+    middle = None
+    kid = box.get_first_child()
+    while kid is not None:
+        if (isinstance(kid, Gtk.Box)
+                and kid.get_orientation() == Gtk.Orientation.VERTICAL):
+            middle = kid
+            break
+        kid = kid.get_next_sibling()
+    if middle is None:
+        return
+    first = middle.get_first_child()
+    if isinstance(first, Gtk.Label):
+        first.set_text(title)
+    second = first.get_next_sibling() if first is not None else None
+    if isinstance(second, Gtk.Label):
+        second.set_text(subtitle)
+    elif subtitle:
+        middle.append(widgets.label(subtitle, 'xx-secondary'))

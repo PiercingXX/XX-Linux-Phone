@@ -441,7 +441,9 @@ conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 def on_bus_acquired(connection, name):
     d.register_on(connection)
 
-daemon_mod.own_bus_name(on_bus_acquired)
+# Calls start only once the name is ours; calling earlier races the async
+# ownership and fails with ServiceUnknown under load.
+daemon_mod.own_bus_name(on_bus_acquired, on_acquired=lambda _c, _n: start())
 
 def on_signal(c, sender, path, iface, signal, params, user_data):
     seen.append(params.unpack())
@@ -501,7 +503,6 @@ def start():
               None, Gio.DBusCallFlags.NONE, 5000, None, on_send)
     return False
 
-GLib.idle_add(start)
 loop.run()
 
 assert "error" not in state, state["error"]

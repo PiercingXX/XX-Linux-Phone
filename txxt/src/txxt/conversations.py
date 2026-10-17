@@ -12,7 +12,7 @@ harmless no-op.
 Phone rules: ``Gtk.ListView`` with single-click activate over
 ``Gtk.NoSelection`` (an autoselecting selection model would pick row 0);
 long-press resolves the row under the pointer (pick + walk up), never
-the selection; header bars hide desktop window buttons; the search
+the selection; no header-bar chrome (``xx_ui`` page header); the search
 entry stays unfocusable until tapped so the on-screen keyboard never
 pops on its own. Import-safe without a display: building the page
 needs one, importing this module must not.
@@ -28,10 +28,13 @@ gi.require_version("Gdk", "4.0")
 import threading  # noqa: E402
 import time  # noqa: E402
 
-from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from txxt import blocking as blocking_mod  # noqa: E402
+from xx_ui import widgets  # noqa: E402
 from txxt import list_presenter as presenter  # noqa: E402
+
+FILTERS = ("all", "unread", "starred")
 
 
 class ConversationItem(GObject.Object):
@@ -103,6 +106,15 @@ def tap_to_focus(entry: Gtk.Editable) -> None:
     entry.add_controller(focus)
 
 
+def avatar_for(title: str) -> Gtk.Label:
+    """Avatar disc for a row title: initials, or a dashed disc for numbers."""
+    if any(char.isalpha() for char in title):
+        words = [word for word in title.split() if word[:1].isalpha()]
+        initials = "".join(word[0] for word in words[:2]).upper() or "?"
+        return widgets.avatar(initials, 40)
+    return widgets.avatar("", 40, dashed=True)
+
+
 def launch_uri(parent: Gtk.Window | None, uri: str) -> None:
     """Open a tel:/sms: URI with whichever handler owns it."""
     launcher = Gtk.UriLauncher.new(uri)
@@ -134,6 +146,7 @@ class ConversationListPage(Adw.NavigationPage):
         self._on_open_thread = on_open_thread
         self._views: list = []
         self._query_seq = 0
+        self._filter = "all"
         try:
             from txxt.contacts import DisplayNameCache
 
@@ -141,33 +154,36 @@ class ConversationListPage(Adw.NavigationPage):
         except Exception:
             self._names = None
 
-        toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label="Messages"))
-        header.set_show_start_title_buttons(False)
-        header.set_show_end_title_buttons(False)
-        settings_button = Gtk.Button(label="Settings")
-        settings_button.connect("clicked", self._on_settings_clicked)
-        header.pack_end(settings_button)
-        toolbar.add_top_bar(header)
+        self._header = widgets.page_header(
+            "Inbox", "Threads",
+            icon_name="list-add-symbolic",
+            icon_cb=self._on_compose_clicked,
+            overflow_cb=self._on_overflow_clicked,
+        )
+        self._caption = self._header.get_last_child()
 
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        body.set_hexpand(True)
-        body.set_margin_start(12)
-        body.set_margin_end(12)
-        body.set_margin_top(6)
-        body.set_margin_bottom(6)
-
-        self._search = Gtk.SearchEntry()
-        self._search.set_placeholder_text("Search conversations")
-        self._search.set_hexpand(True)
-        tap_to_focus(self._search)
-        body.append(self._search)
-
-        self._quarantine_banner = Gtk.Button(label="Quarantine")
+        chips_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        self._chips_wrap = chips_box
+        self._rebuild_chips()
+        held = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        self._quarantine_banner = Gtk.Button()
+        self._quarantine_banner.add_css_class("xx-card")
+        banner_row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 12)
+        banner_row.set_valign(Gtk.Align.CENTER)
+        shield = widgets.icon_image("dialog-warning-symbolic")
+        shield.set_valign(Gtk.Align.CENTER)
+        banner_row.append(shield)
+        self._banner_label = widgets.label("Held for review", "xx-title")
+        self._banner_label.set_hexpand(True)
+        self._banner_label.set_valign(Gtk.Align.CENTER)
+        banner_row.append(self._banner_label)
+        chevron = widgets.icon_image("go-next-symbolic")
+        chevron.set_valign(Gtk.Align.CENTER)
+        banner_row.append(chevron)
+        self._quarantine_banner.set_child(banner_row)
         self._quarantine_banner.set_visible(False)
         self._quarantine_banner.connect("clicked", self._on_quarantine_clicked)
-        body.append(self._quarantine_banner)
+        held.append(self._quarantine_banner)
 
         self._model = Gio.ListStore.new(ConversationItem)
         self._selection = Gtk.NoSelection.new(self._model)
@@ -177,22 +193,6 @@ class ConversationListPage(Adw.NavigationPage):
         self._list = Gtk.ListView.new(self._selection, factory)
         self._list.set_single_click_activate(True)
         self._list.set_vexpand(True)
-        self._scrolled = Gtk.ScrolledWindow()
-        self._scrolled.set_vexpand(True)
-        self._scrolled.set_child(self._list)
-        body.append(self._scrolled)
-
-        self._empty = Adw.StatusPage()
-        self._empty.set_vexpand(True)
-        self._empty.set_visible(False)
-        body.append(self._empty)
-
-        toolbar.set_content(body)
-        self.set_child(toolbar)
-        self.set_title("Messages")
-
-        self._search.connect("search-changed", self._on_search_changed)
-        self._list.connect("activate", self._on_row_activated)
         right_click = Gtk.GestureClick.new()
         right_click.set_button(3)
         right_click.connect("pressed", self._on_row_right_clicked)
@@ -200,6 +200,29 @@ class ConversationListPage(Adw.NavigationPage):
         long_press = Gtk.GestureLongPress.new()
         long_press.connect("pressed", self._on_row_long_pressed)
         self._list.add_controller(long_press)
+
+        body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        body.append(chips_box)
+        body.append(held)
+        rows_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        rows_box.append(self._list)
+        body.append(rows_box)
+        self._empty_wrap = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+        self._empty = widgets.empty_state("No conversations yet.")
+        self._empty.set_vexpand(True)
+        self._empty.set_visible(False)
+        self._empty_wrap.append(self._empty)
+        body.append(self._empty_wrap)
+
+        search = widgets.search_bar(
+            "Search messages", on_changed=self._on_query_changed,
+        )
+        self._search = _first_entry(search)
+        tap_to_focus(self._search)
+        self.set_child(widgets.page(self._header, body, search))
+        self.set_title("Inbox")
+
+        self._list.connect("activate", self._on_row_activated)
 
         self.refresh()
 
@@ -332,15 +355,66 @@ class ConversationListPage(Adw.NavigationPage):
             count = int(held)
         except (TypeError, ValueError):
             count = 0
-        self._quarantine_banner.set_label(f"Quarantine ({count})")
+        self._banner_label.set_text(f"{count} held for review")
         self._quarantine_banner.set_visible(count > 0)
         return False
 
-    def _on_settings_clicked(self, _button) -> None:
+    # ------------------------------------------------------------ chrome
+
+    def _rebuild_chips(self) -> None:
+        kid = self._chips_wrap.get_first_child()
+        while kid is not None:
+            following = kid.get_next_sibling()
+            self._chips_wrap.remove(kid)
+            kid = following
+        self._chips_wrap.append(widgets.chip_bar([
+            (key.upper(), key == self._filter, self._on_chip_tapped(key))
+            for key in FILTERS
+        ]))
+
+    def _on_chip_tapped(self, key: str):
+        def _tapped() -> None:
+            self._filter = key
+            self._rebuild_chips()
+            try:
+                self._apply_filter(self._search.get_text())
+            except Exception:
+                pass
+
+        return _tapped
+
+    def _on_compose_clicked(self) -> None:
         try:
-            self._window.open_settings()
+            self._window.open_new_conversation()
         except Exception:
             pass
+
+    def _on_overflow_clicked(self) -> None:
+        dialog = Adw.AlertDialog.new("Inbox", None)
+        dialog.add_response("settings", "Settings")
+        dialog.add_response("blocking", "Blocking")
+        dialog.add_response("cancel", "Cancel")
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.choose(
+            self._window, None, self._on_overflow_chosen,
+        )
+
+    def _on_overflow_chosen(self, dialog, result) -> None:
+        try:
+            response = dialog.choose_finish(result)
+        except GLib.Error:
+            return
+        if response == "settings":
+            try:
+                self._window.open_settings()
+            except Exception:
+                pass
+        elif response == "blocking":
+            try:
+                self._window.open_blocking()
+            except Exception:
+                pass
 
     def _on_quarantine_clicked(self, _button) -> None:
         try:
@@ -350,11 +424,16 @@ class ConversationListPage(Adw.NavigationPage):
 
     def _apply_filter(self, query: str) -> None:
         shown = presenter.filter_rows(self._views, query)
+        if self._filter == "unread":
+            shown = [view for view in shown if view.unread_count > 0]
+        elif self._filter == "starred":
+            shown = [view for view in shown if view.starred]
         self._model.remove_all()
         for view in shown:
+            title = view.title + (" ★" if view.starred else "")
             self._model.append(ConversationItem(
                 conversation_id=view.conversation_id,
-                title=view.title,
+                title=title,
                 snippet=view.snippet + view.marks,
                 stamp=presenter.format_time(
                     view.timestamp_millis, int(time.time() * 1000),
@@ -362,49 +441,52 @@ class ConversationListPage(Adw.NavigationPage):
                 unread=view.unread_count,
                 address=view.address,
             ))
-        searching = bool((query or "").strip())
-        self._empty.set_title("No matches" if searching else "No conversations")
-        self._empty.set_description(
-            "Try a different search." if searching
-            else "New messages will appear here.")
+        total = len(self._views)
+        try:
+            self._caption.set_text(
+                f"{total} thread".upper() if total == 1
+                else f"{total} threads".upper(),
+            )
+        except Exception:
+            pass
+        searching = bool((query or "").strip()) or self._filter != "all"
+        self._empty.get_first_child().set_text(
+            "No matches for that search." if searching
+            else "No conversations yet.",
+        )
         has_rows = len(shown) > 0
-        self._scrolled.set_visible(has_rows)
+        self._list.set_visible(has_rows)
         self._empty.set_visible(not has_rows)
 
     # -------------------------------------------------------------- factory
 
     def _on_item_setup(self, _factory, list_item: Gtk.ListItem) -> None:
-        name = Gtk.Label()
-        name.set_xalign(0.0)
-        name.set_hexpand(True)
-        name.set_ellipsize(Pango.EllipsizeMode.END)
-        name.set_max_width_chars(24)
-        stamp = Gtk.Label()
-        stamp.add_css_class("txxt-timestamp")
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        top.set_hexpand(True)
-        top.append(name)
-        top.append(stamp)
-        snippet = Gtk.Label()
-        snippet.set_xalign(0.0)
-        snippet.set_hexpand(True)
-        snippet.set_ellipsize(Pango.EllipsizeMode.END)
-        snippet.set_max_width_chars(32)
-        snippet.add_css_class("txxt-detail")
-        badge = Gtk.Label()
-        badge.add_css_class("txxt-badge")
-        badge.set_margin_start(8)
-        bottom = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        bottom.set_hexpand(True)
-        bottom.append(snippet)
-        bottom.append(badge)
-        row_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        row_box.set_hexpand(True)
-        row_box.append(top)
-        row_box.append(bottom)
-        list_item.name = name
-        list_item.stamp = stamp
+        leading = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 0)
+        leading.set_valign(Gtk.Align.CENTER)
+        middle = Gtk.Box.new(Gtk.Orientation.VERTICAL, 2)
+        middle.set_hexpand(True)
+        middle.set_valign(Gtk.Align.CENTER)
+        title = widgets.label("", "xx-title")
+        middle.append(title)
+        snippet = widgets.label("", "xx-secondary")
+        middle.append(snippet)
+        trailing = Gtk.Box.new(Gtk.Orientation.VERTICAL, 2)
+        trailing.set_valign(Gtk.Align.CENTER)
+        stamp = widgets.label("", "xx-time", xalign=1.0)
+        trailing.append(stamp)
+        badge = widgets.count_badge("")
+        badge.set_halign(Gtk.Align.END)
+        trailing.append(badge)
+        row_box = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 12)
+        row_box.add_css_class("xx-row")
+        row_box.set_valign(Gtk.Align.CENTER)
+        row_box.append(leading)
+        row_box.append(middle)
+        row_box.append(trailing)
+        list_item.leading = leading
+        list_item.title = title
         list_item.snippet = snippet
+        list_item.stamp = stamp
         list_item.badge = badge
         list_item.row_box = row_box
         list_item.set_child(row_box)
@@ -412,20 +494,36 @@ class ConversationListPage(Adw.NavigationPage):
     def _on_item_bind(self, _factory, list_item: Gtk.ListItem) -> None:
         item = list_item.get_item()
         list_item.set_activatable(True)
-        list_item.name.set_text(item.title)
-        list_item.stamp.set_text(item.stamp)
+        list_item.title.set_text(item.title)
         list_item.snippet.set_text(item.snippet)
+        list_item.stamp.set_text(item.stamp)
         if item.unread > 0:
             list_item.badge.set_text(str(item.unread))
             list_item.badge.set_visible(True)
         else:
             list_item.badge.set_visible(False)
+        leading = list_item.leading
+        kid = leading.get_first_child()
+        while kid is not None:
+            following = kid.get_next_sibling()
+            leading.remove(kid)
+            kid = following
+        leading.append(avatar_for(item.title))
         list_item.row_box._txxt_cid = int(item.conversation_id)
+        try:
+            total = self._model.get_n_items()
+            last = list_item.get_position() == total - 1
+        except Exception:
+            last = False
+        if last:
+            list_item.row_box.add_css_class("last")
+        else:
+            list_item.row_box.remove_css_class("last")
 
     # ---------------------------------------------------------------- input
 
-    def _on_search_changed(self, _entry: Gtk.SearchEntry) -> None:
-        self._apply_filter(self._search.get_text())
+    def _on_query_changed(self, text: str) -> None:
+        self._apply_filter(text)
 
     def _on_row_activated(self, _view: Gtk.ListView, position: int) -> None:
         item = self._model.get_item(position)
@@ -647,3 +745,13 @@ class ConversationListPage(Adw.NavigationPage):
             dialog.choose_finish(result)
         except GLib.Error:
             pass
+
+
+def _first_entry(box: Gtk.Box) -> Gtk.Entry:
+    """The text entry inside an ``xx_ui`` search bar."""
+    kid = box.get_first_child()
+    while kid is not None:
+        if isinstance(kid, Gtk.Entry):
+            return kid
+        kid = kid.get_next_sibling()
+    raise AssertionError("search bar has no entry")

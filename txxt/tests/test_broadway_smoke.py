@@ -190,13 +190,20 @@ def _child_main():
         pump(1.2)
         assert window._thread_pages, "thread page never opened"
         thread = window._thread_pages[-1]
-        assert thread._model.get_n_items() == 5
-        bodies = [thread._model.get_item(i).body for i in range(5)]
+        from txxt.thread_page import MessageItem, SeparatorItem
+        rows = [
+            thread._model.get_item(i)
+            for i in range(thread._model.get_n_items())
+        ]
+        messages = [row for row in rows if isinstance(row, MessageItem)]
+        assert len(messages) == 5
+        assert any(isinstance(row, SeparatorItem) for row in rows)
+        bodies = [row.body for row in messages]
         assert any(len(body) > 500 for body in bodies)
         assert "[Photo]" in bodies
-        states = [thread._model.get_item(i).state for i in range(5)]
+        states = [row.state for row in messages]
         assert any(state.startswith("Held") for state in states)
-        assert any(thread._model.get_item(i).show_retry for i in range(5))
+        assert any(row.show_retry for row in messages)
         assert_list_rules(window)
         thread._search_bar.set_search_mode(True)
         thread._search_entry.set_text("Lorem")
@@ -285,7 +292,8 @@ def test_broadway_launch_thread_search_and_focus():
         env["GDK_BACKEND"] = "broadway"
         env["BROADWAY_DISPLAY"] = f":{number}"
         env["XDG_DATA_HOME"] = tmp.name
-        env["PYTHONPATH"] = os.path.join(repo_root, "src") + os.pathsep + env.get(
+        common_root = os.path.join(os.path.dirname(repo_root), "common")
+        env["PYTHONPATH"] = os.path.join(repo_root, "src") + os.pathsep + common_root + os.pathsep + env.get(
             "PYTHONPATH", "")
         child = subprocess.run(
             [sys.executable, os.path.abspath(__file__), "--child"],

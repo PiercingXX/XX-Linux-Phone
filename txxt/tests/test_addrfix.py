@@ -366,6 +366,7 @@ from pathlib import Path
 
 txxt_src, ref_src, db_path = sys.argv[1], sys.argv[2], sys.argv[3]
 sys.path.insert(0, txxt_src)
+sys.path.insert(0, os.path.join(os.path.dirname(txxt_src), "..", "common"))
 
 from gi.repository import GLib, Gio
 
@@ -457,12 +458,12 @@ try:
     while time.monotonic() < deadline:
         pump(1.0)
         try:
-            header = window._thread_pages[-1]._title.get_text()
+            header = window._thread_pages[-1].header_title
         except Exception:
             header = ""
-        if header == "Grace Hopper":
+        if header == "GRACE HOPPER":
             break
-    assert header == "Grace Hopper", f"thread header missed Grace: {header!r}"
+    assert header == "GRACE HOPPER", f"thread header missed Grace: {header!r}"
     print("ADDRFIX-SMOKE-OK", flush=True)
 finally:
     try:

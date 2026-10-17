@@ -12,7 +12,11 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent.parent / "src" / "txxt"
 
 UI_WITH_LISTS = ("conversations.py", "thread_page.py")
-UI_WRITERS = ("main.py", "conversations.py", "thread_page.py", "compose.py")
+UI_WRITERS = ("main.py", "conversations.py", "thread_page.py", "compose.py",
+              "new_conversation_page.py")
+UI_PAGES = ("conversations.py", "thread_page.py", "blocking_page.py",
+            "quarantine_page.py", "new_conversation_page.py",
+            "settings_page.py")
 
 
 def read(name: str) -> str:
@@ -74,20 +78,24 @@ def test_long_press_resolves_row_under_pointer():
 
 # ---- header bars / layout ----
 
-def test_title_buttons_hidden_everywhere():
-    for name in UI_WITH_LISTS:
-        src = read(name)
-        headers = src.count("Adw.HeaderBar(")
-        assert headers >= 1, name
-        assert src.count("set_show_start_title_buttons(False)") == headers, name
-        assert src.count("set_show_end_title_buttons(False)") == headers, name
+def test_no_header_bar_chrome_anywhere():
+    """The restyle dropped every Adw.HeaderBar for xx_ui page headers."""
+    for name in UI_PAGES:
+        assert "Adw.HeaderBar(" not in read(name), name
+    assert "set_decorated(False)" in read("main.py")
 
 
 def test_phone_layout_bounds():
     assert "set_size_request(320" in read("main.py")
     assert "360, 720" in read("main.py")
-    assert "set_ellipsize" in read("conversations.py")
-    assert "set_wrap" in read("thread_page.py")
+    for name in UI_PAGES:
+        assert "from xx_ui import widgets" in read(name), name
+    assert "widgets.bubble" in read("thread_page.py")
+    assert "set_ellipsize" in read("thread_page.py")
+
+
+def test_entries_unfocusable_on_new_page():
+    assert "tap_to_focus" in read("new_conversation_page.py")
 
 
 # ---- dialogs: parent first ----
@@ -115,7 +123,7 @@ def test_reply_types_are_variant_or_none():
 
 def test_no_polling_signal_drives_refresh():
     for name in ("main.py", "conversations.py", "thread_page.py",
-                 "txxt_client.py"):
+                 "txxt_client.py", "new_conversation_page.py"):
         assert "timeout_add" not in read(name), name
     assert "signal_subscribe" in read("txxt_client.py")
     assert "MessagesChanged" in read("txxt_client.py")
@@ -152,20 +160,17 @@ def test_send_and_mark_read_go_through_the_client():
         assert "TxxtClient" in read(name) or "txxt_client" in read(name), name
 
 
-# ---- theme: no white lists, lists and entries painted ----
+# ---- theme: the app owns no theme reader or CSS ----
 
-def test_every_preset_paints_lists_without_white():
-    from txxt import theme
+def test_no_local_theme_module():
+    assert not (SRC / "theme.py").exists()
+    for name in UI_PAGES + ("main.py",):
+        assert "txxt_theme" not in read(name), name
+        assert "css_for_theme" not in read(name), name
 
-    keys = list(theme.THEME_PRESETS) + ["custom"]
-    assert len(keys) == 9
-    for key in keys:
-        active = theme.resolve_theme({"theme": key})
-        css = theme.css_for_theme(active, "Space Mono, Monospace").lower()
-        assert "listview" in css, key
-        assert "listview row" in css, key
-        assert "row:selected" in css, key
-        assert "entry" in css, key
-        assert "textview" in css, key
-        assert "#fff" not in css, key
-        assert "white" not in css, key
+
+def test_shared_theme_applied_once_at_startup():
+    src = read("main.py")
+    assert "xx_ui.apply(" in src
+    assert "xx_ui.on_change(" in src
+    assert "xx_ui.install(" in src
