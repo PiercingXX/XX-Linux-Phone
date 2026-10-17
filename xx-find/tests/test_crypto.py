@@ -74,3 +74,9 @@ def test_bad_keys_rejected():
         crypto.seal_report(b"x", "zz")
     with pytest.raises(crypto.CryptoError):
         crypto.verify_command(b"x", b"\x00" * 64, "zz")
+
+
+def test_wrong_length_signature_rejected_as_crypto_error():
+    for bad in (b"", b"\x00" * 63, b"\x00" * 65):
+        with pytest.raises(crypto.CryptoError):
+            crypto.verify_command(b"x", bad, RFC8032_PUB)

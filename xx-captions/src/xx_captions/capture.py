@@ -44,12 +44,16 @@ class CaptureError(RuntimeError):
 
 def pw_record_argv_for(target: str,
                        rate: int = audio.ENGINE_RATE_HZ) -> list[str]:
-    """pw-record argv for one node, tagged for the privacy monitor."""
-    base = audio.pw_record_argv(target, rate)
+    """pw-record argv for one sink monitor, tagged for the privacy monitor.
+
+    The monitor selector stays merged in the single `-P` properties
+    object: a second `-P`/`--properties` flag would replace it and the
+    capture would no longer read the sink's monitor.
+    """
+    base = audio.pw_record_argv(target, rate, STREAM_PROPS)
     head, tail = base[:-1], base[-1:]
     assert tail == ["-"]
-    return head + ["--media-role", MEDIA_ROLE,
-                   "--properties", json.dumps(STREAM_PROPS)] + tail
+    return head + ["--media-role", MEDIA_ROLE] + tail
 
 
 def pipewiresrc_props_for(target: str,

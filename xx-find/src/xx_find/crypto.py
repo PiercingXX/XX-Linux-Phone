@@ -90,5 +90,5 @@ def verify_command(canonical: bytes, signature: bytes,
         raise CryptoError("bad verify key") from exc
     try:
         key.verify(bytes(canonical), bytes(signature))
-    except _BadSig as exc:
+    except (_BadSig, ValueError, TypeError) as exc:
         raise CryptoError("bad command signature") from exc

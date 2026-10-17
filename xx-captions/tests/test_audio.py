@@ -21,41 +21,37 @@ def _graph() -> list[dict]:
     return [
         _node(10, "alsa_output.platform-sound.HiFi__hw__0__sink",
               "Audio/Sink"),
-        _node(11, "alsa_output.platform-sound.HiFi__hw__0__sink.monitor",
-              "Audio/Source"),
         _node(20, "alsa_input.platform-sound.HiFi__hw__0__source",
               "Audio/Source"),
     ]
 
 
-def test_monitor_name_appends_suffix() -> None:
-    assert audio.monitor_name("alsa_output.x") == "alsa_output.x.monitor"
+def test_pw_record_argv_targets_sink_with_capture_sink() -> None:
+    import json
 
-
-def test_monitor_name_passes_monitors_through() -> None:
-    assert audio.monitor_name("alsa_output.x.monitor") == "alsa_output.x.monitor"
-
-
-def test_pw_record_argv_targets_node() -> None:
-    argv = audio.pw_record_argv("alsa_output.x.monitor")
-    assert argv[:3] == ["pw-record", "--target", "alsa_output.x.monitor"]
+    argv = audio.pw_record_argv("alsa_output.x")
+    assert argv[:3] == ["pw-record", "--target", "alsa_output.x"]
     assert "--rate" in argv and "16000" in argv
+    assert argv[-1] == "-"
+    props = json.loads(argv[argv.index("-P") + 1])
+    assert props["stream.capture.sink"] is True
     with pytest.raises(ValueError):
         audio.pw_record_argv("  ")
 
 
 def test_pipewiresrc_requests_capture_role() -> None:
-    props = audio.pipewiresrc_caps("alsa_output.x.monitor")
-    assert props["target-object"] == "alsa_output.x.monitor"
+    props = audio.pipewiresrc_caps("alsa_output.x")
+    assert props["target-object"] == "alsa_output.x"
     assert props["stream.capture.sink"] is True
 
 
-def test_playback_resolves_to_sink_monitor() -> None:
+def test_playback_resolves_to_sink_itself() -> None:
     plan = audio.resolve_capture(
         _graph(), "alsa_output.platform-sound.HiFi__hw__0__sink",
         in_call=False)
     assert set(plan) == {"playback"}
-    assert plan["playback"].node.endswith(".monitor")
+    assert plan["playback"].node == \
+        "alsa_output.platform-sound.HiFi__hw__0__sink"
 
 
 def test_call_resolves_downlink_and_uplink() -> None:
@@ -63,17 +59,30 @@ def test_call_resolves_downlink_and_uplink() -> None:
         _graph(), "alsa_output.platform-sound.HiFi__hw__0__sink",
         in_call=True)
     assert set(plan) == {"downlink", "uplink"}
-    assert plan["downlink"].node.endswith(".monitor")
+    assert plan["downlink"].node == \
+        "alsa_output.platform-sound.HiFi__hw__0__sink"
     assert plan["uplink"].node == "alsa_input.platform-sound.HiFi__hw__0__source"
+
+
+def test_no_plan_names_a_dot_monitor_node() -> None:
+    nodes = _graph() + [_node(
+        30, "alsa_output.platform-sound.HiFi__hw__0__sink.monitor",
+        "Audio/Source")]
+    for in_call in (False, True):
+        plan = audio.resolve_capture(
+            nodes, "alsa_output.platform-sound.HiFi__hw__0__sink",
+            in_call=in_call)
+        assert all(not target.node.endswith(".monitor")
+                   for target in plan.values())
 
 
 def test_missing_nodes_yield_empty_plan() -> None:
     assert audio.resolve_capture([], "no-such-sink", in_call=False) == {}
     assert audio.resolve_capture([], "no-such-sink", in_call=True) == {}
-    nodes = [_node(1, "some-sink", "Audio/Sink"),
-             _node(2, "some-sink.monitor", "Audio/Source",
-                   state="suspended")]
+    nodes = [_node(1, "some-sink", "Audio/Sink", state="suspended")]
     assert audio.resolve_capture(nodes, "some-sink", in_call=False) == {}
+    nodes = [_node(1, "some-source", "Audio/Source")]
+    assert audio.resolve_capture(nodes, "some-source", in_call=False) == {}
 
 
 def test_default_source_skips_suspended() -> None:

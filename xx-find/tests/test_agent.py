@@ -58,6 +58,30 @@ def test_bad_signature_commands_never_advance_counter():
     assert cfg.last_counter == 0
 
 
+def test_short_signature_envelope_does_not_kill_poll():
+    import base64
+
+    cfg, signing_hex = _paired()
+    bad = _envelope(signing_hex, counter=1)
+    bad["sig"] = base64.b64encode(b"\x00" * 63).decode("ascii")
+    good = _envelope(signing_hex, counter=2, cmd_type="lock")
+    deps = agent_mod.AgentDeps(
+        now=lambda: NOW,
+        fetch_commands=lambda _cfg: [bad, good],
+        lock_now=lambda: None)
+    summary = agent_mod.Agent(cfg, deps).poll_once()
+    assert summary["status"] == "ok"
+    assert [outcome["ok"] for outcome in summary["acted"]] == [False, True]
+    assert cfg.last_counter == 2
+
+
+def test_none_fetch_commands_is_transport_error_not_crash():
+    cfg, _ = _paired()
+    deps = agent_mod.AgentDeps(now=lambda: NOW, fetch_commands=None)
+    assert agent_mod.Agent(cfg, deps).poll_once() == {
+        "status": "transport-error", "acted": []}
+
+
 def test_replay_does_not_reactuate():
     cfg, signing_hex = _paired()
     calls = []

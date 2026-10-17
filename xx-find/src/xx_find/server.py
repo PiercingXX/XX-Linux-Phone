@@ -330,16 +330,16 @@ def handle_request(method: str, path: str, headers: dict,
             return (400, "text/plain; charset=utf-8", "bad json")
         if not isinstance(payload, dict):
             return (400, "text/plain; charset=utf-8", "bad json")
+        if not store.login_limiter.allowed("ip:%s" % peer, now):
+            return _limited()
+        if not store.login_limiter.allowed("account:owner", now):
+            return _limited()
         if store.check_owner_password(payload.get("password", "")):
             store.login_limiter.clear("ip:%s" % peer)
             store.login_limiter.clear("account:owner")
             token = store.open_session(now)
             return (200, "application/json",
                     json.dumps({"session": token}))
-        if not store.login_limiter.allowed("ip:%s" % peer, now):
-            return _limited()
-        if not store.login_limiter.allowed("account:owner", now):
-            return _limited()
         time.sleep(0)
         return _unauthorized()
 
@@ -604,9 +604,11 @@ ciphertext only. Map tiles: OpenStreetMap contributors.</p>
         args.confirmation = $("aconfirm").value;
       }
       var now = Math.floor(Date.now() / 1000);
+      // One idle poll (900 s) plus skew/jitter margin: the phone only
+      // polls about every 15 min, and the counter prevents replay.
       var cmd = { v: 1, device_id: deviceId,
         counter: parseInt($("acounter").value, 10),
-        exp: now + 120, type: type, args: args };
+        exp: now + 1200, type: type, args: args };
       if (!(cmd.counter > 0)) { throw new Error("bad counter"); }
       var seed = XXFIND.hexToBytes($("signkey").value.trim());
       var sig = XXFIND.bytesToBase64(

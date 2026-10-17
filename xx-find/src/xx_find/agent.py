@@ -54,10 +54,13 @@ class Agent:
         if status != STATUS_OK:
             return {"status": status, "acted": []}
         acted = []
+        fetch = self.deps.fetch_commands
+        if not callable(fetch):
+            return {"status": STATUS_TRANSPORT_ERROR, "acted": []}
         try:
-            envelopes = self.deps.fetch_commands(self.cfg)
+            envelopes = fetch(self.cfg)
         except TypeError:
-            envelopes = self.deps.fetch_commands()
+            envelopes = fetch()
         except Exception:
             return {"status": STATUS_TRANSPORT_ERROR, "acted": []}
         for envelope in envelopes or []:

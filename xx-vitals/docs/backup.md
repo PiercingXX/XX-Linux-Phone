@@ -23,7 +23,11 @@ backup, per the manifest comment in `ref/xx-vitals`).
 ## What travels with a normal home-directory backup
 
 - `~/.config/xx-vitals/config.json` — goals, units, height, birth year,
-  tab visibility, NAS host, step baseline. Plain JSON, safe to back up.
+  tab visibility, NAS host. Plain JSON, safe to back up.
+  The collector-owned step baseline
+  (`~/.local/state/xx-vitals/collector-state.json`) is transient
+  calibration, not backed up; a restore cold-starts it (next tick
+  attributes nothing).
   The shell's own backup (`xx-wm-backup-*.json`) covers shell settings
   only and never touches this file.
 

@@ -20,13 +20,19 @@ column holds only observed counts.
 
 from __future__ import annotations
 
+import json
 import signal
 import sys
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from xx_vitals.prefs import StepBaseline
 
 if __package__ in (None, ""):  # installed script run: find the app dir
     from pathlib import Path as _Path
@@ -107,6 +113,116 @@ def _save_baseline(config, reading: StepReading, source: str, floor: float | Non
     )
     if floor is not None and floor > 0:
         config.step_noise_floor = float(floor)
+
+
+COLLECTOR_STATE_FILENAME = "collector-state.json"
+
+
+def collector_state_path() -> "Path":
+    """Collector-owned step state file (baseline lives here, not in the
+    UI-written config, so neither side can save the other's stale copy)."""
+    from pathlib import Path as _Path
+
+    from xx_vitals.paths import state_dir
+
+    return _Path(state_dir()) / COLLECTOR_STATE_FILENAME
+
+
+def load_state_baseline(path=None) -> "StepBaseline | None":
+    """Fresh hardware-counter baseline from the collector state file.
+
+    None when the collector never stored one or the file is unreadable:
+    callers cold-start (attribute nothing) instead of guessing.
+    """
+    from pathlib import Path as _Path
+
+    from xx_vitals.prefs import StepBaseline
+
+    state_path = _Path(path) if path is not None else collector_state_path()
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    baseline = raw.get("step_baseline") if isinstance(raw, dict) else None
+    if not isinstance(baseline, dict):
+        return None
+    try:
+        counter = float(baseline["counter"])
+        elapsed = int(baseline["elapsed_ms"])
+        wall = int(baseline["wall_ms"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    source = baseline.get("source", "")
+    return StepBaseline(counter=counter, elapsed_ms=elapsed, wall_ms=wall,
+                        source=source if isinstance(source, str) else "")
+
+
+def store_state_baseline(reading: StepReading, source: str,
+                         path=None) -> None:
+    """Durably record the hardware-counter baseline. Only collector
+    sampling paths call this; the UI never writes the state file, so it
+    can never persist a stale baseline over a fresh one."""
+    from pathlib import Path as _Path
+
+    from xx_vitals import prefs as prefs_module
+
+    state_path = _Path(path) if path is not None else collector_state_path()
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    with prefs_module.locked(state_path):
+        try:
+            doc = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            doc = {}
+        if not isinstance(doc, dict):
+            doc = {}
+        doc["step_baseline"] = {
+            "counter": float(reading.counter_value),
+            "elapsed_ms": int(reading.elapsed_realtime_ms),
+            "wall_ms": int(reading.wall_clock_ms),
+            "source": str(source),
+        }
+        tmp = state_path.with_name(state_path.name + ".tmp")
+        tmp.write_text(json.dumps(doc), encoding="utf-8")
+        tmp.replace(state_path)
+
+
+def persist_collector_state(config, config_path=None,
+                            state_path=None) -> None:
+    """Persist only collector-owned step state: the baseline goes to the
+    state file, the noise floor is field-updated. Never whole-writes the
+    config, so a stale startup snapshot cannot re-enable collection."""
+    from xx_vitals import prefs as prefs_module
+
+    baseline = getattr(config, "step_baseline", None)
+    if baseline is not None:
+        try:
+            counter = float(baseline.counter)
+            elapsed = int(baseline.elapsed_ms)
+            wall = int(baseline.wall_ms)
+        except (TypeError, ValueError, AttributeError):
+            pass
+        else:
+            store_state_baseline(
+                StepReading(counter_value=counter,
+                            elapsed_realtime_ms=elapsed,
+                            wall_clock_ms=wall),
+                getattr(baseline, "source", "") or "", state_path)
+    floor = getattr(config, "step_noise_floor", None)
+    if floor is not None:
+        prefs_module.update(config_path, step_noise_floor=float(floor))
+
+
+def load_collector_config(config_path=None, state_path=None):
+    """Config for a collector pass: prefs overlaid with the fresh
+    state-file baseline, so a tick never counts from an app-open
+    snapshot. Without stored state the prefs copy stands (legacy)."""
+    from xx_vitals.prefs import load as load_config
+
+    config = load_config(config_path)
+    fresh = load_state_baseline(state_path)
+    if fresh is not None:
+        config.step_baseline = fresh
+    return config
 
 
 def _accumulate(db, config, date: str, delta: int, now_ms: int):
@@ -245,14 +361,26 @@ def run_resident(
     moving_batch_s: float = 1.0,
     sample_wait_s: float = 1.0 / MOVING_HZ,
     clock=None,
+    is_enabled=None,
 ) -> ResidentSampler:
-    """Drive the resident sampler until `stop` is set. No sleeping inside."""
+    """Drive the resident sampler until `stop` is set. No sleeping inside.
+
+    The opt-in toggle is re-checked every iteration (callers pass a
+    fresh reader; the default reads the given config object): once off,
+    the loop exits without flushing or persisting, so a stale snapshot
+    can never turn collection back on.
+    """
 
     active = sampler if sampler is not None else build_resident_sampler(
         db, config, save_config=save_config
     )
+    if is_enabled is None:
+        def is_enabled() -> bool:
+            return bool(getattr(config, "collect_enabled", False))
     now = clock if clock is not None else time.monotonic
     while not stop.is_set():
+        if not is_enabled():
+            break
         if active.mode == "still":
             stop.wait(still_poll_s)
             if stop.is_set():
@@ -280,13 +408,14 @@ def run_resident(
                     batch.append((now(), sample[0], sample[1], sample[2]))
             if batch:
                 active.advance(batch[-1][0], batch)
-    active.flush()
-    if save_config is not None and active.floor is not None:
-        config.step_noise_floor = float(active.floor)
-        try:
-            save_config(config)
-        except OSError:
-            pass
+    if is_enabled():
+        active.flush()
+        if save_config is not None and active.floor is not None:
+            config.step_noise_floor = float(active.floor)
+            try:
+                save_config(config)
+            except OSError:
+                pass
     return active
 
 
@@ -313,13 +442,15 @@ def main(argv: list[str] | None = None) -> int:
     from xx_vitals.collect import sensors as sensor_backend
     from xx_vitals.paths import ensure_app_dirs
     from xx_vitals.prefs import load as load_config
-    from xx_vitals.prefs import save as save_config
 
     args = list(argv) if argv is not None else []
     ensure_app_dirs()
-    config = load_config()
+    config = load_collector_config()
     if not config.collect_enabled:
         return 0
+
+    def _persist(cfg) -> None:
+        persist_collector_state(cfg)
     from xx_vitals.core import applog
     from xx_vitals.store.db import Database
 
@@ -327,14 +458,14 @@ def main(argv: list[str] | None = None) -> int:
     db = Database()
     db.init()
     if "--one-shot" in args:
-        result = run_one_shot(db, config, on_save=lambda cfg: save_config(cfg))
+        result = run_one_shot(db, config, on_save=_persist)
         log.info("one-shot %s steps=%d source=%s date=%s",
                  result.outcome, result.steps, result.source, result.date)
         if result.outcome == OUTCOME_OK and result.steps:
             print(f"xx-vitals-collect: +{result.steps} steps ({result.source}) for {result.date}")
         return 0
     if sensor_backend.find_step_counter_node() is not None:
-        result = run_one_shot(db, config, on_save=lambda cfg: save_config(cfg))
+        result = run_one_shot(db, config, on_save=_persist)
         log.info("one-shot %s steps=%d source=%s date=%s",
                  result.outcome, result.steps, result.source, result.date)
         if result.outcome == OUTCOME_OK and result.steps:
@@ -342,13 +473,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not sensor_backend.accelerometer_available():
         return 0
-    sampler = build_resident_sampler(db, config, save_config=lambda cfg: save_config(cfg))
+    sampler = build_resident_sampler(db, config, save_config=_persist)
     stop = threading.Event()
 
     def _handle_term(_signum, _frame) -> None:
         sampler.handle_sigterm()
         try:
-            save_config(config)
+            _persist(config)
         except OSError:
             pass
         log.info("resident stop")
@@ -359,7 +490,8 @@ def main(argv: list[str] | None = None) -> int:
     reader = sensor_backend.sysfs_sample_reader()
     log.info("resident start")
     run_resident(db, config, read_sample=reader, stop=stop, sampler=sampler,
-                 save_config=lambda cfg: save_config(cfg))
+                 save_config=_persist,
+                 is_enabled=lambda: bool(load_config().collect_enabled))
     log.info("resident exit")
     return 0
 

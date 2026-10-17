@@ -183,7 +183,9 @@ plus server halves the audit surface.
 - **Commands**: canonical JSON (see below), Ed25519-signed by the
   owner's signing key. The agent checks signature + `counter >
   last_counter` + `now - skew <= exp <= now + max_age` (defaults
-  60 s / 300 s) + device match, then **advances and durably persists
+  60 s / 1500 s, above the owner UI TTL of 1200 s: one 900 s idle
+  poll plus skew/jitter margin) + device match, then **advances
+  and durably persists
   `last_counter` (atomic tmp + fsync + rename) BEFORE dispatching**;
   persist failure refuses the action. Replays, backdated and
   far-future commands are dropped before dispatch; wrong-device

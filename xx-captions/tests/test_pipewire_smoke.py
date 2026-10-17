@@ -39,12 +39,9 @@ def test_live_monitor_streams_bytes() -> None:
     if sink is None:
         pytest.skip("no running PipeWire within reach "
                     "(pw-record/pactl or daemon missing)")
-    from xx_captions import audio
-
-    target = audio.monitor_name(sink)
     got: list[capture.Chunk] = []
     ended = threading.Event()
-    cap = capture.PipeCapture(capture.pw_record_argv_for(target),
+    cap = capture.PipeCapture(capture.pw_record_argv_for(sink),
                               "playback", got.append,
                               lambda: ended.set())
     cap.start()

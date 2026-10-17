@@ -7,6 +7,8 @@ defaults to IMPERIAL display; an explicitly saved choice is always honored.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -146,10 +148,58 @@ def load(path: Path | str | None = None) -> AppConfig:
     return AppConfig.from_dict(data)
 
 
+@contextlib.contextmanager
+def locked(path: Path | str):
+    """Exclusive advisory lock for one config/state file read-modify-write.
+
+    The lock lives in a sidecar `<file>.lock` so replacing the file
+    itself (atomic tmp + rename) never invalidates the lock: every
+    writer through save()/update() serializes on the same inode.
+    """
+    lock_path = Path(str(path) + ".lock")
+    ensure_parent_for(lock_path)
+    with open(lock_path, "a+b") as guard:
+        fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
+        try:
+            yield guard
+        finally:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
+
+
 def save(cfg: AppConfig, path: Path | str | None = None) -> None:
-    """Persist config atomically."""
+    """Persist config atomically under an exclusive lock."""
     cfg_path = Path(path) if path is not None else default_config_path()
     ensure_parent_for(cfg_path)
-    tmp = cfg_path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cfg.to_dict(), indent=2), encoding="utf-8")
-    tmp.replace(cfg_path)
+    with locked(cfg_path):
+        tmp = cfg_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cfg.to_dict(), indent=2), encoding="utf-8")
+        tmp.replace(cfg_path)
+
+
+def update(path: Path | str | None = None, **fields) -> AppConfig:
+    """Field-level read-modify-write under an exclusive lock.
+
+    Only the named top-level keys change; every other key keeps its
+    on-disk value, so a writer holding a stale snapshot cannot clobber
+    fields another process owns (e.g. the collector must never rewrite
+    `collect_enabled`). Unknown field names raise TypeError instead of
+    persisting silent junk. Returns the merged config.
+    """
+    unknown = set(fields) - set(AppConfig.__dataclass_fields__)
+    if unknown:
+        raise TypeError(
+            "unknown config fields: %s" % ", ".join(sorted(unknown)))
+    cfg_path = Path(path) if path is not None else default_config_path()
+    ensure_parent_for(cfg_path)
+    with locked(cfg_path):
+        try:
+            doc = json.loads(cfg_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            doc = {}
+        if not isinstance(doc, dict):
+            doc = {}
+        doc.update(fields)
+        tmp = cfg_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        tmp.replace(cfg_path)
+    return load(cfg_path)

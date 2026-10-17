@@ -81,7 +81,9 @@ class SessionController:
     capture instead of misattributing voices. capture_factory builds
     one capture-like (start/stop/running, on Chunk callbacks) per
     session; engine_factory builds an object with start(source,
-    on_text)/stop() plus optional feed(samples)/flush().
+    on_text)/stop() plus optional feed(samples)/flush(). A multi-role
+    plan (call downlink+uplink) is paired by role and mixed to one
+    real-time stream; it is never fed direction after direction.
     """
 
     def __init__(self, engine_factory: Callable,
@@ -103,6 +105,7 @@ class SessionController:
         self._lock = threading.Lock()
         self._engine = None
         self._captures: list = []
+        self._roles: set[str] = set()
         self._pump: threading.Thread | None = None
         self._chunks: queue.Queue = queue.Queue()
         self._active = False
@@ -201,7 +204,7 @@ class SessionController:
         try:
             for role, target in plan.items():
                 cap = factory({role: target}, self._on_bytes,
-                              self._on_capture_end)
+                              self._role_ended(role))
                 cap.start()
                 started.append(cap)
         except Exception:
@@ -213,6 +216,7 @@ class SessionController:
             raise
         with self._lock:
             self._captures = started
+            self._roles = set(plan)
 
     def _on_bytes(self, chunk: capture_mod.Chunk) -> None:
         try:
@@ -220,8 +224,14 @@ class SessionController:
         except queue.Full:
             pass
 
-    def _on_capture_end(self) -> None:
-        pass
+    def _role_ended(self, role: str) -> Callable[[], None]:
+        """Drop a dead direction so the survivor keeps feeding at 1x."""
+
+        def _ended() -> None:
+            with self._lock:
+                self._roles.discard(role)
+
+        return _ended
 
     def _on_segment(self, segment: Segment) -> None:
         try:
@@ -246,6 +256,8 @@ class SessionController:
     def _run_pump(self) -> None:
         feed = getattr(self._engine, "feed", None)
         poll = self._route_poll_s if self._route_poll_s > 0 else None
+        pending: dict[str, list[float]] = {}
+        want: frozenset[str] = frozenset()
         while True:
             try:
                 chunk = self._chunks.get(timeout=poll)
@@ -257,18 +269,36 @@ class SessionController:
                 running = self._active and self._pump is not None and (
                     threading.current_thread() is self._pump)
                 engine = self._engine
+                roles = frozenset(self._roles)
             if not running:
                 return
+            if roles != want:
+                pending.clear()
+                want = roles
             if chunk is not None and feed is not None and engine is not None:
                 try:
                     samples = resample.pcm16_to_mono_float32_16k(
                         chunk.raw, chunk.rate, chunk.channels)
                 except ValueError:
                     continue
-                try:
-                    feed(samples)
-                except EngineError:
-                    return
+                if len(want) > 1:
+                    pending[chunk.label] = samples
+                    if all(role in pending for role in want):
+                        mixed = [pending[role] for role in sorted(want)]
+                        combined = mixed[0]
+                        for other in mixed[1:]:
+                            combined = capture_mod.mix_mono(combined, other)
+                        for role in want:
+                            del pending[role]
+                        try:
+                            feed(combined)
+                        except EngineError:
+                            return
+                else:
+                    try:
+                        feed(samples)
+                    except EngineError:
+                        return
             if chunk is None:
                 self.recheck_route()
 

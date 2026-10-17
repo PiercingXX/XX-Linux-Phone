@@ -86,7 +86,7 @@ def set_collect_enabled(config, enabled: bool, save=None) -> dict:
         from xx_vitals import prefs as prefs_module
 
         try:
-            prefs_module.save(config)
+            prefs_module.update(collect_enabled=config.collect_enabled)
         except OSError:
             pass
     return collect_status(config)
@@ -106,7 +106,8 @@ def set_count_while_screen_off(config, enabled: bool, save=None) -> dict:
         from xx_vitals import prefs as prefs_module
 
         try:
-            prefs_module.save(config)
+            prefs_module.update(
+                count_while_screen_off=config.count_while_screen_off)
         except OSError:
             pass
     return collect_status(config)
@@ -120,11 +121,26 @@ def screen_off_copy() -> str:
     )
 
 
+def _refresh_baseline(config, state_path=None) -> None:
+    """Overlay the collector's fresh baseline onto the app-open config.
+
+    Without this, "Sample now" counts from when the app opened while the
+    collector has since moved on, and the delta is counted twice.
+    """
+    from xx_vitals.collect import service as collect_service
+
+    fresh = collect_service.load_state_baseline(state_path)
+    if fresh is not None:
+        config.step_baseline = fresh
+
+
 def tick_collect_now(db, config, hardware=None, now_ms: int = 0,
-                     today: str = "", elapsed_ms: int = 0, wall_ms: int = 0):
+                     today: str = "", elapsed_ms: int = 0, wall_ms: int = 0,
+                     _state_path=None):
     """Immediate hardware-counter pass; the resident sampler owns the rest."""
     from xx_vitals.collect import service as collect_service
 
+    _refresh_baseline(config, _state_path)
     return collect_service.run_once(
         db, config, now_ms=now_ms, today=today or _today(),
         elapsed_ms=elapsed_ms, wall_ms=wall_ms or now_ms,
@@ -132,7 +148,8 @@ def tick_collect_now(db, config, hardware=None, now_ms: int = 0,
     )
 
 
-def collect_tick_in_background(db, config, on_done=None, readers=None):
+def collect_tick_in_background(db, config, on_done=None, readers=None,
+                               state_path=None):
     from xx_vitals.sync import worker as worker_module
 
     def work():
@@ -141,6 +158,7 @@ def collect_tick_in_background(db, config, on_done=None, readers=None):
         from xx_vitals.collect import sensors as sensor_backend
         from xx_vitals.collect import service as collect_service
 
+        _refresh_baseline(config, state_path)
         if readers is not None:
             hardware = readers.get("hardware")
             elapsed = readers.get("elapsed_ms", 0)
@@ -156,7 +174,8 @@ def collect_tick_in_background(db, config, on_done=None, readers=None):
         return collect_service.run_once(
             db, config, now_ms=moment, today=day,
             elapsed_ms=elapsed, wall_ms=wall, hardware=hardware,
-            on_save=_save_config,
+            on_save=lambda cfg: collect_service.persist_collector_state(
+                cfg, state_path=state_path),
         )
 
     return worker_module.run_in_background(work, on_done)
@@ -190,8 +209,12 @@ def start_resident_in_background(db, config, on_done=None, _deps=None) -> Reside
     deps = _deps or {}
     stop = threading.Event()
     reader = deps.get("reader") or sensor_backend.sysfs_sample_reader()
+
+    def _persist(cfg) -> None:
+        collect_service.persist_collector_state(cfg)
+
     sampler = collect_service.build_resident_sampler(
-        db, config, save_config=_save_config,
+        db, config, save_config=_persist,
         inhibitor=deps.get("inhibitor"),
     )
     kwargs = {
@@ -204,7 +227,7 @@ def start_resident_in_background(db, config, on_done=None, _deps=None) -> Reside
     def work() -> None:
         collect_service.run_resident(
             db, config, read_sample=reader, stop=stop, sampler=sampler,
-            save_config=_save_config, **kwargs,
+            save_config=_persist, **kwargs,
         )
 
     from xx_vitals.sync import worker as worker_module
@@ -256,15 +279,6 @@ def _now_ms() -> int:
     import time
 
     return int(time.time() * 1000)
-
-
-def _save_config(config) -> None:
-    from xx_vitals import prefs as prefs_module
-
-    try:
-        prefs_module.save(config)
-    except OSError:
-        pass
 
 
 def save_nas_host(config, raw_url: str) -> str | None:

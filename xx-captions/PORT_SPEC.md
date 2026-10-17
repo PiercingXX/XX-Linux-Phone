@@ -112,16 +112,20 @@ upset costs a config change, not a rewrite.
 
 ### 2.1 Live captions (system playback)
 
-Capture-only stream on the default sink's monitor node, resolved at
+Capture-only stream on the default sink's monitor, resolved at
 session start (pure logic in `src/xx_captions/audio.py`,
-`resolve_capture`): `pw-record --target <sink>.monitor --rate 16000`
-or GStreamer `pipewiresrc target-object=<sink>.monitor
-stream.capture.sink=true` at 16 kHz mono s16. A capture stream never
-moves, re-links, or re-profiles existing nodes, so routing is
-untouched and a captions crash cannot mute the phone. The default
-sink name comes from `pactl get-default-sink` at start (never a
-numeric id: under pipewire-pulse ids shift between boots — same rule
-as `call_ui.py::_pactl_card_names`).
+`resolve_capture`): `pw-record --target <sink> -P
+'{"stream.capture.sink": true, ...}' --rate 16000`
+or GStreamer `pipewiresrc target-object=<sink>
+stream.capture.sink=true` at 16 kHz mono s16. A sink's monitor is
+ports on the sink node itself, not a separate `<sink>.monitor` node
+(that name exists only in the PulseAudio view, so targeting it fails
+with "no target node available" — verified on PipeWire 1.6.9). A
+capture stream never moves, re-links, or re-profiles existing nodes,
+so routing is untouched and a captions crash cannot mute the phone.
+The default sink name comes from `pactl get-default-sink` at start
+(never a numeric id: under pipewire-pulse ids shift between boots —
+same rule as `call_ui.py::_pactl_card_names`).
 
 ### 2.2 Call transcription (both directions)
 
@@ -132,9 +136,10 @@ On these phones call audio is routed by callaudiod
 voice-call profile. The capture plan does not fight that stack:
 
 - At call start (ModemManager state active, same snapshot the call
-  UI renders from), resolve the CURRENT default sink and take its
-  `.monitor` as the **downlink** (far end), and the current default
-  source as the **uplink** (mic). callaudiod switches profiles
+  UI renders from), resolve the CURRENT default sink and take the
+  sink itself (with `stream.capture.sink=true`) as the
+  **downlink** (far end), and the current default source as the
+  **uplink** (mic). callaudiod switches profiles
   underneath, so names are re-resolved per call, never cached across
   calls.
 - Both are capture-only streams with `stream.capture.sink=true` /

@@ -50,6 +50,15 @@ def test_wrong_key_rejected(keys):
         protocol.validate_command(envelope, other_verify, 0, NOW)
 
 
+def test_wrong_length_signature_rejected(keys):
+    import base64
+
+    verify_hex, envelope, _ = _signed(keys)
+    envelope["sig"] = base64.b64encode(b"\x00" * 63).decode("ascii")
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate_command(envelope, verify_hex, 0, NOW)
+
+
 def test_expired_and_far_future_rejected(keys):
     verify_hex, old, _ = _signed(keys, counter=1, exp=NOW - 3600)
     with pytest.raises(protocol.ProtocolError):
@@ -57,6 +66,16 @@ def test_expired_and_far_future_rejected(keys):
     _, future, _ = _signed(keys, counter=2, exp=NOW + 3600)
     with pytest.raises(protocol.ProtocolError):
         protocol.validate_command(future, verify_hex, 0, NOW)
+
+
+def test_command_survives_one_idle_poll(keys):
+    verify_hex, signing_hex = keys
+    cmd = protocol.build_command("phone-1", 1, NOW + 1200, "ring")
+    envelope = protocol.sign_envelope(cmd, signing_hex)
+    assert protocol.validate_command(envelope, verify_hex, 0, NOW) == cmd
+    assert protocol.validate_command(envelope, verify_hex, 0, NOW + 900) == cmd
+    with pytest.raises(protocol.ProtocolError):
+        protocol.validate_command(envelope, verify_hex, 0, NOW + 1200 + 61)
 
 
 def test_unknown_type_rejected():

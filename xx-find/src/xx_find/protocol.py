@@ -15,7 +15,10 @@ from xx_find import crypto
 PROTOCOL_VERSION = 1
 COMMAND_TYPES = frozenset({"locate", "ring", "message", "lock", "erase"})
 PRIVILEGED_COMMANDS = frozenset({"erase"})
-DEFAULT_MAX_AGE_S = 300
+# Must stay above the owner UI command TTL (server web UI signs
+# exp = now + 1200: one 900 s idle poll plus skew/jitter margin);
+# the monotonic counter already prevents replay.
+DEFAULT_MAX_AGE_S = 1500
 DEFAULT_MAX_SKEW_S = 60
 
 
@@ -157,7 +160,10 @@ def _check_envelope_shape(envelope: object) -> tuple[dict, bytes]:
         raise ProtocolError("envelope needs a cmd object")
     if not isinstance(envelope.get("sig"), str):
         raise ProtocolError("envelope needs a base64 sig")
-    return cmd, _b64decode(envelope["sig"])
+    raw_sig = _b64decode(envelope["sig"])
+    if len(raw_sig) != crypto.ED25519_SIG_BYTES:
+        raise ProtocolError("envelope needs a 64-byte sig")
+    return cmd, raw_sig
 
 
 def validate_command(envelope: dict, verify_key_hex: str,

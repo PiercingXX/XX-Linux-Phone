@@ -39,7 +39,7 @@ samples the accelerometer until the user flips the switch in Profile.
 |---|---|---|---|
 | `collect_enabled` | bool | `false` | Master pedometer switch. `false` means the resident service, the timer tick and the in-app fallback all do nothing. |
 | `count_while_screen_off` | bool | `false` | Take a logind `delay` sleep inhibitor while motion is detected, so a walk with the screen off delays suspend briefly. Off by default (uses more battery). |
-| `step_baseline` | object | — | Last hardware counter reading `{counter, elapsed_ms, wall_ms, source}`. Written automatically; `source` is `hardware`. Delete it to force a cold start (next tick attributes nothing). |
+| `step_baseline` | object | — | Legacy fallback only: the live hardware-counter reading `{counter, elapsed_ms, wall_ms, source}` is kept in `~/.local/state/xx-vitals/collector-state.json`, owned by the collector, so the UI and the collector never overwrite each other's copy. Delete the state file (not this key) to force a cold start (next tick attributes nothing). |
 | `step_noise_floor` | float | — | Per-device still-noise floor learned by the resident sampler. Written automatically; delete it to re-learn. |
 
 Background collection depends on the probed step source (enable

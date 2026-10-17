@@ -7,6 +7,7 @@ read-only: capture streams never move or re-link existing nodes.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 MONITOR_SUFFIX = ".monitor"
@@ -19,20 +20,26 @@ class CaptureTarget:
     label: str
 
 
-def monitor_name(sink: str) -> str:
-    """Monitor node for a sink; already-a-monitor names pass through."""
-    sink = (sink or "").strip()
-    if sink.endswith(MONITOR_SUFFIX):
-        return sink
-    return sink + MONITOR_SUFFIX if sink else ""
+def pw_record_argv(target: str, rate: int = ENGINE_RATE_HZ,
+                   properties: dict | None = None) -> list[str]:
+    """pw-record argv capturing a sink's monitor at engine sample rate.
 
-
-def pw_record_argv(target: str, rate: int = ENGINE_RATE_HZ) -> list[str]:
-    """pw-record argv capturing exactly one node at engine sample rate."""
+    PipeWire exposes a sink's monitor as ports on the sink node itself,
+    not as a separate `<sink>.monitor` node (that name exists only in
+    the PulseAudio view), so the target is the sink node and
+    `stream.capture.sink` selects its monitor. Verified on PipeWire
+    1.6.9: targeting `<sink>.monitor` fails with "no target node
+    available", while sink + capture.sink streams.
+    """
     if not target or not target.strip():
         raise ValueError("capture target must be a non-empty node name")
-    return ["pw-record", "--target", target.strip(), "--rate",
-            str(int(rate)), "--format", "s16", "--channels", "1", "-"]
+    props = {"stream.capture.sink": True}
+    if properties:
+        props.update(properties)
+    return ["pw-record", "--target", target.strip(),
+            "-P", json.dumps(props),
+            "--rate", str(int(rate)), "--format", "s16",
+            "--channels", "1", "-"]
 
 
 def pipewiresrc_caps(target: str, rate: int = ENGINE_RATE_HZ) -> dict:
@@ -60,14 +67,16 @@ def find_node_by_name(nodes: list[dict], name: str) -> dict | None:
 
 
 def find_monitor_for_sink(nodes: list[dict], sink: str) -> str | None:
-    """Monitor node name for a sink, or None when the graph has none.
+    """Sink node name for monitor capture, or None when the graph has
+    none. Returns the sink's own name: capture streams target it with
+    `stream.capture.sink` (see pw_record_argv).
 
-    Only `running` nodes count, matching the shell privacy monitor's
-    classification of live streams.
+    Only `running` Audio/Sink nodes count, matching the shell privacy
+    monitor's classification of live streams.
     """
-    if not sink:
+    if not sink or not sink.strip():
         return None
-    node = find_node_by_name(nodes, monitor_name(sink))
+    node = find_node_by_name(nodes, sink.strip())
     if node is None:
         return None
     info = node.get("info")
@@ -75,7 +84,12 @@ def find_monitor_for_sink(nodes: list[dict], sink: str) -> str | None:
         return None
     if str(info.get("state", "")).lower() != "running":
         return None
-    return monitor_name(sink)
+    props = info.get("props")
+    if not isinstance(props, dict):
+        return None
+    if props.get("media.class") != "Audio/Sink":
+        return None
+    return sink.strip()
 
 
 def default_source(nodes: list[dict]) -> str | None:

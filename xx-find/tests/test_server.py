@@ -89,6 +89,18 @@ def test_http_rejects_unauthenticated_device(store):
     assert status == 401
 
 
+def test_login_limiter_checked_before_password(store):
+    bad = json.dumps({"password": "nope"})
+    for _ in range(server.LOGIN_MAX_ATTEMPTS):
+        status, _, _ = server.handle_request(
+            "POST", "/login", {}, bad, store, NOW)
+        assert status == 401
+    good = json.dumps({"password": "correct horse"})
+    status, _, _ = server.handle_request(
+        "POST", "/login", {}, good, store, NOW + 1)
+    assert status == 429
+
+
 def test_http_ui_needs_owner_session(store):
     status, _, text = server.handle_request("GET", "/", {}, "", store,
                                             NOW)
@@ -97,6 +109,26 @@ def test_http_ui_needs_owner_session(store):
     status, _, text = server.handle_request(
         "GET", "/", {"x-session": session}, "", store, NOW)
     assert status == 200 and "OpenStreetMap" in text
+
+
+def test_owner_ui_command_ttl_survives_idle_poll(store):
+    import re
+
+    from xx_find import schedule
+
+    status, _, text = server.handle_request("GET", "/", {}, "", store,
+                                            NOW)
+    assert status == 200
+    match = re.search(r"exp:\s*now\s*\+\s*(\d+)", text)
+    assert match is not None
+    ttl = int(match.group(1))
+    assert ttl >= int(schedule.IDLE_POLL_S) + 60
+    verify_hex, signing_hex = crypto.generate_owner_signing_keypair()
+    cmd = protocol.build_command("phone-1", 1, NOW + ttl, "ring")
+    envelope = protocol.sign_envelope(cmd, signing_hex)
+    assert protocol.validate_command(envelope, verify_hex, 0, NOW) == cmd
+    assert protocol.validate_command(
+        envelope, verify_hex, 0, NOW + int(schedule.IDLE_POLL_S)) == cmd
 
 
 def test_tile_math_known_values():

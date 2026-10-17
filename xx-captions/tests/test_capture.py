@@ -29,8 +29,6 @@ def _graph() -> list[dict]:
     return [
         _node(10, "alsa_output.platform-sound.HiFi__hw__0__sink",
               "Audio/Sink"),
-        _node(11, "alsa_output.platform-sound.HiFi__hw__0__sink.monitor",
-              "Audio/Source"),
         _node(20, "alsa_input.platform-sound.HiFi__hw__0__source",
               "Audio/Source"),
     ]
@@ -45,20 +43,23 @@ def test_stream_props_classify_capture_for_privacy_dot() -> None:
 
 
 def test_pw_record_argv_tags_stream_and_stays_s16() -> None:
-    argv = capture.pw_record_argv_for("alsa_output.x.monitor")
-    assert argv[:3] == ["pw-record", "--target", "alsa_output.x.monitor"]
+    argv = capture.pw_record_argv_for("alsa_output.x")
+    assert argv[:3] == ["pw-record", "--target", "alsa_output.x"]
     assert argv[-1] == "-"
     assert "--media-role" in argv and "Accessibility" in argv
-    props = argv[argv.index("--properties") + 1]
-    assert json.loads(props) == capture.STREAM_PROPS
+    assert argv.count("-P") == 1
+    props = json.loads(argv[argv.index("-P") + 1])
+    assert props["stream.capture.sink"] is True
+    for key, value in capture.STREAM_PROPS.items():
+        assert props[key] == value
     assert "16000" in argv and "s16" in argv
     with pytest.raises(ValueError):
         capture.pw_record_argv_for("  ")
 
 
 def test_pipewiresrc_props_tag_stream() -> None:
-    props = capture.pipewiresrc_props_for("alsa_output.x.monitor")
-    assert props["target-object"] == "alsa_output.x.monitor"
+    props = capture.pipewiresrc_props_for("alsa_output.x")
+    assert props["target-object"] == "alsa_output.x"
     assert props["stream.capture.sink"] is True
     assert props["application.name"] == "xx-captions"
     assert props["application.id"] == BUS_NAME
@@ -154,9 +155,7 @@ def test_call_plan_resolves_fresh_each_call_never_cached() -> None:
     def fake_graph() -> list[dict]:
         return [
             _node(1, "sink-a", "Audio/Sink"),
-            _node(2, "sink-a.monitor", "Audio/Source"),
             _node(3, "sink-b", "Audio/Sink"),
-            _node(4, "sink-b.monitor", "Audio/Source"),
             _node(5, "mic", "Audio/Source"),
         ]
 
@@ -165,14 +164,13 @@ def test_call_plan_resolves_fresh_each_call_never_cached() -> None:
         get_graph=fake_graph)
     first = resolver.resolve()
     second = resolver.resolve()
-    assert first["downlink"].node == "sink-a.monitor"
-    assert second["downlink"].node == "sink-b.monitor"
+    assert first["downlink"].node == "sink-a"
+    assert second["downlink"].node == "sink-b"
     assert first["uplink"].node == "mic"
 
 
 def test_call_plan_refuses_half_a_call() -> None:
-    graph = [_node(1, "sink-a", "Audio/Sink"),
-             _node(2, "sink-a.monitor", "Audio/Source")]
+    graph = [_node(1, "sink-a", "Audio/Sink")]
     resolver = capture.CallPlanResolver(
         get_sink=lambda: "sink-a", get_source=lambda: "",
         get_graph=lambda: graph)
@@ -208,9 +206,9 @@ def test_default_sink_never_numeric_and_empty_on_failure() -> None:
 
 def test_route_tracker_reports_each_switch_once() -> None:
     plans = [
-        {"playback": audio.CaptureTarget("sink-a.monitor", "system")},
-        {"playback": audio.CaptureTarget("sink-a.monitor", "system")},
-        {"playback": audio.CaptureTarget("sink-b.monitor", "system")},
+        {"playback": audio.CaptureTarget("sink-a", "system")},
+        {"playback": audio.CaptureTarget("sink-a", "system")},
+        {"playback": audio.CaptureTarget("sink-b", "system")},
     ]
     tracker = capture.RouteTracker(lambda: plans.pop(0))
     _, changed = tracker.check()

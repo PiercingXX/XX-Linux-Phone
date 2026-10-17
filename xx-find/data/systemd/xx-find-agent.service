@@ -20,4 +20,6 @@ ProtectSystem=strict
 ProtectHome=read-only
 
 # Config/keys live outside ProtectHome's read-only view via explicit binds.
-ReadWritePaths=%h/.config/xx-find %h/.local/state/xx-find
+# The "-" prefix lets the namespace start on a clean device where the
+# state directory does not exist yet (otherwise 226/NAMESPACE).
+ReadWritePaths=-%h/.config/xx-find -%h/.local/state/xx-find

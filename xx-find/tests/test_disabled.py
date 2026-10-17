@@ -36,6 +36,16 @@ def test_unit_has_no_install_section():
     assert "Alias=" not in UNIT
 
 
+def test_unit_tolerates_missing_state_dirs():
+    lines = [line.strip() for line in UNIT.splitlines()
+             if line.strip().startswith("ReadWritePaths=")]
+    assert lines, "unit must declare its state paths"
+    for line in lines:
+        paths = line.split("=", 1)[1].split()
+        assert paths, line
+        assert all(path.startswith("-") for path in paths), paths
+
+
 def test_meson_never_enables_or_starts():
     for banned in ("systemctl", "enable", "start", "preset", "symlink",
                    "autostart", "/etc/xdg", "dbus-1/services"):
