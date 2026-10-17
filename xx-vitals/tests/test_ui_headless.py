@@ -42,10 +42,28 @@ def test_long_lists_use_list_view_and_entry_uses_dialogs():
     assert "PreferencesWindow" not in profile_src
 
 
-def test_layout_stays_in_phone_budget():
-    for name in ("entry.py", "home.py", "journal.py", "browse.py", "profile.py", "shell.py"):
+def test_layout_uses_design_system_pages():
+    # Phone fit comes from xx_ui builders (capped widths, fixed header plus
+    # scrolling body plus bottom tabs); pages must assemble through them.
+    import re
+
+    shell_src = (SRC / "ui" / "shell.py").read_text(encoding="utf-8")
+    assert "widgets.bottom_tabs" in shell_src
+    assert "set_decorated(False)" in shell_src
+    expectations = {
+        "home.py": ("widgets.page_header", "widgets.page", "widgets.fab"),
+        "journal.py": ("widgets.page_header", "widgets.page", "Gtk.ListView"),
+        "browse.py": ("widgets.page_header", "widgets.page", "Gtk.ListView"),
+        "profile.py": ("widgets.page_header", "widgets.page", "Gtk.ListView"),
+        "entry.py": ("widgets.dialog_box", "Adw.Dialog"),
+    }
+    for name, markers in expectations.items():
         src = (SRC / "ui" / name).read_text(encoding="utf-8")
-        assert "maximum_size" in src or "set_wrap" in src or "ellipsize" in src, name
+        for marker in markers:
+            assert marker in src, (name, marker)
+    for name in ("home.py", "journal.py", "browse.py", "profile.py"):
+        src = (SRC / "ui" / name).read_text(encoding="utf-8")
+        assert re.search(r"xx-page-body|page_header|compact_header", src), name
 
 
 def test_ui_never_blocks_the_main_loop():

@@ -10,11 +10,14 @@ Status: spec + scaffold. See [PORT_SPEC.md](PORT_SPEC.md) for the full port plan
 ## Run from the checkout
 
 ```sh
-PYTHONPATH=src python3 -m xx_vitals
+PYTHONPATH=src:../common python3 -m xx_vitals
 ```
 
 Requires Python 3.12+, GTK4 + libadwaita with PyGObject introspection
-(`Gtk`, `Adw`, `Gio`, `GLib`). No pip dependencies.
+(`Gtk`, `Adw`, `Gio`, `GLib`). No pip dependencies. The shared `xx_ui`
+design system lives in `../common` and must be importable: install
+`common/` first (see below) or keep it on `PYTHONPATH` for source runs
+and tests (`tests/conftest.py` and `tools/` add it automatically).
 
 ## Layout
 
@@ -27,8 +30,19 @@ Requires Python 3.12+, GTK4 + libadwaita with PyGObject introspection
 
 ## Install
 
+Install `common/` first — the app requires the installed `xx_ui` python
+package and never vendors a copy (`meson setup` fails otherwise):
+
 ```sh
-meson setup build && meson install -C build
+meson setup build && meson install -C build   # in common/
+meson setup build && meson install -C build   # here
+```
+
+Seeded screenshots for every theme:
+
+```sh
+python3 tools/demo_seed.py /tmp/vhome
+sh tools/snap_all.sh lane_shots
 ```
 
 Background collection/sync are opt-in systemd user timers:

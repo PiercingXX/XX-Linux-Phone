@@ -110,7 +110,8 @@ def test_copy_source_helpers_are_headless():
     from xx_vitals.ui import profile
 
     assert callable(profile.import_takeout)
-    assert "Copy logs" in _profile_source() and "get_clipboard" in _profile_source()
+    assert "Copy logs" in _profile_source()
+    assert "copy_to_clipboard" in _profile_source()
     assert "FileDialog" in _profile_source()
 
 

@@ -1,14 +1,29 @@
 """Browse tab: search over six categories with honest "not tracked" rows.
 
-Category data lives in core/browse; series math in core/detail. Metric lists
-and the batch/sample rows render through Gtk.ListView. Charts are Cairo
-sparklines on Gtk.DrawingArea (no new dependencies).
+Category data lives in core/browse; series math in core/detail. Category and
+metric rows render through Gtk.ListView; charts are Cairo bars on
+Gtk.DrawingArea reading the live xx_ui theme (no new dependencies).
 """
 
 from __future__ import annotations
 
 from xx_vitals.core import browse as browse_model
 from xx_vitals.core import detail as detail_model
+
+CHART_W = 272
+CHART_H = 150
+
+ZOOMS = ("Day", "Week", "Month", "Year")
+
+METRIC_LETTERS = {
+    "steps": "S", "distance": "D", "active_min": "A", "effort": "E",
+    "weight": "W", "bmi": "B",
+}
+
+CATEGORY_LETTERS = {
+    "activity": "A", "body": "B", "hr": "H", "nutrition": "N",
+    "sleep": "S", "cycle": "C",
+}
 
 
 def visible_rows(query: str) -> list:
@@ -52,73 +67,395 @@ def weight_rows(samples, zone):
     return detail_model.daily_weight_projection(samples, zone)
 
 
-def build_browse_page(db) -> object:
+def _item_type():
+    """ListView payload type: widgets are built in bind(), so a hidden
+    page never pays for its rows in size negotiation."""
+    from gi.repository import GObject
+
+    class Item(GObject.Object):
+        def __init__(self, payload) -> None:
+            super().__init__()
+            self.payload = payload
+
+    return Item
+
+
+def metric_label(metric: str) -> str:
+    try:
+        return browse_model.METRIC_LABELS[browse_model.MetricKey(metric)]
+    except (ValueError, KeyError):
+        return metric.capitalize()
+
+
+def latest_value_text(metric: str, dailies, weights, config) -> str:
+    from xx_vitals.core import format as format_model
+    from xx_vitals.core import home as home_model
+
+    if metric == "weight":
+        if not weights:
+            return "—"
+        return format_model.format_weight(weights[0].weight_kg, config.units)
+    if metric == "bmi":
+        value = _bmi_latest(dailies, weights, config)
+        return f"{value:.1f}" if value is not None else "—"
+    if not dailies:
+        return "—"
+    for row in dailies:
+        if metric == "steps" and row.steps is not None:
+            return f"{row.steps:,}"
+        if metric == "distance" and row.distance_m is not None:
+            return (home_model.format_distance(row.distance_m, config.units)
+                    + " " + home_model.distance_label(config.units))
+        if metric == "active_min" and row.active_min is not None:
+            return str(row.active_min)
+        if metric == "effort" and row.effort_points is not None:
+            return str(row.effort_points)
+    return "—"
+
+
+def _bmi_latest(dailies, weights, config):
+    if not config.height_metres or not weights:
+        return None
+    return weights[0].weight_kg / (config.height_metres ** 2)
+
+
+def _draw_chart(area, cairo, _width, _height, payload) -> None:
+    import xx_ui
+
+    theme = xx_ui.theme.load()
+    from gi.repository import Gdk
+
+    def paint(hex_color: str):
+        rgba = Gdk.RGBA()
+        rgba.parse(hex_color)
+        return (rgba.red, rgba.green, rgba.blue, rgba.alpha)
+
+    series, _accumulates = payload
+    values = [b.value for b in series.buckets]
+    pad = 8.0
+    base = CHART_H - 22.0
+    top = 10.0
+    span = max(1e-9, (series.axis_max - series.axis_min) or 1.0)
+    n = max(1, len(values))
+    slot = (CHART_W - pad * 2) / n
+    bar_w = max(2.0, min(14.0, slot - 4.0))
+    for index, value in enumerate(values):
+        if value is None:
+            continue
+        height = 4.0 + (value - series.axis_min) / span * (base - top - 4.0)
+        x = pad + index * slot + (slot - bar_w) / 2
+        cairo.set_source_rgba(*paint(theme.foreground))
+        cairo.rectangle(x, base - height, bar_w, height)
+        cairo.fill()
+    cairo.set_source_rgba(*paint(theme.border))
+    cairo.set_line_width(1.0)
+    cairo.move_to(pad, base + 0.5)
+    cairo.line_to(CHART_W - pad, base + 0.5)
+    cairo.stroke()
+
+
+def _chart(series, accumulates: bool):
     import gi
 
     gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gio, Gtk
+    from gi.repository import Gtk
 
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-    box.set_margin_start(12)
-    box.set_margin_end(12)
-    search = Gtk.SearchEntry(placeholder_text="Search metrics")
-    search.set_hexpand(True)
-    _defer_focus_until_tapped(search)
-    box.append(search)
-    store = Gio.ListStore.new(Gtk.Widget)
-    factory = Gtk.SignalListItemFactory()
+    import xx_ui
 
-    def setup(_factory, item) -> None:
-        label = Gtk.Label(label="")
-        label.set_wrap(True)
-        label.set_xalign(0.0)
-        item.set_child(label)
+    area = Gtk.DrawingArea()
+    area.set_content_width(CHART_W)
+    area.set_content_height(CHART_H)
+    area.set_draw_func(_draw_chart, (series, accumulates))
+    xx_ui.on_change(lambda _theme: area.queue_draw())
+    return area
 
-    def bind(_factory, item) -> None:
-        row = item.get_item()
-        item.get_child().set_label(str(row))
 
-    factory.connect("setup", setup)
-    factory.connect("bind", bind)
-    list_view = Gtk.ListView.new(Gtk.NoSelection.new(store), factory)
-    list_view.set_single_click_activate(True)
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_vexpand(True)
-    scrolled.set_child(list_view)
-    clamp = Adw.Clamp(maximum_size=480)
-    clamp.set_child(scrolled)
-    box.append(clamp)
+def build_browse_page(db, config, nav, live: dict | None = None) -> object:
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gio, Gtk
+
+    from xx_ui import widgets
+
+    from xx_vitals.ui import shell as shell_page
+
+    live = live if live is not None else {}
+    state = {"query": "", "zoom": "Week", "stack": None,
+             "level": "cats", "metric": "steps", "overflow": None}
+    header_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    search_row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+    search_row.append(widgets.icon_image("system-search-symbolic"))
+    search_entry = widgets.deferred_entry("Search metrics")
+    search_entry.set_hexpand(True)
+    search_entry.connect("changed",
+                         lambda _e: (state.update(query=search_entry.get_text()),
+                                     refresh()))
+    search_row.append(search_entry)
+    inner = Gtk.Stack()
+    state["stack"] = inner
+    cats_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    metrics_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    detail_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 12)
+    inner.add_named(cats_box, "cats")
+    inner.add_named(metrics_box, "metrics")
+    inner.add_named(detail_box, "detail")
+
+    def menu() -> object:
+        if state["overflow"] is not None:
+            state["overflow"].popup()
+            return state["overflow"]
+        anchor = header_box.get_first_child()
+        popover = shell_page.open_overflow(anchor, [
+            ("Log activity", nav.add_activity),
+            ("Log weight", nav.add_weight),
+            ("Settings", lambda: nav.show("profile")),
+        ])
+        state["overflow"] = popover
+        popover.connect("closed", lambda _p: state.update(overflow=None))
+        return popover
+
+    def open_category(category) -> None:
+        if not category.tracked:
+            _show_untracked(category)
+            return
+        if len(category.metrics) == 1:
+            open_metric(category.metrics[0].value)
+            return
+        _fill_box(metrics_box, widgets.compact_header(
+            lambda: inner.set_visible_child_name("cats"),
+            category.label, "Choose a metric"))
+        for index, key in enumerate(category.metrics):
+            metrics_box.append(widgets.list_row(
+                browse_model.METRIC_LABELS[key],
+                latest_value_text(key.value, _dailies(), _weights(), config),
+                leading=widgets.avatar(METRIC_LETTERS.get(key.value, "•"), 40),
+                on_activate=lambda key=key: open_metric(key.value),
+                last=index == len(category.metrics) - 1))
+        inner.set_visible_child_name("metrics")
+
+    def open_metric(metric: str) -> None:
+        state["metric"] = metric
+        _show_detail()
+        inner.set_visible_child_name("detail")
+
+    def _show_untracked(category) -> None:
+        _fill_box(detail_box, widgets.compact_header(
+            lambda: inner.set_visible_child_name("cats"),
+            category.label, "Not tracked"))
+        detail_box.append(widgets.empty_state(
+            f"{category.label} is not tracked."))
+        inner.set_visible_child_name("detail")
+
+    def _show_detail() -> None:
+        metric = state["metric"]
+        _fill_box(detail_box, widgets.compact_header(
+            lambda: inner.set_visible_child_name("cats"),
+            metric_label(metric), _range_caption()))
+        detail_box.append(widgets.segmented([
+            (zoom, zoom == state["zoom"],
+             lambda zoom=zoom: (state.update(zoom=zoom), _show_detail()))
+            for zoom in ZOOMS
+        ]))
+        series, summary = _series_for(metric)
+        if series is None:
+            detail_box.append(widgets.empty_state(summary))
+            return
+        if summary:
+            detail_box.append(widgets.caption(summary))
+        detail_box.append(_chart(series, _accumulates(metric)))
+        detail_box.append(_axis_labels(series))
+        for title, value in _summary_fields(metric, series):
+            detail_box.append(widgets.field(title, value))
+
+    def _range_caption() -> str:
+        try:
+            rows = db.list_dailies(limit=365)
+        except (OSError, AttributeError):
+            rows = []
+        if not rows:
+            return "No data yet"
+        return f"{rows[-1].date} – {rows[0].date}"
+
+    def _series_for(metric: str):
+        try:
+            dailies = db.list_dailies(limit=365)
+        except (OSError, AttributeError):
+            dailies = []
+        try:
+            samples = db.list_weights(limit=365)
+        except (OSError, AttributeError):
+            samples = []
+        if metric == "weight":
+            rows = weight_rows(samples, None)
+            if not any(row.weight_avg_kg is not None for row in rows):
+                return None, "No weigh-ins yet. Log your weight to see the trend."
+            extractor, accumulates = _metric_extractor("weight")
+            height = getattr(config, "height_metres", 0.0) or 0.0
+            for row in rows:
+                row.height_metres = height
+            return detail_series(rows, state["zoom"].lower(), "weight"), ""
+        if metric == "bmi":
+            if not getattr(config, "height_metres", 0.0):
+                return None, "Set your height on Profile to see BMI."
+            rows = weight_rows(samples, None)
+            height = config.height_metres
+            for row in rows:
+                row.height_metres = height
+            if not any(_bmi_extractor()(row) is not None for row in rows):
+                return None, "No weigh-ins yet. Log your weight to see the trend."
+            return detail_series(rows, state["zoom"].lower(), "bmi"), ""
+        extract, _acc = _metric_extractor(metric)
+        if not any(extract(row) is not None for row in dailies):
+            return None, f"No {metric_label(metric).lower()} data yet."
+        return detail_series(dailies, state["zoom"].lower(), metric), ""
+
+    def _dailies():
+        try:
+            return db.list_dailies(limit=60)
+        except (OSError, AttributeError):
+            return []
+
+    def _weights():
+        try:
+            return db.list_weights(limit=60)
+        except (OSError, AttributeError):
+            return []
 
     def refresh() -> None:
-        store.remove_all()
-        for category in browse_model.search_rows(search.get_text()):
-            row = Gtk.Label(label=_category_line(category))
-            row.set_wrap(True)
-            row.set_xalign(0.0)
-            store.append(row)
+        while True:
+            first = header_box.get_first_child()
+            if first is None:
+                break
+            header_box.remove(first)
+        header_box.append(widgets.page_header(
+            "Browse", "Activity · Body · More", overflow_cb=menu))
+        _fill_box(cats_box, None)
+        rows = visible_rows(state["query"])
+        if not rows:
+            cats_box.append(widgets.empty_state(
+                f"No matches for “{state['query']}”."))
+            return
+        item_type = _item_type()
+        store = Gio.ListStore.new(item_type)
+        for category in rows:
+            store.append(item_type(category))
+        factory = Gtk.SignalListItemFactory()
+        factory.connect("setup", lambda _f, item: item.set_child(
+            Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)))
+        factory.connect("bind", lambda _f, item: _bind_row(item))
+        view = Gtk.ListView.new(Gtk.NoSelection.new(store), factory)
+        view.set_single_click_activate(True)
+        cats_box.append(view)
+        inner.set_visible_child_name("cats")
 
-    search.connect("search-changed", lambda _entry: refresh())
+    def _bind_row(item) -> None:
+        holder = item.get_child()
+        previous = holder.get_first_child()
+        while previous is not None:
+            after = previous.get_next_sibling()
+            holder.remove(previous)
+            previous = after
+        holder.append(_category_row(item.get_item().payload, open_category))
+
+    live["refresh"] = refresh
+    live["menu"] = menu
+    live["open_metric"] = open_metric
     refresh()
-    return box
+    body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    body.add_css_class("xx-page-body")
+    body.append(search_row)
+    body.append(inner)
+    return widgets.page(header_box, body, None)
 
 
-def _defer_focus_until_tapped(entry) -> None:
-    try:
-        from gi.repository import Gtk
-    except ImportError:
-        return
-    try:
-        entry.set_can_focus(False)
-        tap = Gtk.GestureClick.new()
-        tap.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        tap.connect("pressed", lambda *_args: entry.set_can_focus(True))
-        entry.add_controller(tap)
-    except AttributeError:
-        pass
+def _fill_box(box, header) -> None:
+    while True:
+        first = box.get_first_child()
+        if first is None:
+            break
+        box.remove(first)
+    if header is not None:
+        box.append(header)
 
 
-def _category_line(category) -> str:
+def _category_row(category, open_category):
+    from xx_ui import widgets
+
     if category.tracked:
-        return f"{category.glyph} {category.label}"
-    return f"{category.glyph} {category.label} — {browse_model.NOT_TRACKED_TAG}"
+        names = [browse_model.METRIC_LABELS[key] for key in category.metrics]
+        if len(names) > 2:
+            secondary = f"{names[0]} · {names[1]} · +{len(names) - 2}"
+        else:
+            secondary = " · ".join(names)
+        meta = ""
+    else:
+        secondary = browse_model.NOT_TRACKED_TAG.capitalize()
+        meta = "—"
+    letter = CATEGORY_LETTERS.get(category.id, category.label[:1].upper())
+    return widgets.list_row(
+        category.label, secondary, meta=meta,
+        leading=widgets.avatar(letter, 40),
+        on_activate=lambda: open_category(category))
+
+
+def _accumulates(metric: str) -> bool:
+    return metric not in ("weight", "bmi")
+
+
+def _axis_labels(series) -> object:
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk, Pango
+
+    from xx_ui import widgets
+
+    row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 0)
+    labels = [b.label for b in series.buckets if b.value is not None]
+    first = widgets.caption(labels[0] if labels else "—")
+    first.set_hexpand(True)
+    row.append(first)
+    values = [b.value for b in series.buckets if b.value is not None]
+    peak = widgets.caption(f"Max {_compact(max(values))}" if values else "—")
+    # Allocated exactly its natural width: never misfire on rounding.
+    peak.set_ellipsize(Pango.EllipsizeMode.NONE)
+    row.append(peak)
+    return row
+
+
+def _compact(value) -> str:
+    if value is None:
+        return "—"
+    if value >= 1000:
+        return f"{value:,.0f}"
+    if value == int(value):
+        return str(int(value))
+    return f"{value:.1f}"
+
+
+def _summary_fields(metric: str, series) -> list:
+    values = [b.value for b in series.buckets if b.value is not None]
+    if not values:
+        return []
+    if _accumulates(metric):
+        total = sum(values)
+        best = max(values)
+        best_label = next(
+            b.label for b in series.buckets if b.value == best)
+        return [("Total", _compact(total)),
+                ("Daily average", _compact(total / len(values))),
+                ("Best", f"{_compact(best)} · {best_label}")]
+    latest = values[-1]
+    return [("Latest", _compact(latest)),
+            ("Average", _compact(sum(values) / len(values))),
+            ("Change", _signed(latest - values[0]))]
+
+
+def _signed(value: float) -> str:
+    text = _compact(abs(value))
+    if value > 0:
+        return f"+{text}"
+    if value < 0:
+        return f"−{text}"
+    return text

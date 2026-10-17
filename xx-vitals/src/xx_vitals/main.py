@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """XX-Vitals entry point: Adw.Application with the four-tab shell.
 
-Theme comes from the XX-WM config with hot-reload (see ui/shell), falling
-back to libadwaita dark/light otherwise. `--sync-once` runs one headless
+The theme comes from the shared xx_ui design system (see ui/shell):
+installed once at startup with live switching, falling back to
+libadwaita dark/light otherwise. `--sync-once` runs one headless
 push/pull pass for the systemd user timer (no display needed).
 """
 
@@ -40,7 +41,6 @@ class VitalsApplication(Adw.Application):
         db = Database()
         db.init()
         window = shell.build_window(self, db, load_prefs(), LibsecretBackend())
-        self._theme_monitor = shell.watch_xx_wm_config(shell.apply_xx_wm_theme)
         window.present()
 
 

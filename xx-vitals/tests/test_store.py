@@ -115,6 +115,24 @@ def test_replayed_sync_is_idempotent_through_uniques():
     assert db.count_dailies() == 1
 
 
+def test_listings_return_newest_first_with_limits():
+    db = _db()
+    db.upsert_daily(DailyMetric(source_id="phone", date="2026-10-14", steps=1, derived_mask=0))
+    db.upsert_daily(DailyMetric(source_id="phone", date="2026-10-16", steps=3, derived_mask=0))
+    db.upsert_daily(DailyMetric(source_id="phone", date="2026-10-15", steps=2, derived_mask=0))
+    assert [row.date for row in db.list_dailies()] == ["2026-10-16", "2026-10-15", "2026-10-14"]
+    assert [row.date for row in db.list_dailies(limit=2)] == ["2026-10-16", "2026-10-15"]
+    db.insert_activity(Activity(
+        source_id="phone", type="walk", started_at=1_000, ended_at=2_000, steps=10))
+    db.insert_activity(Activity(
+        source_id="phone", type="run", started_at=3_000, ended_at=4_000, steps=20))
+    assert [row.started_at for row in db.list_activities()] == [3_000, 1_000]
+    db.upsert_weight(WeightSample(source_id="manual", measured_at=1_000, weight_kg=70.0))
+    db.upsert_weight(WeightSample(source_id="manual", measured_at=2_000, weight_kg=71.0))
+    assert [row.measured_at for row in db.list_weights()] == [2_000, 1_000]
+    assert db.list_weights(limit=1)[0].weight_kg == 71.0
+
+
 def test_file_db_uses_wal(tmp_path):
     path = tmp_path / "vitals.db"
     db = Database(path)

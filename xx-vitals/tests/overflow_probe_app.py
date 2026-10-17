@@ -97,14 +97,15 @@ def main(argv: list[str]) -> int:
         if stack is None:
             print("FAIL: no Gtk.Stack in window")
             return 1
-        toolbar = _find_toolbar(window)
-        if toolbar is None:
-            print("FAIL: no Adw.ToolbarView in window")
+        nav = getattr(window, "_vitals_nav", None)
+        if nav is None:
+            print("FAIL: no _vitals_nav hooks on window")
             return 1
 
         plan: list = []
         for tab in ("home", "journal", "browse", "profile"):
             plan.append(("tab", tab))
+        plan.append(("metric-detail", None))
         plan.append(("weight-dialog", None))
         plan.append(("activity-dialog", None))
 
@@ -119,8 +120,12 @@ def main(argv: list[str]) -> int:
             kind, name = plan[state["index"]]
             state["index"] += 1
             if kind == "tab":
-                stack.set_visible_child_name(name)
+                nav["show"](name)
                 GLib.timeout_add(400, lambda: settle(name))
+            elif kind == "metric-detail":
+                nav["show"]("browse")
+                nav["open_metric"]("steps")
+                GLib.timeout_add(400, lambda: settle("metric-detail"))
             elif kind == "weight-dialog":
                 state["dialog"] = entry_page.build_weight_dialog(
                     window, db, cfg.units, measured_at_ms)
@@ -137,7 +142,7 @@ def main(argv: list[str]) -> int:
                 state["dialog"].close()
                 state["dialog"] = None
             else:
-                _dump_surface(toolbar, surface)
+                _dump_surface(window.get_child(), surface)
             run_next()
             return False
 
@@ -177,20 +182,6 @@ def _find_stack(widget):
     return None
 
 
-def _find_toolbar(widget):
-    from gi.repository import Adw
-
-    if isinstance(widget, Adw.ToolbarView):
-        return widget
-    child = widget.get_first_child()
-    while child is not None:
-        found = _find_toolbar(child)
-        if found is not None:
-            return found
-        child = child.get_next_sibling()
-    return None
-
-
 def _dump_surface(root, surface: str) -> None:
     from gi.repository import Gtk
 
@@ -203,9 +194,15 @@ def _dump_surface(root, surface: str) -> None:
     _dump_widths(root, surface)
 
 
-def _dump_widths(widget, surface: str) -> None:
+def _dump_widths(widget, surface: str, hscroll_ancestor: bool = False) -> None:
     from gi.repository import Gtk
 
+    if isinstance(widget, Gtk.ScrolledWindow):
+        try:
+            hscroll_ancestor = (hscroll_ancestor
+                                or widget.get_policy()[0] != Gtk.PolicyType.NEVER)
+        except TypeError:
+            pass
     width = widget.get_width()
     if width <= 0:
         pass
@@ -217,17 +214,20 @@ def _dump_widths(widget, surface: str) -> None:
             text = (widget.get_label() or "")[:40]
         print(f"WIDTH:{surface}:{type(widget).__name__}:{width}:{text}",
               flush=True)
-        try:
-            minimum, _natural, _min_base, _nat_base = widget.measure(
-                Gtk.Orientation.HORIZONTAL, -1)
-        except TypeError:
-            minimum = 0
-        if minimum > 320:
-            print(f"MIN:{surface}:{type(widget).__name__}:{minimum}:{text}",
-                  flush=True)
+        # Content inside a horizontal scroller scrolls by design and can
+        # never widen the window; gating it would ban ChipBars outright.
+        if not hscroll_ancestor:
+            try:
+                minimum, _natural, _min_base, _nat_base = widget.measure(
+                    Gtk.Orientation.HORIZONTAL, -1)
+            except TypeError:
+                minimum = 0
+            if minimum > 320:
+                print(f"MIN:{surface}:{type(widget).__name__}:{minimum}:{text}",
+                      flush=True)
     child = widget.get_first_child()
     while child is not None:
-        _dump_widths(child, surface)
+        _dump_widths(child, surface, hscroll_ancestor)
         child = child.get_next_sibling()
 
 

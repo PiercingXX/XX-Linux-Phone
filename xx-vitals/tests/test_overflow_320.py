@@ -67,8 +67,9 @@ def test_no_widget_exceeds_320px(tmp_path, monkeypatch):
         env["BROADWAY_DISPLAY"] = f":{display}"
         env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/nonexistent-test-bus"
         repo_root = str(Path(__file__).parent.parent)
-        env["PYTHONPATH"] = repo_root + "/src" + os.pathsep + env.get(
-            "PYTHONPATH", "")
+        env["PYTHONPATH"] = (repo_root + "/src" + os.pathsep
+                               + str(Path(repo_root).parent / "common")
+                               + os.pathsep + env.get("PYTHONPATH", ""))
         completed = subprocess.run(
             [sys.executable, str(DRIVER), str(tmp_path / "vitals.db")],
             capture_output=True, text=True, timeout=120, env=env)
@@ -90,7 +91,7 @@ def test_no_widget_exceeds_320px(tmp_path, monkeypatch):
     surfaces = {
         line.split(":")[1] for line in lines if line.startswith("CONTENT_MIN:")
     }
-    assert {"home", "journal", "browse", "profile",
+    assert {"home", "journal", "browse", "profile", "metric-detail",
             "weight-dialog", "activity-dialog"} <= surfaces
     forcing = [
         line for line in lines

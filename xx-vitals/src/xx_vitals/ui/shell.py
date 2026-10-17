@@ -1,14 +1,23 @@
-"""Application shell: four tabs, entry FAB, XX-WM theme hookup.
+"""Application shell: xx_ui theme, four tabs, entry FAB, overflow menus.
 
-Bottom tab bar is text-only buttons; Home is always visible while Journal /
-Browse / Profile follow the persisted toggles. Entry sheets open as Adw
-dialogs. The XX-WM theme file is read at startup and watched with
-Gio.File.monitor for hot-reload, falling back to libadwaita dark/light.
+The window is a plain Gtk.ApplicationWindow with no titlebar chrome; every
+page carries its own PageHeader plus the shared BottomTabs. The design
+system is installed once here via ``xx_ui.apply`` (live theme switches
+restyle the open window with no restart). ``nav`` hooks below are the
+headless navigation surface used by scripts/snap.py and the overflow probe.
 """
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import xx_ui
+from xx_ui import widgets
+
 TABS = ("home", "journal", "browse", "profile")
+
+TAB_LABELS = {"home": "Home", "journal": "Journal",
+              "browse": "Browse", "profile": "Profile"}
 
 
 def visible_tabs(config) -> list[str]:
@@ -22,116 +31,160 @@ def visible_tabs(config) -> list[str]:
     return tabs
 
 
-_theme_provider = None
+def copy_to_clipboard(text: str) -> str | None:
+    """Copy text; returns an error line or None on success."""
+    from gi.repository import Gdk
 
-
-def apply_xx_wm_theme() -> str:
-    from gi.repository import Gdk, Gtk
-
-    from xx_vitals.theme import load_xx_wm_config, preset_css, resolve_preset
-
-    global _theme_provider
-    preset = resolve_preset(load_xx_wm_config())
     display = Gdk.Display.get_default()
     if display is None:
-        return preset.key
-    provider = Gtk.CssProvider()
-    provider.load_from_data(preset_css(preset).encode("utf-8"))
-    if _theme_provider is not None:
-        try:
-            Gtk.StyleContext.remove_provider_for_display(display, _theme_provider)
-        except (TypeError, AttributeError):
-            pass
-    Gtk.StyleContext.add_provider_for_display(
-        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-    )
-    _theme_provider = provider
-    return preset.key
+        return "No clipboard available right now."
+    display.get_clipboard().set(text)
+    return None
 
 
-def watch_xx_wm_config(on_change=None, path=None) -> object | None:
-    """Watch the shell config for hot-reload without a restart.
+def show_result_dialog(window, title: str, text: str):
+    """One-shot surface notice (import/export/copy outcomes)."""
+    import gi
 
-    The parent directory is watched, not the file itself: editors save
-    atomically (write temp + rename), which replaces the inode and
-    silently kills a file monitor. Only events naming config.json
-    reach `on_change`.
-    """
-    from pathlib import Path
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Adw
 
-    try:
-        from gi.repository import Gio
+    from xx_vitals.ui import entry as entry_page
 
-        from xx_vitals.theme import XX_WM_CONFIG_PATH
-    except ImportError:
-        return None
-    target = Path(path or XX_WM_CONFIG_PATH)
-    try:
-        watched = Gio.File.new_for_path(str(target.parent))
-        monitor = watched.monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
-    except Exception:
-        return None
-    if on_change is not None and monitor is not None:
-        wanted = target.name
+    dialog = Adw.Dialog(title=title)
+    box = widgets.dialog_box(title)
+    box.append(widgets.wrap_label(text, "xx-body"))
+    close = widgets.primary_button("Close", dialog.close)
+    box.append(close)
+    entry_page.fit_dialog(dialog, box)
+    dialog.present(window)
+    return dialog
 
-        def _on_event(_monitor, changed, other, _event) -> None:
-            names: list[str] = []
-            for candidate in (changed, other):
-                try:
-                    names.append(candidate.get_basename())
-                except AttributeError:
-                    continue
-            if wanted in names:
-                on_change()
 
-        monitor.connect("changed", _on_event)
-    return monitor
+def open_overflow(anchor, items: list):
+    """Surface menu: popover of 48 px rows. Returns the popover."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    popover = Gtk.Popover()
+    box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    box.set_margin_top(4)
+    box.set_margin_bottom(4)
+    for text, callback in items:
+        row = widgets.menu_row(text, callback)
+        row.connect("clicked", lambda _b: popover.popdown())
+        box.append(row)
+    popover.set_child(box)
+    popover.set_parent(anchor)
+    popover.popup()
+    return popover
 
 
 def build_window(app, db, config, secrets) -> object:
     import gi
 
     gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gtk, Pango
+    from gi.repository import Gtk
 
     from xx_vitals.ui import browse as browse_page
     from xx_vitals.ui import home as home_page
     from xx_vitals.ui import journal as journal_page
     from xx_vitals.ui import profile as profile_page
 
-    apply_xx_wm_theme()
-    window = Adw.ApplicationWindow(application=app)
+    xx_ui.apply(app)
+    window = Gtk.ApplicationWindow(application=app)
     window.set_title("XX-Vitals")
     window.set_default_size(360, 720)
-    header = Adw.HeaderBar()
-    header.set_show_start_title_buttons(False)
-    header.set_show_end_title_buttons(False)
-    header.set_title_widget(Gtk.Label(label="XX-Vitals"))
+    window.set_decorated(False)
+
+    lives: dict[str, dict] = {}
     stack = Gtk.Stack()
-    stack.add_named(home_page.build_home_page(db, config), "home")
-    stack.add_named(journal_page.build_journal_page(db, config.effort_goal), "journal")
-    stack.add_named(browse_page.build_browse_page(db), "browse")
-    stack.add_named(profile_page.build_profile_page(db, config, secrets), "profile")
+    stack.set_hexpand(True)
+    stack.set_vexpand(True)
+    nav = SimpleNamespace()
+    state = {"current": "home", "tabs": None}
+
+    def refresh_all() -> None:
+        for live in lives.values():
+            refresh = live.get("refresh")
+            if refresh is not None:
+                refresh()
+
+    def show(name: str) -> None:
+        if name not in TABS:
+            return
+        if name not in visible_tabs(config):
+            name = "home"
+        state["current"] = name
+        stack.set_visible_child_name(name)
+        live = lives.get(name)
+        if live is not None and live.get("refresh") is not None:
+            live["refresh"]()
+        _rebuild_tabs()
+
+    def _rebuild_tabs() -> None:
+        bar = widgets.bottom_tabs([
+            ("", TAB_LABELS[tab], tab == state["current"],
+             lambda tab=tab: show(tab))
+            for tab in visible_tabs(config)
+        ])
+        if state["tabs"] is not None:
+            root.remove(state["tabs"])
+        state["tabs"] = bar
+        root.append(bar)
+
+    nav.show = show
+    nav.refresh_all = refresh_all
+    nav.refresh_tabs = _rebuild_tabs
+
+    def _open_sheet(kind: str):
+        from xx_vitals.ui import entry as entry_page
+
+        return entry_page.open_sheet(window, db, config, kind,
+                                     on_saved=refresh_all)
+
+    nav.add_activity = lambda: _open_sheet("activity")
+    nav.add_weight = lambda: _open_sheet("weight")
+
+    def _import_here() -> None:
+        profile_page.open_takeout_import(
+            window, db,
+            lambda text: show_result_dialog(window, "Import", text),
+            on_done=refresh_all)
+
+    nav.import_takeout = _import_here
+    nav.open_menu = lambda name="home": lives[name]["menu"]()
+
+    for tab in TABS:
+        lives[tab] = {}
+    stack.add_named(home_page.build_home_page(
+        db, config, nav, lives["home"]), "home")
+    stack.add_named(journal_page.build_journal_page(
+        db, config, nav, lives["journal"]), "journal")
+    lives["journal"]["window"] = window
+    stack.add_named(browse_page.build_browse_page(
+        db, config, nav, lives["browse"]), "browse")
+    stack.add_named(profile_page.build_profile_page(
+        db, config, secrets, nav, lives["profile"], window), "profile")
     profile_page.maybe_start_fallback(db, config, window)
-    switcher = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-    switcher.set_halign(Gtk.Align.CENTER)
-    for tab in visible_tabs(config):
-        tab_label = Gtk.Label(label=tab.capitalize())
-        tab_label.set_ellipsize(Pango.EllipsizeMode.END)
-        tab_label.set_wrap(False)
-        button = Gtk.Button()
-        button.set_child(tab_label)
-        button.connect("clicked", lambda _b, name=tab: stack.set_visible_child_name(name))
-        switcher.append(button)
-    layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    layout.set_margin_start(4)
-    layout.set_margin_end(4)
-    layout.append(stack)
-    layout.append(switcher)
-    toast_overlay = Adw.ToastOverlay(child=layout)
-    view = Adw.ToolbarView()
-    view.add_top_bar(header)
-    view.set_content(toast_overlay)
-    window.set_content(view)
+
+    root = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    root.append(stack)
+    window.set_child(root)
+    _rebuild_tabs()
+    show("home")
+
+    window._vitals_nav = {  # headless navigation for snap.py + probes
+        "show": show,
+        "refresh_all": refresh_all,
+        "add_activity": nav.add_activity,
+        "add_weight": nav.add_weight,
+        "import_takeout": nav.import_takeout,
+        "open_menu": nav.open_menu,
+        "open_metric": lambda key="steps": lives["browse"].get(
+            "open_metric", lambda _k: None)(key),
+    }
     return window

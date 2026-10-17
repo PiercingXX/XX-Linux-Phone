@@ -77,6 +77,43 @@ def submit_activity(
     return row_id, None
 
 
+def fit_dialog(dialog, box) -> None:
+    """Size a sheet to the phone canvas: 320 px content, scrolling body."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    scrolled = Gtk.ScrolledWindow()
+    scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scrolled.set_propagate_natural_width(True)
+    scrolled.set_propagate_natural_height(True)
+    scrolled.set_child(box)
+    dialog.set_content_width(320)
+    dialog.set_child(scrolled)
+
+
+def open_sheet(window, db, config, kind: str, on_saved=None):
+    """Open the add-activity or log-weight sheet. Returns the dialog."""
+    import time
+
+    now_ms = int(time.time() * 1000)
+    if kind == "weight":
+        return build_weight_dialog(window, db, config.units, now_ms,
+                                   on_saved=on_saved)
+    weight = latest_weight_kg(db)
+    return build_activity_dialog(window, db, now_ms, config.height_metres,
+                                 weight, on_saved=on_saved)
+
+
+def latest_weight_kg(db):
+    try:
+        latest = db.latest_weight()
+    except (OSError, AttributeError):
+        return None
+    return latest.weight_kg if latest is not None else None
+
+
 def build_weight_dialog(app_window, db, units: str, measured_at: int, on_saved=None):
     import gi
 
@@ -84,38 +121,31 @@ def build_weight_dialog(app_window, db, units: str, measured_at: int, on_saved=N
     gi.require_version("Adw", "1")
     from gi.repository import Adw, Gtk
 
+    from xx_ui import widgets
+
     dialog = Adw.Dialog(title="Log weight")
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-    box.set_margin_top(16)
-    box.set_margin_start(16)
-    box.set_margin_end(16)
-    box.set_margin_bottom(16)
+    box = widgets.dialog_box("Log weight")
+    box.append(widgets.caption("Track a weigh-in"))
     unit = entries.unit_for(units)
     hint = "kg" if unit == entries.WeightUnit.KG else "lb"
-    field = Gtk.Entry(placeholder_text=f"Weight ({hint})")
+    field = widgets.deferred_entry(f"Weight ({hint})")
     field.set_input_purpose(Gtk.InputPurpose.NUMBER)
     box.append(field)
-    error_label = Gtk.Label(label="")
-    error_label.set_wrap(True)
-    error_label.add_css_class("error")
+    error_label = widgets.wrap_label("", "xx-secondary")
+    error_label.add_css_class("xx-danger-text")
     box.append(error_label)
-    save = Gtk.Button(label="Save")
-    save.add_css_class("suggested-action")
+    box.append(widgets.primary_button("Save", lambda: on_save()))
 
-    def on_save(_button) -> None:
+    def on_save() -> None:
         row_id, error = submit_weight(db, units, field.get_text(), measured_at)
         if error is not None:
-            error_label.set_label(error)
+            error_label.set_text(error)
             return
         dialog.close()
         if on_saved is not None:
             on_saved(row_id)
 
-    save.connect("clicked", on_save)
-    box.append(save)
-    clamp = Adw.Clamp(maximum_size=480)
-    clamp.set_child(box)
-    dialog.set_child(clamp)
+    fit_dialog(dialog, box)
     dialog.present(app_window)
     return dialog
 
@@ -128,42 +158,35 @@ def build_activity_dialog(app_window, db, now_ms: int, height_metres: float,
     gi.require_version("Adw", "1")
     from gi.repository import Adw, Gtk
 
+    from xx_ui import widgets
+
     dialog = Adw.Dialog(title="Log activity")
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-    box.set_margin_top(16)
-    box.set_margin_start(16)
-    box.set_margin_end(16)
-    box.set_margin_bottom(16)
-    type_field = Gtk.Entry(placeholder_text="Type (walk, run, cycle, other)")
-    duration_field = Gtk.Entry(placeholder_text="Duration (minutes)")
+    box = widgets.dialog_box("Log activity")
+    box.append(widgets.caption("Walk · Run · Cycle · Other"))
+    type_field = widgets.deferred_entry("Walk, run, cycle, other")
+    duration_field = widgets.deferred_entry("Duration (minutes)")
     duration_field.set_input_purpose(Gtk.InputPurpose.NUMBER)
-    steps_field = Gtk.Entry(placeholder_text="Steps (optional)")
+    steps_field = widgets.deferred_entry("Steps (optional)")
     steps_field.set_input_purpose(Gtk.InputPurpose.NUMBER)
     for widget in (type_field, duration_field, steps_field):
         box.append(widget)
-    error_label = Gtk.Label(label="")
-    error_label.set_wrap(True)
-    error_label.add_css_class("error")
+    error_label = widgets.wrap_label("", "xx-secondary")
+    error_label.add_css_class("xx-danger-text")
     box.append(error_label)
-    save = Gtk.Button(label="Save")
-    save.add_css_class("suggested-action")
+    box.append(widgets.primary_button("Save", lambda: on_save()))
 
-    def on_save(_button) -> None:
+    def on_save() -> None:
         row_id, error = submit_activity(
             db, type_field.get_text(), duration_field.get_text(),
             steps_field.get_text(), now_ms, height_metres, weight_kg,
         )
         if error is not None:
-            error_label.set_label(error)
+            error_label.set_text(error)
             return
         dialog.close()
         if on_saved is not None:
             on_saved(row_id)
 
-    save.connect("clicked", on_save)
-    box.append(save)
-    clamp = Adw.Clamp(maximum_size=480)
-    clamp.set_child(box)
-    dialog.set_child(clamp)
+    fit_dialog(dialog, box)
     dialog.present(app_window)
     return dialog

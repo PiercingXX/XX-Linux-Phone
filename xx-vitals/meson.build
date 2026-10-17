@@ -6,6 +6,17 @@ project(
 
 python = import('python').find_installation('python3')
 
+# The shared design system must be installed first (meson setup build &&
+# meson install -C build in common/); the app imports xx_ui at runtime and
+# never vendors a copy.
+xx_ui_check = run_command(
+  python, '-c', 'import xx_ui',
+  check: false,
+)
+if xx_ui_check.returncode() != 0
+  error('xx_ui python package not found: install common/ first')
+endif
+
 prefix = get_option('prefix')
 bindir = join_paths(prefix, get_option('bindir'))
 datadir = get_option('datadir')
@@ -24,7 +35,6 @@ install_data(
     'src/xx_vitals/paths.py',
     'src/xx_vitals/prefs.py',
     'src/xx_vitals/sync_wire.py',
-    'src/xx_vitals/theme.py',
     'src/xx_vitals/units.py',
   ],
   install_dir: join_paths(app_datadir, 'xx_vitals'),

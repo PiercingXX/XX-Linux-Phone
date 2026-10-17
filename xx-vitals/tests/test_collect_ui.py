@@ -3,7 +3,7 @@
 import threading
 from pathlib import Path
 
-from xx_vitals import prefs, theme
+from xx_vitals import prefs
 from xx_vitals.ui import home, profile
 
 SRC = Path(__file__).parent.parent / "src" / "xx_vitals"
@@ -58,15 +58,16 @@ def test_tick_runs_off_the_calling_thread():
     assert cfg.step_baseline is None
 
 
-def test_phone_window_has_no_min_max_buttons():
+def test_phone_window_has_no_titlebar_chrome():
+    # The xx_ui restyle dropped the Adw HeaderBar/ToolbarView shell: a
+    # plain undecorated window carries its own PageHeader per page.
     src = (SRC / "ui" / "shell.py").read_text(encoding="utf-8")
-    assert "set_show_start_title_buttons(False)" in src
-    assert "set_show_end_title_buttons(False)" in src
-    # gtk_window_set_titlebar() aborts on AdwApplicationWindow (fatal Adwaita
-    # error, caught by the Broadway smoke test), so the bar rides the content.
+    assert "set_decorated(False)" in src
+    assert "Gtk.ApplicationWindow" in src
+    assert "Adw.HeaderBar" not in src
+    assert "Adw.ToolbarView" not in src
     assert "set_titlebar" not in src
-    assert "Adw.ToolbarView" in src
-    assert "add_top_bar" in src
+    assert "bottom_tabs" in src
 
 
 def test_display_css_come_from_widgets_not_the_app():
@@ -74,13 +75,14 @@ def test_display_css_come_from_widgets_not_the_app():
         src = (SRC / "ui" / name).read_text(encoding="utf-8")
         assert "grab_focus" not in src, name
         assert "get_display()" not in src, name
+        assert "xx_ui" in src or "widgets" in src, name
     assert "Gdk.Display.get_default()" in (SRC / "ui" / "shell.py").read_text(encoding="utf-8")
-    assert "listview" in theme.preset_css(theme.THEME_PRESETS["amoled"])
 
 
 def test_profile_collect_uses_switch_and_worker_thread():
     src = (SRC / "ui" / "profile.py").read_text(encoding="utf-8")
-    assert "Gtk.Switch" in src
+    # Switches come from the design system (inverted, never Adwaita blue).
+    assert "make_switch" in src
     assert "run_in_background" in src
     assert "Sample now" in src
     assert "start_resident_in_background" in src

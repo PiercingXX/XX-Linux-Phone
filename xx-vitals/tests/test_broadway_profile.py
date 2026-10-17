@@ -68,8 +68,9 @@ def test_profile_window_pumps_without_exceptions(tmp_path, monkeypatch):
         env["BROADWAY_DISPLAY"] = f":{display}"
         env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/nonexistent-test-bus"
         repo_root = str(Path(__file__).parent.parent)
-        env["PYTHONPATH"] = repo_root + "/src" + os.pathsep + env.get(
-            "PYTHONPATH", "")
+        env["PYTHONPATH"] = (repo_root + "/src" + os.pathsep
+                               + str(Path(repo_root).parent / "common")
+                               + os.pathsep + env.get("PYTHONPATH", ""))
         completed = subprocess.run(
             [sys.executable, str(DRIVER), str(tmp_path / "vitals.db")],
             capture_output=True, text=True, timeout=120, env=env)

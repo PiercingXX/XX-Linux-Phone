@@ -276,6 +276,18 @@ class Database:
         finally:
             self._close(conn)
 
+    def list_dailies(self, limit: int = 365) -> list[DailyMetric]:
+        """Newest-first daily rows for the Home rings and Browse charts."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM daily_metric ORDER BY date DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            self._close(conn)
+        return [_daily_from_row(row) for row in rows]
+
     # -- activity --------------------------------------------------------
 
     def insert_activity(self, activity: Activity) -> int:
@@ -313,6 +325,18 @@ class Database:
             return int(conn.execute("SELECT COUNT(*) FROM activity").fetchone()[0])
         finally:
             self._close(conn)
+
+    def list_activities(self, limit: int = 200) -> list[Activity]:
+        """Newest-first activity rows for the Journal list."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM activity ORDER BY started_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            self._close(conn)
+        return [_activity_from_row(row) for row in rows]
 
     # -- weight_sample ---------------------------------------------------
 
@@ -374,6 +398,18 @@ class Database:
             return int(conn.execute("SELECT COUNT(*) FROM weight_sample").fetchone()[0])
         finally:
             self._close(conn)
+
+    def list_weights(self, limit: int = 60) -> list[WeightSample]:
+        """Newest-first weigh-ins for the Home card and Browse charts."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM weight_sample ORDER BY measured_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            self._close(conn)
+        return [_weight_from_row(row) for row in rows]
 
     # -- pending_write ---------------------------------------------------
 

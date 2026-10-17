@@ -476,389 +476,77 @@ def import_takeout_zip(db, zip_path, now_ms: int, on_progress=None) -> str:
     return _summarize_import(dailies, weights, activities, skipped)
 
 
-def build_profile_page(db, config, secrets) -> object:
+"""Profile page builder: restyled sections over the unchanged logic above."""
+
+
+def open_takeout_import(window, db, on_notice, on_done=None) -> None:
+    """Pick a Takeout file and import it off the main loop."""
     import gi
 
     gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gdk, Gio, Gtk
+    from gi.repository import Gtk
 
-    from xx_vitals.sync import worker as worker_module
-
-    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-    box.set_margin_start(12)
-    box.set_margin_end(12)
-    sync_title = Gtk.Label(label="Sync")
-    sync_title.set_xalign(0.0)
-    sync_title.set_wrap(True)
-    box.append(sync_title)
-    nas_line = Gtk.Label(label="")
-    nas_line.set_xalign(0.0)
-    nas_line.set_wrap(True)
-    box.append(nas_line)
-    host_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    host_row.set_hexpand(True)
-    host_entry = Gtk.Entry(placeholder_text="NAS host URL")
-    host_entry.set_text(config.server_url)
-    host_entry.set_hexpand(True)
-    _defer_focus_until_tapped(host_entry)
-    host_row.append(host_entry)
-    host_save = Gtk.Button(label="Save")
-    host_row.append(host_save)
-    box.append(host_row)
-    login_line = Gtk.Label(label="")
-    login_line.set_xalign(0.0)
-    login_line.set_wrap(True)
-    box.append(login_line)
-    pull_line = Gtk.Label(label="")
-    pull_line.set_xalign(0.0)
-    pull_line.set_wrap(True)
-    box.append(pull_line)
-    push_line = Gtk.Label(label="")
-    push_line.set_xalign(0.0)
-    push_line.set_wrap(True)
-    box.append(push_line)
-    pending_line = Gtk.Label(label="")
-    pending_line.set_xalign(0.0)
-    pending_line.set_wrap(True)
-    box.append(pending_line)
-    xxchat_entry = Gtk.Entry(placeholder_text="Sign-in host URL")
-    xxchat_entry.set_text(getattr(config, "xxchat_url", ""))
-    xxchat_entry.set_hexpand(True)
-    _defer_focus_until_tapped(xxchat_entry)
-    box.append(xxchat_entry)
-    user_entry = Gtk.Entry(placeholder_text="Username")
-    user_entry.set_hexpand(True)
-    _defer_focus_until_tapped(user_entry)
-    box.append(user_entry)
-    password_entry = Gtk.Entry(placeholder_text="Password")
-    password_entry.set_visibility(False)
-    password_entry.set_hexpand(True)
-    _defer_focus_until_tapped(password_entry)
-    box.append(password_entry)
-    signin_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    signin_button = Gtk.Button(label="Sign in")
-    signin_row.append(signin_button)
-    login_message = Gtk.Label(label="")
-    login_message.set_xalign(0.0)
-    login_message.set_wrap(True)
-    login_message.set_hexpand(True)
-    signin_row.append(login_message)
-    box.append(signin_row)
-    setup_label = Gtk.Label(label="")
-    setup_label.set_xalign(0.0)
-    setup_label.set_wrap(True)
-    box.append(setup_label)
-    sync_button = Gtk.Button(label="Sync now")
-    box.append(sync_button)
-    notice = Gtk.Label(label="")
-    notice.set_wrap(True)
-    box.append(notice)
-    batch_store = Gio.ListStore.new(Gtk.StringObject)
-    factory = Gtk.SignalListItemFactory()
-
-    def setup(_factory, item) -> None:
-        label = Gtk.Label(label="")
-        label.set_wrap(True)
-        label.set_xalign(0.0)
-        item.set_child(label)
-
-    def bind(_factory, item) -> None:
-        item.get_child().set_label(item.get_item().get_string())
-
-    factory.connect("setup", setup)
-    factory.connect("bind", bind)
-    batches = Gtk.ListView.new(Gtk.NoSelection.new(batch_store), factory)
-    batches.set_single_click_activate(True)
-    scrolled = Gtk.ScrolledWindow()
-    scrolled.set_min_content_height(160)
-    scrolled.set_child(batches)
-    box.append(scrolled)
-    pedometer_title = Gtk.Label(label="Step counting")
-    pedometer_title.set_xalign(0.0)
-    pedometer_title.set_wrap(True)
-    box.append(pedometer_title)
-    pedometer_detail = Gtk.Label(label=collect_status(config)["detail"])
-    pedometer_detail.set_xalign(0.0)
-    pedometer_detail.set_wrap(True)
-    box.append(pedometer_detail)
-    collect_switch = Gtk.Switch()
-    collect_switch.set_active(bool(getattr(config, "collect_enabled", False)))
-    box.append(collect_switch)
-    screen_off_label = Gtk.Label(label=screen_off_copy())
-    screen_off_label.set_xalign(0.0)
-    screen_off_label.set_wrap(True)
-    box.append(screen_off_label)
-    screen_off_switch = Gtk.Switch()
-    screen_off_switch.set_active(bool(getattr(config, "count_while_screen_off", False)))
-    box.append(screen_off_switch)
-    sample_button = Gtk.Button(label="Sample now")
-    box.append(sample_button)
-    if not systemd_user_available():
-        fallback = Gtk.Label(
-            label="Systemd user timers are unavailable here — "
-            "sampling runs while the app is open."
-        )
-        fallback.set_xalign(0.0)
-        fallback.set_wrap(True)
-        box.append(fallback)
-
-    def on_collect_toggled(_switch, state: bool) -> bool:
-        line = set_collect_enabled(config, state)
-        pedometer_detail.set_label(line["detail"])
-        return False
-
-    collect_switch.connect("state-set", on_collect_toggled)
-
-    def on_screen_off_toggled(_switch, state: bool) -> bool:
-        set_count_while_screen_off(config, state)
-        return False
-
-    screen_off_switch.connect("state-set", on_screen_off_toggled)
-
-    def on_sample_clicked(_button) -> None:
-        pedometer_detail.set_label("Sampling…")
-
-        def done(result) -> None:
-            if isinstance(result, BaseException):
-                pedometer_detail.set_label("Sample failed — will retry on the next tick.")
-                return
-            line = collect_status(config)
-            if getattr(result, "outcome", "") == "no-source":
-                pedometer_detail.set_label(line["detail"])
-            elif getattr(result, "steps", 0):
-                pedometer_detail.set_label(
-                    f"Counted {result.steps} steps just now. {line['detail']}"
-                )
-            else:
-                pedometer_detail.set_label(line["detail"])
-
-        collect_tick_in_background(db, config, done)
-
-    sample_button.connect("clicked", on_sample_clicked)
-
-    def refresh_state() -> None:
-        def work():
-            return refresh_sync_state(db, config, secrets)
-
-        def done(outcome) -> None:
-            if isinstance(outcome, BaseException):
-                return
-            nas_line.set_label(f"NAS host: {outcome['host']}")
-            login_line.set_label(f"Sign-in: {outcome['login']}")
-            pull_line.set_label(f"Last pull: {outcome['last_pull']}")
-            push_line.set_label(f"Last push: {outcome['last_push']}")
-            pending_line.set_label(f"Queue: {outcome['pending']}")
-            sync_button.set_sensitive(bool(outcome["can_sync"]))
-            setup_label.set_label(
-                "" if outcome["can_sync"] else "Set the NAS host and sign in to sync."
-            )
-
-        worker_module.run_in_background(work, done)
-
-    def refresh_batches() -> None:
-        def work():
-            return status_model.batches_outcome(_build_api(config, secrets))
-
-        def done(outcome) -> None:
-            if isinstance(outcome, BaseException):
-                return
-            lines, problem = outcome
-            batch_store.remove_all()
-            for line in lines:
-                batch_store.append(Gtk.StringObject.new(line))
-            if problem:
-                notice.set_label(problem)
-
-        worker_module.run_in_background(work, done)
-
-    def on_save_host_clicked(_button) -> None:
-        error = save_nas_host(config, host_entry.get_text())
-        if error is not None:
-            notice.set_label(error)
-            return
-        notice.set_label("")
-        refresh_state()
-
-    host_save.connect("clicked", on_save_host_clicked)
-
-    def update_signin_sensitive(*_args) -> None:
-        signin_button.set_sensitive(bool(
-            xxchat_entry.get_text().strip()
-            and user_entry.get_text().strip()
-            and password_entry.get_text()
-        ))
-
-    for field in (xxchat_entry, user_entry, password_entry):
-        field.connect("changed", update_signin_sensitive)
-    update_signin_sensitive()
-
-    def on_signin_clicked(_button) -> None:
-        host_error = save_nas_host(config, host_entry.get_text())
-        if host_error is not None:
-            notice.set_label(host_error)
-            return
-        chat_error = save_xxchat_host(config, xxchat_entry.get_text())
-        if chat_error is not None:
-            notice.set_label(chat_error)
-            return
-        username = user_entry.get_text().strip()
-        password = password_entry.get_text()
-        if not username or not password:
-            notice.set_label("Enter the username and password.")
-            return
-        notice.set_label("")
-        login_message.set_label("Signing in…")
-        signin_button.set_sensitive(False)
-
-        def done(outcome) -> None:
-            if isinstance(outcome, BaseException):
-                login_message.set_label("Sign-in failed — will retry.")
-            else:
-                login_message.set_label(format_login_message(outcome))
-                if isinstance(outcome, auth_module.LoginSuccess):
-                    password_entry.set_text("")
-            update_signin_sensitive()
-            refresh_state()
-
-        worker_module.login_in_background(
-            config.xxchat_url, username, password, secrets, done,
-        )
-
-    signin_button.connect("clicked", on_signin_clicked)
-
-    def on_sync_clicked(_button) -> None:
-        error = save_nas_host(config, host_entry.get_text())
-        if error is not None:
-            notice.set_label(error)
-            return
-        notice.set_label("Syncing…")
-
-        def build_engine():
-            return _build_engine(db, config, secrets)
-
-        def done(outcome) -> None:
-            if isinstance(outcome, BaseException):
-                problem = status_model.notice_for_exception(outcome)
-                notice.set_label(problem or "Sync failed — will retry.")
-            elif outcome.get("paused"):
-                notice.set_label(status_model.VOLUME_NOTICE)
-            else:
-                notice.set_label(
-                    status_model.describe_pending(
-                        outcome.get("pending", _pending_count(db))))
-            refresh_state()
-            refresh_batches()
-
-        worker_module.sync_now_in_background(build_engine, done)
-
-    sync_button.connect("clicked", on_sync_clicked)
-    refresh_state()
-    refresh_batches()
-    logs_title = Gtk.Label(label="Logs")
-    logs_title.set_xalign(0.0)
-    box.append(logs_title)
-    logs_path = Gtk.Label(label=str(applog.log_file()))
-    logs_path.set_xalign(0.0)
-    logs_path.set_wrap(True)
-    logs_path.set_selectable(True)
-    box.append(logs_path)
-    logs_view = Gtk.TextView()
-    logs_view.set_editable(False)
-    logs_view.set_cursor_visible(False)
-    logs_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-    logs_view.set_can_focus(False)
-    logs_view.set_hexpand(True)
-    logs_view.add_css_class("vitals-logs")
-    logs_scrolled = Gtk.ScrolledWindow()
-    logs_scrolled.set_min_content_height(160)
-    logs_scrolled.set_max_content_height(280)
-    logs_scrolled.set_child(logs_view)
-    box.append(logs_scrolled)
-    copy_button = Gtk.Button(label="Copy logs")
-    box.append(copy_button)
-
-    def refresh_log_view() -> list[str]:
-        lines = applog.log_view_lines()
-        logs_view.get_buffer().set_text("\n".join(lines))
-        return lines
-
-    refresh_log_view()
-
-    def on_copy_clicked(_button) -> None:
-        lines = refresh_log_view()
-        display = Gdk.Display.get_default()
-        if display is None:
-            notice.set_label("No clipboard available right now.")
-            return
-        display.get_clipboard().set("\n".join(lines))
-        notice.set_label(f"{len(lines)} log lines copied.")
-
-    copy_button.connect("clicked", on_copy_clicked)
-    import_button = Gtk.Button(label="Import Takeout file")
-    box.append(import_button)
-
-    def on_import_clicked(_button) -> None:
+    dialog = Gtk.FileDialog(title="Import Takeout file")
+    try:
         from gi.repository import Gio as GioModule
 
-        dialog = Gtk.FileDialog(title="Import Takeout file")
-        try:
-            filters = GioModule.ListStore.new(Gtk.FileFilter)
-            takeout = Gtk.FileFilter()
-            takeout.set_name("Takeout export")
-            for pattern in ("*.csv", "*.tcx", "*.json", "*.zip"):
-                takeout.add_pattern(pattern)
-            filters.append(takeout)
-            dialog.set_filters(filters)
-            dialog.set_default_filter(takeout)
-        except AttributeError:
-            pass
-        dialog.open(None, None, on_file_chosen)
+        filters = GioModule.ListStore.new(Gtk.FileFilter)
+        takeout = Gtk.FileFilter()
+        takeout.set_name("Takeout export")
+        for pattern in ("*.csv", "*.tcx", "*.json", "*.zip"):
+            takeout.add_pattern(pattern)
+        filters.append(takeout)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(takeout)
+    except AttributeError:
+        pass
+    dialog.open(window, None, lambda dlg, result: _finish_import(
+        dlg, result, db, on_notice, on_done))
 
-    def on_file_chosen(dialog, result) -> None:
+
+def _finish_import(dialog, result, db, on_notice, on_done) -> None:
+    from xx_vitals.sync import worker as worker_module
+
+    try:
+        chosen = dialog.open_finish(result)
+    except Exception:
+        return
+    on_notice("Importing…")
+    name = chosen.get_basename() or ""
+
+    def progress(done: int, total) -> None:
+        from gi.repository import GLib as GLibModule
+
+        if total:
+            line = f"Importing… {done}/{total} files…"
+        else:
+            line = f"Importing… {done} rows…"
         try:
-            chosen = dialog.open_finish(result)
-        except Exception:
+            GLibModule.idle_add(on_notice, line)
+        except (AttributeError, TypeError):
+            on_notice(line)
+
+    def work():
+        lowered = name.lower()
+        if lowered.endswith(".zip"):
+            return import_takeout_zip(
+                db, _portal_path(chosen, name), _now_ms(), progress)
+        if lowered.endswith(".csv"):
+            return import_takeout_stream(
+                db, name, _portal_lines(chosen), _now_ms(), progress)
+        ok, data, _etag = chosen.load_contents(None)
+        text = bytes(data).decode("utf-8", "replace") if ok else ""
+        return import_takeout(db, name, text, _now_ms(), progress)
+
+    def done(outcome) -> None:
+        if isinstance(outcome, BaseException):
+            on_notice("Import failed — the file could not be read.")
             return
-        notice.set_label("Importing…")
-        name = chosen.get_basename() or ""
+        on_notice(outcome)
+        if on_done is not None:
+            on_done()
 
-        def progress(done: int, total) -> None:
-            from gi.repository import GLib as GLibModule
-
-            if total:
-                line = f"Importing… {done}/{total} files…"
-            else:
-                line = f"Importing… {done} rows…"
-            try:
-                GLibModule.idle_add(notice.set_label, line)
-            except (AttributeError, TypeError):
-                notice.set_label(line)
-
-        def work():
-            lowered = name.lower()
-            if lowered.endswith(".zip"):
-                return import_takeout_zip(
-                    db, _portal_path(chosen, name), _now_ms(), progress)
-            if lowered.endswith(".csv"):
-                return import_takeout_stream(
-                    db, name, _portal_lines(chosen), _now_ms(), progress)
-            ok, data, _etag = chosen.load_contents(None)
-            text = bytes(data).decode("utf-8", "replace") if ok else ""
-            return import_takeout(db, name, text, _now_ms(), progress)
-
-        def done(outcome) -> None:
-            if isinstance(outcome, BaseException):
-                notice.set_label("Import failed — the file could not be read.")
-                return
-            notice.set_label(outcome)
-
-        worker_module.run_in_background(work, done)
-
-    import_button.connect("clicked", on_import_clicked)
-    clamp = Adw.Clamp(maximum_size=480)
-    clamp.set_child(box)
-    return clamp
+    worker_module.run_in_background(work, done)
 
 
 def _portal_lines(chosen):
@@ -893,6 +581,471 @@ def _portal_path(chosen, name: str) -> str:
     ok, data, _etag = chosen.load_contents(None)
     target.write_bytes(bytes(data) if ok else b"")
     return str(target)
+
+
+def _profile_caption(config) -> str:
+    from xx_vitals.core import format as format_model
+
+    bits = [config.units.upper()]
+    if config.height_metres:
+        bits.append(format_model.format_height(
+            config.height_metres, config.units).upper())
+    return " · ".join(bits)
+
+
+def _labeled(caption_text: str, entry):
+    """Field-style caption over an entry (entries sit on the window
+    background, never inside a surface card where they go invisible)."""
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+
+    from xx_ui import widgets
+
+    box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 6)
+    box.append(widgets.caption(caption_text))
+    box.append(entry)
+    return box
+
+
+def build_profile_page(db, config, secrets, nav, live: dict | None = None,
+                       window=None) -> object:
+    import gi
+
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Adw", "1")
+    from gi.repository import Gio, Gtk
+
+    from xx_ui import widgets
+
+    from xx_vitals.sync import worker as worker_module
+    from xx_vitals.ui import shell as shell_page
+
+    live = live if live is not None else {}
+    body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    body.add_css_class("xx-page-body")
+    header_box = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    state = {"overflow": None}
+    refs: dict = {}
+
+    def menu() -> object:
+        if state["overflow"] is not None:
+            state["overflow"].popup()
+            return state["overflow"]
+        anchor = header_box.get_first_child()
+        popover = shell_page.open_overflow(anchor, [
+            ("Import Takeout",
+             lambda: open_takeout_import(
+                 window, db, refs["import_notice"].set_text,
+                 on_done=nav.refresh_all)),
+            ("Copy logs", _copy_logs),
+        ])
+        state["overflow"] = popover
+        popover.connect("closed", lambda _p: state.update(overflow=None))
+        return popover
+
+    def refresh() -> None:
+        while True:
+            first = header_box.get_first_child()
+            if first is None:
+                break
+            header_box.remove(first)
+        header_box.append(widgets.page_header(
+            "Profile", _profile_caption(config), overflow_cb=menu))
+        _refresh_step_lines()
+        _refresh_weight_line()
+        refresh_state()
+
+    live["refresh"] = refresh
+    live["menu"] = menu
+
+    # -- Goals ---------------------------------------------------------
+    body.append(widgets.section_label("Goals"))
+    steps_entry = widgets.deferred_entry("e.g. 10000")
+    steps_entry.set_text(str(config.steps_goal))
+    steps_entry.set_hexpand(True)
+    effort_entry = widgets.deferred_entry("e.g. 90")
+    effort_entry.set_text(str(config.effort_goal))
+    effort_entry.set_hexpand(True)
+    weekly_entry = widgets.deferred_entry("e.g. 150")
+    weekly_entry.set_text(str(config.weekly_effort_goal))
+    weekly_entry.set_hexpand(True)
+    body.append(_labeled("Daily steps goal", steps_entry))
+    body.append(_labeled("Daily effort goal", effort_entry))
+    body.append(_labeled("Weekly effort goal", weekly_entry))
+    goals_error = widgets.wrap_label("", "xx-secondary")
+    goals_error.add_css_class("xx-danger-text")
+    body.append(goals_error)
+    body.append(widgets.outline_button("Save goals", lambda: _save_goals()))
+
+    def _save_goals() -> None:
+        errors = apply_goal_edits(
+            config, steps_raw=steps_entry.get_text(),
+            effort_raw=effort_entry.get_text(),
+            weekly_raw=weekly_entry.get_text())
+        if errors:
+            goals_error.set_text("; ".join(
+                f"{name}: {message}" for name, message in errors.items()))
+            return
+        goals_error.set_text("")
+        _persist_config(config)
+        nav.refresh_all()
+
+    # -- Body ----------------------------------------------------------
+    body.append(widgets.section_label("Body"))
+    height_entry = widgets.deferred_entry("Metres, e.g. 1.78")
+    height_entry.set_hexpand(True)
+    if config.height_metres:
+        height_entry.set_text(f"{config.height_metres:.2f}")
+    year_entry = widgets.deferred_entry("e.g. 1990")
+    year_entry.set_hexpand(True)
+    if config.birth_year:
+        year_entry.set_text(str(config.birth_year))
+    body.append(_labeled("Height", height_entry))
+    body.append(_labeled("Birth year", year_entry))
+    body_error = widgets.wrap_label("", "xx-secondary")
+    body_error.add_css_class("xx-danger-text")
+    body.append(body_error)
+    body.append(widgets.outline_button("Save", lambda: _save_body()))
+    weight_line = widgets.wrap_label("", "xx-secondary")
+    body.append(widgets.setting_row(
+        "Latest weigh-in", "", weight_line, last=True))
+    refs["weight_line"] = weight_line
+
+    def _save_body() -> None:
+        from datetime import datetime
+
+        error = apply_height_edit(config, height_entry.get_text())
+        if error is None and year_entry.get_text().strip():
+            error = apply_birth_year_edit(
+                config, year_entry.get_text(), datetime.now().year)
+        if error is not None:
+            body_error.set_text(error)
+            return
+        body_error.set_text("")
+        _persist_config(config)
+        nav.refresh_all()
+
+    def _refresh_weight_line() -> None:
+        from xx_vitals.core import format as format_model
+
+        try:
+            latest = db.latest_weight()
+        except (OSError, AttributeError):
+            latest = None
+        if latest is None:
+            weight_line.set_text("No weigh-ins yet")
+        else:
+            weight_line.set_text(format_model.format_weight(
+                latest.weight_kg, config.units))
+
+    body.append(widgets.section_label("Units"))
+    body.append(widgets.segmented([
+        ("Metric", config.units == "metric",
+         lambda: _set_units("metric")),
+        ("Imperial", config.units == "imperial",
+         lambda: _set_units("imperial")),
+    ]))
+
+    def _set_units(units: str) -> None:
+        config.units = units
+        _persist_config(config)
+        nav.refresh_all()
+
+    # -- Tabs ----------------------------------------------------------
+    body.append(widgets.section_label("Tabs"))
+    for key, title in (("show_journal_tab", "Journal tab"),
+                       ("show_browse_tab", "Browse tab"),
+                       ("show_profile_tab", "Profile tab")):
+        switch = widgets.make_switch(
+            bool(getattr(config, key, True)),
+            lambda active, key=key: _set_tab(key, active))
+        body.append(widgets.setting_row(title, "", switch))
+
+    def _set_tab(key: str, active: bool) -> None:
+        setattr(config, key, bool(active))
+        _persist_config(config)
+        nav.refresh_tabs()
+
+    # -- Step counting -------------------------------------------------
+    body.append(widgets.section_label("Step counting"))
+    step_title = widgets.label("", "xx-title")
+    step_detail = widgets.wrap_label("", "xx-secondary")
+    body.append(step_title)
+    body.append(step_detail)
+    collect_switch = widgets.make_switch(
+        bool(getattr(config, "collect_enabled", False)),
+        lambda active: _toggle_collect(active))
+    body.append(widgets.setting_row(
+        "Count my steps", "", collect_switch, last=True))
+    refs["step_title"] = step_title
+    refs["step_detail"] = step_detail
+
+    def _refresh_step_lines() -> None:
+        line = collect_status(config)
+        step_title.set_text(line["title"])
+        step_detail.set_text(line["detail"])
+
+    def _toggle_collect(active: bool) -> None:
+        set_collect_enabled(config, active)
+        _refresh_step_lines()
+        nav.refresh_all()
+
+    body.append(widgets.wrap_label(screen_off_copy()))
+    screen_switch = widgets.make_switch(
+        bool(getattr(config, "count_while_screen_off", False)),
+        lambda active: set_count_while_screen_off(config, active))
+    body.append(widgets.setting_row(
+        "Count while screen is off", "", screen_switch, last=True))
+    sample_line = widgets.wrap_label("", "xx-secondary")
+    sample_button = widgets.outline_button("Sample now", lambda: _sample_now())
+    body.append(sample_button)
+    body.append(sample_line)
+
+    def _sample_now() -> None:
+        sample_line.set_text("Sampling…")
+
+        def done(result) -> None:
+            if isinstance(result, BaseException):
+                sample_line.set_text(
+                    "Sample failed — will retry on the next tick.")
+                return
+            line = collect_status(config)
+            if getattr(result, "outcome", "") == "no-source":
+                sample_line.set_text(line["detail"])
+            elif getattr(result, "steps", 0):
+                sample_line.set_text(
+                    f"Counted {result.steps} steps just now. {line['detail']}")
+            else:
+                sample_line.set_text(line["detail"])
+
+        collect_tick_in_background(db, config, done)
+
+    if not systemd_user_available():
+        body.append(widgets.wrap_label(
+            "Systemd user timers are unavailable here — "
+            "sampling runs while the app is open."))
+
+    # -- Sync ----------------------------------------------------------
+    body.append(widgets.section_label("Sync"))
+    nas_line = widgets.wrap_label("", "xx-body")
+    body.append(nas_line)
+    host_entry = widgets.deferred_entry("NAS host URL")
+    host_entry.set_text(config.server_url)
+    host_entry.set_hexpand(True)
+    host_row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+    host_row.append(host_entry)
+    host_row.append(widgets.outline_button("Save", lambda: _save_host()))
+    body.append(host_row)
+    login_line = widgets.wrap_label("", "xx-body")
+    pull_line = widgets.wrap_label("", "xx-body")
+    push_line = widgets.wrap_label("", "xx-body")
+    pending_line = widgets.wrap_label("", "xx-body")
+    for line in (login_line, pull_line, push_line, pending_line):
+        body.append(line)
+    xxchat_entry = widgets.deferred_entry("Sign-in host URL")
+    xxchat_entry.set_text(getattr(config, "xxchat_url", ""))
+    xxchat_entry.set_hexpand(True)
+    user_entry = widgets.deferred_entry("Username")
+    user_entry.set_hexpand(True)
+    password_entry = widgets.deferred_entry("Password")
+    password_entry.set_visibility(False)
+    password_entry.set_hexpand(True)
+    for entry in (xxchat_entry, user_entry, password_entry):
+        body.append(entry)
+    signin_button = widgets.primary_button("Sign in", lambda: _sign_in())
+    login_message = widgets.wrap_label("", "xx-secondary")
+    login_message.set_hexpand(True)
+    signin_row = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+    signin_row.append(signin_button)
+    signin_row.append(login_message)
+    body.append(signin_row)
+    setup_label = widgets.wrap_label("", "xx-secondary")
+    body.append(setup_label)
+    notice = widgets.wrap_label("", "xx-secondary")
+    sync_button = widgets.primary_button("Sync now", lambda: _sync_now())
+    body.append(sync_button)
+    body.append(notice)
+    refs["notice"] = notice
+
+    batch_store = Gio.ListStore.new(Gtk.StringObject)
+    factory = Gtk.SignalListItemFactory()
+    factory.connect("setup", lambda _f, item: item.set_child(
+        widgets.label("", "xx-secondary")))
+    factory.connect("bind", lambda _f, item: item.get_child().set_text(
+        item.get_item().get_string()))
+    batches = Gtk.ListView.new(Gtk.NoSelection.new(batch_store), factory)
+    batches.set_single_click_activate(True)
+    batch_scrolled = Gtk.ScrolledWindow()
+    batch_scrolled.set_min_content_height(120)
+    batch_scrolled.set_child(batches)
+    batch_scrolled.set_visible(False)
+    body.append(batch_scrolled)
+
+    def refresh_state() -> None:
+        def work():
+            return refresh_sync_state(db, config, secrets)
+
+        def done(outcome) -> None:
+            if isinstance(outcome, BaseException):
+                return
+            nas_line.set_text(f"NAS host: {outcome['host']}")
+            login_line.set_text(f"Sign-in: {outcome['login']}")
+            pull_line.set_text(f"Last pull: {outcome['last_pull']}")
+            push_line.set_text(f"Last push: {outcome['last_push']}")
+            pending_line.set_text(f"Queue: {outcome['pending']}")
+            _update_signin_sensitive()
+            sync_button.set_sensitive(bool(outcome["can_sync"]))
+            setup_label.set_text(
+                "" if outcome["can_sync"] else sync_setup_copy(None) or "")
+
+        worker_module.run_in_background(work, done)
+
+    def refresh_batches() -> None:
+        from xx_vitals.sync import status as status_model
+
+        def work():
+            return status_model.batches_outcome(_build_api(config, secrets))
+
+        def done(outcome) -> None:
+            if isinstance(outcome, BaseException):
+                return
+            lines, problem = outcome
+            batch_store.remove_all()
+            for line in lines:
+                batch_store.append(Gtk.StringObject.new(line))
+            batch_scrolled.set_visible(bool(lines))
+            if problem:
+                notice.set_text(problem)
+
+        worker_module.run_in_background(work, done)
+
+    def _save_host() -> None:
+        error = save_nas_host(config, host_entry.get_text())
+        if error is not None:
+            notice.set_text(error)
+            return
+        notice.set_text("")
+        refresh_state()
+
+    def _update_signin_sensitive(*_args) -> None:
+        signin_button.set_sensitive(bool(
+            xxchat_entry.get_text().strip()
+            and user_entry.get_text().strip()
+            and password_entry.get_text()))
+
+    for entry in (xxchat_entry, user_entry, password_entry):
+        entry.connect("changed", _update_signin_sensitive)
+    _update_signin_sensitive()
+
+    def _sign_in() -> None:
+        from xx_vitals.sync import auth as auth_module
+
+        host_error = save_nas_host(config, host_entry.get_text())
+        if host_error is not None:
+            notice.set_text(host_error)
+            return
+        chat_error = save_xxchat_host(config, xxchat_entry.get_text())
+        if chat_error is not None:
+            notice.set_text(chat_error)
+            return
+        username = user_entry.get_text().strip()
+        password = password_entry.get_text()
+        if not username or not password:
+            notice.set_text("Enter the username and password.")
+            return
+        notice.set_text("")
+        login_message.set_text("Signing in…")
+        signin_button.set_sensitive(False)
+
+        def done(outcome) -> None:
+            if isinstance(outcome, BaseException):
+                login_message.set_text("Sign-in failed — will retry.")
+            else:
+                login_message.set_text(format_login_message(outcome))
+                if isinstance(outcome, auth_module.LoginSuccess):
+                    password_entry.set_text("")
+            _update_signin_sensitive()
+            refresh_state()
+
+        worker_module.login_in_background(
+            config.xxchat_url, username, password, secrets, done)
+
+    def _sync_now() -> None:
+        from xx_vitals.sync import status as status_model
+
+        error = save_nas_host(config, host_entry.get_text())
+        if error is not None:
+            notice.set_text(error)
+            return
+        notice.set_text("Syncing…")
+
+        def done(outcome) -> None:
+            if isinstance(outcome, BaseException):
+                problem = status_model.notice_for_exception(outcome)
+                notice.set_text(problem or "Sync failed — will retry.")
+            elif outcome.get("paused"):
+                notice.set_text(status_model.VOLUME_NOTICE)
+            else:
+                notice.set_text(status_model.describe_pending(
+                    outcome.get("pending", _pending_count(db))))
+            refresh_state()
+            refresh_batches()
+
+        worker_module.sync_now_in_background(
+            lambda: _build_engine(db, config, secrets), done)
+
+    # -- Logs ----------------------------------------------------------
+    body.append(widgets.section_label("Logs"))
+    logs_path = widgets.wrap_label(str(applog.log_file()))
+    logs_path.set_selectable(True)
+    body.append(logs_path)
+    logs_view = Gtk.TextView()
+    logs_view.set_editable(False)
+    logs_view.set_cursor_visible(False)
+    logs_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+    logs_view.set_can_focus(False)
+    logs_view.set_hexpand(True)
+    logs_scrolled = Gtk.ScrolledWindow()
+    logs_scrolled.set_min_content_height(120)
+    logs_scrolled.set_max_content_height(200)
+    logs_scrolled.set_child(logs_view)
+    body.append(logs_scrolled)
+    body.append(widgets.outline_button("Copy logs", lambda: _copy_logs()))
+    _refresh_log_view(logs_view)
+
+    def _copy_logs() -> None:
+        from xx_vitals.core import applog
+
+        lines = applog.log_view_lines()
+        logs_view.get_buffer().set_text("\n".join(lines))
+        error = shell_page.copy_to_clipboard("\n".join(lines))
+        if error is not None:
+            notice.set_text(error)
+            return
+        notice.set_text(f"{len(lines)} log lines copied.")
+
+    # -- Import --------------------------------------------------------
+    body.append(widgets.section_label("Import"))
+    import_notice = widgets.wrap_label("", "xx-secondary")
+    refs["import_notice"] = import_notice
+    body.append(widgets.outline_button(
+        "Import Takeout file",
+        lambda: open_takeout_import(
+            window, db, import_notice.set_text, on_done=nav.refresh_all)))
+    body.append(import_notice)
+
+    refresh()
+    refresh_batches()
+    return widgets.page(header_box, body, None)
+
+
+def _refresh_log_view(logs_view) -> None:
+    from xx_vitals.core import applog
+
+    lines = applog.log_view_lines()
+    logs_view.get_buffer().set_text("\n".join(lines))
 
 
 def _build_api(config, secrets):
