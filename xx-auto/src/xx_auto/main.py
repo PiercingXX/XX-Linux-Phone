@@ -162,6 +162,7 @@ class AutoWindow:
         self.app = app
         self.settings = settings
         self.snapshot = DriveSnapshot()
+        self._demo = False
         self._favourites: list = []
         self._fav_note: str | None = None
         self._players_rows: list = []
@@ -1020,6 +1021,19 @@ class AutoWindow:
 
     def _first_poll(self) -> bool:
         self._poll_tick()
+        self._run_worker(self._resolve_maps)
+        return False
+
+    def _resolve_maps(self) -> None:
+        from . import maps_launch as maps_mod
+
+        sub = maps_mod.tile_subtitle(*maps_mod.resolve_maps_app())
+        self._GLib.idle_add(self._set_maps_sub, sub)
+
+    def _set_maps_sub(self, sub: str) -> bool:
+        if not self._demo:
+            self.snapshot.maps_sub = sub
+            self.refresh()
         return False
 
     def _poll_tick(self) -> bool:
@@ -1083,6 +1097,7 @@ class AutoWindow:
     def seed_demo(self, scenario: str) -> None:
         from . import demo
 
+        self._demo = True
         self.settings = demo.demo_settings()
         self.snapshot = demo.snapshot_for(scenario)
         if scenario == "favourites":

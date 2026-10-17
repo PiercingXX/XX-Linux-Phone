@@ -36,6 +36,27 @@ def resolve_maps_app(desktop=None) -> tuple[Target, str | None]:
     return Target.NOT_INSTALLED, None
 
 
+def tile_subtitle(target: Target, desktop_id: str | None,
+                  desktop=None) -> str:
+    """The Maps tile subtitle: the app the tile opens, or the store hint."""
+    if target is Target.NOT_INSTALLED or not desktop_id:
+        return "Get xx-maps"
+    try:
+        if desktop is None:
+            import gi
+
+            gi.require_version("Gio", "2.0")
+            from gi.repository import Gio
+
+            desktop = Gio.DesktopAppInfo
+        info = desktop.new(desktop_id)
+        if info is not None and info.get_name():
+            return info.get_name()
+    except Exception:
+        pass
+    return "Maps"
+
+
 def launch_target(target: Target, desktop_id: str | None) -> bool:
     """Open the resolved maps entry; False when nothing is installed."""
     if target is Target.NOT_INSTALLED or not desktop_id:

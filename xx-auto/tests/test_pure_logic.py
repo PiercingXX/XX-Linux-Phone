@@ -82,6 +82,23 @@ def test_maps_resolve_order():
     assert resolve(False, False) is Target.NOT_INSTALLED
 
 
+def test_maps_tile_subtitle_names_the_app_it_opens():
+    from xx_auto.maps_launch import tile_subtitle
+
+    class Info:
+        def get_name(self):
+            return "GNOME Maps"
+
+    class Desktop:
+        @staticmethod
+        def new(desktop_id):
+            return Info() if desktop_id == "org.gnome.Maps.desktop" else None
+
+    assert tile_subtitle(Target.NOT_INSTALLED, None, Desktop) == "Get xx-maps"
+    assert tile_subtitle(Target.LAUNCHER, "org.gnome.Maps.desktop",
+                         Desktop) == "GNOME Maps"
+
+
 def test_drive_tiles_gating():
     assert visible(True, True, False) == {Tile.RADIO, Tile.AUDIOBOOK,
                                           Tile.MAPS}
