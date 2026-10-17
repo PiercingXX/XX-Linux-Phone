@@ -28,6 +28,7 @@ HELPER = textwrap.dedent("""\
     import os
     import sys
     sys.path.insert(0, {src!r})
+    sys.path.insert(0, os.path.join({src!r}, "..", "..", "common"))
     os.environ["HOME"] = {home!r}
     from gi.repository import Gio, GLib
     from xx_dialer import config as app_config
@@ -478,8 +479,10 @@ def test_service_entry_imports_no_gtk(tmp_path):
     import xx_dialer
 
     src = str(pathlib.Path(xx_dialer.__file__).parent.parent)
+    common = str(pathlib.Path(src).parent.parent / "common")
     env = dict(os.environ)
-    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        (src, common, env.get("PYTHONPATH", "")))
     proc = subprocess.run(
         [sys.executable, "-X", "importtime", "-m", "xx_dialer",
          "--service", "--check-imports"],
@@ -515,7 +518,7 @@ print("ACTIVATION-OK elapsed_ms=%d" % elapsed_ms)
 _ACTIVATION_WRAPPER = """\
 #!/bin/sh
 export HOME={home!r}
-export PYTHONPATH={src!r}
+export PYTHONPATH={src!r}:{common!r}
 exec {exe!r} -m xx_dialer --service
 """
 
@@ -547,8 +550,10 @@ def test_first_check_number_activates_service(tmp_path):
         "[D-BUS Service]\nName=io.piercingxx.XXDialer.Policy\n"
         "Exec=%s\n" % (tmp_path / "run-service.sh",))
     (tmp_path / "run-service.sh").write_text(
-        _ACTIVATION_WRAPPER.format(home=str(home), src=src,
-                                   exe=sys.executable))
+        _ACTIVATION_WRAPPER.format(
+            home=str(home), src=src, exe=sys.executable,
+            common=str(__import__("pathlib").Path(src).parent.parent
+                       / "common")))
     (tmp_path / "run-service.sh").chmod(0o755)
     driver = tmp_path / "activation_driver.py"
     driver.write_text(_ACTIVATION_DRIVER)

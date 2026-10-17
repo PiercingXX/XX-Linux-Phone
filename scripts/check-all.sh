@@ -20,7 +20,7 @@ for p in $PROJECTS; do
     if [ "$p" = xx-wm ]; then
         (cd "$ROOT/xx-wm" && PATH="$(dirname "$py"):$PATH" sh scripts/check.sh) || failed="$failed $p"
     elif [ "$p" = common ]; then
-        (cd "$ROOT/common" && "$py" -m pytest -q tests && "$py" -m ruff check xx_ui tests tools) || failed="$failed $p"
+        (cd "$ROOT/common" && "$py" -m pytest -q tests && "$py" -m ruff check xx_ui xx_phone tests tools) || failed="$failed $p"
     else
         (cd "$ROOT/$p" && "$py" -m pytest -q tests && "$py" -m ruff check src tests) || failed="$failed $p"
     fi

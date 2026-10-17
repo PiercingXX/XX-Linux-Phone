@@ -25,7 +25,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GObject, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
-from xx_dialer import policy, recents, t9  # noqa: E402
+import xx_phone  # noqa: E402
+from xx_dialer import policy, t9  # noqa: E402
 from xx_dialer.store import BLOCKED_GROUP, BIZ_TIER, Store  # noqa: E402
 
 
@@ -210,8 +211,8 @@ class PeopleController:
         except Exception:
             self._notice("Could not update the block.")
             return
-        shown = person.display_name or recents.format_number(
-            person.primary, self._region())
+        shown = person.display_name or xx_phone.display(
+            person.primary, xx_phone.display_country(self._region()))
         self._notice("Blocked %s" % shown if blocked
                      else "Unblocked %s" % shown)
         self.load()
@@ -234,8 +235,9 @@ class PeopleController:
             try:
                 client.set_blocked(uid, True)
                 self._notice("Blocked %s"
-                             % recents.format_number(
-                                 normalized, self._region()))
+                             % xx_phone.display(
+                                 normalized, xx_phone.display_country(
+                                     self._region())))
                 self.load()
                 return
             except Exception:
@@ -245,8 +247,8 @@ class PeopleController:
                 store.add_blocked(normalized)
         except Exception:
             pass
-        self._notice("Blocked %s" % recents.format_number(
-            normalized, self._region()))
+        self._notice("Blocked %s" % xx_phone.display(
+            normalized, xx_phone.display_country(self._region())))
         self.load()
 
     def call(self, person: Person, number: str | None = None) -> None:
@@ -347,10 +349,10 @@ class PeopleView:
                 item = PeopleItem()
                 item.kind = "item"
                 item.uid = person.uid
-                item.title = person.display_name or recents.format_number(
-                    person.primary, region)
-                item.number = recents.format_number(
-                    person.primary, region)
+                item.title = person.display_name or xx_phone.display(
+                    person.primary, xx_phone.display_country(region))
+                item.number = xx_phone.display(
+                    person.primary, xx_phone.display_country(region))
                 item.meta = person_marks(person)
                 self._store.append(item)
                 total += 1
@@ -472,13 +474,15 @@ class PeopleView:
         title.set_hexpand(True)
         title.set_valign(Gtk.Align.CENTER)
         name = Gtk.Label(
-            label=person.display_name or recents.format_number(
-                person.primary, region), xalign=0.0)
+            label=person.display_name or xx_phone.display(
+                person.primary, xx_phone.display_country(region)),
+            xalign=0.0)
         name.add_css_class("xx-title")
         name.set_ellipsize(Pango.EllipsizeMode.END)
         numbers = Gtk.Label(
-            label="\n".join(recents.format_number(
-                number, region) for number in person.numbers)
+            label="\n".join(xx_phone.display(
+                number, xx_phone.display_country(region))
+                for number in person.numbers)
             or "No numbers",
             xalign=0.0)
         numbers.add_css_class("xx-secondary")

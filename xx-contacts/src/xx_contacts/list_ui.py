@@ -28,8 +28,8 @@ import threading  # noqa: E402
 from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
+import xx_phone  # noqa: E402
 from xx_contacts import avatar as avatar_module  # noqa: E402
-from xx_contacts import phones as phones_module  # noqa: E402
 from xx_contacts import privacy  # noqa: E402
 from xx_contacts import vcard as vcard_module  # noqa: E402
 from xx_contacts.list_model import (  # noqa: E402
@@ -459,8 +459,10 @@ class ContactsWindow(Adw.ApplicationWindow):
                 self._model.append(RowItem(title=entry.title,
                                            is_header=True))
             else:
-                shown = phones_module.format_display_number(
-                    entry.primary_number, self._config.default_region
+                country = xx_phone.display_country(
+                    self._config.default_region)
+                shown = xx_phone.display(
+                    entry.primary_number, country
                 ) if entry.primary_number else ""
                 detail = shown or entry.primary_email
                 if entry.blocked and detail:
@@ -468,7 +470,9 @@ class ContactsWindow(Adw.ApplicationWindow):
                 elif entry.blocked:
                     detail = "Blocked"
                 self._model.append(RowItem(uid=entry.uid,
-                                           title=entry.display_name,
+                                           title=xx_phone.display(
+                                               entry.display_name,
+                                               country),
                                            detail=detail,
                                            photo=entry.photo_path,
                                            starred=entry.starred))

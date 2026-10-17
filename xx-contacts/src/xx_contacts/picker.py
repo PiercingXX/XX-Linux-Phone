@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import xx_phone
+
 from xx_contacts.detail import detail_title
 
 #: D-Bus ``Pick`` kinds, in introspection order.
@@ -81,29 +83,39 @@ def pick_value(kind: str, record) -> tuple[str, str]:
     return uid, detail_title(record)
 
 
-def build_pick_rows(kind: str, records) -> list[PickRow]:
+def build_pick_rows(kind: str, records, country: str | None = None
+                   ) -> list[PickRow]:
     """Flatten ``records`` into tappable rows for ``kind``.
 
     Contact mode keeps one row per contact; phone/email modes keep one
     row per number/address, so choosing is a single tap and contacts
-    without that datum simply do not appear.
+    without that datum simply do not appear. Titles and details read
+    through the shared display rule; ``value`` keeps the raw picked
+    number/address so dialing and storage never see formatting.
     """
     normalized = normalize_kind(kind)
+    shown_in = (country if country is not None
+                else xx_phone.display_country())
     rows: list[PickRow] = []
     for record in records or ():
         uid = getattr(record, "uid", "") or ""
         if not uid:
             continue
-        title = detail_title(record)
+        name = detail_title(record)
+        title = xx_phone.display(name, shown_in)
         if normalized == "contact":
             detail = primary_phone(record) or primary_email(record)
-            rows.append(PickRow(uid, title, detail, title))
+            rows.append(PickRow(uid, title,
+                                xx_phone.display(detail, shown_in), name))
             continue
         if normalized == "phone":
             for entry in getattr(record, "phones", None) or ():
                 raw = entry.number_raw or ""
                 if raw.strip():
-                    rows.append(PickRow(uid, title, raw.strip(), raw.strip()))
+                    rows.append(PickRow(
+                        uid, title,
+                        xx_phone.display(raw.strip(), shown_in),
+                        raw.strip()))
             continue
         for entry in getattr(record, "emails", None) or ():
             address = (entry.address or "").strip()

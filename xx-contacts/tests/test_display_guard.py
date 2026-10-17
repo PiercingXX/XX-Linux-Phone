@@ -84,7 +84,8 @@ def test_theme_css_covers_listview_and_headers(isolated_home):
 
 def test_list_shows_spaced_numbers():
     src = _read("list_ui.py")
-    assert "format_display_number" in src
+    assert "xx_phone.display(" in src
+    assert "format_display_number" not in src
 
 
 def test_detail_page_has_no_text_entry_or_focus_grab():

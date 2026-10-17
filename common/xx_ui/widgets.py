@@ -14,6 +14,9 @@ symbolic icon-theme images, colored by CSS, never Unicode glyphs.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import os
+
 import gi
 
 gi.require_version('Gtk', '4.0')
@@ -623,3 +626,182 @@ def page(header, body, bottom=None, fab_widget=None) -> Gtk.Box:
     if bottom is not None:
         root.append(bottom)
     return root
+
+
+# ---- about & open-source licenses ----------------------------------------
+
+#: Where installed distributions keep per-package license texts (Arch,
+#: pmOS/Alpine); absent elsewhere, where the SPDX id + URL shows instead.
+LICENSES_ROOT = '/usr/share/licenses'
+
+
+@dataclass
+class LicenseEntry:
+    """One row on the licenses page: the component, its SPDX id, the
+    project URL, and the system license directories to try, in order."""
+    name: str
+    spdx: str
+    url: str
+    packages: tuple = ()
+
+
+def standard_license_entries(app_name: str) -> list:
+    """The app's own license plus the third-party components every XX
+    app uses at runtime: GTK/libadwaita/PyGObject, the ``phonenumbers``
+    display engine, the xx_ui fonts and icons. One data table per app;
+    each app passes its own name."""
+    return [
+        LicenseEntry(app_name, 'GPL-3.0-or-later',
+                     'See LICENSE in the source tree'),
+        LicenseEntry('GTK 4', 'LGPL-2.1-or-later',
+                     'https://www.gtk.org/',
+                     ('gtk4', 'gtk4-layer-shell')),
+        LicenseEntry('libadwaita', 'LGPL-2.1-or-later',
+                     'https://gnome.pages.gitlab.gnome.org/libadwaita/',
+                     ('libadwaita',)),
+        LicenseEntry('PyGObject', 'LGPL-2.1-or-later',
+                     'https://pygobject.gnome.org/',
+                     ('python-gobject',)),
+        LicenseEntry('phonenumbers', 'Apache-2.0',
+                     'https://github.com/daviddrysdale/python-phonenumbers',
+                     ('python-phonenumbers', 'py3-phonenumbers')),
+        LicenseEntry('JetBrains Mono / Space Mono', 'OFL-1.1',
+                     'https://www.jetbrains.com/lp/mono/',
+                     ('ttf-jetbrains-mono', 'ttf-space-mono',
+                      'adwaita-fonts')),
+        LicenseEntry('Nerd Fonts glyphs', 'MIT',
+                     'https://www.nerdfonts.com/',
+                     ('nerd-fonts', 'ttf-nerd-fonts-symbols')),
+        LicenseEntry('Adwaita symbolic icons', 'CC-BY-SA-3.0',
+                     'https://gitlab.gnome.org/GNOME/adwaita-icon-theme',
+                     ('adwaita-icon-theme',)),
+    ]
+
+
+def license_text(entry: LicenseEntry,
+                 licenses_root: str = LICENSES_ROOT) -> str:
+    """The license text for ``entry``: the system copy when present,
+    else the SPDX id and the project URL."""
+    candidates = [os.path.join(licenses_root, 'spdx', entry.spdx + '.txt')]
+    for package in entry.packages:
+        try:
+            names = sorted(os.listdir(os.path.join(licenses_root,
+                                                   package)))
+        except OSError:
+            continue
+        for name in names:
+            if name.lower() == 'copyright':
+                continue
+            candidates.append(os.path.join(licenses_root, package, name))
+    for path in candidates:
+        try:
+            with open(path, encoding='utf-8', errors='replace') as handle:
+                text = handle.read().strip()
+        except OSError:
+            continue
+        if text:
+            return text
+    return '%s\n%s' % (entry.spdx, entry.url)
+
+
+def _adw():
+    """libadwaita, loaded only by the licenses pages that need it: importing
+    it initializes Adw and restyles every widget in apps that dropped it."""
+    gi.require_version('Adw', '1')
+    from gi.repository import Adw
+    return Adw
+
+
+def _license_text_page(entry: LicenseEntry,
+                       licenses_root: str = LICENSES_ROOT):
+    """A navigation page showing one license text (scrollable)."""
+    content = Gtk.Box.new(Gtk.Orientation.VERTICAL, 0)
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scroll.set_hexpand(True)
+    scroll.set_vexpand(True)
+    view = Gtk.TextView()
+    view.set_editable(False)
+    view.set_cursor_visible(False)
+    view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+    view.get_buffer().set_text(license_text(entry, licenses_root))
+    scroll.set_child(view)
+    content.append(scroll)
+    sheet = _adw().NavigationPage.new(content, entry.name)
+    return sheet
+
+
+def licenses_page(navigation, app_name: str,
+                  entries: list,
+                  licenses_root: str = LICENSES_ROOT):
+    """An 'Open-source licenses' page: one row per component showing
+    its SPDX id; tapping a row pushes its license text."""
+    body = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+    for entry in entries:
+        row = list_row(entry.name, entry.spdx,
+                       trailing=icon_image('go-next-symbolic'),
+                       on_activate=(lambda item=entry: navigation.push(
+                           _license_text_page(item, licenses_root))))
+        body.append(row)
+    header = compact_header(navigation.pop, 'Open-source licenses',
+                            app_name)
+    sheet = _adw().NavigationPage.new(page(header, body),
+                                   'Open-source licenses')
+    return sheet
+
+
+def about_content(app_name: str, version: str, entries: list,
+                  on_licenses) -> Gtk.Box:
+    """An 'About' section body: the app name and version, the app
+    license line, and an 'Open-source licenses' row."""
+    root = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+    root.append(section_label('About'))
+    root.append(setting_row(app_name, 'Version %s' % version))
+    spdx = entries[0].spdx if entries else ''
+    root.append(setting_row('License', spdx))
+    root.append(list_row('Open-source licenses',
+                         '%d components' % len(entries),
+                         trailing=icon_image('go-next-symbolic'),
+                         on_activate=on_licenses, last=True))
+    return root
+
+
+def show_licenses_dialog(parent: Gtk.Window, app_name: str,
+                         entries: list,
+                         licenses_root: str = LICENSES_ROOT) -> None:
+    """The licenses page as a dialog (for pages without a
+    NavigationView): rows open each license text in place."""
+    dialog = Gtk.Dialog(title='Open-source licenses - %s' % app_name,
+                        transient_for=parent, modal=True)
+    dialog.add_css_class('xx-dialog')
+    area = dialog.get_content_area()
+    area.set_spacing(8)
+    stack = Gtk.Stack()
+    stack.set_vexpand(True)
+    area.append(stack)
+    listing = Gtk.Box.new(Gtk.Orientation.VERTICAL, 8)
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scroll.set_vexpand(True)
+    scroll.set_child(listing)
+    stack.add_named(scroll, 'listing')
+    for entry in entries:
+        sheet = _license_text_page(entry, licenses_root)
+        stack.add_named(sheet.get_child(), entry.name)
+        listing.append(list_row(
+            entry.name, entry.spdx,
+            trailing=icon_image('go-next-symbolic'),
+            on_activate=(lambda name=entry.name:
+                         stack.set_visible_child_name(name))))
+    back = Gtk.Button.new_with_label('Back')
+    back.connect('clicked',
+                 lambda _b: stack.set_visible_child_name('listing'))
+    close = Gtk.Button.new_with_label('Close')
+    close.connect('clicked', lambda _b: dialog.close())
+    actions = Gtk.Box.new(Gtk.Orientation.HORIZONTAL, 8)
+    actions.set_halign(Gtk.Align.END)
+    actions.append(back)
+    actions.append(close)
+    area.append(actions)
+    dialog.set_default_size(340, 600)
+    dialog.present()

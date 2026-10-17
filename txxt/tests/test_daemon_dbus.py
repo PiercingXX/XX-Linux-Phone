@@ -525,7 +525,9 @@ def test_send_through_real_bus_lands_in_store_and_retry(tmp_path):
         pytest.skip("dbus-run-session is not installed")
     helper = tmp_path / "daemon_bus_helper.py"
     helper.write_text(_HELPER)
-    env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+    env = {**os.environ,
+           "PYTHONPATH": os.pathsep.join(
+               (str(ROOT / "src"), str(ROOT.parent / "common")))}
     proc = subprocess.run(
         ["dbus-run-session", "--", sys.executable, str(helper),
          str(ROOT / "src"), str(tmp_path / "txxt.db")],

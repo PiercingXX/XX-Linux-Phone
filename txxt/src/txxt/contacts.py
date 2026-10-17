@@ -285,16 +285,25 @@ class ContactsResolver:
                 return hit
         return ContactHit(number=number)
 
-    def display_name(self, number: str) -> str:
-        """Never blank: contact name when known, else the formatted number."""
+    def contact_name(self, number: str) -> str:
+        """Saved display name for ``number``, or ``""`` when none is saved.
+
+        Never formatted: callers apply the display rule at render time so
+        a country change shows at the next redraw.
+        """
         try:
             hit = self.lookup(number)
         except Exception:
             hit = None
         if hit is not None:
-            name = (hit.name or "").strip()
-            if name:
-                return name
+            return (hit.name or "").strip()
+        return ""
+
+    def display_name(self, number: str) -> str:
+        """Never blank: contact name when known, else the formatted number."""
+        name = self.contact_name(number)
+        if name:
+            return name
         try:
             from txxt import phone_numbers as _phones
 
@@ -373,6 +382,10 @@ class DisplayNameCache:
     number, never D-Bus) so a D-Bus-activated contacts service (~1 s
     first call) never blocks the list render. Misses resolve on a worker
     thread and post back via the caller's idle callback.
+
+    Only saved names are cached — "no saved name" is cached as its own
+    blank value and the number is formatted at display time (never the
+    formatted string), so a country change shows at the next redraw.
     """
 
     def __init__(self, resolver=None, now=None, ttl_s: float = 60) -> None:
@@ -388,6 +401,10 @@ class DisplayNameCache:
 
     def set_resolver(self, resolver) -> None:
         self._resolver = resolver
+        try:
+            self._cache.clear()
+        except Exception:
+            pass
 
     @staticmethod
     def _key(number: str) -> str:
@@ -411,28 +428,52 @@ class DisplayNameCache:
                     fresh = (self._now() - stamp) < self._ttl
                 except Exception:
                     fresh = True
-                if fresh and name.strip():
+                if fresh and (name or "").strip():
                     return name
+        return self._format(number)
+
+    def resolve_blocking(self, number: str) -> str:
+        key = self._key(number)
+        if key:
+            cached = self._cache.get(key)
+            if cached is not None:
+                name, stamp = cached
+                try:
+                    fresh = (self._now() - stamp) < self._ttl
+                except Exception:
+                    fresh = True
+                if fresh:
+                    return (name or "").strip() or self._format(number)
+        name = ""
+        resolver = self._resolver
+        if resolver is not None:
+            try:
+                if hasattr(resolver, "contact_name"):
+                    name = resolver.contact_name(number)
+                else:
+                    name = resolver.display_name(number)
+            except Exception:
+                name = ""
+        name = (name or "").strip()
+        try:
+            self._cache[key] = (name, self._now())
+        except Exception:
+            pass
+        return name or self._format(number)
+
+    @staticmethod
+    def _format(number: str) -> str:
         try:
             from txxt import phone_numbers as _phones
 
-            formatted = _phones.format_display_number(number)
+            formatted = _phones.format_display_configured(number)
         except Exception:
             formatted = ""
         return formatted or number
 
-    def resolve_blocking(self, number: str) -> str:
-        try:
-            display = self._resolver.display_name(number) if self._resolver else number
-        except Exception:
-            display = number
-        if not (display or "").strip():
-            display = number
-        try:
-            self._cache[self._key(number)] = (display, self._now())
-        except Exception:
-            pass
-        return display
+    def cached_count(self) -> int:
+        """Number of cached answers — the cache's observable behaviour."""
+        return len(self._cache)
 
     def invalidate(self, number: str | None = None) -> None:
         if number is None:

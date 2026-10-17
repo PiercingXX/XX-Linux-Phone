@@ -8,7 +8,6 @@ from xx_contacts.detail import (
     get_call_history,
     maps_uri,
 )
-from xx_contacts.phones import format_display_number
 from xx_contacts.store import (
     AddressEntry,
     ContactData,
@@ -68,7 +67,7 @@ def test_numbers_show_spaced_but_dial_raw():
                   if s.key == "phones")
     first, second = phones.fields
     assert " " in first.display
-    assert first.display == "+1 555 010 0200"
+    assert first.display == "+1 555-010-0200"
     assert second.display.startswith("+44 ")
     kinds = {a.kind: a.uri for a in first.actions}
     assert kinds["call"] == "tel:+15550100200"
@@ -121,14 +120,16 @@ def test_call_history_stays_hidden():
     assert get_call_history("no-such-uid") == []
 
 
-def test_format_display_number_grouping():
-    assert format_display_number("+15550100200") == "+1 555 010 0200"
-    assert format_display_number("+1 (555) 010-0200") == "+1 555 010 0200"
-    assert format_display_number("+447700900123") == "+44 770 090 0123"
-    assert format_display_number("+358401234567") == "+358 401 234 567"
-    assert format_display_number("911") == "911"
-    assert format_display_number("") == ""
-    assert format_display_number(None) == ""
+def test_numbers_follow_the_shared_display_rule():
+    import xx_phone
+
+    assert xx_phone.display("+15550100200", "US") == "+1 555-010-0200"
+    assert xx_phone.display("+1 (555) 010-0200", "US") == "+1 555-010-0200"
+    assert xx_phone.display("+447700900123", "US") == "+44 7700 900123"
+    assert xx_phone.display("+358401234567", "US") == "+358 40 1234567"
+    assert xx_phone.display("911", "US") == "911"
+    assert xx_phone.display("", "US") == ""
+    assert xx_phone.display(None, "US") == ""
 
 
 def test_format_address_and_maps_uri():

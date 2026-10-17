@@ -90,42 +90,6 @@ def normalize(raw: str | None, default_region: str = "US") -> tuple[str, str | N
     return digits, to_e164(raw, default_region)
 
 
-def _group_national(national: str) -> str:
-    """Space-group a national digit string for reading (3-3-rest)."""
-    chunks: list[str] = []
-    rest = national
-    while len(rest) > 4:
-        chunks.append(rest[:3])
-        rest = rest[3:]
-    chunks.append(rest)
-    return " ".join(chunks)
-
-
-def format_display_number(raw: str | None, default_region: str = "US") -> str:
-    """Readable spacing for a stored number; dialing keeps raw E.164.
-
-    NANP numbers render as ``+1 555 010 0200``; other regions render the
-    country code plus space-grouped national digits (``+44 770 090 0123``).
-    Anything without a derivable E.164 comes back stripped but unchanged,
-    so short codes and unparseable input never vanish from the UI.
-    """
-    if not raw or not raw.strip():
-        return ""
-    e164 = to_e164(raw, default_region)
-    if e164 is None:
-        return raw.strip()
-    digits = e164[1:]
-    region = (default_region or "US").upper()
-    if region in NANP_REGIONS and digits.startswith("1") and len(digits) == 11:
-        national = digits[1:]
-        return f"+1 {national[:3]} {national[3:6]} {national[6:]}"
-    for code in sorted({*COUNTRY_CALLING_CODES.values(), "1"},
-                       key=len, reverse=True):
-        if digits.startswith(code) and len(digits) > len(code):
-            return f"+{code} {_group_national(digits[len(code):])}"
-    return f"+{_group_national(digits)}"
-
-
 @dataclass
 class IndexedNumber:
     uid: str

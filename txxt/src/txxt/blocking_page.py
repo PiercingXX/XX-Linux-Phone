@@ -196,6 +196,26 @@ class BlockingPage(Adw.NavigationPage):
     def set_resolver(self, resolver) -> None:
         self._resolver = resolver
 
+    def _entry_label(self, kind: str, value: str) -> str:
+        """Blocked-sender rows read through the display rule (saved name
+        when known, else the formatted number); keywords and phrases are
+        match text and stay verbatim."""
+        if kind != 'sender':
+            return value
+        if self._resolver is not None:
+            try:
+                name = self._resolver.display_name(value)
+                if (name or '').strip():
+                    return name
+            except Exception:
+                pass
+        try:
+            from txxt import phone_numbers as _phones
+
+            return _phones.format_display_configured(value) or value
+        except Exception:
+            return value
+
     def _on_back(self) -> None:
         try:
             self._navigation.pop()
@@ -236,7 +256,8 @@ class BlockingPage(Adw.NavigationPage):
                     break
                 rows.remove(row)
             for _kind, value in sorted(pairs, key=lambda pair: pair[1].lower()):
-                label = widgets.label(value, 'xx-title')
+                label = widgets.label(self._entry_label(kind, value),
+                                      'xx-title')
                 label.set_hexpand(True)
                 remove = widgets.text_button('Remove')
                 remove.connect('clicked', self._on_remove_clicked, kind, value)

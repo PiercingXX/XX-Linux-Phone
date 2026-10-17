@@ -83,7 +83,7 @@ def test_display_preview_falls_back():
 def test_phone_preview_uses_normalization():
     assert editor.phone_preview("") == ""
     shown = editor.phone_preview("+1 555 010 0200")
-    assert "+1 555 010 0200" in shown
+    assert "+1 555-010-0200" in shown
     assert "+15550100200" in shown
 
 

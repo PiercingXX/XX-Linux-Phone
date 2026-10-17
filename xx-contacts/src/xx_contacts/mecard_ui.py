@@ -22,6 +22,7 @@ import threading  # noqa: E402
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
+import xx_phone  # noqa: E402
 from xx_contacts import avatar as avatar_module  # noqa: E402
 from xx_contacts import detail as detail_model  # noqa: E402
 from xx_contacts import mecard as mecard_module  # noqa: E402
@@ -149,7 +150,9 @@ class MeCardPage(Adw.NavigationPage):
             return False
         self._me_uid = record.uid
         title = detail_model.detail_title(record)
-        self._name.set_text(title)
+        shown = xx_phone.display(title, xx_phone.display_country(
+            self._region))
+        self._name.set_text(shown)
         self._empty.set_visible(False)
         avatar_module.set_avatar(
             self._avatar_image, self._avatar_fallback, title,

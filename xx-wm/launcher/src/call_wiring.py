@@ -1,6 +1,30 @@
 from __future__ import annotations
 
 
+#: Screening reasons that mean "unknown caller, allowed to ring" (the
+#: dialer's ``Tone.UNKNOWN`` rings plus the observe-week unknowns); the
+#: ringer plays ``unknown.ogg`` for these, ``ringtone.ogg`` otherwise.
+#: Strings mirror the dialer verdict reasons on the CheckNumber reply.
+UNKNOWN_RING_REASONS = frozenset({
+    "unknown caller",
+    "you called them Tue",
+    "repeat caller",
+    "rang · expecting a call",
+    "Unknown, outside 09–17",
+    "silenced by pattern",
+})
+
+
+def ringer_tone_for(verdict: str, reason: str) -> str:
+    """Sound file for a ringing verdict: the unknown-caller tone when
+    the dialer's screening verdict says the caller is unknown but
+    allowed to ring, else the default ringtone."""
+    if (verdict or "").strip().lower() == "ring" and \
+            (reason or "").strip() in UNKNOWN_RING_REASONS:
+        return "unknown.ogg"
+    return "ringtone.ogg"
+
+
 class CallWiring:
     """Call/telephony glue for ShellWindow.
 
@@ -152,7 +176,8 @@ class CallWiring:
                 # sound loop only when it is absent — owned by the
                 # surface, stopped on every terminal path.
                 try:
-                    call_ui.start_ringing()
+                    call_ui.start_ringing(
+                        ringer_tone_for(verdict, reason))
                 except Exception:
                     pass
 

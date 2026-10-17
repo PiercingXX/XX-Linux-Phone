@@ -737,7 +737,14 @@ class InboundPipeline:
                 return self._contacts.display_name(number)
             except Exception:
                 pass
-        return number
+        try:
+            from txxt import phone_numbers as _phones
+
+            settings = self._settings() if self._settings else None
+            return _phones.format_display_configured(number,
+                                                     settings) or number
+        except Exception:
+            return number
 
     def _posture(self) -> tuple[str, str]:
         """(lock_screen_privacy, alert_style) from settings, defaults kept."""

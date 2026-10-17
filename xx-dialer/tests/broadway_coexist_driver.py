@@ -84,7 +84,11 @@ def _wait_owned(bus, timeout_s: float = 25.0) -> bool:
 def main() -> int:
     env = dict(os.environ)
     env["HOME"] = str(HOME)
-    env["PYTHONPATH"] = SRC
+    common = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "..", "..", "common")
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (SRC, common, env.get("PYTHONPATH", ""))
+        if part)
     service = subprocess.Popen(
         [sys.executable, "-m", "xx_dialer", "--service"], env=env)
     try:

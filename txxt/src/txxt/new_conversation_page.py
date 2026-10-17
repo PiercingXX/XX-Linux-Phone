@@ -110,8 +110,17 @@ class NewConversationPage(Adw.NavigationPage):
                 break
             self._rows.remove(row)
         for hit in hits or []:
+            try:
+                from txxt import phone_numbers as _phones
+
+                title = _phones.format_display_configured(
+                    hit.display) or hit.display
+                subtitle = _phones.format_display_configured(
+                    hit.number) or hit.number
+            except Exception:
+                title, subtitle = hit.display, hit.number
             button = widgets.list_row(
-                hit.display, hit.number,
+                title, subtitle,
                 leading=widgets.avatar(_initials(hit.display), 40),
                 on_activate=self._on_hit_chosen(hit.number),
             )

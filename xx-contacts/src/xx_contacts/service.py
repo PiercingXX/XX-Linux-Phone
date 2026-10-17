@@ -212,6 +212,7 @@ class ContactsService:
         from gi.repository import GLib
 
         from xx_contacts import picker as picker_module
+        import xx_phone  # noqa: E402
 
         try:
             normalized = picker_module.normalize_kind(kind)
@@ -231,7 +232,8 @@ class ContactsService:
 
             show = picker_ui_module.present_pick_dialog
         rows = picker_module.build_pick_rows(
-            normalized, self._store.all_records())
+            normalized, self._store.all_records(),
+            xx_phone.display_country(self._default_region))
 
         def _on_settled(uid: str, value: str) -> None:
             pending, self._pending_pick = self._pending_pick, None

@@ -35,6 +35,8 @@ from pathlib import Path
 
 dialer_src, ref_src, home_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 sys.path.insert(0, dialer_src)
+sys.path.insert(0, os.path.join(
+    os.path.dirname(dialer_src), "..", "common"))
 home = Path(home_dir)
 
 from gi.repository import GLib, Gio
@@ -59,7 +61,12 @@ env["HOME"] = str(home)
 contacts_env = dict(env, PYTHONPATH=ref_src)
 contacts = subprocess.Popen(
     [sys.executable, "-m", "xx_contacts", "--service"], env=contacts_env)
-dialer_env = dict(env, PYTHONPATH=dialer_src)
+dialer_env = dict(
+    env,
+    PYTHONPATH=os.pathsep.join(
+        (str(dialer_src),
+         os.path.join(os.path.dirname(str(dialer_src)),
+                      "..", "common"))))
 dialer = subprocess.Popen(
     [sys.executable, "-m", "xx_dialer", "--service"], env=dialer_env)
 try:

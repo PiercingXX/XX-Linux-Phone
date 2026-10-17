@@ -103,8 +103,8 @@ class FakeRinger:
     def __init__(self):
         self.calls = []
 
-    def start(self):
-        self.calls.append('start')
+    def start(self, tone='ringtone.ogg'):
+        self.calls.append(('start', tone))
 
     def stop(self):
         self.calls.append('stop')

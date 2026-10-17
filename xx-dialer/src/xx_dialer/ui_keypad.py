@@ -22,7 +22,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
-from xx_dialer import contacts_client, policy, recents, t9  # noqa: E402
+import xx_phone  # noqa: E402
+from xx_dialer import contacts_client, policy, t9  # noqa: E402
 from xx_dialer.store import Store  # noqa: E402
 
 MAX_MATCHES = 6
@@ -316,7 +317,9 @@ class KeypadView:
         if self.buffer.digits:
             widgets.fit_text(
                 self._number,
-                recents.format_number(self.buffer.digits, region), 12)
+                xx_phone.as_you_type(
+                    self.buffer.digits,
+                    xx_phone.display_country(region)), 12)
         else:
             widgets.fit_text(self._number, "Enter number", 12)
         self._call.set_sensitive(self.buffer.can_call)
@@ -334,7 +337,8 @@ class KeypadView:
             button = Gtk.Button()
             button.add_css_class("xx-btn")
             button.add_css_class("xx-dialer-tight")
-            disp = recents.format_number(number, region)
+            disp = xx_phone.display(
+                number, xx_phone.display_country(region))
             shown = "%s · %s" % (name, disp) if name else disp
             text = Gtk.Label(label=shown, xalign=0.0)
             text.add_css_class("xx-title")
@@ -363,7 +367,8 @@ class KeypadView:
         number = top[1] if top is not None else saveable
         name = top[2] if top is not None else ""
         region = self._region()
-        shown = recents.format_number(number, region)
+        shown = xx_phone.display(
+            number, xx_phone.display_country(region))
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                       spacing=12)
         row.set_valign(Gtk.Align.CENTER)

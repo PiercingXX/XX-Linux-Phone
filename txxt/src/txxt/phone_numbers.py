@@ -13,8 +13,9 @@ compare by exact trimmed-lowercase equality only.
 A normalized MATCH key and the ADDRESS you dial are different things.
 :func:`conversation_key` is digits-only for matching; :func:`canonical_dialable`
 is the E.164 address ModemManager must dial (never send to a key).
-:func:`format_display_number` mirrors xx-contacts ``phones.format_display_number``
-for UI surfaces only.
+UI surfaces show numbers through the shared ``xx_phone.display`` rule
+(national form at home, otherwise international) via
+:func:`format_display_configured`.
 """
 
 from __future__ import annotations
@@ -198,17 +199,6 @@ def should_replace_dialable(stored: str, candidate: str) -> bool:
     return False
 
 
-def _group_national(national: str) -> str:
-    """Space-group a national digit string for reading (3-3-rest)."""
-    chunks: list[str] = []
-    rest = national
-    while len(rest) > 4:
-        chunks.append(rest[:3])
-        rest = rest[3:]
-    chunks.append(rest)
-    return " ".join(chunks)
-
-
 def configured_region(settings=None) -> str:
     """Configured default region (upper-cased), ``US`` when unknown.
 
@@ -245,31 +235,16 @@ def canonical_dialable_configured(address: str, settings=None) -> str:
 
 
 def format_display_configured(raw: str | None, settings=None) -> str:
-    """Region-aware :func:`format_display_number` for UI surfaces."""
-    return format_display_number(raw, configured_region(settings))
+    """Display-only number text for UI surfaces; dialing keeps raw E.164.
 
-
-def format_display_number(raw: str | None, default_region: str = "US") -> str:
-    """Readable spacing for a stored number; dialing keeps raw E.164.
-
-    Mirrors xx-contacts ``phones.format_display_number``: NANP numbers
-    render as ``+1 555 010 0200``; other regions render the country code
-    plus space-grouped national digits (``+44 770 090 0123``). Anything
-    without a derivable E.164 comes back stripped but unchanged, so short
-    codes and unparseable input never vanish from the UI.
+    The shared ``xx_phone.display`` rule: the live user country
+    (network, then SIM, then locale) wins, the configured region is the
+    fallback. Anything that is not a complete valid number comes back
+    as it came in, so short codes never vanish from the UI.
     """
+    import xx_phone
+
     if not raw or not raw.strip():
         return ""
-    e164 = to_e164(raw, default_region)
-    if e164 is None:
-        return raw.strip()
-    digits = e164[1:]
-    region = (default_region or "US").upper()
-    if region in NANP_REGIONS and digits.startswith("1") and len(digits) == 11:
-        national = digits[1:]
-        return f"+1 {national[:3]} {national[3:6]} {national[6:]}"
-    for code in sorted({*COUNTRY_CALLING_CODES.values(), "1"},
-                       key=len, reverse=True):
-        if digits.startswith(code) and len(digits) > len(code):
-            return f"+{code} {_group_national(digits[len(code):])}"
-    return f"+{_group_national(digits)}"
+    return xx_phone.display(
+        raw, xx_phone.display_country(configured_region(settings)))

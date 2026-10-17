@@ -24,6 +24,7 @@ import threading  # noqa: E402
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
+import xx_phone  # noqa: E402
 from xx_contacts import avatar as avatar_module  # noqa: E402
 from xx_contacts import detail as detail_model  # noqa: E402
 from xx_contacts import mecard as mecard_module  # noqa: E402
@@ -189,8 +190,10 @@ class ContactDetailPage(Adw.NavigationPage):
             self._close_missing()
             return False
         title = detail_model.detail_title(record)
-        self.set_title(title)
-        self._name.set_text(title)
+        shown = xx_phone.display(title, xx_phone.display_country(
+            self._region))
+        self.set_title(shown)
+        self._name.set_text(shown)
         avatar_module.set_avatar(
             self._avatar_image, self._avatar_fallback, title,
             record.photo_path or None,

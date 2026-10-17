@@ -16,6 +16,15 @@ def _clean_xdg(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / ".cache"))
 
 
+@pytest.fixture(autouse=True)
+def _pin_display_country(monkeypatch):
+    """Display tests pin to the passed region: live network/SIM/locale
+    resolution is covered by common/tests/test_xx_phone.py."""
+    import xx_phone
+
+    monkeypatch.setattr(xx_phone, "user_country", lambda *a, **k: "")
+
+
 @pytest.fixture
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))

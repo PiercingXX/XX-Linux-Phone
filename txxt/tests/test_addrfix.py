@@ -52,33 +52,33 @@ class TestCanonicalDialable:
 
 
 class TestFormatDisplay:
-    def test_nanp_grouping(self):
-        assert phone_numbers.format_display_number("+15559998888") == "+1 555 999 8888"
-        assert phone_numbers.format_display_number("+15550100200") == "+1 555 010 0200"
+    def test_nanp_reads_nationally(self):
+        assert phone_numbers.format_display_configured(
+            "+16145550142") == "(614) 555-0142"
+        assert phone_numbers.format_display_configured(
+            "6145550142") == "(614) 555-0142"
 
-    def test_uk_grouping_matches_xx_contacts(self):
-        assert phone_numbers.format_display_number("+447700900123") == "+44 770 090 0123"
+    def test_foreign_numbers_keep_their_country_code(self):
+        assert phone_numbers.format_display_configured(
+            "+442079460958") == "+44 20 7946 0958"
+
+    def test_unparseable_numbers_come_back_as_they_came(self):
+        assert phone_numbers.format_display_configured(
+            "+15550100200") == "+1 555-010-0200"
+        assert phone_numbers.format_display_configured(
+            "+447700900123") == "+44 7700 900123"
 
     def test_short_and_empty_passthrough(self):
-        assert phone_numbers.format_display_number("911") == "911"
-        assert phone_numbers.format_display_number("") == ""
-        assert phone_numbers.format_display_number(None) == ""
+        assert phone_numbers.format_display_configured("911") == "911"
+        assert phone_numbers.format_display_configured("22395") == "22395"
+        assert phone_numbers.format_display_configured("AMAZON") == "AMAZON"
+        assert phone_numbers.format_display_configured("*86") == "*86"
+        assert phone_numbers.format_display_configured("") == ""
+        assert phone_numbers.format_display_configured(None) == ""
 
-    def test_matches_reference_when_available(self):
-        ref_phones = REF_SRC / "xx_contacts" / "phones.py"
-        if not ref_phones.exists():
-            pytest.skip("ref/xx-contacts is missing")
-        for raw in ("+15550100200", "+447700900123", "911"):
-            sys.path.insert(0, str(REF_SRC))
-            try:
-                from xx_contacts import phones as ref_phones_mod
-
-                assert phone_numbers.format_display_number(raw) == (
-                    ref_phones_mod.format_display_number(raw)
-                )
-            finally:
-                if str(REF_SRC) in sys.path:
-                    sys.path.remove(str(REF_SRC))
+    def test_home_country_follows_the_user(self):
+        assert phone_numbers.format_display_configured(
+            "+442079460958", "GB") == "020 7946 0958"
 
 
 def make_v6_db(path: str) -> None:
@@ -319,7 +319,7 @@ class TestDisplayCache:
         })
         resolver = ContactsResolver([backend])
         cache = DisplayNameCache(resolver, now=lambda: 0.0)
-        assert cache.fast("+15550100200") == "+1 555 010 0200"
+        assert cache.fast("+15550100200") == "+1 555-010-0200"
         assert cache.resolve_blocking("+15550100200") == "Grace Hopper"
         assert cache.fast("+15550100200") == "Grace Hopper"
 
@@ -332,7 +332,7 @@ class TestDisplayCache:
         cache = DisplayNameCache(resolver, now=lambda: now[0])
         assert cache.resolve_blocking("+15550100200") == "Grace Hopper"
         now[0] += 61.0
-        assert cache.fast("+15550100200") == "+1 555 010 0200"
+        assert cache.fast("+15550100200") == "+1 555-010-0200"
 
         class Params:
             def unpack(self):
@@ -340,7 +340,109 @@ class TestDisplayCache:
 
         cache.resolve_blocking("+15550100200")
         cache.handle_contacts_changed(None, None, None, None, None, Params(), None)
-        assert cache.fast("+15550100200") == "+1 555 010 0200"
+        assert cache.fast("+15550100200") == "+1 555-010-0200"
+
+    def test_unsaved_number_shows_formatted_and_format_runs_on_every_read(
+            self):
+        queries = []
+
+        class CountingBackend(DictBackend):
+            def lookup(self, number):
+                queries.append(number)
+                return None
+
+        cache = DisplayNameCache(ContactsResolver([CountingBackend()]),
+                                 now=lambda: 0.0)
+        assert cache.resolve_blocking("+16145550101") == "(614) 555-0101"
+        assert cache.fast("+16145550101") == "(614) 555-0101"
+        assert cache.cached_count() == 1
+        import xx_phone
+
+        real_display = xx_phone.display
+        try:
+            xx_phone.display = (lambda raw, country=None:
+                                "+1 614-555-0101")
+            assert cache.fast("+16145550101") == "+1 614-555-0101"
+        finally:
+            xx_phone.display = real_display
+        assert queries == ["+16145550101"], queries
+
+    def test_saved_name_is_never_run_through_the_formatter(self):
+        backend = DictBackend(hits={
+            "+16145550101": ContactHit("+16145550101", "uid-a",
+                                       "Ada Lovelace", ()),
+        })
+        cache = DisplayNameCache(ContactsResolver([backend]),
+                                 now=lambda: 0.0)
+        real_configured = phone_numbers.format_display_configured
+        try:
+            def _boom(raw, settings=None):
+                raise AssertionError("names are not numbers")
+
+            phone_numbers.format_display_configured = _boom
+            assert cache.resolve_blocking("+16145550101") == "Ada Lovelace"
+            assert cache.fast("+16145550101") == "Ada Lovelace"
+        finally:
+            phone_numbers.format_display_configured = real_configured
+
+    def test_throwing_backend_shows_the_number(self):
+        class ThrowingBackend(DictBackend):
+            def lookup(self, number):
+                raise OSError("dead provider")
+
+        cache = DisplayNameCache(ContactsResolver([ThrowingBackend()]),
+                                 now=lambda: 0.0)
+        assert cache.resolve_blocking("+16145550101") == "(614) 555-0101"
+        assert cache.fast("+16145550101") == "(614) 555-0101"
+
+    def test_failing_formatter_leaves_the_raw_address(self):
+        cache = DisplayNameCache(ContactsResolver([DictBackend()]),
+                                 now=lambda: 0.0)
+        real_configured = phone_numbers.format_display_configured
+        try:
+            def _boom(raw, settings=None):
+                raise RuntimeError("no telephony")
+
+            phone_numbers.format_display_configured = _boom
+            assert cache.resolve_blocking("+16145550101") == "+16145550101"
+        finally:
+            phone_numbers.format_display_configured = real_configured
+
+    def test_non_numeric_sender_keeps_its_own_cache_entry(self):
+        backend = DictBackend(hits={
+            "MYBANK": ContactHit("MYBANK", "uid-m", "My Bank", ()),
+        })
+        cache = DisplayNameCache(ContactsResolver([backend]),
+                                 now=lambda: 0.0)
+        assert cache.resolve_blocking("MYBANK") == "My Bank"
+        assert cache.resolve_blocking("VERIFY") == "VERIFY"
+        assert cache.cached_count() == 2
+
+    def test_swapping_the_provider_invalidates_cached_answers(self):
+        cache = DisplayNameCache(
+            ContactsResolver([DictBackend(hits={
+                "+15550001111": ContactHit("+15550001111", "uid-a",
+                                           "Ada Lovelace", ()),
+            })]), now=lambda: 0.0)
+        assert cache.resolve_blocking("+15550001111") == "Ada Lovelace"
+        cache.set_resolver(ContactsResolver([DictBackend()]))
+        assert cache.resolve_blocking("+15550001111") == "+1 555-000-1111"
+
+    def test_formatting_variance_shares_one_cache_entry(self):
+        queries = []
+
+        class CountingBackend(DictBackend):
+            def lookup(self, number):
+                queries.append(number)
+                return ContactHit(number, "uid-a", "Ada Lovelace", ())
+
+        cache = DisplayNameCache(ContactsResolver([CountingBackend()]),
+                                 now=lambda: 0.0)
+        assert cache.resolve_blocking("+15550001111") == "Ada Lovelace"
+        assert cache.resolve_blocking("  +1 (555) 000-1111  ") == \
+            "Ada Lovelace"
+        assert len(queries) == 1, queries
+        assert cache.cached_count() == 1
 
 
 def _free_display():

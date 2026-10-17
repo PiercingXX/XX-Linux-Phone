@@ -24,8 +24,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
+import xx_phone  # noqa: E402
+import xx_dialer  # noqa: E402
 from xx_dialer import config as app_config  # noqa: E402
-from xx_dialer import importers, masks, policy, recents, rules  # noqa: E402
+from xx_dialer import importers, masks, policy, rules  # noqa: E402
 from xx_dialer.service import PolicyService  # noqa: E402
 from xx_dialer.store import BLOCKED_GROUP, PatternRow, Store  # noqa: E402
 
@@ -491,7 +493,18 @@ class RulesView:
         self._clear_log.connect("clicked", self._on_clear_log)
         log.append(self._clear_log)
 
+        self._about_entries = widgets.standard_license_entries("Dialer")
+        self._body.append(widgets.about_content(
+            "Dialer", getattr(xx_dialer, "__version__", "?"),
+            self._about_entries, self._on_licenses))
+
         self._page = widgets.page(header, self._body)
+
+    def _on_licenses(self) -> None:
+        parent = self._root.get_root()
+        if isinstance(parent, Gtk.Window):
+            widgets.show_licenses_dialog(parent, "Dialer",
+                                         self._about_entries)
 
     @staticmethod
     def _window_button(title: str) -> tuple[Gtk.Button, Gtk.Label]:
@@ -692,7 +705,8 @@ class RulesView:
             line.add_css_class("xx-row")
             line.set_valign(Gtk.Align.CENTER)
             text = Gtk.Label(
-                label=recents.format_number(number, region),
+                label=xx_phone.display(
+                    number, xx_phone.display_country(region)),
                 xalign=0.0, hexpand=True)
             text.add_css_class("xx-title")
             text.set_ellipsize(Pango.EllipsizeMode.END)
@@ -735,7 +749,8 @@ class RulesView:
             line = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                            spacing=0)
             line.add_css_class("xx-row")
-            who = recents.format_number(entry.e164, region) \
+            who = xx_phone.display(
+                entry.e164, xx_phone.display_country(region)) \
                 if entry.e164 else "hidden"
             head = Gtk.Label(
                 label="%s · %s" % (glyph, who),

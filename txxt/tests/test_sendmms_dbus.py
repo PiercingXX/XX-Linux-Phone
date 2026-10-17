@@ -296,7 +296,8 @@ def test_sendmms_against_fake_mmsd_service(tmp_path):
     helper.write_text(_HELPER)
     env = {
         **os.environ,
-        "PYTHONPATH": str(ROOT / "src"),
+        "PYTHONPATH": os.pathsep.join(
+            (str(ROOT / "src"), str(ROOT.parent / "common"))),
         "XDG_DATA_HOME": str(tmp_path / "data"),
         "XDG_CACHE_HOME": str(tmp_path / "cache"),
     }

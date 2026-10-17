@@ -14,6 +14,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
+import xx_phone
+
 from xx_contacts import phones as phones_module
 from xx_contacts.detail import human_type_label
 from xx_contacts.store import ContactData
@@ -195,7 +197,7 @@ def phone_preview(number: str, default_region: str = "US") -> str:
     raw = (number or "").strip()
     if not raw:
         return ""
-    shown = phones_module.format_display_number(raw, default_region)
+    shown = xx_phone.display(raw, xx_phone.display_country(default_region))
     e164 = phones_module.to_e164(raw, default_region)
     if e164 and e164 != shown:
         return f"{shown} ({e164})"

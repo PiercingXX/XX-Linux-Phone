@@ -295,7 +295,8 @@ def _wiring_win(events, consult=None, hangups=None, notes=None,
 
     call_ui = SimpleNamespace(
         show_incoming=lambda c, n: shown.append(('incoming', c, n)),
-        start_ringing=lambda: shown.append('ring'),
+        start_ringing=lambda tone='ringtone.ogg': shown.append(
+            ('ring', tone)),
         stop_ringing=lambda: shown.append('stop-ring'),
         end_call=lambda: shown.append('end-call'),
         show_active=lambda c, n: shown.append(('active', c, n)),
@@ -337,6 +338,41 @@ def _ensure_settings_page():
     return settings_page
 
 
+class TestRingerTone:
+    def test_unknown_rings_use_the_unknown_tone(self):
+        for reason in ("unknown caller", "you called them Tue",
+                       "repeat caller", "rang · expecting a call",
+                       "Unknown, outside 09–17", "silenced by pattern"):
+            assert call_wiring.ringer_tone_for("ring", reason) == \
+                "unknown.ogg", reason
+
+    def test_known_and_fallback_rings_use_the_default_tone(self):
+        for reason in ("saved contact", "starred", "business",
+                       "emergency callback", "fail-open", "ok",
+                       "Unknown, outside business window"):
+            assert call_wiring.ringer_tone_for("ring", reason) == \
+                "ringtone.ogg", reason
+
+    def test_non_ring_verdicts_use_the_default_tone(self):
+        assert call_wiring.ringer_tone_for("silence",
+                                           "unknown caller") == \
+            "ringtone.ogg"
+        assert call_wiring.ringer_tone_for("block", "blocked") == \
+            "ringtone.ogg"
+
+    def test_unknown_verdict_rings_unknown_tone(self, monkeypatch):
+        import modem_monitor
+        events = []
+        win, _ui, fake_consult, _box = _wiring_win(
+            events, consult=('ring', 'unknown caller'))
+        monkeypatch.setattr(modem_monitor, 'bus_name_has_owner',
+                            lambda _n: False)
+        monkeypatch.setattr(call_screen, 'consult_check_number',
+                            fake_consult)
+        call_wiring.CallWiring(win)._on_call_incoming('Mom', '+15550001111')
+        assert ('ring', 'unknown.ogg') in events
+
+
 class TestWiringVerdicts:
     def test_ring_starts_ringer(self, monkeypatch):
         import modem_monitor
@@ -348,7 +384,7 @@ class TestWiringVerdicts:
                             fake_consult)
         call_wiring.CallWiring(win)._on_call_incoming('Mom', '+15550001111')
         assert ('incoming', 'Mom', '+15550001111') in events
-        assert 'ring' in events
+        assert ('ring', 'ringtone.ogg') in events
         assert box['number'] == '+15550001111'
 
     def test_silence_never_rings(self, monkeypatch):
@@ -591,7 +627,7 @@ class TestLateVerdicts:
         monkeypatch.setattr(modem_monitor, '_last_monitor',
                             SimpleNamespace(calls=lambda: [ringing]))
         box['callback']('ring', 'saved contact')
-        assert 'ring' in events
+        assert ('ring', 'ringtone.ogg') in events
 
 
 class TestDisplayNames:
@@ -821,7 +857,7 @@ print("SHELL-CONSULT-OK %s %s" % result["verdict"])
 _ACTIVATION_WRAPPER = """\
 #!/bin/sh
 export HOME={home!r}
-export PYTHONPATH={src!r}
+export PYTHONPATH={src!r}:{common!r}
 exec {exe!r} -m xx_dialer --service
 """
 
@@ -860,8 +896,9 @@ def test_shell_consult_activates_real_service(tmp_path):
         '[D-BUS Service]\nName=%s\n'
         'Exec=%s\n' % (dialer_bus_name, tmp_path / 'run-service.sh'))
     (tmp_path / 'run-service.sh').write_text(
-        _ACTIVATION_WRAPPER.format(home=str(home), src=dialer_src,
-                                   exe=sys.executable))
+        _ACTIVATION_WRAPPER.format(
+            home=str(home), src=dialer_src, exe=sys.executable,
+            common=str(Path(dialer_src).parent.parent / 'common')))
     (tmp_path / 'run-service.sh').chmod(0o755)
     launcher_src = str(Path(__file__).parent.parent / 'launcher' / 'src')
     driver = tmp_path / 'shell_consult_driver.py'

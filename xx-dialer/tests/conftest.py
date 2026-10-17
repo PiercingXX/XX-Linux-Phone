@@ -56,3 +56,12 @@ def private_bus(tmp_path_factory):
 def _isolated_xdg_config(tmp_path_factory, monkeypatch):
     """Never read the developer's real ~/.config/xx-wm theme."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg")))
+
+
+@pytest.fixture(autouse=True)
+def _pin_display_country(monkeypatch):
+    """Display tests pin to the passed region: live network/SIM/locale
+    resolution is covered by common/tests/test_xx_phone.py."""
+    import xx_phone
+
+    monkeypatch.setattr(xx_phone, "user_country", lambda *a, **k: "")

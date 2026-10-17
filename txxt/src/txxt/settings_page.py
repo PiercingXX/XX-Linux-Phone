@@ -24,6 +24,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 
 import xx_ui  # noqa: E402
 from xx_ui import widgets  # noqa: E402
+import txxt  # noqa: E402
 from txxt import settings as settings_mod  # noqa: E402
 from txxt.conversations import tap_to_focus  # noqa: E402
 
@@ -141,6 +142,11 @@ class SettingsPage(Adw.NavigationPage):
             on_activate=self._on_quarantine_activated, last=True)
         filtering.append(self._quarantine_row)
         body.append(filtering)
+
+        body.append(widgets.about_content(
+            'TxxT', getattr(txxt, '__version__', '?'),
+            widgets.standard_license_entries('TxxT'),
+            self._on_licenses_activated))
 
         self.set_child(widgets.page(header, body, None))
         self._sync_manual_sensitivity()
@@ -309,6 +315,14 @@ class SettingsPage(Adw.NavigationPage):
                 self._on_open_quarantine()
             except Exception:
                 pass
+
+    def _on_licenses_activated(self) -> None:
+        try:
+            self._navigation.push(widgets.licenses_page(
+                self._navigation, 'TxxT',
+                widgets.standard_license_entries('TxxT')))
+        except Exception:
+            pass
 
 
 def _retitle(row_button: Gtk.Button, title: str, subtitle: str) -> None:

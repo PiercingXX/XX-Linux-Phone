@@ -23,6 +23,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GObject, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
+import xx_phone  # noqa: E402
 from xx_dialer import contacts_client, policy, recents  # noqa: E402
 from xx_dialer.store import (  # noqa: E402
     CALL_TYPE_INCOMING,
@@ -192,8 +193,9 @@ class RecentsController:
                 item.kind = "header"
                 item.identity = grouped.identity
                 item.title = recents.display_name_of(first, region)
-                item.number = recents.format_number(
-                    grouped.identity, region)
+                item.number = xx_phone.display(
+                    grouped.identity,
+                    xx_phone.display_country(region))
                 item.count = len(grouped.calls)
                 item.expanded = grouped.expanded
                 item.date = first.time_ms
@@ -214,8 +216,9 @@ class RecentsController:
         item.row_id = call.key
         item.date = call.time_ms
         item.title = recents.display_name_of(call, region)
-        item.number = recents.format_number(
-            call.e164 or call.raw, region)
+        item.number = xx_phone.display(
+            call.e164 or call.raw,
+            xx_phone.display_country(region))
         item.when = recents.format_when(call.time_ms, now_ms,
                                         self._local_tz())
         item.chip = recents.direction_chip(call)
@@ -327,8 +330,8 @@ class RecentsController:
         except Exception:
             self._notice("Could not copy the number.")
             return
-        self._notice("Copied %s" % recents.format_number(
-            number, self._region()))
+        self._notice("Copied %s" % xx_phone.display(
+            number, xx_phone.display_country(self._region())))
 
     def add_contact(self, call: recents.MergedCall) -> None:
         number = self._dialable(call)
@@ -375,8 +378,8 @@ class RecentsController:
                         number, self._region()) or number)
             except Exception:
                 pass
-        self._notice("Blocked %s" % recents.format_number(
-            number, self._region()))
+        self._notice("Blocked %s" % xx_phone.display(
+            number, xx_phone.display_country(self._region())))
         self.load()
 
     def ring_next_time(self, call: recents.MergedCall) -> None:
@@ -817,7 +820,8 @@ class RecentsView:
             from xx_dialer import t9
 
             region = self.controller._region()
-            shown = name or recents.format_number(e164, region)
+            shown = name or xx_phone.display(
+                e164, xx_phone.display_country(region))
             button = Gtk.Button()
             cell = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
@@ -843,8 +847,9 @@ class RecentsView:
         if deeplink is not None:
             self._deep_note.set_label(
                 "Showing calls with %s — show all"
-                % recents.format_number(
-                    deeplink, self.controller._region()))
+                % xx_phone.display(
+                    deeplink, xx_phone.display_country(
+                        self.controller._region())))
         empty = self._store.get_n_items() == 0
         self._empty.set_visible(empty)
         if empty:

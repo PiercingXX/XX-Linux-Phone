@@ -18,6 +18,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
+import xx_contacts  # noqa: E402
 
 
 class SettingsPage(Adw.NavigationPage):
@@ -57,7 +58,10 @@ class SettingsPage(Adw.NavigationPage):
                                   self._on_me_clicked))
         body.append(self._nav_row("Import/export",
                                   "vCard files and GNOME Contacts",
-                                  self._on_import_export_clicked,
+                                  self._on_import_export_clicked))
+        body.append(self._nav_row("About",
+                                  "Version and open-source licenses",
+                                  self._on_about_clicked,
                                   last=True))
 
         self.set_child(widgets.page(header, body))
@@ -100,6 +104,38 @@ class SettingsPage(Adw.NavigationPage):
         if self._alive:
             self._window.open_import_export()
 
+    def _on_about_clicked(self) -> None:
+        if self._alive:
+            self._navigation.push(AboutPage(self._navigation))
+
     def _on_back(self) -> None:
         self._alive = False
+        self._navigation.pop()
+
+
+class AboutPage(Adw.NavigationPage):
+    """Version, license and the open-source licenses page."""
+
+    APP_NAME = "Contacts"
+
+    def __init__(self, navigation: Adw.NavigationView) -> None:
+        super().__init__()
+        self._navigation = navigation
+        entries = widgets.standard_license_entries(self.APP_NAME)
+        version = getattr(xx_contacts, "__version__", "?")
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.add_css_class("xx-page-body")
+        body.set_valign(Gtk.Align.START)
+        body.append(widgets.about_content(
+            self.APP_NAME, version, entries, self._on_licenses))
+        header = widgets.compact_header(self._on_back, "About")
+        self.set_child(widgets.page(header, body))
+        self.set_title("About")
+
+    def _on_licenses(self) -> None:
+        self._navigation.push(widgets.licenses_page(
+            self._navigation, self.APP_NAME,
+            widgets.standard_license_entries(self.APP_NAME)))
+
+    def _on_back(self) -> None:
         self._navigation.pop()

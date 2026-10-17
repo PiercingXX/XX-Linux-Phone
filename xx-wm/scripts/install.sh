@@ -121,13 +121,14 @@ install_deps() {
         pkg_install py3-gobject3 gtk4.0 libadwaita gtk4-layer-shell \
             meson ninja rsync git squeekboard phoc lisgd wl-clipboard
         pkg_install py3-wayland
+        pkg_install py3-phonenumbers
         pkg_install geoclue
         pkg_install networkmanager
         pkg_install brightnessctl
     elif [ "$PKG" = pacman ]; then
         pkg_install python-gobject gtk4 libadwaita gtk4-layer-shell meson ninja \
             rsync git squeekboard phoc python-pywayland wl-clipboard geoclue \
-            networkmanager brightnessctl
+            networkmanager brightnessctl python-phonenumbers
         if command -v lisgd >/dev/null 2>&1; then
             echo "lisgd already present: $(command -v lisgd)"
         else
@@ -138,6 +139,7 @@ install_deps() {
             libgtk4-layer-shell0 meson ninja-build rsync git squeekboard \
             phoc lisgd wl-clipboard
         pkg_install python3-pywayland
+        pkg_install python3-phonenumbers
         pkg_install geoclue-2.0
         pkg_install network-manager
         pkg_install brightnessctl

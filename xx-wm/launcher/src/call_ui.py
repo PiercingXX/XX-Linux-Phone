@@ -401,9 +401,16 @@ def trigger_feedback_params(glib=None):
                         (_RINGER_APP_ID, _RINGER_EVENT, {}, 0))
 
 
-def _ringer_sound_play() -> None:
+#: Synthesized originals (see data/sounds/NOTICE-original-sounds.txt):
+#: the default ringtone, and the unknown-caller tone the dialer picks
+#: for unknown-but-allowed-to-ring verdicts (Android: xx_unknown).
+RINGTONE_DEFAULT = 'ringtone.ogg'
+RINGTONE_UNKNOWN = 'unknown.ogg'
+
+
+def _ringer_sound_play(name: str = RINGTONE_DEFAULT) -> None:
     import sound
-    sound.play('ringtone.ogg', loop=True)
+    sound.play(name, loop=True)
 
 
 def _ringer_sound_stop() -> None:
@@ -424,6 +431,7 @@ class Ringer:
         self._stop = stop
         self._feedback_id: int | None = None
         self._ringing = False
+        self._tone = RINGTONE_DEFAULT
 
     @property
     def ringing(self) -> bool:
@@ -441,7 +449,7 @@ class Ringer:
         if self._play is not None:
             self._play()
         else:
-            _ringer_sound_play()
+            _ringer_sound_play(self._tone)
 
     def _sound_stop(self) -> None:
         if self._stop is not None:
@@ -449,11 +457,12 @@ class Ringer:
         else:
             _ringer_sound_stop()
 
-    def start(self) -> None:
+    def start(self, tone: str = RINGTONE_DEFAULT) -> None:
         """Ring once; repeated starts while ringing are a no-op."""
         if self._ringing:
             return
         self._ringing = True
+        self._tone = tone or RINGTONE_DEFAULT
         bus = self._bus()
         if bus is None:
             self._sound_play()
@@ -1153,9 +1162,9 @@ class CallUI(Gtk.Window):
         self._page_footer(page)
         return page
 
-    def start_ringing(self) -> None:
+    def start_ringing(self, tone: str = RINGTONE_DEFAULT) -> None:
         """Start the incoming-call ringer (idempotent; window gates on DnD)."""
-        self._ringer.start()
+        self._ringer.start(tone)
 
     def stop_ringing(self) -> None:
         self._ringer.stop()

@@ -561,7 +561,14 @@ class ConversationListPage(Adw.NavigationPage):
         view = self._view_for(conversation_id)
         title = view.title if view is not None else "Conversation"
         address = view.address if view is not None else ""
-        dialog = Adw.AlertDialog.new(title, address or title)
+        try:
+            from txxt import phone_numbers as _phones
+
+            shown = _phones.format_display_configured(address)
+        except Exception:
+            shown = ""
+        dialog = Adw.AlertDialog.new(
+            title, shown if shown and shown != title else None)
         dialog.add_response("call", "Call")
         dialog.add_response("copy", "Copy number")
         if view is not None and view.unread_count > 0:
@@ -703,10 +710,16 @@ class ConversationListPage(Adw.NavigationPage):
         GLib.idle_add(self._announce_block, address, done)
 
     def _announce_block(self, address: str, done: bool) -> bool:
+        try:
+            from txxt import phone_numbers as _phones
+
+            shown = _phones.format_display_configured(address) or address
+        except Exception:
+            shown = address
         heading = "Blocked" if done else "Could not block"
         body = (
-            f"New messages from {address} are blocked."
-            if done else f"No contact holds {address}; nothing changed."
+            f"New messages from {shown} are blocked."
+            if done else f"No contact holds {shown}; nothing changed."
         )
         dialog = Adw.AlertDialog.new(heading, body)
         dialog.add_response("ok", "OK")

@@ -2,9 +2,9 @@
 
 Pure module so pytest runs headless. The GTK page (``detail_ui``) renders
 these sections over an ``Adw.NavigationView`` push. Display strings use
-``phones.format_display_number`` (spaces/grouping by region); outbound
-URIs always use the raw compact number through ``list_model`` so dialing
-stays on E.164.
+the shared ``xx_phone.display`` rule (national form at home, otherwise
+international); outbound URIs always use the raw compact number through
+``list_model`` so dialing stays on E.164.
 """
 
 from __future__ import annotations
@@ -12,8 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from urllib.parse import quote_plus
 
+import xx_phone
+
 from xx_contacts.list_model import call_uri, email_uri, message_uri
-from xx_contacts.phones import format_display_number
 
 #: Read-only call history stays hidden until xx-dialer exposes it over
 #: D-Bus; the UI renders the history group only when this flips True
@@ -168,7 +169,8 @@ def build_detail_sections(record, default_region: str = "US"
         raw = entry.number_raw or ""
         if not raw.strip():
             continue
-        display = format_display_number(raw, default_region) or raw.strip()
+        display = xx_phone.display(
+            raw, xx_phone.display_country(default_region)) or raw.strip()
         actions = [DetailAction("call", call_uri(raw)),
                    DetailAction("message", message_uri(raw))]
         phone_fields.append(DetailField(_phone_label(entry, index), display,

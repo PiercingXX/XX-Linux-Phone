@@ -14,3 +14,8 @@ python.install_sources(
   'xx_ui/style.css',
   subdir: 'xx_ui',
 )
+
+python.install_sources(
+  'xx_phone/__init__.py',
+  subdir: 'xx_phone',
+)

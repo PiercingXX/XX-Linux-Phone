@@ -149,7 +149,9 @@ def test_ui_client_through_real_bus(tmp_path):
         pytest.skip("dbus-run-session is not installed")
     helper = tmp_path / "ui_client_bus_helper.py"
     helper.write_text(_HELPER)
-    env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+    env = {**os.environ,
+           "PYTHONPATH": os.pathsep.join(
+               (str(ROOT / "src"), str(ROOT.parent / "common")))}
     proc = subprocess.run(
         ["dbus-run-session", "--", sys.executable, str(helper)],
         env=env, capture_output=True, text=True, timeout=120)
