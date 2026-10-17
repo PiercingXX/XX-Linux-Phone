@@ -24,3 +24,13 @@ def visible(surface_quick_pick: bool = True, surface_nav: bool = True,
     if surface_calls:
         out.add(Tile.CALLS)
     return out
+
+
+def tile_for(desktop_entry: str, identity: str = "") -> Tile | None:
+    """The tile a player belongs to, so it can draw inverted while active."""
+    name = f"{desktop_entry} {identity}".lower()
+    if "audiobook" in name:
+        return Tile.AUDIOBOOK
+    if "radio" in name:
+        return Tile.RADIO
+    return None

@@ -9,16 +9,68 @@ from __future__ import annotations
 
 import os
 import threading
+from pathlib import Path
 
+ICON_DIR = Path(__file__).with_name("icons")
+
+# Drive-screen sizes on top of xx_ui: 72 px targets, light weight, and
+# theme colors by xx_ui's named colors so every preset (and always_ink)
+# repaints live. Landscape variants hang off .xx-auto-landscape.
 APP_CSS = """
 .xx-auto-title { font-size: 40px; font-weight: 300; }
-.xx-auto-body { font-size: 24px; font-weight: 300; }
-.xx-auto-time { font-size: 24px; font-weight: 300; font-feature-settings: "tnum"; }
-.xx-auto-target { min-width: 72px; min-height: 72px; padding: 2px; }
-.xx-auto-play { min-width: 88px; min-height: 88px; border-radius: 44px; padding: 2px; }
-.xx-auto-tile { min-width: 140px; min-height: 80px; padding: 4px; }
-.xx-auto-title.xx-auto-compact-title { font-size: 30px; }
-.xx-auto-play.xx-auto-compact-play { min-width: 72px; min-height: 72px; border-radius: 36px; }
+.xx-auto-landscape .xx-auto-title { font-size: 30px; }
+.xx-auto-title.xx-auto-idle { font-size: 32px; color: @insensitive_fg_color; }
+.xx-auto-landscape .xx-auto-title.xx-auto-idle { font-size: 28px; }
+.xx-auto-sub { font-size: 24px; font-weight: 300; }
+.xx-auto-landscape .xx-auto-sub { font-size: 20px; }
+.xx-auto-sub.xx-auto-idle { font-size: 17px; }
+.xx-auto-time { font-size: 17px; font-feature-settings: "tnum"; }
+progressbar.xx-auto-progress trough,
+progressbar.xx-auto-progress progress { min-height: 2px; border-radius: 0; }
+progressbar.xx-auto-progress trough { background-color: @borders; }
+button.xx-auto-key {
+  min-width: 72px; min-height: 72px; padding: 0;
+  border-radius: 9999px; color: @theme_fg_color;
+}
+button.xx-auto-key:active { background-color: @card_bg_color; }
+button.xx-auto-key:disabled { color: @insensitive_fg_color; filter: none; }
+button.xx-auto-key.xx-auto-play {
+  min-width: 88px; min-height: 88px; border: 2px solid @theme_fg_color;
+}
+.xx-auto-landscape button.xx-auto-key.xx-auto-play {
+  min-width: 72px; min-height: 72px;
+}
+.xx-auto-key-text { font-size: 17px; font-weight: 400; }
+button.xx-auto-tile {
+  min-height: 72px; padding: 10px 14px; border-radius: 6px;
+  border: 1px solid @theme_fg_color; color: @theme_fg_color;
+}
+.xx-auto-landscape button.xx-auto-tile {
+  min-width: 104px; min-height: 92px; padding: 12px 14px;
+}
+button.xx-auto-tile:active { background-color: @card_bg_color; }
+button.xx-auto-tile.active {
+  background-color: @theme_fg_color; color: @theme_bg_color;
+}
+button.xx-auto-tile.active .xx-secondary { color: @theme_bg_color; }
+button.xx-auto-tile:disabled { border-color: @borders; filter: none; }
+button.xx-auto-tile:disabled .xx-auto-tile-name,
+button.xx-auto-tile:disabled image { color: @insensitive_fg_color; }
+button.xx-auto-tile:disabled .xx-secondary { color: @destructive_color; }
+.xx-auto-tile-name { font-size: 22px; font-weight: 300; }
+button.xx-auto-gear {
+  min-width: 72px; min-height: 56px; padding: 0;
+  color: @insensitive_fg_color;
+}
+button.xx-auto-row {
+  min-height: 72px; padding: 6px 0; border-radius: 0;
+}
+button.xx-auto-row:active { background-color: @card_bg_color; }
+.xx-auto-row-title { font-size: 20px; font-weight: 300; }
+.xx-auto-row image { color: @insensitive_fg_color; }
+.xx-auto-setting { min-height: 72px; }
+.xx-auto-section { margin-top: 8px; }
+.xx-auto-back { min-width: 56px; min-height: 72px; padding: 0; }
 """
 
 
@@ -51,7 +103,7 @@ def _fit(label, Pango, text, chars) -> None:
         label.set_ellipsize(Pango.EllipsizeMode.NONE)
 
 
-def _wrap(Gtk, Pango, text, cls, size_cls=None):
+def _wrap(Gtk, Pango, text, cls, size_cls=None, chars=24):
     line = Gtk.Label(label=text)
     line.add_css_class(cls)
     if size_cls:
@@ -59,8 +111,25 @@ def _wrap(Gtk, Pango, text, cls, size_cls=None):
     line.set_xalign(0.0)
     line.set_wrap(True)
     line.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-    line.set_max_width_chars(24)
+    line.set_max_width_chars(chars)
     return line
+
+
+def _texts(Gtk, Pango, title, subtitle, title_cls="xx-auto-row-title"):
+    """Title over a muted subtitle, the body of every list row."""
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+    box.set_hexpand(True)
+    box.set_valign(Gtk.Align.CENTER)
+    box.append(_wrap(Gtk, Pango, title, "xx-title", title_cls, chars=30))
+    if subtitle:
+        box.append(_wrap(Gtk, Pango, subtitle, "xx-secondary", chars=36))
+    return box
+
+
+def _icon(Gtk, name, px):
+    img = Gtk.Image.new_from_icon_name(name)
+    img.set_pixel_size(px)
+    return img
 
 
 class DriveSnapshot:
@@ -99,6 +168,7 @@ class AutoWindow:
         self._car_devices: list = []
         self._inhibit_cookie = 0
         self._poll_timer = 0
+        self._landscape = False
 
         import xx_ui
 
@@ -168,6 +238,8 @@ class AutoWindow:
                 Gtk.StyleContext.add_provider_for_display(
                     display, provider,
                     Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                Gtk.IconTheme.get_for_display(display).add_search_path(
+                    str(ICON_DIR))
         except Exception:
             pass
 
@@ -177,39 +249,18 @@ class AutoWindow:
 
     def set_landscape(self, on: bool) -> None:
         try:
-            if on:
-                self.win.set_default_size(720, 360)
-            else:
-                self.win.set_default_size(360, 720)
+            Gtk = self._Gtk
+            self.win.set_default_size(*((720, 360) if on else (360, 720)))
             self.drive_columns.set_orientation(
-                self._Gtk.Orientation.HORIZONTAL if on
-                else self._Gtk.Orientation.VERTICAL)
+                Gtk.Orientation.HORIZONTAL if on else Gtk.Orientation.VERTICAL)
+            self.drive_columns.set_spacing(28 if on else 0)
             if on:
-                self.title_label.add_css_class("xx-auto-compact-title")
-                self.play_btn.add_css_class("xx-auto-compact-play")
-                self.title_label.set_lines(1)
-                self.sub_label.set_lines(1)
-                self.sub_label.set_ellipsize(self._Pango.EllipsizeMode.END)
-                if self.gear.get_parent() is not self.gear_row:
-                    try:
-                        self.bottom_bar.remove(self.gear)
-                    except Exception:
-                        pass
-                    self.gear_row.append(self.gear)
-                self.bottom_bar.set_visible(False)
+                self.drive_page.add_css_class("xx-auto-landscape")
             else:
-                self.title_label.remove_css_class("xx-auto-compact-title")
-                self.play_btn.remove_css_class("xx-auto-compact-play")
-                self.title_label.set_lines(2)
-                self.sub_label.set_lines(10)
-                self.sub_label.set_ellipsize(self._Pango.EllipsizeMode.NONE)
-                if self.gear.get_parent() is not self.bottom_bar:
-                    try:
-                        self.gear_row.remove(self.gear)
-                    except Exception:
-                        pass
-                    self.bottom_bar.append(self.gear)
-                self.bottom_bar.set_visible(True)
+                self.drive_page.remove_css_class("xx-auto-landscape")
+            for tile in self._tiles.values():
+                tile._icon.set_visible(on)
+            self.title_label.set_lines(1 if on else 2)
             self._landscape = on
             self.refresh()
         except Exception:
@@ -217,20 +268,26 @@ class AutoWindow:
 
     # -- drive page ----------------------------------------------------
     def _build_drive(self) -> None:
+        from .drive_tiles import Tile
+
         Gtk, Pango = self._Gtk, self._Pango
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         page.set_margin_start(20)
         page.set_margin_end(20)
-        page.set_margin_top(8)
-        page.set_margin_bottom(8)
+        page.set_margin_top(12)
+        self.drive_page = page
 
-        self.drive_columns = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                     spacing=8)
+        self.drive_columns = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.drive_columns.set_vexpand(True)
 
-        self.card_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        # The card centers in whatever the tiles leave, so an idle or a
+        # short card sits balanced instead of hugging the top.
+        self.card_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.card_box.set_vexpand(True)
+        self.card_box.set_hexpand(True)
+        self.card_box.set_valign(Gtk.Align.CENTER)
         self.source_label = _label(Gtk, Pango, "", "xx-caption")
+        self.source_label.set_margin_bottom(8)
         self.title_label = Gtk.Label(label="")
         self.title_label.add_css_class("xx-display")
         self.title_label.add_css_class("xx-auto-title")
@@ -240,109 +297,140 @@ class AutoWindow:
         self.title_label.set_lines(2)
         self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.title_label.set_max_width_chars(18)
-        self.sub_label = _wrap(Gtk, Pango, "", "xx-secondary", "xx-auto-body")
+        self.sub_label = _wrap(Gtk, Pango, "", "xx-secondary", "xx-auto-sub")
+        self.sub_label.set_margin_top(6)
+        self.sub_label.set_ellipsize(Pango.EllipsizeMode.END)
         self.progress = Gtk.ProgressBar()
+        self.progress.add_css_class("xx-auto-progress")
         self.progress.set_hexpand(True)
-        self.time_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                                spacing=8)
+        self.progress.set_margin_top(16)
+        self.time_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.time_row.set_margin_top(8)
         self.elapsed_label = _label(Gtk, Pango, "", "xx-time", "xx-auto-time")
         self.elapsed_label.set_max_width_chars(7)
+        self.elapsed_label.set_hexpand(True)
         self.duration_label = _label(Gtk, Pango, "", "xx-time", "xx-auto-time")
         self.duration_label.set_max_width_chars(7)
         self.duration_label.set_xalign(1.0)
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
         self.time_row.append(self.elapsed_label)
-        self.time_row.append(spacer)
         self.time_row.append(self.duration_label)
+        # One control system: equal columns, 72 px round keys, the play
+        # key outlined. Custom actions reuse the same keys and columns.
         self.transport = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                                 spacing=8)
-        self.transport.set_halign(Gtk.Align.CENTER)
-        self.prev_btn = self._transport_btn("media-skip-backward-symbolic",
-                                            self._on_prev)
-        self.play_btn = self._transport_btn("media-playback-start-symbolic",
-                                            self._on_play_pause, big=True)
-        self.next_btn = self._transport_btn("media-skip-forward-symbolic",
-                                            self._on_next)
+                                 homogeneous=True)
+        self.transport.set_margin_top(16)
+        self.prev_btn = self._key("media-skip-backward-symbolic", self._on_prev)
+        self.play_btn = self._key("media-playback-start-symbolic",
+                                  self._on_play_pause)
+        self.play_btn.add_css_class("xx-auto-play")
+        self.next_btn = self._key("media-skip-forward-symbolic", self._on_next)
         for btn in (self.prev_btn, self.play_btn, self.next_btn):
             self.transport.append(btn)
         self.actions_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                                   spacing=8)
-        self.actions_row.set_halign(Gtk.Align.CENTER)
+                                   homogeneous=True)
+        self.actions_row.set_margin_top(4)
         self.note_label = _wrap(Gtk, Pango, "", "xx-secondary")
+        self.note_label.set_margin_top(12)
         for widget in (self.source_label, self.title_label, self.sub_label,
                        self.progress, self.time_row, self.transport,
                        self.actions_row, self.note_label):
             self.card_box.append(widget)
 
-        self.tiles_grid = Gtk.Grid(column_spacing=8, row_spacing=6)
-        self.tiles_grid.set_halign(Gtk.Align.FILL)
-        self.tile_radio = self._tile("Radio", "Stations", self._on_tile_radio)
-        self.tile_audio = self._tile("Audiobook", "xx-audiobook",
-                                     self._on_tile_audio)
-        self.tile_maps = self._tile("Maps", "xx-maps", self._on_tile_maps)
-        self.tile_calls = self._tile("Calls", "Favourites",
-                                     self._on_tile_calls)
-        self.tiles_grid.attach(self.tile_radio, 0, 0, 1, 1)
-        self.tiles_grid.attach(self.tile_audio, 1, 0, 1, 1)
-        self.tiles_grid.attach(self.tile_maps, 0, 1, 1, 1)
-        self.tiles_grid.attach(self.tile_calls, 1, 1, 1, 1)
+        self.tiles_grid = Gtk.Grid(column_spacing=12, row_spacing=12,
+                                   column_homogeneous=True,
+                                   row_homogeneous=True)
+        # Tile labels expand inside their tile; keep that from leaking up.
+        self.tiles_grid.set_vexpand(False)
+        self._tiles = {
+            Tile.RADIO: self._tile("audio-x-generic-symbolic",
+                                   self._on_tile_radio),
+            Tile.AUDIOBOOK: self._tile("accessories-dictionary-symbolic",
+                                       self._on_tile_audio),
+            Tile.MAPS: self._tile("mark-location-symbolic",
+                                  self._on_tile_maps),
+            Tile.CALLS: self._tile("call-start-symbolic",
+                                   self._on_tile_calls),
+        }
+        self.tile_radio = self._tiles[Tile.RADIO]
+        self.tile_audio = self._tiles[Tile.AUDIOBOOK]
+        self.tile_maps = self._tiles[Tile.MAPS]
+        self.tile_calls = self._tiles[Tile.CALLS]
+        for index, tile in enumerate(self._tiles.values()):
+            self.tiles_grid.attach(tile, index % 2, index // 2, 1, 1)
 
-        self.right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                 spacing=6)
+        self.gear = Gtk.Button()
+        self.gear.add_css_class("xx-auto-gear")
+        self.gear.set_tooltip_text("Settings")
+        gear_img = _icon(Gtk, "emblem-system-symbolic", 24)
+        # Glyph flush with the tiles' right edge; the target stays 72 px.
+        gear_img.set_halign(Gtk.Align.END)
+        gear_img.set_margin_end(4)
+        self.gear.set_child(gear_img)
+        self.gear.set_halign(Gtk.Align.END)
+        self.gear.set_valign(Gtk.Align.END)
+        self.gear.set_vexpand(True)
+        self.gear.connect("clicked", lambda *_: self.show("settings"))
+
+        self.right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.right_box.set_hexpand(False)
+        self.right_box.set_vexpand(False)
         self.right_box.append(self.tiles_grid)
-        self.gear_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        self.gear_row.set_halign(Gtk.Align.END)
-        self.right_box.append(self.gear_row)
+        self.right_box.append(self.gear)
 
         self.drive_columns.append(self.card_box)
         self.drive_columns.append(self.right_box)
         page.append(self.drive_columns)
-
-        self.bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        self.bottom_bar.set_halign(Gtk.Align.END)
-        self.gear = Gtk.Button()
-        self.gear.add_css_class("xx-btn-icon")
-        self.gear.add_css_class("xx-auto-target")
-        self.gear.set_tooltip_text("Settings")
-        gear_img = Gtk.Image.new_from_icon_name("emblem-system-symbolic")
-        gear_img.set_pixel_size(24)
-        self.gear.set_child(gear_img)
-        self.gear.connect("clicked", lambda *_: self.show("settings"))
-        self.bottom_bar.append(self.gear)
-        page.append(self.bottom_bar)
         self.stack.add_named(page, "drive")
 
-    def _transport_btn(self, icon, callback, big=False):
+    def _key(self, child, callback, *args):
+        """A 72 px round key; ``child`` is an icon name or a widget."""
         Gtk = self._Gtk
         btn = Gtk.Button()
-        btn.add_css_class("xx-btn-outline")
-        btn.add_css_class("xx-auto-play" if big else "xx-auto-target")
-        img = Gtk.Image.new_from_icon_name(icon)
-        img.set_pixel_size(28 if big else 24)
-        btn.set_child(img)
-        btn.connect("clicked", callback)
+        btn.add_css_class("xx-auto-key")
+        btn.set_halign(Gtk.Align.CENTER)
+        btn.set_valign(Gtk.Align.CENTER)
+        btn.set_child(_icon(Gtk, child, 32) if isinstance(child, str)
+                      else child)
+        btn.connect("clicked", callback, *args)
         return btn
 
-    def _tile(self, title, subtitle, callback):
+    def _action_key(self, action, bus_name):
+        """A custom action as a transport key: its icon, else its name."""
+        Gtk = self._Gtk
+        display = self.win.get_display()
+        if action.icon_name and display is not None and \
+                Gtk.IconTheme.get_for_display(display).has_icon(
+                    action.icon_name):
+            child = action.icon_name
+        else:
+            child = _label(Gtk, self._Pango, action.label,
+                           "xx-auto-key-text", chars=9)
+            child.set_xalign(0.5)
+        btn = self._key(child, self._on_custom_action, bus_name,
+                        action.action_id)
+        btn.set_tooltip_text(action.label)
+        btn.set_sensitive(action.enabled)
+        return btn
+
+    def _tile(self, icon, callback):
         Gtk, Pango = self._Gtk, self._Pango
         btn = Gtk.Button()
-        btn.add_css_class("xx-btn-outline")
         btn.add_css_class("xx-auto-tile")
         btn.set_hexpand(True)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        box.set_halign(Gtk.Align.START)
-        name = Gtk.Label(label=title)
-        name.add_css_class("xx-title")
-        name.add_css_class("xx-auto-body")
-        name.set_xalign(0.0)
-        name.set_ellipsize(Pango.EllipsizeMode.END)
-        name.set_max_width_chars(10)
-        sub = Gtk.Label(label=subtitle)
-        sub.add_css_class("xx-secondary")
-        sub.set_xalign(0.0)
-        sub.set_ellipsize(Pango.EllipsizeMode.END)
-        sub.set_max_width_chars(14)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_valign(Gtk.Align.FILL)
+        btn._icon = _icon(Gtk, icon, 20)
+        btn._icon.set_halign(Gtk.Align.START)
+        btn._icon.set_valign(Gtk.Align.START)
+        btn._icon.set_vexpand(True)
+        btn._icon.set_visible(False)
+        name = _label(Gtk, Pango, "", "xx-auto-tile-name", chars=9)
+        name.set_valign(Gtk.Align.END)
+        name.set_vexpand(True)
+        sub = _label(Gtk, Pango, "", "xx-secondary", chars=12)
+        sub.set_valign(Gtk.Align.START)
+        sub.set_vexpand(True)
+        box.append(btn._icon)
         box.append(name)
         box.append(sub)
         btn.set_child(box)
@@ -351,16 +439,28 @@ class AutoWindow:
         btn._sub_label = sub
         return btn
 
-    def _set_tile(self, btn, title, subtitle, enabled=True) -> None:
+    def _set_tile(self, btn, title, subtitle, enabled=True,
+                  active=False) -> None:
         btn._title_label.set_text(title)
         btn._sub_label.set_text(subtitle)
         btn.set_sensitive(enabled)
-        btn.set_opacity(1.0 if enabled else 0.45)
+        if active and enabled:
+            btn.add_css_class("active")
+        else:
+            btn.remove_css_class("active")
+
+    def _set_idle(self, idle: bool) -> None:
+        for widget in (self.title_label, self.sub_label):
+            if idle:
+                widget.add_css_class("xx-auto-idle")
+            else:
+                widget.remove_css_class("xx-auto-idle")
+        self.sub_label.set_lines(4 if idle else (1 if self._landscape else 2))
 
     # -- drive refresh -------------------------------------------------
     def refresh(self) -> None:
         from . import elapsed as elapsed_mod
-        from .drive_tiles import Tile, visible
+        from .drive_tiles import Tile, tile_for, visible
         from .mpris import display_name
 
         snap = self.snapshot
@@ -372,7 +472,11 @@ class AutoWindow:
 
         for child in list(self._iter_children(self.actions_row)):
             self.actions_row.remove(child)
-        if track is not None and show_card:
+        playing = track is not None and show_card
+        self._set_idle(not playing)
+        self.transport.set_visible(playing)
+        self.source_label.set_visible(playing)
+        if playing:
             _fit(self.source_label, self._Pango,
                  display_name(track).lower() or "playing", 20)
             self.title_label.set_text(track.title or "Unknown title")
@@ -396,77 +500,49 @@ class AutoWindow:
                     self.progress.set_fraction(0.0)
             icon = ("media-playback-pause-symbolic" if track.is_playing
                     else "media-playback-start-symbolic")
-            img = self._Gtk.Image.new_from_icon_name(icon)
-            img.set_pixel_size(32)
-            self.play_btn.set_child(img)
-            self.transport.set_visible(True)
+            self.play_btn.set_child(_icon(self._Gtk, icon, 32))
             for action in (track.actions or [])[:3]:
-                btn = self._Gtk.Button(label=action.label[:12])
-                btn.add_css_class("xx-btn-outline")
-                btn.add_css_class("xx-auto-target")
-                btn.set_sensitive(action.enabled)
-                btn.connect("clicked", self._on_custom_action,
-                            track.bus_name, action.action_id)
-                self.actions_row.append(btn)
+                self.actions_row.append(
+                    self._action_key(action, track.bus_name))
             self.actions_row.set_visible(bool(track.actions))
         else:
-            self.transport.set_visible(False)
             self.actions_row.set_visible(False)
             self.progress.set_visible(False)
             self.time_row.set_visible(False)
-            if show_card:
-                if not snap.tracks:
-                    self.source_label.set_text("")
-                    self.title_label.set_text("Nothing playing")
-                    if not snap.installed.get("radio") and not snap.installed.get(
-                            "audiobook"):
-                        self.sub_label.set_text(
-                            "Install the radio or xx-audiobook from "
+            self.title_label.set_text("Nothing playing" if show_card else "")
+            hint = ""
+            if show_card and not snap.tracks:
+                if not snap.installed.get("radio") and not snap.installed.get(
+                        "audiobook"):
+                    hint = ("Install the radio or xx-audiobook from "
                             "xx-apps, and its controls show up here.")
-                    else:
-                        self.sub_label.set_text(
-                            "Start something in the radio or "
-                            "xx-audiobook, or press Radio.")
-                    self.sub_label.set_visible(True)
                 else:
-                    self.source_label.set_text("")
-                    self.title_label.set_text("Nothing playing")
-                    self.sub_label.set_text("")
-                    self.sub_label.set_visible(False)
-            else:
-                self.source_label.set_text("")
-                self.title_label.set_text("")
-                self.sub_label.set_visible(False)
+                    hint = ("Start something in the radio or "
+                            "xx-audiobook, or press Radio.")
+            # Word joiners keep "xx-audiobook" whole across line breaks.
+            self.sub_label.set_text(hint.replace("-", "-\u2060"))
+            self.sub_label.set_visible(bool(hint))
+        self.title_label.set_visible(show_card)
         self.note_label.set_text(snap.note or "")
-        self.note_label.set_visible(
-            bool(snap.note) and not getattr(self, "_landscape", False))
+        self.note_label.set_visible(bool(snap.note) and not self._landscape)
 
         radio_on = snap.installed.get("radio", bool(snap.tracks))
         audio_on = snap.installed.get("audiobook", bool(snap.tracks))
-        if Tile.RADIO in shown:
-            self.tile_radio.set_visible(True)
-            self._set_tile(self.tile_radio, "Radio",
-                           "Stations" if radio_on else "not installed",
-                           enabled=radio_on)
-        else:
-            self.tile_radio.set_visible(False)
-        if Tile.AUDIOBOOK in shown:
-            self.tile_audio.set_visible(True)
-            self._set_tile(self.tile_audio, "Audiobook",
-                           "xx-audiobook" if audio_on else "not installed",
-                           enabled=audio_on)
-        else:
-            self.tile_audio.set_visible(False)
-        if Tile.MAPS in shown:
-            self.tile_maps.set_visible(True)
-            self._set_tile(self.tile_maps, snap.maps_title, snap.maps_sub)
-        else:
-            self.tile_maps.set_visible(False)
-        if Tile.CALLS in shown:
-            self.tile_calls.set_visible(True)
-            self._set_tile(self.tile_calls, "Calls", "Favourites")
-        else:
-            self.tile_calls.set_visible(False)
+        current = tile_for(track.desktop_entry, track.identity) \
+            if track is not None else None
+        content = {
+            Tile.RADIO: ("Radio", "Stations" if radio_on else "not installed",
+                         radio_on),
+            Tile.AUDIOBOOK: ("Audiobook",
+                             "xx-audiobook" if audio_on else "not installed",
+                             audio_on),
+            Tile.MAPS: (snap.maps_title, snap.maps_sub, True),
+            Tile.CALLS: ("Calls", "Favourites", True),
+        }
+        for kind, tile in self._tiles.items():
+            tile.set_visible(kind in shown)
+            title, sub, enabled = content[kind]
+            self._set_tile(tile, title, sub, enabled, active=kind is current)
 
     def _iter_children(self, box):
         child = box.get_first_child()
@@ -599,51 +675,24 @@ class AutoWindow:
     # -- settings page ---------------------------------------------------
     def _build_settings(self) -> None:
         Gtk, Pango = self._Gtk, self._Pango
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        header.set_margin_start(20)
-        header.set_margin_end(20)
-        header.set_margin_top(16)
-        back = Gtk.Button()
-        back.add_css_class("xx-btn-icon")
-        back.add_css_class("xx-auto-target")
-        back_img = Gtk.Image.new_from_icon_name("go-previous-symbolic")
-        back_img.set_pixel_size(24)
-        back.set_child(back_img)
-        back.connect("clicked", lambda *_: self.show("drive"))
-        title = _label(Gtk, Pango, "Settings", "xx-display", "xx-auto-title")
-        title.add_css_class("xx-auto-compact-title")
-        header.append(back)
-        header.append(title)
-        outer.append(header)
+        body = self._sheet_shell("settings", "Settings", back_to="drive")
 
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_vexpand(True)
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        body.set_margin_start(20)
-        body.set_margin_end(20)
-        body.set_margin_top(8)
-        body.set_margin_bottom(12)
-
-        def _section(text):
-            caption = _label(Gtk, Pango, text.upper(), "xx-caption")
+        def _section(text, first=False):
+            if not first:
+                sep = Gtk.Separator()
+                sep.set_margin_top(12)
+                body.append(sep)
+            caption = self._xx_ui.widgets.section_label(text)
+            caption.add_css_class("xx-auto-section")
             body.append(caption)
 
-        _section("Car")
+        _section("Car", first=True)
         self._setting_row(body, "Open when the car connects",
                           "Pick a Bluetooth device", "auto_launch")
-        car_row = Gtk.Button()
-        car_row.add_css_class("xx-btn-text")
-        car_row.add_css_class("xx-auto-target")
-        car_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        car_box.set_halign(Gtk.Align.START)
-        car_box.append(_label(Gtk, Pango, "Car", "xx-title", "xx-auto-body"))
         self._car_sub = _label(Gtk, Pango, "Pick a device", "xx-secondary")
-        car_box.append(self._car_sub)
-        car_row.set_child(car_box)
-        car_row.connect("clicked", lambda *_: self._open_car_sheet())
-        body.append(car_row)
+        car_texts = _texts(Gtk, Pango, "Car", "", "xx-title")
+        car_texts.append(self._car_sub)
+        body.append(self._nav_row(car_texts, self._open_car_sheet))
         _section("On the drive screen")
         self._setting_row(body, "Now playing", "", "surface_now_playing")
         self._setting_row(body, "Radio and audiobook tiles", "",
@@ -661,44 +710,39 @@ class AutoWindow:
         self._setting_row(body, "Always black",
                           "Off = follow the suite theme", "always_ink")
         _section("About")
-        lic = Gtk.Button()
-        lic.add_css_class("xx-btn-text")
-        lic.add_css_class("xx-auto-target")
-        lic_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        lic_box.set_halign(Gtk.Align.START)
-        lic_box.append(_label(Gtk, Pango, "Open-source licenses", "xx-title",
-                              "xx-auto-body"))
-        lic_box.append(_label(Gtk, Pango, "Libraries and fonts in xx-auto",
-                              "xx-secondary"))
-        lic.set_child(lic_box)
-        lic.connect("clicked", lambda *_: self.show("licenses"))
-        body.append(lic)
+        body.append(self._nav_row(
+            _texts(Gtk, Pango, "Open-source licenses",
+                   "Libraries and fonts in xx-auto", "xx-title"),
+            lambda: self.show("licenses")))
         from . import licenses as lic_mod
 
-        body.append(_label(Gtk, Pango, lic_mod.VERSION_LINE, "xx-title",
-                           "xx-auto-body"))
-        local = _wrap(Gtk, Pango, lic_mod.LOCAL_ONLY, "xx-secondary")
-        body.append(local)
-        scroll.set_child(body)
-        outer.append(scroll)
-        self.stack.add_named(outer, "settings")
+        about = _texts(Gtk, Pango, lic_mod.VERSION_LINE, lic_mod.LOCAL_ONLY,
+                       "xx-title")
+        about.set_margin_top(12)
+        body.append(about)
+
+    def _nav_row(self, texts, callback):
+        """A full-width row button: texts plus a trailing chevron."""
+        Gtk = self._Gtk
+        btn = Gtk.Button()
+        btn.add_css_class("xx-auto-row")
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.append(texts)
+        row.append(_icon(Gtk, "go-next-symbolic", 20))
+        btn.set_child(row)
+        btn.connect("clicked", lambda *_: callback())
+        return btn
 
     def _setting_row(self, body, title, subtitle, key) -> None:
         Gtk, Pango = self._Gtk, self._Pango
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        row.add_css_class("xx-auto-target")
-        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        texts.set_hexpand(True)
-        texts.set_halign(Gtk.Align.START)
-        texts.append(_wrap(Gtk, Pango, title, "xx-title", "xx-auto-body"))
-        if subtitle:
-            texts.append(_wrap(Gtk, Pango, subtitle, "xx-secondary"))
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        row.add_css_class("xx-auto-setting")
+        row.append(_texts(Gtk, Pango, title, subtitle, "xx-title"))
         switch = Gtk.Switch()
         switch.set_valign(Gtk.Align.CENTER)
         switch.set_active(bool(getattr(self.settings, key)))
         switch.connect("notify::active",
                        lambda sw, _ps, k=key: self._on_toggle(k, sw))
-        row.append(texts)
         row.append(switch)
         body.append(row)
 
@@ -751,64 +795,81 @@ class AutoWindow:
         threading.Thread(target=_work, daemon=True).start()
 
     # -- sheets ------------------------------------------------------------
-    def _sheet_shell(self, name, heading):
+    def _sheet_shell(self, name, heading, back_to="drive"):
+        """Back chevron + title over a scrolling body, clamped for landscape."""
         Gtk, Pango = self._Gtk, self._Pango
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        header.set_margin_start(20)
-        header.set_margin_end(20)
-        header.set_margin_top(16)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        header.set_margin_top(4)
         back = Gtk.Button()
-        back.add_css_class("xx-btn-icon")
-        back.add_css_class("xx-auto-target")
-        back_img = Gtk.Image.new_from_icon_name("go-previous-symbolic")
-        back_img.set_pixel_size(24)
+        back.add_css_class("xx-auto-back")
+        back.set_tooltip_text("Back")
+        back_img = _icon(Gtk, "go-previous-symbolic", 24)
+        back_img.set_halign(Gtk.Align.START)
         back.set_child(back_img)
-        back.connect("clicked", lambda *_: self.show("drive"))
+        back.connect("clicked", lambda *_: self.show(back_to))
         header.append(back)
-        heading_label = _label(Gtk, Pango, heading, "xx-display",
-                               "xx-auto-title")
-        heading_label.add_css_class("xx-auto-compact-title")
-        header.append(heading_label)
-        outer.append(header)
+        header.append(_label(Gtk, Pango, heading, "xx-display", chars=16))
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        body.set_margin_bottom(16)
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        column.set_margin_start(20)
+        column.set_margin_end(20)
+        column.append(header)
+        column.append(body)
+        clamp = self._Adw.Clamp(maximum_size=600, tightening_threshold=600)
+        clamp.set_child(column)
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        body.set_margin_start(20)
-        body.set_margin_end(20)
-        body.set_margin_top(8)
-        body.set_margin_bottom(12)
-        scroll.set_child(body)
-        outer.append(scroll)
-        self.stack.add_named(outer, name)
+        scroll.set_child(clamp)
+        self.stack.add_named(scroll, name)
         return body
+
+    def _list_row(self, title, subtitle, icon, callback, *args):
+        """A 72 px sheet row: optional leading glyph, title, subtitle."""
+        Gtk, Pango = self._Gtk, self._Pango
+        btn = Gtk.Button()
+        btn.add_css_class("xx-auto-row")
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        if icon:
+            row.append(_icon(Gtk, icon, 24))
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        texts.set_hexpand(True)
+        texts.set_valign(Gtk.Align.CENTER)
+        texts.append(_label(Gtk, Pango, title, "xx-title",
+                            "xx-auto-row-title"))
+        if subtitle:
+            texts.append(_label(Gtk, Pango, subtitle, "xx-secondary",
+                                chars=28))
+        row.append(texts)
+        btn.set_child(row)
+        btn.connect("clicked", callback, *args)
+        return btn
+
+    def _empty(self, body, title, detail="") -> None:
+        Gtk, Pango = self._Gtk, self._Pango
+        box = _texts(Gtk, Pango, title, detail)
+        box.set_margin_top(16)
+        body.append(box)
+
+    def _clear(self, body) -> None:
+        for child in list(self._iter_children(body)):
+            body.remove(child)
 
     def _build_sheet_players(self) -> None:
         self._players_body = self._sheet_shell("players", "Players")
 
     def _render_players_sheet(self) -> None:
-        Gtk, Pango = self._Gtk, self._Pango
         body = self._players_body
-        for child in list(self._iter_children(body)):
-            body.remove(child)
+        self._clear(body)
         if not self._players_rows:
-            body.append(_wrap(Gtk, Pango,
-                              "No players. Start the radio or xx-audiobook.",
-                              "xx-secondary", "xx-auto-body"))
+            self._empty(body, "No players",
+                        "Start the radio or xx-audiobook.")
             return
         for item in self._players_rows:
-            btn = Gtk.Button()
-            btn.add_css_class("xx-btn-text")
-            btn.add_css_class("xx-auto-target")
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            box.set_halign(Gtk.Align.START)
-            box.append(_label(Gtk, Pango, item["title"], "xx-title",
-                              "xx-auto-body"))
-            box.append(_label(Gtk, Pango, item["sub"], "xx-secondary"))
-            btn.set_child(box)
-            btn.connect("clicked", self._on_pick_player, item["bus"])
-            body.append(btn)
+            body.append(self._list_row(item["title"], item["sub"],
+                                       "media-playback-start-symbolic",
+                                       self._on_pick_player, item["bus"]))
 
     def _on_pick_player(self, _btn, bus_name) -> None:
         def _work():
@@ -854,42 +915,22 @@ class AutoWindow:
         threading.Thread(target=_work, daemon=True).start()
 
     def _render_favourites(self, favourites, error) -> bool:
-        Gtk, Pango = self._Gtk, self._Pango
         body = self._fav_body
-        for child in list(self._iter_children(body)):
-            body.remove(child)
+        self._clear(body)
         self._favourites = favourites
         if error and not favourites:
-            body.append(_label(Gtk, Pango, "Contacts are not available",
-                               "xx-title", "xx-auto-body"))
-            body.append(_wrap(Gtk, Pango,
-                              "xx-auto reads only your starred contacts, "
-                              "and only to show them here.", "xx-secondary"))
+            self._empty(body, "Contacts are not available",
+                        "xx-auto reads only your starred contacts, "
+                        "and only to show them here.")
             return False
         if not favourites:
-            body.append(_label(Gtk, Pango, "No starred contacts",
-                               "xx-title", "xx-auto-body"))
+            self._empty(body, "No starred contacts",
+                        "Star someone in xx-contacts and they show up here.")
             return False
         for fav in favourites:
-            btn = Gtk.Button()
-            btn.add_css_class("xx-btn-text")
-            btn.add_css_class("xx-auto-target")
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-            img = Gtk.Image.new_from_icon_name("call-start-symbolic")
-            img.set_pixel_size(28)
-            img.set_valign(Gtk.Align.CENTER)
-            texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            texts.set_hexpand(True)
-            texts.set_halign(Gtk.Align.START)
-            texts.append(_label(Gtk, Pango, fav.name, "xx-title",
-                                "xx-auto-body"))
-            num = _label(Gtk, Pango, fav.number, "xx-secondary")
-            texts.append(num)
-            row.append(img)
-            row.append(texts)
-            btn.set_child(row)
-            btn.connect("clicked", self._on_call_favourite, fav.number)
-            body.append(btn)
+            body.append(self._list_row(fav.name, fav.number,
+                                       "call-start-symbolic",
+                                       self._on_call_favourite, fav.number))
         return False
 
     def _on_call_favourite(self, _btn, number) -> None:
@@ -912,7 +953,8 @@ class AutoWindow:
         self._run_worker(_work)
 
     def _build_sheet_car(self) -> None:
-        self._car_body = self._sheet_shell("car", "Which car?")
+        self._car_body = self._sheet_shell("car", "Which car?",
+                                           back_to="settings")
 
     def _open_car_sheet(self) -> None:
         self.show("car")
@@ -920,28 +962,15 @@ class AutoWindow:
         self._load_car_devices()
 
     def _render_car_sheet(self) -> None:
-        Gtk, Pango = self._Gtk, self._Pango
         body = self._car_body
-        for child in list(self._iter_children(body)):
-            body.remove(child)
+        self._clear(body)
         if not self._car_devices:
-            body.append(_label(Gtk, Pango, "Bluetooth is off", "xx-title",
-                               "xx-auto-body"))
-            body.append(_wrap(Gtk, Pango, "Turn it on to see your car.",
-                              "xx-secondary"))
+            self._empty(body, "Bluetooth is off", "Turn it on to see your car.")
             return
         for dev in self._car_devices:
-            btn = Gtk.Button()
-            btn.add_css_class("xx-btn-text")
-            btn.add_css_class("xx-auto-target")
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            box.set_halign(Gtk.Align.START)
-            box.append(_label(Gtk, Pango, dev.name or dev.address,
-                              "xx-title", "xx-auto-body"))
-            box.append(_label(Gtk, Pango, dev.address, "xx-secondary"))
-            btn.set_child(box)
-            btn.connect("clicked", self._on_pick_car, dev.address)
-            body.append(btn)
+            body.append(self._list_row(dev.name or dev.address, dev.address,
+                                       "bluetooth-active-symbolic",
+                                       self._on_pick_car, dev.address))
 
     def _load_car_devices(self) -> None:
         def _work():
@@ -972,14 +1001,14 @@ class AutoWindow:
 
     def _build_sheet_licenses(self) -> None:
         Gtk, Pango = self._Gtk, self._Pango
-        body = self._sheet_shell("licenses", "Licenses")
+        body = self._sheet_shell("licenses", "Licenses", back_to="settings")
         from . import licenses as lic_mod
 
         for title, detail in lic_mod.license_rows():
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            box.append(_wrap(Gtk, Pango, title, "xx-title", "xx-auto-body"))
-            box.append(_wrap(Gtk, Pango, detail, "xx-secondary"))
-            body.append(box)
+            row = _texts(Gtk, Pango, title, detail, "xx-title")
+            row.add_css_class("xx-auto-setting")
+            row.set_margin_bottom(4)
+            body.append(row)
 
     # -- live poll + inhibit -----------------------------------------------
     def _start_poll(self) -> None:
@@ -1121,7 +1150,3 @@ def main(argv=None) -> int:
         return run_watch(args)
     app = AutoApp()
     return app.run(args)
-
-
-
-

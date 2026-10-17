@@ -12,9 +12,11 @@ def _radio_track() -> Track:
         title="Slow Morning Light", artist="Harbor FM · The Quiet Hours",
         length_us=0, position_us=0, status="Playing",
         can_play=True, can_pause=True, can_next=True, can_prev=True,
-        actions=[CustomAction("thumb-down", "Dislike", "", True),
-                 CustomAction("thumb-rest", "Rest", "", True),
-                 CustomAction("thumb-up", "Like", "", True)],
+        actions=[CustomAction("thumb-down", "Dislike",
+                              "xx-auto-thumb-down-symbolic", True),
+                 CustomAction("thumb-rest", "Rest", "list-remove-symbolic", True),
+                 CustomAction("thumb-up", "Like",
+                              "xx-auto-thumb-up-symbolic", True)],
         last_active_ms=3)
 
 
@@ -27,9 +29,12 @@ def _audiobook_track() -> Track:
         length_us=2310 * 1_000_000, position_us=754 * 1_000_000,
         status="Playing", can_play=True, can_pause=True,
         can_next=True, can_prev=True, can_seek=True,
-        actions=[CustomAction("rewind-15", "-15s", "", True),
-                 CustomAction("bookmark", "Bookmark", "", True),
-                 CustomAction("forward-30", "+30s", "", True)],
+        actions=[CustomAction("rewind-15", "-15s",
+                              "media-seek-backward-symbolic", True),
+                 CustomAction("bookmark", "Bookmark", "user-bookmarks-symbolic",
+                              True),
+                 CustomAction("forward-30", "+30s",
+                              "media-seek-forward-symbolic", True)],
         last_active_ms=2)
 
 

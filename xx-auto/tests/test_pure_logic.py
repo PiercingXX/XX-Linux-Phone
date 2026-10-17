@@ -2,7 +2,7 @@
 FavouritePick, CarConnectDecision, SettingsMapper, MapsLaunch,
 DriveTiles)."""
 from xx_auto.car_decision import Outcome, decide
-from xx_auto.drive_tiles import Tile, visible
+from xx_auto.drive_tiles import Tile, tile_for, visible
 from xx_auto.elapsed import format_ms, row
 from xx_auto.favourite_pick import Number, NumberType, primary_number
 from xx_auto.maps_resolve import Target, resolve
@@ -88,3 +88,10 @@ def test_drive_tiles_gating():
     assert visible(False, False, False) == set()
     assert Tile.CALLS in visible(True, True, True)
     assert Tile.CALLS not in visible(True, True, False)
+
+
+def test_drive_tile_for_player():
+    assert tile_for("io.piercingxx.Radio") is Tile.RADIO
+    assert tile_for("io.piercingxx.Audiobook", "xx-audiobook") is Tile.AUDIOBOOK
+    assert tile_for("", "Harbor Radio") is Tile.RADIO
+    assert tile_for("org.mpris.vlc", "VLC") is None

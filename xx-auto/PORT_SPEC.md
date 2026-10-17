@@ -38,6 +38,10 @@ Theme: shared `common/xx_ui`; every preset works live; `always_ink`
   plus `ActivateAction(in s id)`. Rendered in session order when a
   player offers the interface; cards stay correct without it
   (transport only). No player-specific code either way (AU4 holds).
+  Each button draws its `icon_name` from the icon theme (else its
+  label) on the same 72 px keys as the transport. Adwaita has no
+  thumbs, so xx-auto ships `xx-auto-thumb-up-symbolic` and
+  `xx-auto-thumb-down-symbolic` for players to name.
 
 ### M2. Navigation tile (AU7)
 

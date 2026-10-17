@@ -47,6 +47,14 @@ install_data(
   install_dir: join_paths(app_datadir, 'xx_auto'),
 )
 
+install_data(
+  [
+    'src/xx_auto/icons/xx-auto-thumb-up-symbolic.svg',
+    'src/xx_auto/icons/xx-auto-thumb-down-symbolic.svg',
+  ],
+  install_dir: join_paths(app_datadir, 'xx_auto', 'icons'),
+)
+
 launcher_conf = configuration_data()
 launcher_conf.set('python', python.full_path())
 launcher_conf.set('app_dir', join_paths(prefix, app_datadir))
