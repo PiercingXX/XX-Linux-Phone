@@ -13,6 +13,19 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _FALLBACK_NAME = "file"
 
 
+def _truncate_bytes(text: str, limit: int) -> str:
+    raw = text.encode("utf-8")
+    if len(raw) <= limit:
+        return text
+    cut = raw[:limit]
+    while cut:
+        try:
+            return cut.decode("utf-8")
+        except UnicodeDecodeError:
+            cut = cut[:-1]
+    return _FALLBACK_NAME
+
+
 def sanitize_filename(name: object) -> str:
     if not isinstance(name, str):
         return _FALLBACK_NAME
@@ -21,13 +34,13 @@ def sanitize_filename(name: object) -> str:
     base = base.lstrip(".").strip()
     if not base or base in (".", ".."):
         return _FALLBACK_NAME
-    if len(base) > 255:
+    if len(base.encode("utf-8")) > 255:
         stem, dot, ext = base.rpartition(".")
-        if dot and len(ext) <= 32:
-            keep = 255 - len(ext) - 1
-            base = stem[:keep] + dot + ext
+        if dot and len(ext.encode("utf-8")) <= 32:
+            keep = 255 - len(ext.encode("utf-8")) - 1
+            base = _truncate_bytes(stem, keep) + dot + ext
         else:
-            base = base[:255]
+            base = _truncate_bytes(base, 255)
     return base
 
 

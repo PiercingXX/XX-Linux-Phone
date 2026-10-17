@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import shutil
 import socket
@@ -42,6 +43,29 @@ CANCELLED = "cancelled"
 FINISHED = "finished"
 
 _JSON_BODY_LIMIT = 1024 * 1024
+_HANDSHAKE_TIMEOUT = 10.0
+_REQUEST_TIMEOUT = 60.0
+
+logger = logging.getLogger(__name__)
+
+
+def _wait_io(raw, timeout: float, want: Exception) -> bool:
+    """Wait until ``raw`` can do what OpenSSL asked for (read or write).
+
+    Waiting on both directions would spin: an idle socket is almost
+    always writable while OpenSSL needs input.
+    """
+    import select
+
+    from OpenSSL.SSL import WantWriteError
+
+    write = isinstance(want, WantWriteError)
+    try:
+        ready = select.select([] if write else [raw], [raw] if write else [],
+                              [], timeout)
+    except (OSError, ValueError):
+        return False
+    return bool(ready[0] or ready[1])
 
 
 def _load_pyopenssl():
@@ -71,8 +95,9 @@ def _peer_der_from_x509(cert):
 
 
 class _PyOpenSSLFile:
-    def __init__(self, tls_conn):
+    def __init__(self, tls_conn, raw_sock=None):
         self._tls = tls_conn
+        self._raw = raw_sock
         self._buf = bytearray()
         self.closed = False
 
@@ -83,8 +108,11 @@ class _PyOpenSSLFile:
         while True:
             try:
                 return self._tls.recv(size)
-            except (WantReadError, WantWriteError):
-                continue
+            except (WantReadError, WantWriteError) as want:
+                if self._raw is None:
+                    continue
+                if not _wait_io(self._raw, _REQUEST_TIMEOUT, want):
+                    return b""
             except (ZeroReturnError, SysCallError):
                 return b""
 
@@ -137,7 +165,22 @@ class _PyOpenSSLFile:
             self._buf.extend(data)
 
     def write(self, data):
-        self._tls.sendall(bytes(data))
+        from OpenSSL.SSL import WantReadError, WantWriteError
+
+        view = bytes(data)
+        total = 0
+        while total < len(view):
+            try:
+                sent = self._tls.send(view[total:])
+            except (WantReadError, WantWriteError) as want:
+                if self._raw is None:
+                    continue
+                if not _wait_io(self._raw, _REQUEST_TIMEOUT, want):
+                    raise OSError("TLS write timed out")
+                continue
+            if not sent:
+                raise OSError("TLS connection closed")
+            total += sent
         return len(data)
 
     def flush(self):
@@ -153,13 +196,37 @@ class _PyOpenSSLConn:
         self._raw = raw_sock
         self._peer_der = peer_der
 
+    def do_handshake(self, timeout: float = _HANDSHAKE_TIMEOUT) -> None:
+        from OpenSSL.SSL import WantReadError, WantWriteError
+
+        end = time.monotonic() + timeout
+        try:
+            while True:
+                try:
+                    self._tls.do_handshake()
+                    break
+                except (WantReadError, WantWriteError) as want:
+                    remaining = end - time.monotonic()
+                    if remaining <= 0:
+                        raise OSError("TLS handshake timed out")
+                    if not _wait_io(self._raw, remaining, want):
+                        raise OSError("TLS handshake timed out")
+        except Exception:
+            self.close()
+            raise
+        try:
+            peer = self._tls.get_peer_certificate()
+        except Exception:
+            peer = None
+        self._peer_der = _peer_der_from_x509(peer)
+
     def getpeercert(self, binary_form=False):
         if binary_form:
             return self._peer_der
         return None
 
     def makefile(self, mode, _bufsize=-1):
-        return _PyOpenSSLFile(self._tls)
+        return _PyOpenSSLFile(self._tls, self._raw)
 
     def recv(self, size, _flags=0):
         return self._tls.recv(size)
@@ -205,22 +272,18 @@ class _PyOpenSSLHTTPServer(ThreadingHTTPServer):
         tls = _Connection(self._tls_context, raw)
         tls.set_accept_state()
         try:
-            tls.do_handshake()
-        except Exception:
-            try:
-                raw.close()
-            except OSError:
-                pass
-            try:
-                tls.close()
-            except Exception:
-                pass
-            raise OSError("TLS handshake failed")
+            raw.setblocking(False)
+        except OSError:
+            pass
+        return _PyOpenSSLConn(tls, raw, None), addr
+
+    def finish_request(self, request, client_address):
         try:
-            peer = tls.get_peer_certificate()
+            request.do_handshake()
         except Exception:
-            peer = None
-        return _PyOpenSSLConn(tls, raw, _peer_der_from_x509(peer)), addr
+            self.close_request(request)
+            return
+        super().finish_request(request, client_address)
 
     def shutdown_request(self, request):
         try:
@@ -236,6 +299,28 @@ class _PyOpenSSLHTTPServer(ThreadingHTTPServer):
             pass
 
 
+class _StdlibTLSServer(ThreadingHTTPServer):
+    def get_request(self):
+        raw, addr = self.socket.accept()
+        try:
+            raw.settimeout(_HANDSHAKE_TIMEOUT)
+        except OSError:
+            pass
+        return raw, addr
+
+    def finish_request(self, request, client_address):
+        try:
+            request.do_handshake()
+        except (OSError, ssl.SSLError):
+            self.close_request(request)
+            return
+        try:
+            request.settimeout(_REQUEST_TIMEOUT)
+        except OSError:
+            pass
+        super().finish_request(request, client_address)
+
+
 @dataclass
 class Session:
     session_id: str
@@ -249,6 +334,7 @@ class Session:
     decision: threading.Event = field(default_factory=threading.Event)
     accepted: set[str] = field(default_factory=set)
     verified: bool = False
+    last_activity: float = field(default_factory=time.monotonic)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -347,13 +433,21 @@ class _Handler(BaseHTTPRequestHandler):
         if pin is None:
             body_pin = raw.get("pin", "")
             pin = body_pin if isinstance(body_pin, str) else ""
-        if share.require_pin:
-            if not isinstance(pin, str) or not hmac.compare_digest(pin, share.require_pin):
-                self._error(401, "PIN required")
-                return
         if not share.register_attempt():
             self._error(429, "too many requests")
             return
+        expected_pin = share.current_require_pin()
+        if expected_pin:
+            if not isinstance(pin, str):
+                self._error(401, "PIN required")
+                return
+            try:
+                matched = hmac.compare_digest(pin, expected_pin)
+            except TypeError:
+                matched = False
+            if not matched:
+                self._error(401, "PIN required")
+                return
         if share.has_active_session():
             self._error(409, "blocked by another session")
             return
@@ -460,6 +554,9 @@ class _Handler(BaseHTTPRequestHandler):
                     handle.write(chunk)
                     digest.update(chunk)
                     remaining -= len(chunk)
+                    with share.lock:
+                        if session.state == ACCEPTED:
+                            session.last_activity = time.monotonic()
             if remaining:
                 staged.unlink(missing_ok=True)
                 self._error(400, "truncated body")
@@ -499,8 +596,10 @@ class ShareServer:
         staging_root: str | Path,
         download_dir: str | Path,
         require_pin: str = "",
+        require_pin_getter: Callable[[], str] | None = None,
         max_transfer_bytes: int = 500 * 1024 * 1024,
         decision_timeout: float = 120.0,
+        session_idle_timeout: float = 120.0,
         rate_limit_max: int = 30,
         rate_limit_window: float = 60.0,
         decide: Callable[[Session], bool] | None = None,
@@ -517,8 +616,10 @@ class ShareServer:
         self.staging_root = Path(staging_root)
         self.download_dir = Path(download_dir)
         self.require_pin = require_pin
+        self._require_pin_getter = require_pin_getter
         self.max_transfer_bytes = max_transfer_bytes
         self.decision_timeout = decision_timeout
+        self.session_idle_timeout = session_idle_timeout
         self.rate_limit_max = rate_limit_max
         self.rate_limit_window = rate_limit_window
         self.decide = decide or (lambda _session: False)
@@ -557,8 +658,8 @@ class ShareServer:
         context.load_cert_chain(str(self.cert_path), str(self.key_path))
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
-        server = ThreadingHTTPServer((addr, self.port), _Handler,
-                                     bind_and_activate=False)
+        server = _StdlibTLSServer((addr, self.port), _Handler,
+                                    bind_and_activate=False)
         server.share_server = self  # type: ignore[attr-defined]
         server.handle_error = lambda *args: None  # type: ignore[method-assign]
         server.daemon_threads = True
@@ -569,7 +670,8 @@ class ShareServer:
         except OSError:
             server.server_close()
             raise
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server.socket = context.wrap_socket(
+            server.socket, server_side=True, do_handshake_on_connect=False)
         return server
 
     def start(self) -> None:
@@ -612,6 +714,15 @@ class ShareServer:
             except TypeError:
                 self.on_peer(peer)
 
+    def current_require_pin(self) -> str:
+        getter = self._require_pin_getter
+        if getter is not None:
+            try:
+                return str(getter() or "")
+            except Exception:
+                pass
+        return self.require_pin
+
     def register_attempt(self) -> bool:
         now = time.monotonic()
         with self.lock:
@@ -623,9 +734,34 @@ class ShareServer:
             return True
 
     def has_active_session(self) -> bool:
+        self._expire_idle_sessions()
         with self.lock:
             return any(session.state in (WAITING, ACCEPTED)
                        for session in self.sessions.values())
+
+    def _expire_idle_sessions(self) -> None:
+        now = time.monotonic()
+        with self.lock:
+            stale = [session.session_id for session in self.sessions.values()
+                     if session.state == ACCEPTED
+                     and now - session.last_activity > self.session_idle_timeout]
+        for session_id in stale:
+            self._cancel_if_idle(session_id)
+
+    def _cancel_if_idle(self, session_id: str) -> bool:
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if session is None or session.state != ACCEPTED:
+                return False
+            if (time.monotonic() - session.last_activity
+                    <= self.session_idle_timeout):
+                return False
+            session.state = CANCELLED
+            session.decision.set()
+        if self.on_cancel is not None:
+            self.on_cancel(session)
+        shutil.rmtree(self.staging_root / session.session_id, ignore_errors=True)
+        return True
 
     def create_session(
         self, sender: DeviceInfo, files: list[UploadFile],
@@ -675,11 +811,16 @@ class ShareServer:
                 continue
             target = unique_path(self.download_dir, sanitize_filename(meta.file_name))
             try:
-                staged.rename(target)
-            except OSError:
+                shutil.move(str(staged), str(target))
+            except OSError as error:
+                logger.warning("delivery of %s failed: %s", meta.file_name, error)
                 continue
             delivered.append(target)
         session.delivered.extend(delivered)
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
         return delivered
 
     def accept_session(
@@ -700,6 +841,7 @@ class ShareServer:
                 wanted = set(session.files) if file_ids is None else set(file_ids)
                 session.accepted = wanted & set(session.files)
                 session.state = ACCEPTED
+                session.last_activity = time.monotonic()
                 session.decision.set()
                 return []
             session.state = ACCEPTED

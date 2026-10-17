@@ -142,6 +142,7 @@ class ShareService:
                 staging_root=self.staging,
                 download_dir=self.downloads,
                 require_pin=str(self.config.data.get("require_pin", "")),
+                require_pin_getter=self._current_pin,
                 max_transfer_bytes=self.config.max_transfer_bytes,
                 decide=self._decide,
                 on_session=self._on_session,
@@ -155,11 +156,12 @@ class ShareService:
             except OSError:
                 pass
             if self.config.data.get("visibility_mode") != VISIBILITY_ALWAYS:
+                self._cancel_timer()
                 self._timer = self.schedule(AUTO_OFF_SECONDS, self._auto_off)
 
     def stop(self) -> None:
         with self._lock:
-            self._timer = None
+            self._cancel_timer()
             discovery, self.discovery = self.discovery, None
             server, self.server = self.server, None
         if discovery is not None:
@@ -167,11 +169,35 @@ class ShareService:
         if server is not None:
             server.stop()
 
+    def _cancel_timer(self) -> None:
+        timer, self._timer = self._timer, None
+        if timer is None:
+            return
+        cancel = getattr(timer, "cancel", None)
+        if callable(cancel):
+            try:
+                cancel()
+            except Exception as error:
+                logger.warning("auto-off cancel failed: %s", error)
+            return
+        if isinstance(timer, int):
+            try:
+                from gi.repository import GLib
+
+                GLib.source_remove(timer)
+            except Exception as error:
+                logger.warning("auto-off cancel failed: %s", error)
+
     def _auto_off(self) -> bool:
         self.set_visible(False)
         return False
 
+    def _current_pin(self) -> str:
+        self.config.load()
+        return str(self.config.data.get("require_pin", ""))
+
     def set_visible(self, visible: bool, bind_addrs: list[str] | None = None) -> None:
+        self.config.load()
         self.config.data["visible"] = bool(visible)
         self.config.save()
         if visible:
@@ -187,6 +213,7 @@ class ShareService:
             self.stop()
 
     def _decide(self, session: Session) -> bool:
+        self.config.load()
         if not getattr(session, "verified", False):
             return False
         return self.should_auto_accept(session.sender.fingerprint)
@@ -306,28 +333,33 @@ class ShareService:
                     logger.warning("transfer progress signal failed: %s", error)
 
             try:
-                send_files(peer.info, peer.addr, sender, paths, pin_value,
-                           progress=progress,
-                           is_cancelled=lambda: self.outgoing.is_cancelled(
-                               transfer_id),
-                           cert_path=str(self.cert_path),
-                           key_path=str(self.key_path))
-            except PinRequired:
-                outcome = (False, "Receiver needs the PIN it shows on screen")
-            except (TransferError, FingerprintMismatch, OSError) as error:
-                outcome = (False, str(error))
-            else:
-                outcome = (True, f"Sent to {peer.info.alias}")
-            try:
-                self.on_signal("TransferDone",
-                               (transfer_id, outcome[0], outcome[1]))
-            except Exception as error:
-                logger.warning("transfer done signal failed: %s", error)
-            if on_done is not None:
-                on_done(outcome[0], outcome[1])
-            self.outgoing.finish(transfer_id)
-            with self._lock:
-                self._send_threads.pop(transfer_id, None)
+                try:
+                    send_files(peer.info, peer.addr, sender, paths, pin_value,
+                               progress=progress,
+                               is_cancelled=lambda: self.outgoing.is_cancelled(
+                                   transfer_id),
+                               cert_path=str(self.cert_path),
+                               key_path=str(self.key_path))
+                except PinRequired:
+                    outcome = (False, "Receiver needs the PIN it shows on screen")
+                except (TransferError, FingerprintMismatch, OSError) as error:
+                    outcome = (False, str(error))
+                except Exception as error:
+                    logger.warning("send %s failed: %s", transfer_id, error)
+                    outcome = (False, f"Send failed: {error}")
+                else:
+                    outcome = (True, f"Sent to {peer.info.alias}")
+                try:
+                    self.on_signal("TransferDone",
+                                   (transfer_id, outcome[0], outcome[1]))
+                except Exception as error:
+                    logger.warning("transfer done signal failed: %s", error)
+                if on_done is not None:
+                    on_done(outcome[0], outcome[1])
+            finally:
+                self.outgoing.finish(transfer_id)
+                with self._lock:
+                    self._send_threads.pop(transfer_id, None)
 
         thread = threading.Thread(target=work, daemon=True)
         with self._lock:

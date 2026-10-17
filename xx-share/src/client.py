@@ -253,7 +253,9 @@ def send_files(
             except (OSError, TransferError):
                 pass
             raise TransferError(0, "cancelled")
-        token = tokens[meta.id]
+        token = tokens.get(meta.id)
+        if token is None:
+            continue
         target = (f"{PATH_UPLOAD}?sessionId={quote(session_id)}"
                   f"&fileId={quote(meta.id)}&token={quote(token)}")
         size = meta.size

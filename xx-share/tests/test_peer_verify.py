@@ -13,6 +13,8 @@ import time
 
 import pytest
 
+from http.server import ThreadingHTTPServer
+
 from certs import cert_fingerprint, ensure_certpair
 from config import ShareConfig
 from discovery import Discovery
@@ -304,7 +306,7 @@ def test_server_fallback_without_pyopenssl(tmp_path, monkeypatch):
                       download_dir=tmp_path / "dl")
     server = srv._make_server("127.0.0.1")
     try:
-        assert type(server).__name__ == "ThreadingHTTPServer"
+        assert isinstance(server, ThreadingHTTPServer)
         assert server.socket.context.verify_mode == _ssl.CERT_NONE
     finally:
         server.server_close()
