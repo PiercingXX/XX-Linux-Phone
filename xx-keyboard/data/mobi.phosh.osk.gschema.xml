@@ -37,6 +37,25 @@
       </description>
     </key>
 
+    <key name="glide-typing" type='b'>
+      <default>true</default>
+      <summary>Whether swipe (glide) typing is enabled</summary>
+      <description>
+        When enabled a drag starting on a letter key and leaving it is
+        decoded as a swiped word instead of a tap. Needs a dictionary
+        for the current language.
+      </description>
+    </key>
+
+    <key name="glide-trail" type='b'>
+      <default>true</default>
+      <summary>Whether to draw the glide trail</summary>
+      <description>
+        When enabled the keyboard draws a fading trail in the theme's
+        foreground colour while gliding.
+      </description>
+    </key>
+
     <key name="scaling" flags='mobi.phosh.osk.PhoshOskScalingFlags'>
       <default>['auto-portrait', 'auto-landscape']</default>
       <summary>How to scale the on screen keyboard</summary>

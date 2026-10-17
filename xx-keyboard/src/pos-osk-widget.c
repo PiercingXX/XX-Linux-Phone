@@ -17,6 +17,7 @@
 #include "pos-enums.h"
 #include "pos-enum-types.h"
 #include "pos-indicator-popup.h"
+#include "pos-glide.h"
 #include "pos-osk-key.h"
 #include "pos-osk-widget.h"
 
@@ -44,6 +45,7 @@ enum {
   OSK_KEY_SYMBOL,
   OSK_POPOVER_SHOWN,
   OSK_POPOVER_HIDDEN,
+  OSK_GLIDE,
   N_SIGNALS
 };
 static guint signals[N_SIGNALS];
@@ -55,6 +57,8 @@ enum {
   PROP_NAME,
   PROP_MODE,
   PROP_KEY_HEIGHT,
+  PROP_GLIDE_ENABLED,
+  PROP_GLIDE_TRAIL,
   PROP_LAST_PROP,
 };
 static GParamSpec *props[PROP_LAST_PROP];
@@ -164,6 +168,20 @@ struct _PosOskWidget {
   GArray              *event_history;
   cursor_drag_t        drag_type;
 
+  /* Glide (swipe) typing. The gesture anchor (glide_start_key) stays in
+   * current while gliding so a release on it still completes a tap.
+   */
+  PosGlideDecoder     *glide_decoder;
+  gboolean             glide_enabled;
+  gboolean             glide_trail;
+  PosOskKey           *glide_start_key;
+  PosGlideStroke      *glide_stroke;
+  gboolean             glide_active;
+  guint32              glide_start_time;
+  PosGlideStroke      *glide_trail_stroke;
+  double               glide_trail_alpha;
+  guint                glide_fade_id;
+
   /* Key scaling */
   GtkCssProvider      *css_provider;
   int key_scale;
@@ -174,6 +192,18 @@ typedef struct {
   double delta_x, delta_y;
   guint32 time;
 } EventHistoryRecord;
+
+static PosOskKey *pos_osk_widget_locate_key (PosOskWidget *self, double x, double y);
+static void pos_osk_widget_set_key_pressed (PosOskWidget *self, PosOskKey *key, gboolean pressed);
+static void pos_osk_widget_push_glide_layout (PosOskWidget *self);
+static PosOskWidgetKeyboardLayer *pos_osk_widget_get_current_layer (PosOskWidget *self);
+static PosOskWidgetKeyboardLayer *pos_osk_widget_get_keyboard_layer (PosOskWidget *self,
+                                                                     PosOskWidgetLayer layer);
+static PosOskWidgetRow *pos_osk_widget_get_layer_row (PosOskWidget *self,
+                                                      PosOskWidgetLayer layer,
+                                                      guint row);
+static guint pos_osk_widget_row_get_num_keys (PosOskWidgetRow *row);
+static PosOskKey *pos_osk_widget_row_get_key (PosOskWidgetRow *row, guint n);
 
 
 static void
@@ -332,6 +362,225 @@ static void
 on_drag_cancel (PosOskWidget *self)
 {
   on_drag_end (self);
+}
+
+
+/* Whether a press on @key may turn into a glide. Only letter keys glide;
+ * the space bar keeps its cursor-drag and everything else its tap.
+ */
+static gboolean
+glide_can_start (PosOskWidget *self, PosOskKey *key)
+{
+  PosOskWidgetKeyboardLayer *layer;
+
+  if (!self->glide_enabled || self->glide_decoder == NULL)
+    return FALSE;
+  if (self->mode != POS_OSK_WIDGET_MODE_KEYBOARD)
+    return FALSE;
+  if (key == NULL || pos_osk_key_get_use (key) != POS_OSK_KEY_USE_KEY)
+    return FALSE;
+  if (pos_glide_symbol_codepoint (pos_osk_key_get_symbol (key)) == 0)
+    return FALSE;
+
+  layer = pos_osk_widget_get_current_layer (self);
+  if (layer->key_width <= 0)
+    return FALSE;
+
+  return pos_glide_decoder_get_available (self->glide_decoder);
+}
+
+
+static void
+glide_clear_trail (PosOskWidget *self)
+{
+  g_clear_handle_id (&self->glide_fade_id, g_source_remove);
+  g_clear_pointer (&self->glide_trail_stroke, pos_glide_stroke_free);
+  self->glide_trail_alpha = 0.0;
+}
+
+
+/* Drop the in-progress gesture without emitting anything */
+static void
+glide_cancel (PosOskWidget *self)
+{
+  g_clear_pointer (&self->glide_stroke, pos_glide_stroke_free);
+  self->glide_start_key = NULL;
+  self->glide_active = FALSE;
+}
+
+
+static gboolean
+glide_fade_tick (gpointer data)
+{
+  PosOskWidget *self = POS_OSK_WIDGET (data);
+
+  self->glide_trail_alpha -= 0.12;
+  if (self->glide_trail_alpha <= 0) {
+    glide_clear_trail (self);
+  }
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+
+  return self->glide_trail_stroke != NULL;
+}
+
+
+static void
+glide_begin (PosOskWidget *self, double x, double y, guint32 time)
+{
+  glide_clear_trail (self);
+  glide_cancel (self);
+
+  if (!glide_can_start (self, self->current))
+    return;
+
+  self->glide_start_key = self->current;
+  self->glide_start_time = time;
+  self->glide_stroke = pos_glide_stroke_new ();
+  pos_glide_stroke_append (self->glide_stroke, x, y, 0);
+}
+
+
+/* Feed one motion point to the gesture. Returns TRUE while gliding, in
+ * which case the caller must skip the regular key-drag handling.
+ */
+static gboolean
+glide_update (PosOskWidget *self, double x, double y, guint32 time)
+{
+  PosOskWidgetKeyboardLayer *layer;
+
+  if (self->glide_stroke == NULL)
+    return FALSE;
+
+  /* The press was cancelled (e.g. key boundary crossed before the
+   * threshold), so this is no gesture anchor any more.
+   */
+  if (self->current == NULL) {
+    glide_cancel (self);
+    return FALSE;
+  }
+
+  pos_glide_stroke_append (self->glide_stroke, x, y, time - self->glide_start_time);
+
+  if (!self->glide_active) {
+    layer = pos_osk_widget_get_current_layer (self);
+    if (!pos_glide_stroke_exceeds_threshold (self->glide_stroke, layer->key_width))
+      return FALSE;
+
+    /* A glide now: release the start key visually (current stays the
+     * anchor, see the struct comment), hide the key indicator and keep
+     * the long-press popup from firing for this sequence.
+     */
+    self->glide_active = TRUE;
+    pos_osk_widget_set_key_pressed (self, self->glide_start_key, FALSE);
+    pos_indicator_popup_hide (self->indicator_popup, TRUE);
+    if (self->sequence != NULL)
+      gtk_gesture_set_sequence_state (GTK_GESTURE (self->long_press), self->sequence,
+                                      GTK_EVENT_SEQUENCE_DENIED);
+    g_debug ("Glide started");
+  }
+
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+  return TRUE;
+}
+
+
+/* Finish the gesture on release. Returns TRUE when it was a glide (the
+ * caller then skips the regular release handling); a glide released on
+ * its start key still counts as a tap.
+ */
+static gboolean
+glide_end (PosOskWidget *self, double x, double y)
+{
+  PosOskKey *key;
+  gboolean was_glide;
+
+  if (self->glide_stroke == NULL)
+    return FALSE;
+
+  was_glide = self->glide_active;
+  self->glide_active = FALSE;
+
+  key = pos_osk_widget_locate_key (self, x, y);
+  if (was_glide && key != self->glide_start_key) {
+    /* Hand the stroke to the input surface for worker decoding; the
+     * trail keeps the points for the fade-out.
+     */
+    PosGlideStroke *stroke = self->glide_stroke;
+
+    self->glide_stroke = NULL;
+    self->current = NULL;
+    self->glide_start_key = NULL;
+    g_signal_emit (self, signals[OSK_GLIDE], 0, stroke);
+    /* The handler copied what it needs; keep the points for the fade-out */
+    g_clear_pointer (&self->glide_trail_stroke, pos_glide_stroke_free);
+    self->glide_trail_stroke = stroke;
+    self->glide_trail_alpha = 1.0;
+    g_clear_handle_id (&self->glide_fade_id, g_source_remove);
+    if (self->glide_trail)
+      self->glide_fade_id = g_timeout_add (30, glide_fade_tick, self);
+    else
+      glide_clear_trail (self);
+    gtk_widget_queue_draw (GTK_WIDGET (self));
+    return TRUE;
+  }
+
+  glide_cancel (self);
+  return FALSE;
+}
+
+
+/* Describe the visible letter layout to the decoder. Called whenever
+ * the layout or size changes; most_common_key_width is the key pitch.
+ */
+static void
+pos_osk_widget_push_glide_layout (PosOskWidget *self)
+{
+  PosOskWidgetKeyboardLayer *layer;
+  g_autoptr (GArray) keys = NULL;
+  /* Borrowed symbol pointers, only the array itself is owned */
+  g_autofree const char **symbols = NULL;
+  g_autofree GdkRectangle *boxes = NULL;
+  int n = 0;
+
+  if (self->glide_decoder == NULL || self->width <= 0 || self->height <= 0)
+    return;
+
+  layer = pos_osk_widget_get_keyboard_layer (self, POS_OSK_WIDGET_LAYER_NORMAL);
+  if (layer->key_width <= 0)
+    return;
+
+  for (int r = 0; r < self->layout.n_rows; r++) {
+    PosOskWidgetRow *row = pos_osk_widget_get_layer_row (self,
+                                                         POS_OSK_WIDGET_LAYER_NORMAL,
+                                                         r);
+    n += pos_osk_widget_row_get_num_keys (row);
+  }
+
+  symbols = g_new0 (const char *, n);
+  boxes = g_new0 (GdkRectangle, n);
+  n = 0;
+  for (int r = 0; r < self->layout.n_rows; r++) {
+    PosOskWidgetRow *row = pos_osk_widget_get_layer_row (self,
+                                                         POS_OSK_WIDGET_LAYER_NORMAL,
+                                                         r);
+
+    for (int k = 0; k < pos_osk_widget_row_get_num_keys (row); k++) {
+      PosOskKey *key = pos_osk_widget_row_get_key (row, k);
+
+      symbols[n] = pos_osk_key_get_symbol (key);
+      boxes[n] = *pos_osk_key_get_box (key);
+      n++;
+    }
+  }
+
+  keys = pos_glide_build_keys (symbols, boxes, n, layer->key_width);
+  if (keys->len == 0)
+    return;
+
+  pos_glide_decoder_set_layout (self->glide_decoder,
+                                (PosGlideKey *) keys->data, keys->len,
+                                self->width, self->height,
+                                (int) round (layer->key_width));
 }
 
 
@@ -801,6 +1050,12 @@ pos_osk_widget_set_property (GObject      *object,
   case PROP_KEY_HEIGHT:
     pos_osk_widget_set_key_height (self, g_value_get_uint (value));
     break;
+  case PROP_GLIDE_ENABLED:
+    pos_osk_widget_set_glide_enabled (self, g_value_get_boolean (value));
+    break;
+  case PROP_GLIDE_TRAIL:
+    pos_osk_widget_set_glide_trail (self, g_value_get_boolean (value));
+    break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
     break;
@@ -831,6 +1086,12 @@ pos_osk_widget_get_property (GObject    *object,
     break;
   case PROP_KEY_HEIGHT:
     g_value_set_uint (value, self->key_height);
+    break;
+  case PROP_GLIDE_ENABLED:
+    g_value_set_boolean (value, self->glide_enabled);
+    break;
+  case PROP_GLIDE_TRAIL:
+    g_value_set_boolean (value, self->glide_trail);
     break;
   default:
     G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -1032,7 +1293,10 @@ pos_osk_widget_button_press_event (GtkWidget *widget, GdkEventButton *event)
   if (event->type != GDK_BUTTON_PRESS)
     return GDK_EVENT_PROPAGATE;
 
+  /* A new press drops any in-progress gesture */
+  glide_cancel (self);
   pos_osk_widget_key_press (self, event->x, event->y);
+  glide_begin (self, event->x, event->y, event->time);
 
   return GDK_EVENT_STOP;
 }
@@ -1110,6 +1374,9 @@ pos_osk_widget_button_release_event (GtkWidget *widget, GdkEventButton *event)
   if (event->button != 1)
     return GDK_EVENT_PROPAGATE;
 
+  if (glide_end (self, event->x, event->y))
+    return GDK_EVENT_STOP;
+
   /* Already cancelled */
   if (self->current == NULL)
     return GDK_EVENT_PROPAGATE;
@@ -1151,6 +1418,8 @@ pos_osk_widget_touch_event (GtkWidget *widget, GdkEventTouch *event)
            event->type);
 
   if (event->type == GDK_TOUCH_BEGIN) {
+    /* A second finger drops any in-progress gesture */
+    glide_cancel (self);
     if (self->current) {
       key_repeat_cancel (self);
       pos_osk_widget_set_mode (self, POS_OSK_WIDGET_MODE_KEYBOARD);
@@ -1159,6 +1428,7 @@ pos_osk_widget_touch_event (GtkWidget *widget, GdkEventTouch *event)
 
     self->sequence = event->sequence;
     pos_osk_widget_key_press (self, event->x, event->y);
+    glide_begin (self, event->x, event->y, event->time);
     return GDK_EVENT_STOP;
   }
 
@@ -1166,6 +1436,11 @@ pos_osk_widget_touch_event (GtkWidget *widget, GdkEventTouch *event)
     return GDK_EVENT_PROPAGATE;
 
   if (event->type == GDK_TOUCH_END || event->type == GDK_TOUCH_CANCEL) {
+    if (event->type == GDK_TOUCH_CANCEL) {
+      glide_cancel (self);
+    } else if (glide_end (self, event->x, event->y)) {
+      return GDK_EVENT_STOP;
+    }
     if (self->current) {
       key_repeat_cancel (self);
       pos_osk_widget_set_mode (self, POS_OSK_WIDGET_MODE_KEYBOARD);
@@ -1176,6 +1451,9 @@ pos_osk_widget_touch_event (GtkWidget *widget, GdkEventTouch *event)
 
     if (!self->current)
       return GDK_EVENT_PROPAGATE;
+
+    if (glide_update (self, event->x, event->y, event->time))
+      return GDK_EVENT_STOP;
 
     key = pos_osk_widget_locate_key (self, event->x, event->y);
     if (self->current && key != self->current) {
@@ -1207,6 +1485,9 @@ pos_osk_widget_motion_notify_event (GtkWidget *widget, GdkEventMotion *event)
 
   if ((event->state & GDK_BUTTON1_MASK) == 0)
     return GDK_EVENT_PROPAGATE;
+
+  if (glide_update (self, event->x, event->y, event->time))
+    return GDK_EVENT_STOP;
 
   key = pos_osk_widget_locate_key (self, event->x, event->y);
   if (self->current && key != self->current) {
@@ -1255,6 +1536,10 @@ on_long_pressed (GtkGestureLongPress *gesture, double x, double y, gpointer user
   PosOskKey *key = pos_osk_widget_locate_key (self, x, y);
   GStrv symbols = NULL;
   GdkRectangle rect = { 0 };
+
+  /* A glide owns the sequence from here on; no popups, no cursor mode */
+  if (self->glide_active)
+    return;
 
   g_debug ("Long press '%s'", pos_osk_key_get_label (key) ?: pos_osk_key_get_symbol (key));
 
@@ -1579,7 +1864,51 @@ pos_osk_widget_size_allocate (GtkWidget *widget, GdkRectangle *allocation)
   /* On key size changes we adjust the font and icon size */
   update_key_scale (self);
 
+  /* Key geometry changed, tell the glide decoder */
+  pos_osk_widget_push_glide_layout (self);
+
   GTK_WIDGET_CLASS (pos_osk_widget_parent_class)->size_allocate (widget, allocation);
+}
+
+
+/* Draw the glide trail in the theme's foreground colour, fading from
+ * tail to tip. Runs in widget coordinates, after the translated keys.
+ */
+static void
+draw_glide_trail (PosOskWidget *self, PosGlideStroke *stroke, double alpha, cairo_t *cr)
+{
+  GdkRGBA color;
+  GtkStateFlags state;
+  int n;
+
+  if (stroke == NULL || alpha <= 0)
+    return;
+
+  n = pos_glide_stroke_get_n_points (stroke);
+  if (n < 2)
+    return;
+
+  state = gtk_style_context_get_state (self->key_context);
+  gtk_style_context_get_color (self->key_context, state, &color);
+
+  cairo_save (cr);
+  cairo_set_line_width (cr, MAX (3.0, self->key_height / 16.0));
+  cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);
+  cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND);
+
+  for (int i = 1; i < n; i++) {
+    float x0, y0, x1, y1;
+    double a = alpha * (0.15 + 0.75 * i / (n - 1));
+
+    pos_glide_stroke_get_point (stroke, i - 1, &x0, &y0, NULL);
+    pos_glide_stroke_get_point (stroke, i, &x1, &y1, NULL);
+    cairo_move_to (cr, x0, y0);
+    cairo_line_to (cr, x1, y1);
+    cairo_set_source_rgba (cr, color.red, color.green, color.blue, color.alpha * a);
+    cairo_stroke (cr);
+  }
+
+  cairo_restore (cr);
 }
 
 
@@ -1608,6 +1937,14 @@ pos_osk_widget_draw (GtkWidget *widget, cairo_t *cr)
   }
 
   cairo_restore (cr);
+
+  if (self->glide_trail) {
+    if (self->glide_active)
+      draw_glide_trail (self, self->glide_stroke, 1.0, cr);
+    else
+      draw_glide_trail (self, self->glide_trail_stroke, self->glide_trail_alpha, cr);
+  }
+
   return FALSE;
 }
 
@@ -1618,6 +1955,10 @@ pos_osk_widget_finalize (GObject *object)
   PosOskWidget *self = POS_OSK_WIDGET (object);
 
   g_clear_handle_id (&self->repeat_id, g_source_remove);
+  g_clear_handle_id (&self->glide_fade_id, g_source_remove);
+  g_clear_pointer (&self->glide_stroke, pos_glide_stroke_free);
+  g_clear_pointer (&self->glide_trail_stroke, pos_glide_stroke_free);
+  g_clear_object (&self->glide_decoder);
   pos_osk_widget_layout_free (&self->layout);
   g_clear_object (&self->long_press);
   g_clear_pointer (&self->name, g_free);
@@ -1724,6 +2065,28 @@ pos_osk_widget_class_init (PosOskWidgetClass *klass)
                        POS_OSK_WIDGET_KEY_HEIGHT_DEFAULT,
                        G_PARAM_READWRITE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
 
+  /**
+   * PosOskWidget:glide-enabled
+   *
+   * Whether swipe (glide) typing is enabled. The input surface sets
+   * this from the "glide-typing" setting, the input-method content
+   * purpose and dictionary availability.
+   */
+  props[PROP_GLIDE_ENABLED] =
+    g_param_spec_boolean ("glide-enabled", "", "",
+                          TRUE,
+                          G_PARAM_READWRITE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
+
+  /**
+   * PosOskWidget:glide-trail
+   *
+   * Whether to draw the fading gesture trail while gliding.
+   */
+  props[PROP_GLIDE_TRAIL] =
+    g_param_spec_boolean ("glide-trail", "", "",
+                          TRUE,
+                          G_PARAM_READWRITE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
+
   g_object_class_install_properties (object_class, PROP_LAST_PROP, props);
 
   /**
@@ -1798,6 +2161,21 @@ pos_osk_widget_class_init (PosOskWidgetClass *klass)
                                               0, NULL, NULL, NULL,
                                               G_TYPE_NONE,
                                               0);
+  /**
+   * PosOskWidget::glide
+   * @self: The osk widget emitting the gesture
+   * @stroke: The collected gesture points (widget pixels, ms since start)
+   *
+   * A glide gesture finished: the finger started on a letter key and
+   * left it. The handler owns nothing; copy what the worker needs.
+   */
+  signals[OSK_GLIDE] = g_signal_new ("glide",
+                                     G_TYPE_FROM_CLASS (klass),
+                                     G_SIGNAL_RUN_LAST,
+                                     0, NULL, NULL, NULL,
+                                     G_TYPE_NONE,
+                                     1,
+                                     POS_TYPE_GLIDE_STROKE);
 
   gtk_widget_class_set_css_name (widget_class, "pos-osk-widget");
 }
@@ -1831,6 +2209,8 @@ pos_osk_widget_init (PosOskWidget *self)
 
   self->key_scale = 100; /* percent */
   self->mode = POS_OSK_WIDGET_MODE_KEYBOARD;
+  self->glide_enabled = TRUE;
+  self->glide_trail = TRUE;
   self->layer = POS_OSK_WIDGET_LAYER_NORMAL;
   self->symbols = g_ptr_array_new ();
   self->key_height = POS_OSK_WIDGET_KEY_HEIGHT_DEFAULT;
@@ -1999,6 +2379,9 @@ pos_osk_widget_set_layout (PosOskWidget *self,
 
   if (g_strcmp0 (self->name, name) == 0)
     return TRUE;
+
+  /* The layout owns the gesture anchor, drop any in-progress glide */
+  glide_cancel (self);
 
   if (self->layout.name)
     pos_osk_widget_layout_free (&self->layout);
@@ -2192,4 +2575,90 @@ pos_osk_widget_max_rows (PosOskWidget *self)
   g_assert (POS_IS_OSK_WIDGET (self));
 
   return self->layout.n_rows;
+}
+
+
+/**
+ * pos_osk_widget_set_glide_enabled:
+ * @self: The osk widget
+ * @enabled: Whether glide typing is enabled
+ *
+ * Enable or drop swipe (glide) typing. When disabled the widget
+ * behaves exactly as upstream: drags cancel the press.
+ */
+void
+pos_osk_widget_set_glide_enabled (PosOskWidget *self, gboolean enabled)
+{
+  g_return_if_fail (POS_IS_OSK_WIDGET (self));
+
+  enabled = !!enabled;
+  if (self->glide_enabled == enabled)
+    return;
+
+  self->glide_enabled = enabled;
+  if (!enabled)
+    glide_cancel (self);
+  g_object_notify_by_pspec (G_OBJECT (self), props[PROP_GLIDE_ENABLED]);
+}
+
+
+/**
+ * pos_osk_widget_set_glide_trail:
+ * @self: The osk widget
+ * @trail: Whether to draw the gesture trail
+ *
+ * Show or hide the fading trail drawn while gliding. Capture is
+ * unaffected.
+ */
+void
+pos_osk_widget_set_glide_trail (PosOskWidget *self, gboolean trail)
+{
+  g_return_if_fail (POS_IS_OSK_WIDGET (self));
+
+  trail = !!trail;
+  if (self->glide_trail == trail)
+    return;
+
+  self->glide_trail = trail;
+  if (!trail)
+    glide_clear_trail (self);
+  g_object_notify_by_pspec (G_OBJECT (self), props[PROP_GLIDE_TRAIL]);
+  gtk_widget_queue_draw (GTK_WIDGET (self));
+}
+
+
+/**
+ * pos_osk_widget_set_glide_decoder:
+ * @self: The osk widget
+ * @decoder: (nullable): The glide decoder worker
+ *
+ * The widget holds a reference and pushes its letter layout whenever
+ * the layout or size changes. Without a decoder (or dictionary) there
+ * is no glide, as upstream.
+ */
+void
+pos_osk_widget_set_glide_decoder (PosOskWidget *self, PosGlideDecoder *decoder)
+{
+  g_return_if_fail (POS_IS_OSK_WIDGET (self));
+
+  if (g_set_object (&self->glide_decoder, decoder))
+    pos_osk_widget_push_glide_layout (self);
+}
+
+
+/**
+ * pos_osk_widget_glide_committed:
+ * @self: The osk widget
+ *
+ * A glided word was committed through the input method. Reset a
+ * one-shot shift layer the way a regular key press would; caps lock
+ * stays.
+ */
+void
+pos_osk_widget_glide_committed (PosOskWidget *self)
+{
+  g_return_if_fail (POS_IS_OSK_WIDGET (self));
+
+  if (self->layer == POS_OSK_WIDGET_LAYER_CAPS && !self->caps_lock)
+    pos_osk_widget_set_layer (self, POS_OSK_WIDGET_LAYER_NORMAL);
 }

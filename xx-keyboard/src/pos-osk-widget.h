@@ -9,6 +9,7 @@
 #include "phosh-osk-enums.h"
 #include "pos-enums.h"
 #include "pos-enum-types.h"
+#include "pos-glide.h"
 #include <gtk/gtk.h>
 
 G_BEGIN_DECLS
@@ -41,5 +42,9 @@ void              pos_osk_widget_set_features (PosOskWidget *self, PhoshOskFeatu
 const char *const *pos_osk_widget_get_symbols (PosOskWidget *self);
 void              pos_osk_widget_set_key_height (PosOskWidget *self, guint key_height);
 guint             pos_osk_widget_max_rows (PosOskWidget *self);
+void              pos_osk_widget_set_glide_enabled (PosOskWidget *self, gboolean enabled);
+void              pos_osk_widget_set_glide_trail (PosOskWidget *self, gboolean trail);
+void              pos_osk_widget_set_glide_decoder (PosOskWidget *self, PosGlideDecoder *decoder);
+void              pos_osk_widget_glide_committed (PosOskWidget *self);
 
 G_END_DECLS

@@ -19,6 +19,7 @@
 #include "pos-completer.h"
 #include "pos-completer-manager.h"
 #include "pos-completion-bar.h"
+#include "pos-glide.h"
 #include "pos-input-surface.h"
 #include "pos-keypad.h"
 #include "pos-logind-session.h"
@@ -169,6 +170,13 @@ struct _PosInputSurface {
   guint                       bs_repeat_id;
   PosBackspaceMode            bs_mode;
   char                       *surround_before;
+  /* Glide (swipe) typing */
+  PosGlideDecoder            *glide_decoder;
+  char                       *glide_word;
+  gboolean                    glide_capitalize;
+  gboolean                    glide_bar;
+  guint                       glide_seq;
+  GCancellable               *glide_cancellable;
   /* layout-override */
   gboolean                    layout_overriden;
 };
@@ -327,6 +335,263 @@ pos_input_surface_handle_backsapce (PosInputSurface *self)
 }
 
 
+/* Dictionaries install to <datadir>/xx-keyboard/dicts/. The env var
+ * is a test hook.
+ */
+static char *
+pos_input_surface_get_dict_dir (void)
+{
+  const char *env = g_getenv ("XX_KEYBOARD_DICT_DIR");
+
+  if (env != NULL && *env != '\0')
+    return g_strdup (env);
+
+  for (const char * const *dir = g_get_system_data_dirs (); *dir != NULL; dir++) {
+    g_autofree char *path = g_build_filename (*dir, "xx-keyboard", "dicts", NULL);
+
+    if (g_file_test (path, G_FILE_TEST_IS_DIR))
+      return g_steal_pointer (&path);
+  }
+
+  g_debug ("No glide dictionary directory found, glide typing disabled");
+  return NULL;
+}
+
+
+/* No glide in password/PIN/number/phone fields, as on Android */
+static gboolean
+pos_input_surface_glide_purpose_ok (PosInputSurface *self)
+{
+  PosInputMethodPurpose purpose;
+
+  if (self->input_method == NULL)
+    return FALSE;
+
+  purpose = pos_input_method_get_purpose (self->input_method);
+
+  return purpose != POS_INPUT_METHOD_PURPOSE_PASSWORD &&
+    purpose != POS_INPUT_METHOD_PURPOSE_PIN &&
+    purpose != POS_INPUT_METHOD_PURPOSE_NUMBER &&
+    purpose != POS_INPUT_METHOD_PURPOSE_DIGITS &&
+    purpose != POS_INPUT_METHOD_PURPOSE_PHONE;
+}
+
+
+static char *
+pos_input_surface_get_before_text (PosInputSurface *self)
+{
+  const char *text;
+  guint anchor, cursor;
+
+  text = pos_input_method_get_surrounding_text (self->input_method, &anchor, &cursor);
+  if (text == NULL)
+    return g_strdup ("");
+
+  return g_strndup (text, MIN (cursor, strlen (text)));
+}
+
+
+/* Forget a just-committed glided word: tapping a suggestion no longer
+ * replaces it and backspace goes back to deleting characters.
+ */
+static void
+pos_input_surface_clear_glide (PosInputSurface *self)
+{
+  g_clear_pointer (&self->glide_word, g_free);
+  self->glide_capitalize = FALSE;
+
+  /* Void in-flight decodes even when no new gesture follows */
+  self->glide_seq++;
+
+  if (self->glide_bar) {
+    self->glide_bar = FALSE;
+    pos_completion_bar_set_completions (POS_COMPLETION_BAR (self->completion_bar), NULL);
+  }
+
+  if (self->glide_cancellable != NULL && !g_cancellable_is_cancelled (self->glide_cancellable)) {
+    g_cancellable_cancel (self->glide_cancellable);
+    g_clear_object (&self->glide_cancellable);
+    self->glide_cancellable = g_cancellable_new ();
+  }
+}
+
+
+/* Whether a new glide may start right now */
+static gboolean
+pos_input_surface_glide_usable (PosInputSurface *self)
+{
+  if (self->glide_decoder == NULL)
+    return FALSE;
+
+  if (!g_settings_get_boolean (self->osk_settings, "glide-typing"))
+    return FALSE;
+
+  if (!pos_input_surface_glide_purpose_ok (self))
+    return FALSE;
+
+  if (!pos_input_method_get_active (self->input_method))
+    return FALSE;
+
+  return pos_glide_decoder_get_available (self->glide_decoder);
+}
+
+
+/* Push setting, purpose, input-method and dictionary state into every
+ * OSK widget. When glide is off the widgets behave exactly as upstream.
+ */
+static void
+pos_input_surface_update_glide (PosInputSurface *self)
+{
+  GtkWidget *child;
+  gboolean enabled;
+
+  g_return_if_fail (POS_IS_INPUT_SURFACE (self));
+
+  if (self->glide_decoder == NULL || self->deck == NULL)
+    return;
+
+  child = hdy_deck_get_visible_child (self->deck);
+  if (POS_INPUT_SURFACE_IS_LANG_LAYOUT (child)) {
+    PosOskWidget *osk = POS_OSK_WIDGET (child);
+
+    pos_glide_decoder_set_language (self->glide_decoder,
+                                    pos_osk_widget_get_lang (osk),
+                                    pos_osk_widget_get_region (osk));
+  }
+
+  enabled = pos_input_surface_glide_usable (self);
+  if (!enabled)
+    pos_input_surface_clear_glide (self);
+
+  for (int i = 0; i < self->osks->len; i++) {
+    PosOskWidget *osk = g_ptr_array_index (self->osks, i);
+
+    pos_osk_widget_set_glide_enabled (osk, enabled);
+  }
+}
+
+
+typedef struct {
+  GWeakRef      surface;
+  PosOskWidget *osk;
+  gboolean      need_space;
+  gboolean      capitalize;
+  guint         seq;
+} GlideDecode;
+
+
+static void
+glide_decode_free (GlideDecode *decode)
+{
+  g_weak_ref_clear (&decode->surface);
+  g_clear_object (&decode->osk);
+  g_free (decode);
+}
+
+
+static void
+pos_input_surface_commit_glide (PosInputSurface *self,
+                                PosOskWidget    *osk,
+                                GStrv            words,
+                                gboolean         need_space,
+                                gboolean         capitalize)
+{
+  g_autofree char *display = NULL;
+  g_autofree char *text = NULL;
+  g_auto (GStrv) alts = NULL;
+  int n_alts = 0;
+
+  display = pos_glide_apply_capitalization (words[0], capitalize);
+  text = g_strdup_printf ("%s%s", need_space ? " " : "", display);
+  pos_input_method_send_string (self->input_method, text, TRUE);
+  pos_osk_widget_glide_committed (osk);
+  pos_input_surface_trigger_feedback (self, KEY_PRESS_EVENT);
+
+  g_free (self->glide_word);
+  self->glide_word = g_steal_pointer (&display);
+  self->glide_capitalize = capitalize;
+
+  /* The other candidates go to the existing completion bar; tapping
+   * one replaces the just-committed word.
+   */
+  while (words[n_alts + 1] != NULL)
+    n_alts++;
+  alts = g_new0 (char *, n_alts + 1);
+  for (int i = 0; i < n_alts; i++)
+    alts[i] = pos_glide_apply_capitalization (words[i + 1], capitalize);
+
+  self->glide_bar = n_alts > 0;
+  pos_completion_bar_set_completions (POS_COMPLETION_BAR (self->completion_bar), alts);
+}
+
+
+static void
+on_glide_decoded (PosGlideDecoder *decoder, PosGlideResult *result, gpointer user_data)
+{
+  GlideDecode *decode = user_data;
+  PosInputSurface *self = g_weak_ref_get (&decode->surface);
+
+  if (self == NULL) {
+    glide_decode_free (decode);
+    return;
+  }
+
+  /* A newer gesture (or any tap) voided this decode */
+  if (decode->seq != self->glide_seq ||
+      g_cancellable_is_cancelled (self->glide_cancellable)) {
+    glide_decode_free (decode);
+    g_object_unref (self);
+    return;
+  }
+
+  if (result == NULL || result->words == NULL || result->words[0] == NULL) {
+    g_debug ("Glide decode found no candidate");
+    pos_input_surface_clear_glide (self);
+  } else {
+    g_debug ("Glide decoded: %s", result->words[0]);
+    pos_input_surface_commit_glide (self, decode->osk, result->words,
+                                    decode->need_space, decode->capitalize);
+  }
+
+  glide_decode_free (decode);
+  g_object_unref (self);
+}
+
+
+static void
+on_osk_glide (PosInputSurface *self, PosGlideStroke *stroke, GtkWidget *osk_widget)
+{
+  g_autofree char *before = NULL;
+  g_autofree char *prev_word = NULL;
+  GlideDecode *decode;
+
+  g_return_if_fail (POS_IS_INPUT_SURFACE (self));
+  g_return_if_fail (POS_IS_OSK_WIDGET (osk_widget));
+
+  /* A new gesture voids the previous glided word */
+  pos_input_surface_clear_glide (self);
+
+  if (!pos_input_surface_glide_usable (self))
+    return;
+
+  before = pos_input_surface_get_before_text (self);
+  prev_word = pos_glide_prev_word (before);
+
+  decode = g_new0 (GlideDecode, 1);
+  g_weak_ref_init (&decode->surface, self);
+  decode->osk = POS_OSK_WIDGET (g_object_ref (osk_widget));
+  decode->need_space = pos_glide_needs_leading_space (before);
+  decode->capitalize = pos_glide_is_sentence_start (before) ||
+    pos_osk_widget_get_layer (POS_OSK_WIDGET (osk_widget)) == POS_OSK_WIDGET_LAYER_CAPS;
+  decode->seq = ++self->glide_seq;
+
+  /* decode owns itself from here; the callback frees it */
+  pos_glide_decoder_decode (self->glide_decoder, stroke, prev_word,
+                            self->glide_cancellable,
+                            on_glide_decoded, decode);
+}
+
+
 static void
 on_swipe (GtkGestureSwipe *swipe, double velocity_x, double velocity_y, gpointer data)
 {
@@ -441,6 +706,20 @@ on_completion_selected (PosInputSurface *self, const char *completion)
   g_return_if_fail (POS_IS_INPUT_SURFACE (self));
   g_return_if_fail (completion != NULL);
 
+  /* A tap on a glide candidate replaces the just-committed glided word */
+  if (self->glide_word != NULL) {
+    g_autofree char *replace = pos_glide_apply_capitalization (completion,
+                                                               self->glide_capitalize);
+
+    pos_input_method_delete_surrounding_text (self->input_method,
+                                              strlen (self->glide_word), 0, FALSE);
+    pos_input_method_send_string (self->input_method, replace, TRUE);
+    pos_input_surface_trigger_feedback (self, KEY_PRESS_EVENT);
+    g_free (self->glide_word);
+    self->glide_word = g_steal_pointer (&replace);
+    return;
+  }
+
   lookup = pos_completer_lookup_completion (self->completer, completion);
   g_debug ("completion: %s -> lookup: %s", completion, lookup);
 
@@ -490,6 +769,10 @@ static void
 on_completer_completions_changed (PosInputSurface *self)
 {
   g_auto (GStrv) completions = pos_completer_get_completions (self->completer);
+
+  /* Glide candidates own the bar until the next key press */
+  if (self->glide_word != NULL)
+    return;
 
   pos_completion_bar_set_completions (POS_COMPLETION_BAR (self->completion_bar),
                                       completions);
@@ -589,6 +872,19 @@ pos_input_surface_submit_symbol (PosInputSurface *self, const char *symbol)
   g_debug ("Key: '%s' symbol", symbol);
 
   is_bs = pos_input_surface_set_backspace_pressed (self, symbol);
+
+  /* Backspace right after a glide deletes the whole glided word */
+  if (is_bs && self->glide_word != NULL &&
+      pos_input_method_get_active (self->input_method)) {
+    pos_input_method_delete_surrounding_text (self->input_method,
+                                              pos_glide_pending_backspace_span (self->glide_word),
+                                              0, TRUE);
+    pos_input_surface_clear_glide (self);
+    return;
+  }
+
+  /* Any other input ends the glide replace window and voids decodes */
+  pos_input_surface_clear_glide (self);
 
   /* Latched modifiers, send as virtual-keyboard */
   if (self->latched_modifiers) {
@@ -1039,6 +1335,8 @@ on_visible_child_changed (PosInputSurface *self)
 
   osk = POS_OSK_WIDGET (child);
   g_debug ("Switched to layout '%s'", pos_osk_widget_get_display_name (osk));
+  pos_input_surface_clear_glide (self);
+  pos_input_surface_update_glide (self);
   pos_osk_widget_set_layer (osk, POS_OSK_WIDGET_LAYER_NORMAL);
 
   set_keymap (self);
@@ -1487,6 +1785,7 @@ on_im_purpose_changed (PosInputSurface *self, GParamSpec *pspec, PosInputMethod 
   g_assert (self->input_method == im);
 
   select_layout_by_im_purpose (self);
+  pos_input_surface_update_glide (self);
 }
 
 
@@ -1566,6 +1865,8 @@ on_im_active_changed (PosInputSurface *self, GParamSpec *pspec, PosInputMethod *
       pos_completer_set_preedit (self->completer, NULL);
   }
 
+  pos_input_surface_update_glide (self);
+
   /* Completer can only be active with input method, not vk */
   g_object_notify_by_pspec (G_OBJECT (self), props[PROP_COMPLETER_ACTIVE]);
 }
@@ -1616,6 +1917,7 @@ pos_input_surface_constructed (GObject *object)
                     NULL);
 
   set_keymap (self);
+  pos_input_surface_update_glide (self);
 
   /* Work around https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/5628 by
      sending at least one key press to the shell so we have a serial */
@@ -1662,6 +1964,11 @@ pos_input_surface_finalize (GObject *object)
   pos_input_surface_set_completer_manager (self, NULL);
   g_clear_object (&self->swipe_down);
   g_clear_object (&self->style_manager);
+  if (self->glide_cancellable != NULL)
+    g_cancellable_cancel (self->glide_cancellable);
+  g_clear_object (&self->glide_cancellable);
+  g_clear_pointer (&self->glide_word, g_free);
+  g_clear_object (&self->glide_decoder);
   g_clear_pointer (&self->osks, g_ptr_array_unref);
   g_clear_pointer (&self->surround_before, g_free);
 
@@ -2051,10 +2358,18 @@ insert_osk (PosInputSurface   *self,
                     "swapped-signal::key-down", G_CALLBACK (on_osk_key_down), self,
                     "swapped-signal::key-symbol", G_CALLBACK (on_osk_key_symbol), self,
                     "swapped-signal::key-up", G_CALLBACK (on_osk_key_up), self,
+                    "swapped-signal::glide", G_CALLBACK (on_osk_glide), self,
                     "swapped-signal::notify::mode", G_CALLBACK (on_osk_mode_changed), self,
                     "swapped-signal::popover-shown", G_CALLBACK (on_osk_popover_shown), self,
                     "swapped-signal::popover-hidden", G_CALLBACK (on_osk_popover_hidden), self,
                     NULL);
+
+  if (self->glide_decoder) {
+    pos_osk_widget_set_glide_decoder (osk_widget, self->glide_decoder);
+    g_settings_bind (self->osk_settings, "glide-trail",
+                     osk_widget, "glide-trail",
+                     G_SETTINGS_BIND_GET);
+  }
 
   hdy_deck_insert_child_after (self->deck, GTK_WIDGET (osk_widget), NULL);
   g_ptr_array_add (self->osks, osk_widget);
@@ -2338,6 +2653,12 @@ pos_input_surface_init (PosInputSurface *self)
                             self);
   on_completion_mode_changed (self, NULL, self->osk_settings);
   g_settings_bind (self->osk_settings, "osk-features", self, "osk-features", G_SETTINGS_BIND_GET);
+
+  self->glide_cancellable = g_cancellable_new ();
+  self->glide_decoder = pos_glide_decoder_new (pos_input_surface_get_dict_dir ());
+  g_signal_connect_swapped (self->osk_settings, "changed::glide-typing",
+                            G_CALLBACK (pos_input_surface_update_glide),
+                            self);
 
   if (!pos_osk_widget_set_layout (POS_OSK_WIDGET (self->osk_terminal),
                                   "terminal",

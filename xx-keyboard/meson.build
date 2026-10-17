@@ -187,6 +187,8 @@ config_h.set(
   description: 'Maximum minimum clamp width the OSKs can take',
 )
 config_h.set_quoted('POS_DEFAULT_COMPLETER', default_completer)
+config_h.set('POS_HAVE_GLIDE', get_option('glide'),
+             description: 'Whether glide (swipe) typing is built')
 config_h.set(
   'PHOSH_HAVE_MEMFD_CREATE',
   have_memfd_create,
@@ -203,12 +205,13 @@ configure_file(input: 'run.in', output: 'run', configuration: run_data)
 subdir('data')
 subdir('po')
 subdir('protocol')
-subdir('src')
-subdir('tests')
-subdir('doc')
+# Glide before src: the widget links the decoder library
 if get_option('glide')
   subdir('glide')
 endif
+subdir('src')
+subdir('tests')
+subdir('doc')
 
 summary(
   {

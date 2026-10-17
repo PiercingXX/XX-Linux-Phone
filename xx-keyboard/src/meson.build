@@ -42,6 +42,10 @@ libpos_deps = [
   cc.find_library('rt', required: false),
 ]
 
+if get_option('glide')
+  libpos_deps += xxglide_dep
+endif
+
 pos_resources = gnome.compile_resources(
   'pos-resources',
   'phosh-osk-stevia.gresources.xml',
@@ -71,6 +75,8 @@ libpos_sources = files(
   'pos-emoji-picker.c',
   'pos-emoji-picker.h',
   'pos-enums.h',
+  'pos-glide.c',
+  'pos-glide.h',
   'pos-hw-tracker.c',
   'pos-hw-tracker.h',
   'pos-indicator-popup.c',

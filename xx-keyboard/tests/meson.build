@@ -77,6 +77,37 @@ if presage_dep.found()
   )
 endif
 
+# Glide helpers: pure unit tests, no display needed. The decoder tests
+# use the dictionaries from the source tree.
+glide_test_dict = '"@0@"'.format(meson.project_source_root() / 'glide' / 'dicts' / 'main_en-US.dict')
+test(
+  'test-glide',
+  executable(
+    'test-glide',
+    'test-glide.c',
+    pie: true,
+    c_args: '-DXXGLIDE_TEST_DICT=@0@'.format(glide_test_dict),
+    dependencies: libpos_dep,
+  ),
+  depends: compile_schemas,
+  env: test_env,
+)
+
+# Glide widget capture: needs a display (Broadway works), skips cleanly
+# without one so `meson test` stays green headless.
+test(
+  'test-glide-widget',
+  executable(
+    'test-glide-widget',
+    'test-glide-widget.c',
+    pie: true,
+    c_args: '-DXXGLIDE_TEST_DICT=@0@'.format(glide_test_dict),
+    dependencies: libpos_dep,
+  ),
+  depends: compile_schemas,
+  env: test_env,
+)
+
 if uim_dep.found()
   name = 'test-completer-uim'
   test(
