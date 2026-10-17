@@ -33,7 +33,7 @@ def main(db_path: str) -> int:
 
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
-    from gi.repository import Adw, GLib, Gtk, Pango
+    from gi.repository import GLib, Gtk, Pango
 
     from xx_calendar.main import CalendarApp, CalendarWindow, EventItem
 
@@ -69,25 +69,44 @@ def main(db_path: str) -> int:
             raise AssertionError("recurring seeded event never rendered")
         window.show_view("month")
         if not _pump_until(
-                lambda: window._month_grid.get_child_at(0, 0) is not None):
+                lambda: len(getattr(window._month_grid, "weeks", [])) > 0):
             raise AssertionError("month grid never rendered")
-        rows = 0
-        while window._month_grid.get_child_at(0, rows) is not None:
-            rows += 1
+        rows = len(window._month_grid.weeks)
         print(f"MONTH_ROWS={rows:d}", flush=True)
         if rows * 7 < 28:
             raise AssertionError("month grid too small")
+        window.show_view("day")
+        if not _pump_until(lambda: window._view == "day"):
+            raise AssertionError("day view never shown")
+        window.show_view("calendars")
+        if not _pump_until(lambda: window._view == "calendars"):
+            raise AssertionError("calendars never shown")
+        window.show_view("search")
+        if not _pump_until(lambda: window._view == "search"):
+            raise AssertionError("search never shown")
+        window.show_view("settings")
+        if not _pump_until(lambda: window._view == "settings"):
+            raise AssertionError("settings never shown")
         window.show_view("schedule")
         if not _pump_until(
                 lambda: window._schedule_model.get_n_items() > 0):
             raise AssertionError("schedule never reloaded")
+        first_uid = None
+        for i in range(window._schedule_model.get_n_items()):
+            item = window._schedule_model.get_item(i)
+            if isinstance(item, EventItem) and item.props.uid:
+                first_uid = (item.props.uid, int(item.props.recurrence_id))
+                break
+        if first_uid is not None:
+            window.open_detail(first_uid[0], first_uid[1])
+            if not _pump_until(lambda: window._view == "detail"):
+                raise AssertionError("detail never opened")
+            window.show_view("schedule")
         window.open_create_sheet(dt.date.today())
-        if not _pump_until(lambda: window._last_dialog is not None):
+        if not _pump_until(lambda: window._view == "editor"):
             raise AssertionError("create sheet never opened")
-        if not isinstance(window._last_dialog, Adw.Dialog):
-            raise AssertionError("create sheet is not a dialog")
         print("SHEET=ok", flush=True)
-        window._last_dialog.close()
+        window.show_view("schedule")
         window.set_default_size(320, 640)
         if not _pump_until(lambda: True):
             raise AssertionError("unreachable")

@@ -102,11 +102,20 @@ def test_create_call_uses_varianttype_reply():
 
 def test_bus_name_is_not_the_gui_app_id():
     from xx_calendar import service
-    from xx_calendar import theme
+    from xx_calendar.main import APP_ID as GUI_APP_ID
 
     assert service.BUS_NAME == BUS_NAME
-    assert theme.APP_ID == APP_ID
-    assert service.BUS_NAME != theme.APP_ID
+    assert GUI_APP_ID == APP_ID
+    assert service.BUS_NAME != GUI_APP_ID
+
+
+def test_no_headerbar_chrome_and_xx_ui_adopted():
+    source = (ROOT / "src" / "xx_calendar" / "main.py").read_text()
+    assert "Adw.HeaderBar" not in source
+    assert "set_decorated(False)" in source
+    assert "xx_ui.apply(" in source
+    assert "page_header" in source
+    assert "bottom_tabs" in source
 
 
 def test_changed_subscription_targets_service_sender():

@@ -19,6 +19,7 @@ from gi.repository import Gio, GLib
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = str(ROOT / "src")
+COMMON = str(ROOT.parent / "common")
 
 BUS_NAME = "io.piercingxx.Calendar"
 OBJECT_PATH = "/io/piercingxx/Calendar"
@@ -73,8 +74,9 @@ time.sleep(30)
 
 def _client_env(extra=None):
     env = dict(os.environ)
-    env["PYTHONPATH"] = SRC + (":" + env["PYTHONPATH"] if env.get(
-        "PYTHONPATH") else "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [SRC, COMMON] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH")
+                          else []))
     if extra:
         env.update(extra)
     return env

@@ -434,7 +434,10 @@ def month_window_ms(year: int, month: int, zone,
 
 
 def build_create_ics(title: str, all_day: bool, start_ms: int, end_ms: int,
-                     reminder_minutes: int | None = None) -> str:
+                     reminder_minutes: int | None = None,
+                     rrule: str | None = None,
+                     location: str | None = None,
+                     description: str | None = None) -> str:
     """Build the minimal VEVENT text the create sheet writes via Create."""
     from xx_calendar import ics as ics_module
     from xx_calendar.ics import ICalProperty, VEvent
@@ -477,6 +480,13 @@ def build_create_ics(title: str, all_day: bool, start_ms: int, end_ms: int,
                 modified=True))
     cleaned = (title or "").strip()
     event.set_text("SUMMARY", cleaned if cleaned else UNTITLED)
+    if location:
+        event.set_text("LOCATION", location.strip())
+    if description:
+        event.set_text("DESCRIPTION", description.strip())
+    if rrule:
+        event.props.append(ICalProperty(name="RRULE", value=rrule.strip(),
+                                        modified=True))
     if reminder_minutes is not None:
         try:
             minutes = int(reminder_minutes)  # type: ignore[arg-type]

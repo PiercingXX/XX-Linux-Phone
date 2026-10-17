@@ -6,6 +6,16 @@ project(
 
 python = import('python').find_installation('python3')
 
+# Shared design system: common/meson.build installs the xx_ui python
+# package first, then this app imports it at runtime (never vendored).
+xx_ui_check = run_command(
+  python, ['-c', 'import xx_ui'],
+  check: false,
+)
+if xx_ui_check.returncode() != 0
+  error('xx_ui python package not found: install common/ first')
+endif
+
 prefix     = get_option('prefix')
 bindir     = join_paths(prefix, get_option('bindir'))
 datadir    = get_option('datadir')
@@ -23,7 +33,8 @@ install_data(
     'src/xx_calendar/__init__.py',
     'src/xx_calendar/__main__.py',
     'src/xx_calendar/main.py',
-    'src/xx_calendar/theme.py',
+    'src/xx_calendar/month_grid.py',
+    'src/xx_calendar/calendar.css',
     'src/xx_calendar/app_config.py',
     'src/xx_calendar/models.py',
     'src/xx_calendar/store.py',

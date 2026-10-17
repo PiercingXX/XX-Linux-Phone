@@ -24,8 +24,8 @@ from xx_calendar.service import (
     emit_changed,
     resolve_idle_timeout,
 )
+from xx_calendar.main import APP_ID
 from xx_calendar.store import CalendarStore
-from xx_calendar.theme import APP_ID
 
 WEEKLY_ICS = "\r\n".join([
     "BEGIN:VEVENT", "UID:weekly-1", "DTSTAMP:20260101T000000Z",

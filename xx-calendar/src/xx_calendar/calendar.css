@@ -1,0 +1,15 @@
+/* xx-calendar app-specific CSS. No hardcoded colors: only the named
+   theme colors defined by xx_ui (see common/xx_ui/style.css). */
+.xxc-dow-row {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.xxc-month-grid {
+  background-color: transparent;
+}
+
+.xxc-peek-label {
+  padding-top: 8px;
+  padding-bottom: 4px;
+}

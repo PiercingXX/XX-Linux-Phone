@@ -122,8 +122,10 @@ def test_real_window_schedule_and_month(tmp_path):
         env["GDK_BACKEND"] = "broadway"
         env["BROADWAY_DISPLAY"] = f":{display:d}"
         src = str(TESTS_DIR.parent / "src")
-        env["PYTHONPATH"] = src + (":" + env["PYTHONPATH"] if env.get(
-            "PYTHONPATH") else "")
+        common = str(TESTS_DIR.parent.parent / "common")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [src, common] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH")
+                             else []))
         child = subprocess.run(
             [sys.executable, str(TESTS_DIR / "l5_smoke_child.py"),
              str(db_path)],

@@ -20,17 +20,23 @@ placeholder page that applies the shell theme.
 ## Run from the checkout
 
 ```bash
-PYTHONPATH=src python3 -m xx_calendar
+PYTHONPATH=src:../common python3 -m xx_calendar
 ```
 
 Needs GTK4 + libadwaita with Python bindings (`gi`). No pip packages.
+The shared design system lives in `common/xx_ui` and is never vendored.
 
 ## Install
 
 ```bash
+meson setup ../common/build ../common
+meson install -C ../common/build
 meson setup build
 meson install -C build
 ```
+
+Install `common` first: it provides the `xx_ui` python package this app
+requires at runtime.
 
 This installs the Python package to the datadir (like XX-WM does), a
 `xx-calendar` launcher in bindir, the `.desktop` file with app id
