@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+CONFIGURE_OPTS=-Ddefault_osk=false
+
+ifeq ($(filter nodoc,$(DEB_BUILD_PROFILES)),)
+  CONFIGURE_OPTS+=-Dgtk_doc=true -Dman=true
+else
+  CONFIGURE_OPTS+=-Dgtk_doc=false -Dman=false
+endif
+
+%:
+	dh $@ --builddirectory=_build
+
+override_dh_auto_configure:
+	dh_auto_configure -- $(CONFIGURE_OPTS)
+
+override_dh_auto_test:
+ifeq ($(filter nocheck,$(DEB_BUILD_OPTIONS)),)
+	XDG_RUNTIME_DIR=$(CURDIR) HOME=. LC_ALL=C.UTF-8 xvfb-run -a meson test -C _build --print-errorlogs
+endif

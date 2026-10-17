@@ -1,0 +1,24 @@
+option('tests',
+       type: 'boolean', value: true,
+       description: 'Whether to compile unit tests')
+
+option('gtk_doc',
+       type: 'boolean', value: false,
+       description: 'Whether to generate the API reference')
+
+# Whether we use the sm.puri.OSK0.desktop name
+option('default_osk',
+       type: 'boolean', value: true,
+       description: 'Whether to install as default OSK for phosh')
+
+option('man',
+       type: 'boolean', value : false,
+       description : 'generate man pages (requires rst2man)')
+
+option('systemd_user_unit_dir',
+       type: 'string', value: '',
+       description: 'Directory for systemd user units')
+
+option('wordlist',
+       type: 'string', value : '/usr/share/dict/words',
+       description : 'Filename of the word list used by the fzf completer')

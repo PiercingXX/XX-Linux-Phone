@@ -1,0 +1,252 @@
+pos-input-surface {
+  background-color: @pos_bg_color;
+}
+
+pos-osk-widget {
+  color: @pos_fg_color;
+  background-color: @pos_bg_color;
+}
+
+/* A regular (e.g. character, number) key */
+pos-key {
+  color: @pos_key_fg_color;
+  background: @pos_key_bg_color;
+  border-radius: 6px;
+  margin: 2px;
+  font-weight: bold;
+}
+
+pos-key:disabled {
+  color: shade(@pos_key_fg_color, 0.8);
+}
+
+pos-key.pressed {
+  background: shade(@pos_key_bg_color, 0.8);
+}
+
+/* The hint indicating a popover */
+pos-key.hint {
+  font-weight: normal;
+}
+
+/* A non-character key (ESC, tab, ...) */
+pos-key.sys {
+  background: shade(@pos_key_bg_color, 0.75);
+  font-weight: normal;
+}
+
+/* The space bar */
+pos-key.space {
+  font-weight: normal;
+}
+
+pos-key.sys.pressed {
+  background: shade(@pos_key_bg_color, 0.6);
+}
+
+/* a layer toggle */
+pos-key.toggle {
+  background: shade(@pos_key_bg_color, 0.75);
+  font-weight: normal;
+}
+
+pos-key.toggle.pressed {
+  background: shade(@pos_key_bg_color, 0.6);
+  color: @pos_key_fg_color;
+}
+
+pos-key.return {
+  background: @theme_selected_bg_color;
+  color: @theme_selected_fg_color;
+}
+
+pos-key.return.pressed {
+  background: shade(@theme_selected_bg_color, 0.8);
+  color: alpha(@theme_selected_fg_color, 0.8);
+}
+
+/*
+ * character popover
+ */
+pos-char-popup {
+  border-radius: 10px;
+}
+
+pos-char-popup grid {
+  padding: 2px;
+}
+
+pos-char-popup button {
+  font-size: 175%;
+  padding: 10px;
+  border: none;
+}
+
+pos-char-popup button:hover {
+  background: shade(@pos_key_bg_color, 0.9);
+}
+
+pos-char-popup button:active {
+  background: shade(@pos_key_bg_color, 0.8);
+}
+
+/*
+ * pressed key indicator popover
+ */
+pos-indicator-popup label {
+  font-size: 175%;
+  font-weight: bold;
+  margin: 5px 10px 10px 10px;
+}
+
+pos-indicator-popup {
+  border-radius: 10px;
+}
+
+/*
+ * completion bar
+ */
+pos-completion-bar button {
+  color: @pos_fg_color;
+  background: none;
+  padding-left: 10px;
+  padding-right: 10px;
+  border: none;
+  font-weight: bold;
+}
+
+pos-completion-bar button:disabled {
+  color: mix(@pos_fg_color, @pos_bg_color, 0.5);
+}
+
+pos-completion-bar button:active {
+  background: shade(@pos_key_bg_color, 0.8);
+}
+
+/*
+ * menu popup
+ */
+#pos-menu-popup modelbutton {
+  padding: 5px 10px 5px 10px;
+}
+
+/*
+ * shortcuts bar
+ */
+pos-shortcuts-bar button {
+  color: @pos_fg_color;
+  background: shade(@pos_key_bg_color, 0.75);
+  padding-left: 12px;
+  padding-right: 12px;
+  border: none;
+  border-radius: 6px;
+  margin: 2px 2px 2px 0px;
+}
+
+/* FIXME: an override to prevent double highlighting on some buttons */
+pos-shortcuts-bar button:hover {
+  background: shade(@pos_key_bg_color, 0.75);
+}
+/* End FIXME */
+
+pos-shortcuts-bar button:active {
+  background: shade(@pos_key_bg_color, 0.8);
+}
+
+/* Modifier button */
+pos-shortcuts-bar button.toggle:checked {
+  background: shade(@pos_key_bg_color, 0.6);
+}
+
+pos-shortcuts-bar scrollbar {
+  background-color: transparent;
+  border: none;
+  transition: none;
+}
+
+#pos-emoji-switcher {
+  padding:4px;
+}
+
+#pos-emoji-switcher .view {
+  background: transparent;
+}
+
+#pos-emoji-switcher .emoji-section {
+  box-shadow: none;
+}
+
+#pos-emoji-switcher .view button {
+  border-radius: 99px;
+  padding:0;
+  border: none;
+  text-shadow:none;
+}
+
+#pos-emoji-switcher .view button:checked {
+  background-color: alpha(@pos_key_bg_color, 0.5);
+}
+
+pos-emoji-picker button.action {
+  color: @pos_key_fg_color;
+  border-radius: 6px;
+  padding: 6px;
+  border: none;
+  box-shadow: none;
+  text-shadow:none;
+  background: shade(@pos_key_bg_color, 0.75);
+}
+
+pos-emoji-picker button.action:active {
+  background: shade(@pos_key_bg_color, 0.6);
+}
+
+pos-emoji-picker scrollbar {
+  background-color: transparent;
+  border: none;
+  transition: none;
+}
+
+/* Keypad */
+pos-keypad .digit { font-size: 120%; font-weight: bold; }
+pos-keypad .letters { font-size: 60%; }
+pos-keypad .symbol { font-size: 100%; }
+
+pos-keypad button {
+  color: @pos_key_fg_color;
+  background: @pos_key_bg_color;
+  border: 0px;
+  margin: 1px;
+}
+
+pos-keypad button:active {
+  background: shade(@pos_key_bg_color, 0.8);
+}
+
+pos-keypad button.sys {
+  color: @pos_key_fg_color;
+  background: shade(@pos_key_bg_color, 0.75);
+}
+
+pos-keypad button.sys:active {
+  background: shade(@pos_key_bg_color, 0.6);
+}
+
+pos-keypad button.return {
+  background: @theme_selected_bg_color;
+  color: @theme_selected_fg_color;
+}
+
+pos-keypad button.return:active {
+  background: shade(@theme_selected_bg_color, 0.8);
+  color: alpha(@theme_selected_fg_color, 0.8);
+}
+
+/* Unset GTK defaults */
+modelbutton check:checked,
+modelbutton radio:active,
+modelbutton radio:checked {
+  background-color: @theme_selected_bg_color;
+  background-image: none;
+  border-color: @theme_selected_bg_color;
+}

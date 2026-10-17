@@ -1,0 +1,31 @@
+#!/bin/bash
+set -e
+
+handle_done() {
+  if [ "${STATE}" == false ]; then
+    echo "Restoring previous keyboard state"
+    gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled "${STATE}"
+  fi
+}
+
+trap handle_done EXIT
+
+ABS_BUILDDIR='@ABS_BUILDDIR@'
+
+export GSETTINGS_SCHEMA_DIR="${ABS_BUILDDIR}/data"
+
+STATE=$(gsettings get org.gnome.desktop.a11y.applications screen-keyboard-enabled)
+gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true
+
+if [ "${POS_GDB}" = 1 ]; then
+    echo "Running phosh-osk-stevia under gdb"
+    WRAPPER="gdb --args"
+fi
+
+set +e
+set -x
+${WRAPPER} "${ABS_BUILDDIR}/src/phosh-osk-stevia" "$@"
+ret=$?
+set -e
+
+exit "$ret"

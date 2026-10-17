@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk+" version="3.20"/>
+  <template class="PosCompletionBar" parent="GtkBox">
+    <property name="visible">1</property>
+    <property name="height-request">32</property>
+    <child>
+      <object class="GtkButton">
+        <property name="visible">1</property>
+        <property name="halign">start</property>
+        <property name="action-name">win.clipboard-paste</property>
+        <child>
+          <object class="GtkImage">
+            <property name="visible">1</property>
+            <property name="icon-name">edit-paste-symbolic</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkScrolledWindow" id="scrolled_window">
+        <property name="visible">1</property>
+        <property name="hexpand">1</property>
+        <property name="vscrollbar-policy">never</property>
+        <property name="propagate-natural-width">True</property>
+        <child>
+          <object class="PosCompletionsBox" id="completions_box">
+            <property name="visible">1</property>
+            <signal name="selected" handler="on_completion_selected" object="PosCompletionBar" swapped="yes"/>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="mode_button">
+        <property name="visible">1</property>
+        <property name="margin-start">6</property>
+        <property name="margin-end">6</property>
+        <signal name="clicked" handler="on_mode_button_clicked" object="PosCompletionBar" swapped="yes"/>
+        <child>
+          <object class="GtkLabel">
+            <property name="label" bind-source="PosCompletionBar" bind-property="mode-symbol" bind-flags="sync-create"/>
+            <property name="visible">1</property>
+            <attributes>
+              <attribute name="weight" value="bold"/>
+            </attributes>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+  <object class="GtkPopover" id="mode_popover">
+    <property name="relative-to">mode_button</property>
+  </object>
+</interface>
