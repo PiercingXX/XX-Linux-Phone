@@ -1,0 +1,758 @@
+[
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky (feat. Pharrell Williams and Nile Rodgers)",
+  "album": {
+   "name": "Random Access Memories",
+   "id": "MPREb_K8qWMWVqXGi"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "4D7u5KF7SP8",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "6:10",
+  "year": null,
+  "artists": [
+   {
+    "name": "Daft Punk",
+    "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+   },
+   {
+    "name": "Pharrell Williams",
+    "id": "UCJw8VyO6e3v6S0327AsgwcQ"
+   },
+   {
+    "name": "Nile Rodgers",
+    "id": "UCThde8ccpEr6sP8dIHZ-ceQ"
+   }
+  ],
+  "duration_seconds": 370,
+  "views": "1.9B",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/N55arCGj69gtw6thXK8JUPisxoVYiwuIEQ7I6SGlkEyNcSJ7xIWPe76Vuu1SiUqRyx5w9qvR_zV8fV3CWQ=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/N55arCGj69gtw6thXK8JUPisxoVYiwuIEQ7I6SGlkEyNcSJ7xIWPe76Vuu1SiUqRyx5w9qvR_zV8fV3CWQ=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)",
+  "album": {
+   "name": "Get Lucky (Radio Edit - feat. Pharrell Williams and Nile Rodgers)",
+   "id": "MPREb_yw4jv9byKCr"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "Rgrt_8mXrK8",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:09",
+  "year": null,
+  "artists": [
+   {
+    "name": "Daft Punk",
+    "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+   },
+   {
+    "name": "Pharrell Williams",
+    "id": "UCJw8VyO6e3v6S0327AsgwcQ"
+   },
+   {
+    "name": "Nile Rodgers",
+    "id": "UCThde8ccpEr6sP8dIHZ-ceQ"
+   }
+  ],
+  "duration_seconds": 249,
+  "views": "1.9B",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/HqegqT4tr2u0IsOqAmUgILJunBwHHkjl9s5L7t02ZFcGsRQpqKtmM7YlkeqzDdXi926mNvAn2UJu48s=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/HqegqT4tr2u0IsOqAmUgILJunBwHHkjl9s5L7t02ZFcGsRQpqKtmM7YlkeqzDdXi926mNvAn2UJu48s=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky",
+  "album": {
+   "name": "Get Lucky",
+   "id": "MPREb_ohDkB6GSTtj"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "2KPIShmFouY",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:10",
+  "year": null,
+  "artists": [
+   {
+    "name": "Funk Punk",
+    "id": "UCyk07PLeX8wvclVJJ379d-g"
+   }
+  ],
+  "duration_seconds": 250,
+  "views": "7.6K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/WZDQ2_16V2MgokgfFBMkoNAZdWfGxuz6CqZt0HubzPyltyCVoY9U2E8NS5R6U8obrCgXk3FurpFnfCs=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/WZDQ2_16V2MgokgfFBMkoNAZdWfGxuz6CqZt0HubzPyltyCVoY9U2E8NS5R6U8obrCgXk3FurpFnfCs=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky",
+  "album": {
+   "name": "Covers By Kids",
+   "id": "MPREb_g0bdO6CzXF6"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "28DL6VcWIb0",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:07",
+  "year": null,
+  "artists": [
+   {
+    "name": "The Countdown Kids",
+    "id": "UCJ31-d77OU6CNGqWZAZBg8g"
+   }
+  ],
+  "duration_seconds": 247,
+  "views": "14K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/XYk0D2QumZP28e5BjeMATgMJmL8FulKpYSqPas8m15ACT4oMrC6m1dh54tffPozDme7pgqaJo_Z_5QbOZQ=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/XYk0D2QumZP28e5BjeMATgMJmL8FulKpYSqPas8m15ACT4oMrC6m1dh54tffPozDme7pgqaJo_Z_5QbOZQ=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky (Metal Cover)",
+  "album": {
+   "name": "Leo Metal Covers Volume 7",
+   "id": "MPREb_dPM8ziZQ9Tv"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "D-cfH1V4RQ0",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "3:29",
+  "year": null,
+  "artists": [
+   {
+    "name": "Leo",
+    "id": "UCvFDzQ5R9dmSfQqWvOGEmXQ"
+   }
+  ],
+  "duration_seconds": 209,
+  "views": "224K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/d6jZqe7pKb_DZX-upwo6UeWwIG9nMTZwTNuepioUXg1FWdJ8Nxq858CGwpignDs5R6OEGIBpDp8IAgUT=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/d6jZqe7pKb_DZX-upwo6UeWwIG9nMTZwTNuepioUXg1FWdJ8Nxq858CGwpignDs5R6OEGIBpDp8IAgUT=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky",
+  "album": {
+   "name": "Two",
+   "id": "MPREb_0w0IakVTMr6"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "qR1hH637ups",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "3:08",
+  "year": null,
+  "artists": [
+   {
+    "name": "The Cairn String Quartet",
+    "id": "UCFesGYDpBDtagKI3xpv5N8Q"
+   }
+  ],
+  "duration_seconds": 188,
+  "views": "3.4K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/6Ui_WRrkdWZs3c-qjPP66-KGfmxtRBy74z6Wc4V3OFAC2-LvXQ_kz7EWvkn8FyaHLTOkTRpmKdvUa-TysQ=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/6Ui_WRrkdWZs3c-qjPP66-KGfmxtRBy74z6Wc4V3OFAC2-LvXQ_kz7EWvkn8FyaHLTOkTRpmKdvUa-TysQ=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "End of Line (From \"TRON: Legacy\"/Score)",
+  "album": {
+   "name": "TRON: Legacy",
+   "id": "MPREb_BQHrCwSBM37"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "NOMa56y_Was",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "2:37",
+  "year": null,
+  "artists": [
+   {
+    "name": "Daft Punk",
+    "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+   }
+  ],
+  "duration_seconds": 157,
+  "views": "31M",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/wY7kATQ2X8UkxWku6-JuLMCfjoIP4V5Mc9B24wV_bNcombU5iOTEPIgRax9iuIpgGcBbsTuF2lhsSyPO=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/wY7kATQ2X8UkxWku6-JuLMCfjoIP4V5Mc9B24wV_bNcombU5iOTEPIgRax9iuIpgGcBbsTuF2lhsSyPO=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky (Originally Performed by Daft Punk & Pharrell Williams) [Instrumental]",
+  "album": {
+   "name": "Get Lucky (Originally Performed by Daft Punk & Pharrell Williams) [Karaoke Version]",
+   "id": "MPREb_IjSPnl0x2iq"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "nmZXC48-syU",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "6:02",
+  "year": null,
+  "artists": [
+   {
+    "name": "DJ Cocktail",
+    "id": "UCVL4XV2GX92QMaAtXzyjgLw"
+   }
+  ],
+  "duration_seconds": 362,
+  "views": "7.6K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/T2KQbXbprtGYuje5KeRXyytJV40jlBTofXAUObsHYa_KPGwAtJV_mQzE-hnIAPJ5KSpyZdZLxyBlG6I=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/T2KQbXbprtGYuje5KeRXyytJV40jlBTofXAUObsHYa_KPGwAtJV_mQzE-hnIAPJ5KSpyZdZLxyBlG6I=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky (Made Popular By Daft Punk ft. Pharrell Williams) [Vocal Version] (feat. Pharrell Williams)",
+  "album": {
+   "name": "Party Tyme Karaoke - Pop Party Pack 6 (Vocal Versions)",
+   "id": "MPREb_naywoOygDGN"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "_ANaXnfkww8",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:05",
+  "year": null,
+  "artists": [
+   {
+    "name": "Party Tyme Karaoke",
+    "id": "UC20ZbpYgVBCMv0C6dKKjzEQ"
+   }
+  ],
+  "duration_seconds": 245,
+  "views": "14K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/N0NVtMHvcvbuWG1Vg4rJWJyCzUPwuVcAVDfZ57fGCPcngjfedNVcws7DBr7XMdldKyScr6pTw4NWpaeX=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/N0NVtMHvcvbuWG1Vg4rJWJyCzUPwuVcAVDfZ57fGCPcngjfedNVcws7DBr7XMdldKyScr6pTw4NWpaeX=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky (In the Style of Daft Punk & Pharell Williams) [Karaoke Instrumental Version]",
+  "album": {
+   "name": "2013 Pop Instrumentals, Vol. 16",
+   "id": "MPREb_P8xKzNZKvca"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "Ut_V0vhPzUI",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:21",
+  "year": null,
+  "artists": [
+   {
+    "name": "Karaoke All Hits",
+    "id": "UCRNzif-l1WBKTNayl0z16SA"
+   }
+  ],
+  "duration_seconds": 261,
+  "views": "1.9K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/EHDWrBWYliIN8FWNd0WO5d5KNQAfJlpktv4TwQ3vHGfVV9qor1hZ3Jb6mfZhJK3QFg_EmHifIGjGraWW=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/EHDWrBWYliIN8FWNd0WO5d5KNQAfJlpktv4TwQ3vHGfVV9qor1hZ3Jb6mfZhJK3QFg_EmHifIGjGraWW=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "One More Time (12 Mix)",
+  "album": {
+   "name": "One More Time",
+   "id": "MPREb_uWQeJO6Z53u"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "bmjsUsS8QuM",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "8:01",
+  "year": null,
+  "artists": [
+   {
+    "name": "Daft Punk",
+    "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+   }
+  ],
+  "duration_seconds": 481,
+  "views": "853M",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/_pY9BvNbeIpT2PUw_hQszOM3PZzmBRdi5uGNL8U6ZVE8AvApw7WqgMotzoGg7kk_ip8yj9VBkAJlgwv7_A=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/_pY9BvNbeIpT2PUw_hQszOM3PZzmBRdi5uGNL8U6ZVE8AvApw7WqgMotzoGg7kk_ip8yj9VBkAJlgwv7_A=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "GET LUCKY! (Live ver.)",
+  "album": {
+   "name": "GET LUCKY!",
+   "id": "MPREb_sETeLnTCMjG"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "z23ahl6lNCY",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "3:47",
+  "year": null,
+  "artists": [
+   {
+    "name": "YdBB",
+    "id": "UCw-JbV7l4MwJjfd14QvKteQ"
+   }
+  ],
+  "duration_seconds": 227,
+  "views": "94K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/VMvMQmOA0B-kXYuKMYKhHZLoU4LZ9_9iN8S9LGMs_GOWLWeR1xKwrt_Jg0fUX0SjHfAiae3_HqQTQ9M2UQ=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/VMvMQmOA0B-kXYuKMYKhHZLoU4LZ9_9iN8S9LGMs_GOWLWeR1xKwrt_Jg0fUX0SjHfAiae3_HqQTQ9M2UQ=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Daft Punk",
+  "album": {
+   "name": "PTX, Vol. 2",
+   "id": "MPREb_H5kJtPlicvI"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "6QWpHhHgTD4",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:09",
+  "year": null,
+  "artists": [
+   {
+    "name": "Pentatonix",
+    "id": "UC9ouIc5bVUPVzZ0X_JETPEA"
+   }
+  ],
+  "duration_seconds": 249,
+  "views": "407M",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/H6gob_SKY8bHY44kH8bN0ONORcjnKoPOrOtu1RctntUOWNkJj21AetMCfjYWZZc-1ZZaqMPsvsfaqx4=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/H6gob_SKY8bHY44kH8bN0ONORcjnKoPOrOtu1RctntUOWNkJj21AetMCfjYWZZc-1ZZaqMPsvsfaqx4=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky",
+  "album": {
+   "name": "Arcade Versions of Daft Punk",
+   "id": "MPREb_bT4QtprJYSF"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "fOqZVUQi0Do",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:11",
+  "year": null,
+  "artists": [
+   {
+    "name": "8-Bit Misfits",
+    "id": "UCeRTBXSx915PtfiLQYjPIvA"
+   }
+  ],
+  "duration_seconds": 251,
+  "views": "7.3K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/2NCa2ELTE1lZOMNBqtrzPr-KJXoaVrdMmNfhlS2_rSx1U_Xf3T3YzaKCIeFTAK3pBPXSbWi5S7NZdLk=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/2NCa2ELTE1lZOMNBqtrzPr-KJXoaVrdMmNfhlS2_rSx1U_Xf3T3YzaKCIeFTAK3pBPXSbWi5S7NZdLk=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky",
+  "album": {
+   "name": "Music for Hipsters",
+   "id": "MPREb_5qkV30qFS5D"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "YojsXQhh7HQ",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:19",
+  "year": null,
+  "artists": [
+   {
+    "name": "Phoenix Moon",
+    "id": "UCY3jD0WSOA5mlQtyFn3svYA"
+   }
+  ],
+  "duration_seconds": 259,
+  "views": "80K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/XSTwd358UgoQ-kqRZ19tO2FoNXOAVztOJCfCvyeYvA9O0yY4ERblrKWt373d5247zrY8xG8j28MtCUt3mA=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/XSTwd358UgoQ-kqRZ19tO2FoNXOAVztOJCfCvyeYvA9O0yY4ERblrKWt373d5247zrY8xG8j28MtCUt3mA=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky",
+  "album": {
+   "name": "Vitamin String Quartet Performs Daft Punk's Random Access Memories",
+   "id": "MPREb_uWqchxQ5Pyu"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "bBbLswaThdg",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:54",
+  "year": null,
+  "artists": [
+   {
+    "name": "Vitamin String Quartet",
+    "id": "UCLEcrRNFiDrhwENdwVI-ZPQ"
+   }
+  ],
+  "duration_seconds": 294,
+  "views": "1.8M",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/M3DHomaYospmFhvaSV_X60-x3cWajokAZnAFdif3IbL2utbzlVoZR7IlOkYan11xBEGr57UAb1iEF5Np=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/M3DHomaYospmFhvaSV_X60-x3cWajokAZnAFdif3IbL2utbzlVoZR7IlOkYan11xBEGr57UAb1iEF5Np=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky",
+  "album": {
+   "name": "Lullaby Renditions of Daft Punk - Random Access Memories",
+   "id": "MPREb_YNtsUtpBxzs"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "UPac8lqHabo",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:56",
+  "year": null,
+  "artists": [
+   {
+    "name": "Baby Rockstar",
+    "id": "UCh-eGj1RRkR4L6SAuGq61OA"
+   }
+  ],
+  "duration_seconds": 296,
+  "views": "53K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/fu9nbxje8AAlgZ-mSmJXKkpOcv639SMjrlvq0jVx2N18T8gSVi82bV6C4bL-WLfN7Scm768VgHbJnBg=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/fu9nbxje8AAlgZ-mSmJXKkpOcv639SMjrlvq0jVx2N18T8gSVi82bV6C4bL-WLfN7Scm768VgHbJnBg=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "get lucky",
+  "album": {
+   "name": "get lucky",
+   "id": "MPREb_Rzdb7ZwzpYG"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "BQry_--Qw_s",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "3:03",
+  "year": null,
+  "artists": [
+   {
+    "name": "Takane Lui",
+    "id": "UCQMgXC391DOrMXY430fAHYQ"
+   }
+  ],
+  "duration_seconds": 183,
+  "views": "1M",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/ZUwCS5ajhZkREe9vS8skX1ndwgVrdGk-tA-iNX3EGyDh3n2AC6wvJ6uvBBuJ1vNnImLc-UvkYp16ouYv=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/ZUwCS5ajhZkREe9vS8skX1ndwgVrdGk-tA-iNX3EGyDh3n2AC6wvJ6uvBBuJ1vNnImLc-UvkYp16ouYv=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky (Originally Performed By Daft Punk) [Full Vocal Version]",
+  "album": {
+   "name": "Karaoke Hits 2013, Vol. 4",
+   "id": "MPREb_vV6LAXP4Kts"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "_1b0UM9ij5o",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:10",
+  "year": null,
+  "artists": [
+   {
+    "name": "Paris Music",
+    "id": "UCyr7TDS-H_BsONY5m_GkwxQ"
+   }
+  ],
+  "duration_seconds": 250,
+  "views": "2K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/2zpCfJmdzNGTKgwP0_0gTYSOSx9XQ2VewFuttCTpg1WaRiOjvxXdEAF3Vc6y3JZY1qsqVmcMm573qnGM=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/2zpCfJmdzNGTKgwP0_0gTYSOSx9XQ2VewFuttCTpg1WaRiOjvxXdEAF3Vc6y3JZY1qsqVmcMm573qnGM=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ },
+ {
+  "category": "Songs",
+  "resultType": "song",
+  "title": "Get Lucky (A Tribute to Daft Punk)",
+  "album": {
+   "name": "Get Lucky (A Tribute to Daft Punk)",
+   "id": "MPREb_LE3eSPIow6q"
+  },
+  "inLibrary": false,
+  "pinnedToListenAgain": false,
+  "videoId": "duBPqo4I1hE",
+  "videoType": "MUSIC_VIDEO_TYPE_ATV",
+  "isAvailable": true,
+  "duration": "4:09",
+  "year": null,
+  "artists": [
+   {
+    "name": "Live Airplay",
+    "id": "UCNh342XWmkeOEROy1uIp0-w"
+   }
+  ],
+  "duration_seconds": 249,
+  "views": "34K",
+  "isExplicit": false,
+  "thumbnails": [
+   {
+    "url": "https://yt3.googleusercontent.com/8rX3T7XrNcVOhUmXVz0zMdwy7pwRER8QDBIaFWdWf-Jpk51R5ILFVkU0YVQ19v2N8CHXf3GfEcx3eYY=w60-h60-l90-rj",
+    "width": 60,
+    "height": 60
+   },
+   {
+    "url": "https://yt3.googleusercontent.com/8rX3T7XrNcVOhUmXVz0zMdwy7pwRER8QDBIaFWdWf-Jpk51R5ILFVkU0YVQ19v2N8CHXf3GfEcx3eYY=w120-h120-l90-rj",
+    "width": 120,
+    "height": 120
+   }
+  ]
+ }
+]

@@ -1,0 +1,3284 @@
+{
+ "owned": false,
+ "id": "OLAK5uy_mvGpNqcAglCR8WbCLLHnIitRBdLjho0ZI",
+ "privacy": "PUBLIC",
+ "description": null,
+ "views": null,
+ "duration": "19+ hours",
+ "trackCount": 116,
+ "title": "Videos",
+ "thumbnails": [
+  {
+   "url": "https://i.ytimg.com/vi/a5uQMwRMHcs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lr_-asr943kjNKr21YiUt96WbHUA",
+   "width": 400,
+   "height": 225
+  },
+  {
+   "url": "https://i.ytimg.com/vi/a5uQMwRMHcs/hq720.jpg?sqp=-oaymwEKCKAGEMIDIABIWg&rs=AMzJL3mMF8u_kf2VXzn-4p35M9wt-eNzUA",
+   "width": 800,
+   "height": 450
+  },
+  {
+   "url": "https://i.ytimg.com/vi/a5uQMwRMHcs/hq720.jpg?sqp=-oaymwEKCNUGEN8DIABIWg&rs=AMzJL3l6ykGpTsvYIazUf4xXMMbegtYjQw",
+   "width": 853,
+   "height": 479
+  }
+ ],
+ "author": {
+  "name": "Daft Punk",
+  "id": "UC_kRDKYrUlrbtrSiyu5Tflg"
+ },
+ "year": "2026",
+ "related": [],
+ "tracks": [
+  {
+   "videoId": "a5uQMwRMHcs",
+   "title": "Instant Crush (feat. Julian Casablancas)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/a5uQMwRMHcs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lr_-asr943kjNKr21YiUt96WbHUA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:40",
+   "duration_seconds": 340
+  },
+  {
+   "videoId": "IT27gX6vbkU",
+   "title": "Get Lucky (Drumless Edition) (Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/IT27gX6vbkU/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nYzXRkbJcMUGGU3jJ9PaeIhQQMcQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:11",
+   "duration_seconds": 371
+  },
+  {
+   "videoId": "FGBhQbmPwH8",
+   "title": "One More Time",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/FGBhQbmPwH8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n3_qY4XRLapf4YMTv5EuAp3xtbfw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:22",
+   "duration_seconds": 322
+  },
+  {
+   "videoId": "K0HSD_i2DvA",
+   "title": "Around the World",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/K0HSD_i2DvA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mrN-atQ6S94rADYgLlZUz24xwFwQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:02",
+   "duration_seconds": 242
+  },
+  {
+   "videoId": "HhZaHf8RP6g",
+   "title": "Veridis Quo",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/HhZaHf8RP6g/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kwKnIxHHFYbd2Wn6r-bhxn_6bvUA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:47",
+   "duration_seconds": 407
+  },
+  {
+   "videoId": "gAjR4_CbPpQ",
+   "title": "Harder, Better, Faster, Stronger",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/gAjR4_CbPpQ/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3krzcqw5IGYqVlEcMxMYnj_CKWBow",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:43",
+   "duration_seconds": 223
+  },
+  {
+   "videoId": "NF-kLy44Hls",
+   "title": "Lose Yourself to Dance (Official Version)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/NF-kLy44Hls/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3k7XOOLQXm2wYc1ywD4LadCdGdFUw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:11",
+   "duration_seconds": 251
+  },
+  {
+   "videoId": "sOS9aOIXPEk",
+   "title": "Something About Us",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/sOS9aOIXPEk/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3ltm3_U8JuyUXrjeWnv0ab5w6zuRQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:49",
+   "duration_seconds": 229
+  },
+  {
+   "videoId": "CqZgd6-xQl8",
+   "title": "Voyager",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/CqZgd6-xQl8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mWglnV0CxmK1Ye2RchbPLHmQcrIA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:46",
+   "duration_seconds": 226
+  },
+  {
+   "videoId": "zhl-Cs1-sG4",
+   "title": "Giorgio by Moroder (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/zhl-Cs1-sG4/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lPaS5RkmFplRO0Z12B23hGyMp9SQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "9:14",
+   "duration_seconds": 554
+  },
+  {
+   "videoId": "4whD6uAryMs",
+   "title": "Digital Love",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/4whD6uAryMs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kp7hYbibiNugifS9V3vLIt-v6m-Q",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:02",
+   "duration_seconds": 302
+  },
+  {
+   "videoId": "dKJfJMMsqX4",
+   "title": "Face to Face",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/dKJfJMMsqX4/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nhnuEC6LuQ7E0Gp6E29uD5a0mHZA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:59",
+   "duration_seconds": 239
+  },
+  {
+   "videoId": "L93-7vRfxNs",
+   "title": "Aerodynamic",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/L93-7vRfxNs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nhFF5KYrmgE7jIVPsyHThOAw_TzA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:33",
+   "duration_seconds": 213
+  },
+  {
+   "videoId": "PwILkY9gRrc",
+   "title": "Da Funk",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/PwILkY9gRrc/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kujFngyqL6PLS_A3zkHnWF539bkg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:29",
+   "duration_seconds": 329
+  },
+  {
+   "videoId": "IluRBvnYMoY",
+   "title": "Give Life Back to Music (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/IluRBvnYMoY/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mdoLMxVmWm6hkpYwTQEMEUkdIlpQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:44",
+   "duration_seconds": 284
+  },
+  {
+   "videoId": "sFZjqVnWBhc",
+   "title": "Robot Rock",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/sFZjqVnWBhc/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lvUdqwAOob3wmdf_B8e0CKu2-8xQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:17",
+   "duration_seconds": 197
+  },
+  {
+   "videoId": "0Gkhol2Q1og",
+   "title": "Touch (Official Audio) (feat. Paul Williams)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/0Gkhol2Q1og/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n5DF_qXbr-Gkku9mfpzP_sSMy8wA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "8:29",
+   "duration_seconds": 509
+  },
+  {
+   "videoId": "D8K90hX4PrE",
+   "title": "Technologic",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/D8K90hX4PrE/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lmaRLeUCKmg3Vkcj5Ybpu83QPvDg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:56",
+   "duration_seconds": 176
+  },
+  {
+   "videoId": "imBlPXbAv6E",
+   "title": "Infinity Repeating (2013 Demo) (feat. Julian Casablancas+The ...",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/imBlPXbAv6E/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lsPHyJOaqbkzoB498oBFzECEV_EQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:20",
+   "duration_seconds": 260
+  },
+  {
+   "videoId": "UsXubuXq1lM",
+   "title": "Human After All",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/UsXubuXq1lM/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3m-xzayB6tiULz73qy2JkueF7I4gg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:37",
+   "duration_seconds": 157
+  },
+  {
+   "videoId": "m4cgLL8JaVI",
+   "title": "Derezzed (from TRON: Legacy)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/m4cgLL8JaVI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kpHGXzaezSEFgmeI9-SSqO746pcQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:57",
+   "duration_seconds": 177
+  },
+  {
+   "videoId": "LL-gyhZVvx0",
+   "title": "Doin' it Right (Official Audio) (feat. Panda Bear)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/LL-gyhZVvx0/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3ldPZj1L3yuh3Tfi5xRHJSfmqnMqQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:21",
+   "duration_seconds": 261
+  },
+  {
+   "videoId": "x84m3YyO2oU",
+   "title": "Harder, Better, Faster, Stronger",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/x84m3YyO2oU/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mP7sIiwXDtRR-ESY-uZHZyWc8Ntg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:27",
+   "duration_seconds": 207
+  },
+  {
+   "videoId": "6S3ISlvlEbs",
+   "title": "Daft Punk - Crescendolls (Official Video)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/6S3ISlvlEbs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lN2iFpS4TPcGlmysHa_tImrgitEw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:55",
+   "duration_seconds": 235
+  },
+  {
+   "videoId": "bRt5z880CFY",
+   "title": "Superheroes",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/bRt5z880CFY/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lRWLz66tzOn6PKjF_QIq6a7mRmBA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:55",
+   "duration_seconds": 235
+  },
+  {
+   "videoId": "_ScM9pKlCfo",
+   "title": "Fragments of Time (Official Audio) (feat. Todd Edwards)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/_ScM9pKlCfo/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mMymuOAI4J2EteG4lJzXWCAGu2ZQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:49",
+   "duration_seconds": 289
+  },
+  {
+   "videoId": "WLa3JlGANuU",
+   "title": "Within (Drumless Edition) (Official Lyric Video)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/WLa3JlGANuU/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mJJPGTFuoMCe0431MLd6Uy08pQ3w",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:52",
+   "duration_seconds": 232
+  },
+  {
+   "videoId": "ajGKWk0auOc",
+   "title": "The Game of Love (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/ajGKWk0auOc/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3l5KycG_GFRpxEnkhKkBDYTs6vNQg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:32",
+   "duration_seconds": 332
+  },
+  {
+   "videoId": "HoQN7K6HdRw",
+   "title": "High Life",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/HoQN7K6HdRw/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mvsbG9JTMMMwI75ffeWcdfGmlLxQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:17",
+   "duration_seconds": 197
+  },
+  {
+   "videoId": "ZbbTmR6Xaag",
+   "title": "Contact",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/ZbbTmR6Xaag/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n-AJXIexb8sbTAB2ceIcek9QFHaQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:48",
+   "duration_seconds": 288
+  },
+  {
+   "videoId": "uURB-vo9rZ4",
+   "title": "Revolution 909",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/uURB-vo9rZ4/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lQQDt-3N19bZJYfyWlBjRBLh7A5Q",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:55",
+   "duration_seconds": 235
+  },
+  {
+   "videoId": "FxzBvqY5PP0",
+   "title": "Digital Love",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/FxzBvqY5PP0/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3k50myhXrues8XyDTlUvO1gKBHn-g",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:25",
+   "duration_seconds": 265
+  },
+  {
+   "videoId": "Z6_ZNW1DACE",
+   "title": "Too Long / Steam Machine",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Z6_ZNW1DACE/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3m53wQX6pS9xj2ypi1Nn-2UG0gcrw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "10:00",
+   "duration_seconds": 600
+  },
+  {
+   "videoId": "3T0NqvdUiWI",
+   "title": "Beyond (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/3T0NqvdUiWI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nszsTidhdWMr8IXuer9Pkl6nPQHA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:00",
+   "duration_seconds": 300
+  },
+  {
+   "videoId": "xBTqRd09y3E",
+   "title": "Nightvision",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/xBTqRd09y3E/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3m7p7DLT4myBG5DsfwBjFr9kV6Egw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "1:52",
+   "duration_seconds": 112
+  },
+  {
+   "videoId": "Hg3G1E2tNCA",
+   "title": "Television Rules the Nation / Crescendolls (Live)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Hg3G1E2tNCA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3msjywFLz6faFNmXZu3St60EObfcQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:51",
+   "duration_seconds": 291
+  },
+  {
+   "videoId": "1-yzqgwTVi8",
+   "title": "Short Circuit",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/1-yzqgwTVi8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mGdtjhy1hJwb5ul1cLC6S_JTUluw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:17",
+   "duration_seconds": 197
+  },
+  {
+   "videoId": "0fllyJTBsRU",
+   "title": "Around the World / Harder, Better, Faster, Stronger (Live)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/0fllyJTBsRU/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kPD84twlWPTG9yEjgsDtTs07HVEQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:43",
+   "duration_seconds": 343
+  },
+  {
+   "videoId": "wz7YiQdNmZ8",
+   "title": "Motherboard (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/wz7YiQdNmZ8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mUIgI6ZBRNAU0965umE3NQwc0EBQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:51",
+   "duration_seconds": 351
+  },
+  {
+   "videoId": "evqx5HLm9iM",
+   "title": "One More Time / Aerodynamic",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/evqx5HLm9iM/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mccvm0-we0oh1KF4FhNPabC2LWrg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:11",
+   "duration_seconds": 371
+  },
+  {
+   "videoId": "q27KtfR1ESA",
+   "title": "Daft Punk - Rollin' & Scratchin' (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/q27KtfR1ESA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kjEj97ZDIcaEymJtgQU3pG3ODmuQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:29",
+   "duration_seconds": 449
+  },
+  {
+   "videoId": "sBvJUdBeY5s",
+   "title": "Horizon (Japan CD) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/sBvJUdBeY5s/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lS1_DO26vzvy2dn2UsOIpLgDZ-xA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:24",
+   "duration_seconds": 264
+  },
+  {
+   "videoId": "0dbnYJRp6n8",
+   "title": "Make Love",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/0dbnYJRp6n8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kOTqvdkfd4IvPYD2h7ehRXfF6Waw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:51",
+   "duration_seconds": 291
+  },
+  {
+   "videoId": "lVKbF8khsrI",
+   "title": "Robot Rock / Oh Yeah",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/lVKbF8khsrI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lkPtATEprUIuUtNKaNl5822Iiz_A",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:28",
+   "duration_seconds": 388
+  },
+  {
+   "videoId": "mmi60Bd4jSs",
+   "title": "Da Funk",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/mmi60Bd4jSs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lerPQFuDhpERI6bmeHK3tC8L74vg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:35",
+   "duration_seconds": 335
+  },
+  {
+   "videoId": "DuDX6wNfjqc",
+   "title": "Daft Punk - Epilogue",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/DuDX6wNfjqc/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kGCQTFwsPMoXnJ9mp-AleK8w4LbQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:58",
+   "duration_seconds": 478
+  },
+  {
+   "videoId": "NFxyYYRqobw",
+   "title": "Touch It / Technologic",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/NFxyYYRqobw/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nPpu7TLcEN1x4RFi7zh94xtU04_g",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:30",
+   "duration_seconds": 330
+  },
+  {
+   "videoId": "QwRlt1XyOg0",
+   "title": "The Prime Time of Your Life",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/QwRlt1XyOg0/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n7jJbggoW2cqm0CD_pHCKHdqSAhg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:06",
+   "duration_seconds": 246
+  },
+  {
+   "videoId": "StACmxSQKY8",
+   "title": "Television Rules the Nation",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/StACmxSQKY8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n-QXBnDN8f0aNQh0pNY7w-ZXoaIg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:13",
+   "duration_seconds": 193
+  },
+  {
+   "videoId": "WY8hqzYT_uk",
+   "title": "Alive",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/WY8hqzYT_uk/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lL5l-HzUpMW3-lGhQ2A4c4ox-Tpg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:17",
+   "duration_seconds": 317
+  },
+  {
+   "videoId": "LMNlm7khYwA",
+   "title": "Fresh",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/LMNlm7khYwA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n02yDwtbKv4-W3bGr3H_SbeKgKPA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:05",
+   "duration_seconds": 245
+  },
+  {
+   "videoId": "uOdm7-YMoUU",
+   "title": "Human After All / Together / One More Time (Reprise) / Music Sounds Better with You (Live)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/uOdm7-YMoUU/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3khvqGEr6fQHvJ76w0yNaCslXUmiQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "9:59",
+   "duration_seconds": 599
+  },
+  {
+   "videoId": "yuoghR-5-Xs",
+   "title": "Daftendirekt",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/yuoghR-5-Xs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mKJmrImSJ1lUQ7WwGrtvLFKTo1Gg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:45",
+   "duration_seconds": 165
+  },
+  {
+   "videoId": "DBHipNYuAZk",
+   "title": "Burnin'",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/DBHipNYuAZk/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3m0zVIjykUkmTJ0blldrdHvSSmI3g",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:46",
+   "duration_seconds": 226
+  },
+  {
+   "videoId": "3AsRI_cSie0",
+   "title": "Prime Time of Your Life / Brainwasher / Rollin' & Scratchin' / Alive",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/3AsRI_cSie0/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kzuoQJf7CxBbc0m9wgNrqX6_p_Mg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "10:23",
+   "duration_seconds": 623
+  },
+  {
+   "videoId": "Im6Fsd92n3k",
+   "title": "Da Funk / Daftendirekt",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Im6Fsd92n3k/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mDMhIZ6FjGbQd5q3no-d5XVj7QIQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:37",
+   "duration_seconds": 397
+  },
+  {
+   "videoId": "NPgsadG-lwk",
+   "title": "Daft Punk - Aerodynamic (Daft Punk Remix) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/NPgsadG-lwk/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mSRKuCPd1DnzPeWiki9g4EWA1x2g",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:11",
+   "duration_seconds": 371
+  },
+  {
+   "videoId": "Kccj6KPAKcE",
+   "title": "Superheroes / Human After All / Rock'n Roll (Live)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Kccj6KPAKcE/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kID5MD-_u-ss-aXIlNni0a9eIQDg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:42",
+   "duration_seconds": 342
+  },
+  {
+   "videoId": "IuwwuuvnvCs",
+   "title": "Prime (2012 Unfinished) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/IuwwuuvnvCs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nJJgdWcOt9jjEBgNSDREkDR8MMfg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:48",
+   "duration_seconds": 288
+  },
+  {
+   "videoId": "3yq-NFiEywo",
+   "title": "Teachers (extended mix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/3yq-NFiEywo/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n2GsmZgWGnD-_GhMpqYUSKzxhPog",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:54",
+   "duration_seconds": 174
+  },
+  {
+   "videoId": "5AJ8yHebaok",
+   "title": "Daft Punk - Phœnix (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/5AJ8yHebaok/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n0K-9oLIaLfen2KObmPe2SXYr3yA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:58",
+   "duration_seconds": 298
+  },
+  {
+   "videoId": "ZXhwXhv37Ps",
+   "title": "Face to Face / Short Circuit (Live)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/ZXhwXhv37Ps/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nJKxIJnFN2oAeXjca9n4P4WoixlQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:56",
+   "duration_seconds": 296
+  },
+  {
+   "videoId": "DSaOvIaDQSw",
+   "title": "LYTD (Vocoder Tests) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/DSaOvIaDQSw/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3np4_sViCvIVXFYpEeNJYSrWS1Kww",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:11",
+   "duration_seconds": 131
+  },
+  {
+   "videoId": "TycgkK2gFvA",
+   "title": "Aerodynamic Beats / Gabrielle , Forget About the World",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/TycgkK2gFvA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nQiFnoMT3_HIS5ryGAKLWeOLeYKQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:32",
+   "duration_seconds": 212
+  },
+  {
+   "videoId": "l4SFUztLWOA",
+   "title": "Too Long / Steam Machine",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/l4SFUztLWOA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kgIU5KFwv40ubEsMdzp6o7L36YUA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:02",
+   "duration_seconds": 422
+  },
+  {
+   "videoId": "ZW7WfdTuth8",
+   "title": "Rock'n Roll",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/ZW7WfdTuth8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mvWit-0uG5Pa637a_34_94LTkAoQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:34",
+   "duration_seconds": 454
+  },
+  {
+   "videoId": "d-OGBZSDKBU",
+   "title": "Emotion",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/d-OGBZSDKBU/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3k6aHH-w5dso5A-kHjMD0vumuzHVQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:58",
+   "duration_seconds": 418
+  },
+  {
+   "videoId": "YiZfLvLU5Jc",
+   "title": "GLBTM (Studio Outtakes) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/YiZfLvLU5Jc/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3m3y1eYCHHO7_KNZUkm48V1oqfkrQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:24",
+   "duration_seconds": 384
+  },
+  {
+   "videoId": "0sa2R-PM0Uk",
+   "title": "Steam Machine",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/0sa2R-PM0Uk/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nK8gkcDIES6cONS4qmX6iVLuNZNg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:22",
+   "duration_seconds": 322
+  },
+  {
+   "videoId": "RrUa-lm4BMY",
+   "title": "Lose Yourself to Dance (Drumless Edition) (Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/RrUa-lm4BMY/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mPwfdycXOJpop06d8P4LMPFcgdiQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:56",
+   "duration_seconds": 356
+  },
+  {
+   "videoId": "JXWkKO4eplY",
+   "title": "High Fidelity",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/JXWkKO4eplY/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3muw6ufR4Zane5qQnXFJD6B4iY4bA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:03",
+   "duration_seconds": 363
+  },
+  {
+   "videoId": "VubH7FuW6TQ",
+   "title": "Indo Silver Club",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/VubH7FuW6TQ/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lwSfvTD2n1gma32JJVbCkGvIQexg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:35",
+   "duration_seconds": 275
+  },
+  {
+   "videoId": "RdVEQbWjaTE",
+   "title": "The Brainwasher",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/RdVEQbWjaTE/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lY-wL31at2mb6_Kc-8HJpJXPj6YA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:09",
+   "duration_seconds": 249
+  },
+  {
+   "videoId": "uejC3tt5euQ",
+   "title": "Robot Rock",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/uejC3tt5euQ/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lyDGfsZ2JETYg5i1b47hQ0TH1vlA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:00",
+   "duration_seconds": 360
+  },
+  {
+   "videoId": "g30oA4GUfEg",
+   "title": "Daft Punk - Aerodynamite (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/g30oA4GUfEg/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3ko4C4AmqpxvbFZDoMTYUYRw8Un3Q",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:49",
+   "duration_seconds": 469
+  },
+  {
+   "videoId": "uguMN4BEU3k",
+   "title": "Daft Punk - Face to Face (Demon Remix) (Official Audio) (feat. Todd Edwards)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/uguMN4BEU3k/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n8w6kLu5AGgfPBCqPh4ak69IdEYg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:00",
+   "duration_seconds": 420
+  },
+  {
+   "videoId": "USpepfrrCNs",
+   "title": "Burnin' / Too Long",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/USpepfrrCNs/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lMqN6wcIj1074pXcA4L6Pwe2lFZw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:12",
+   "duration_seconds": 432
+  },
+  {
+   "videoId": "1PGHlxyz82U",
+   "title": "Human After All (SebastiAn remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/1PGHlxyz82U/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kikVmBKEpay111dKU_XXubN3FFtQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:48",
+   "duration_seconds": 288
+  },
+  {
+   "videoId": "WzHjINunubY",
+   "title": "Digital Love (Boris Dlugosch Remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/WzHjINunubY/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n5RxFgz3JGdABEn8r7ex5esdanNQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:31",
+   "duration_seconds": 451
+  },
+  {
+   "videoId": "E5xZf1unC84",
+   "title": "Horizon Ouverture (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/E5xZf1unC84/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kNYbkMxEdLRATaa7HufBT_PieegQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:10",
+   "duration_seconds": 130
+  },
+  {
+   "videoId": "6TOXw9zQCAc",
+   "title": "Fresh",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/6TOXw9zQCAc/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nSSLWwp2XZWfa-18HVRHYUCyDwFA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:03",
+   "duration_seconds": 243
+  },
+  {
+   "videoId": "Twp55oTHlxQ",
+   "title": "Motherboard (Drumless Edition) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Twp55oTHlxQ/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nxsno2qWYxPJC0vDzJWotd5pWaog",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:49",
+   "duration_seconds": 349
+  },
+  {
+   "videoId": "HU7KlDJVINc",
+   "title": "Ouverture",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/HU7KlDJVINc/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kk-dnwdAuGXaDuM-AEzs360u3O9Q",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:41",
+   "duration_seconds": 161
+  },
+  {
+   "videoId": "CYKekR6661o",
+   "title": "The Writing of Fragments of Time (RAM 10th Anniversary) (feat. Todd Edwards)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/CYKekR6661o/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mHBJAvu6NsJs6N4D7knkgB8_wIKw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "8:26",
+   "duration_seconds": 506
+  },
+  {
+   "videoId": "YqUyNvGsM9s",
+   "title": "Funk Ad",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/YqUyNvGsM9s/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kTJNuaPRUPZhL2ArPNylJw2m2GMg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "0:52",
+   "duration_seconds": 52
+  },
+  {
+   "videoId": "XlUutoCywnk",
+   "title": "Rollin' Scratchin'",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/XlUutoCywnk/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mDZTW1g6aEMf3zgWlx3YW3ZibGQA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "8:38",
+   "duration_seconds": 518
+  },
+  {
+   "videoId": "quXWcWyuS9k",
+   "title": "Daft Punk - Harder, Better, Faster, Stronger (The Neptunes Remix) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/quXWcWyuS9k/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lQTqz-0iSVcOUl3nC-7iTUTzq79w",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:13",
+   "duration_seconds": 313
+  },
+  {
+   "videoId": "iuPrdT_CuoI",
+   "title": "Daft Punk - Robot Rock (Soulwax Remix) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/iuPrdT_CuoI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kBcdXepbbbs-fTxlLvfi1goMpZZw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:31",
+   "duration_seconds": 391
+  },
+  {
+   "videoId": "w4ht5oHbd5w",
+   "title": "Around the World (Maw Remix) (Official Music Video)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/w4ht5oHbd5w/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3n2evzId3pZIxuyfVANq9skexclkg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:10",
+   "duration_seconds": 310
+  },
+  {
+   "videoId": "OSoSNJCg-Io",
+   "title": "Daft Punk - The Prime Time Of Your Life (Para One Remix) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/OSoSNJCg-Io/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kfATelLb_xrLNeo8FceST-MeKEqg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:52",
+   "duration_seconds": 232
+  },
+  {
+   "videoId": "-nnnK8FnZ0M",
+   "title": "Harder, Better, Faster, Stronger",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/-nnnK8FnZ0M/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kMvFw9tDX_mhAk3bJJW9x_bxU8-g",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:01",
+   "duration_seconds": 361
+  },
+  {
+   "videoId": "TCuHN_tttGc",
+   "title": "Technologic (Le Knight Club Remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/TCuHN_tttGc/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lWt1yTW0URGKqoy4C5uXkfCjs2nQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:29",
+   "duration_seconds": 329
+  },
+  {
+   "videoId": "eQQubmdYtMY",
+   "title": "Contact (Drumless Edition) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/eQQubmdYtMY/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3krMRbBS4lX_rCIrcxIdg-4oMY42w",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:25",
+   "duration_seconds": 385
+  },
+  {
+   "videoId": "h5Xp4v3bhO8",
+   "title": "GL (Early Take) (Official Audio) (feat. Nile Rodgers)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/h5Xp4v3bhO8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lHgrBFolDIxHy0LMcHmH0YsJrPtQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "0:35",
+   "duration_seconds": 35
+  },
+  {
+   "videoId": "JysC2r5_qis",
+   "title": "Face to Face (Cosmo Vitelli Remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/JysC2r5_qis/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3k1UCBCOMVIr08o93i8j0srXvcK1g",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:55",
+   "duration_seconds": 295
+  },
+  {
+   "videoId": "ljP5JHeth_w",
+   "title": "Human After All (\"Guy-Man After All \"- Justice Remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/ljP5JHeth_w/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nJbAkgHCp4U1LTDSRFSF96kvNBSA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:01",
+   "duration_seconds": 241
+  },
+  {
+   "videoId": "AmLFjE0Z0bk",
+   "title": "Aerodynamic (Slum Village remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/AmLFjE0Z0bk/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nXwu3PJA7iDaoJfqAq5kGNxtjAqA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:38",
+   "duration_seconds": 218
+  },
+  {
+   "videoId": "zr28TRk9vCg",
+   "title": "Oh Yeah",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/zr28TRk9vCg/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3ldTJqpjaQnUCmqrVMucOyK2Mg6UA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:02",
+   "duration_seconds": 122
+  },
+  {
+   "videoId": "cUC4BY7CdY4",
+   "title": "Daft Punk - Technologic (Digitalism Remix) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/cUC4BY7CdY4/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kd0mcoM0KOKh5HXOeWfTB1AGQ21w",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:02",
+   "duration_seconds": 362
+  },
+  {
+   "videoId": "PVTSrcOmyuE",
+   "title": "Burnin' (Official Music Video) (Ian Pooley Cut Up Mix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/PVTSrcOmyuE/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3ks-icCbici14861lvZ3GSlhGYq-g",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:28",
+   "duration_seconds": 328
+  },
+  {
+   "videoId": "Ni-sBFiWGGI",
+   "title": "Technologic (Liquid Twins remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Ni-sBFiWGGI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mUDx0latyjXeNlgqeunIO8iynw0A",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:11",
+   "duration_seconds": 251
+  },
+  {
+   "videoId": "Dhe4KPWAw5s",
+   "title": "Get Lucky (feat. Nile Rodgers & Pharrell)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Dhe4KPWAw5s/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kJX_hUIi_ILmDP5_LKx-R85nlsRg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "2:02",
+   "duration_seconds": 122
+  },
+  {
+   "videoId": "XbLHx3bqqpA",
+   "title": "Phoenix (Basement Jaxx remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/XbLHx3bqqpA/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nRO1gbKLCEoy00y4b-YZPaT8uuBw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "7:54",
+   "duration_seconds": 474
+  },
+  {
+   "videoId": "s5NjOW43hJo",
+   "title": "Daft Punk - Human After All (The Juan Maclean Remix) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/s5NjOW43hJo/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nvA5nyCzqdFW4YC4z8Cx3qRSKkRg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:44",
+   "duration_seconds": 404
+  },
+  {
+   "videoId": "wOEwqc2H57E",
+   "title": "One More Time",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/wOEwqc2H57E/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nzsRRNCcxtlV_hrH_FRcn0pT-Q3Q",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:41",
+   "duration_seconds": 221
+  },
+  {
+   "videoId": "erAODxtYVKI",
+   "title": "Daft Punk - Technologic (Vitalic Remix) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/erAODxtYVKI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kIlLeO4F0LEE7L_Nv3rjvyHUDYGQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:25",
+   "duration_seconds": 325
+  },
+  {
+   "videoId": "FemuqkKWK4A",
+   "title": "Too Long (Gonzales Version)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/FemuqkKWK4A/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3m5_5zgktHed4LQZC3tBi9j_Mx78A",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:14",
+   "duration_seconds": 194
+  },
+  {
+   "videoId": "PCc3S-hPqS8",
+   "title": "Daft Punk - Crescendolls (Laidback Remix) (Official Audio)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/PCc3S-hPqS8/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3kaUV7REMFrf6-Gyvo4rQsvtOOLvA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:26",
+   "duration_seconds": 326
+  },
+  {
+   "videoId": "9jqwg4NrIoo",
+   "title": "Technologic (Peaches No Logic remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/9jqwg4NrIoo/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3my2O_RENiWO62t6p6vg5pojkTJUg",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "4:41",
+   "duration_seconds": 281
+  },
+  {
+   "videoId": "asWlF4cH-9w",
+   "title": "Brainwasher (Erol Alkan's Horrohouse dub)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/asWlF4cH-9w/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3katF31E1t9VGDf4S_mbCONrmBPeA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:05",
+   "duration_seconds": 365
+  },
+  {
+   "videoId": "0Q7_ZQmqVa0",
+   "title": "Technologic (Basement Jaxx Kontrol Mixx)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/0Q7_ZQmqVa0/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lBleDbQdt7j929dfTg1oNnYKpAbw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "5:32",
+   "duration_seconds": 332
+  },
+  {
+   "videoId": "Yuqgz3dVnQM",
+   "title": "Human After All",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Yuqgz3dVnQM/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lxePaxEM3m40RKbgfk6YJKyrry0Q",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "6:05",
+   "duration_seconds": 365
+  },
+  {
+   "videoId": "W3HMtXMzRos",
+   "title": "Human After All (Alter Ego remix)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/W3HMtXMzRos/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lNDL0b3uf9eSwuwSFT7PyMwJwnBA",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "9:26",
+   "duration_seconds": 566
+  },
+  {
+   "videoId": "Oj5q3QassmM",
+   "title": "DCONSTRUCTED - Daft Punk \"Derezzed\" (Avicii So Amazing Remix ft. Negin) (feat. Negin)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/Oj5q3QassmM/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3lLt-ZW1bOEe8wLTx1r_5dtaJW5GQ",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "3:48",
+   "duration_seconds": 228
+  },
+  {
+   "videoId": "64_Xu3tc_uU",
+   "title": "Around the World (Music Video Storyboard)",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/64_Xu3tc_uU/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nkN8PiyieqEwTgmVvuA3Q5xV9pxw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "1:41",
+   "duration_seconds": 101
+  },
+  {
+   "videoId": "OzZAHvq_UqI",
+   "title": "WDPK 83.7 FM",
+   "artists": [
+    {
+     "name": "Daft Punk",
+     "id": "UCRr1xG_2WIDs18a6cIiCxeA"
+    }
+   ],
+   "album": null,
+   "likeStatus": "INDIFFERENT",
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/OzZAHvq_UqI/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3nFBttZI7MJEZge-GWLuxDKdg64Yw",
+     "width": 400,
+     "height": 225
+    }
+   ],
+   "isAvailable": true,
+   "isExplicit": false,
+   "videoType": "MUSIC_VIDEO_TYPE_OMV",
+   "views": null,
+   "communityVoteStatus": null,
+   "duration": "0:29",
+   "duration_seconds": 29
+  }
+ ],
+ "duration_seconds": 35135
+}

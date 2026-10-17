@@ -1,0 +1,158 @@
+{
+ "Moods & moments": [
+  {
+   "title": "Chill",
+   "params": "ggMPOg1uX1JOQWZFeDByc2Jm"
+  },
+  {
+   "title": "Commute",
+   "params": "ggMPOg1uX044Z2o5WERLckpU"
+  },
+  {
+   "title": "Energize",
+   "params": "ggMPOg1uX2lRZUZiMnNrQnJW"
+  },
+  {
+   "title": "Feel good",
+   "params": "ggMPOg1uXzZQbDB5eThLRTQ3"
+  },
+  {
+   "title": "Focus",
+   "params": "ggMPOg1uX0NvNGNhWThMYWRh"
+  },
+  {
+   "title": "Gaming",
+   "params": "ggMPOg1uX3NmUVV4Vzl3WGQ0"
+  },
+  {
+   "title": "Party",
+   "params": "ggMPOg1uX2w1aW1CRDFTSUNo"
+  },
+  {
+   "title": "Romance",
+   "params": "ggMPOg1uX1JCQnB2QXVYVEIz"
+  },
+  {
+   "title": "Sad",
+   "params": "ggMPOg1uX3NISTh4UmtWcFgz"
+  },
+  {
+   "title": "Sleep",
+   "params": "ggMPOg1uX1MxaFQ3Z0JMZkN4"
+  },
+  {
+   "title": "Workout",
+   "params": "ggMPOg1uXzIxYkNac21YZ2Z0"
+  }
+ ],
+ "Genres": [
+  {
+   "title": "African",
+   "params": "ggMPOg1uX0UzWGxlRE5jMDVk"
+  },
+  {
+   "title": "Arabic",
+   "params": "ggMPOg1uX3VOQWxsblVZTFNE"
+  },
+  {
+   "title": "Blues",
+   "params": "ggMPOg1uX2NXUkgxdW0zUHJp"
+  },
+  {
+   "title": "Bollywood & Indian",
+   "params": "ggMPOg1uX2hacTRJOU5KcndD"
+  },
+  {
+   "title": "Brazilian",
+   "params": "ggMPOg1uX3Vmb2NXbUdLcHNU"
+  },
+  {
+   "title": "Christian & gospel",
+   "params": "ggMPOg1uX3E1VnpSRHhLVElG"
+  },
+  {
+   "title": "Classical",
+   "params": "ggMPOg1uX1N4VmduTmdUR3dm"
+  },
+  {
+   "title": "Country & Americana",
+   "params": "ggMPOg1uX1RXcFlyZEpRb1d3"
+  },
+  {
+   "title": "Dance & electronic",
+   "params": "ggMPOg1uX1NPTld3SDN3WGs4"
+  },
+  {
+   "title": "Decades",
+   "params": "ggMPOg1uX3NjZllsNGVEMkZo"
+  },
+  {
+   "title": "Family",
+   "params": "ggMPOg1uXzMyY3J2SGM0bVh5"
+  },
+  {
+   "title": "Folk & acoustic",
+   "params": "ggMPOg1uXzBTRFBmQ3N4b0R6"
+  },
+  {
+   "title": "Hip-hop",
+   "params": "ggMPOg1uX01sVVAwVmNXcEIx"
+  },
+  {
+   "title": "Indie & alternative",
+   "params": "ggMPOg1uX21NWWpBbU01SDgy"
+  },
+  {
+   "title": "J-Pop",
+   "params": "ggMPOg1uXzAwSjVITDBZckJR"
+  },
+  {
+   "title": "Jazz",
+   "params": "ggMPOg1uX3lPcDFRaE9wM1BS"
+  },
+  {
+   "title": "K-Pop",
+   "params": "ggMPOg1uX0JrbjBDOFFPSzJW"
+  },
+  {
+   "title": "Latin",
+   "params": "ggMPOg1uX29wWTRjMHV1dWN5"
+  },
+  {
+   "title": "Mandopop & cantopop",
+   "params": "ggMPOg1uX2hXVUQwc0JTNXlE"
+  },
+  {
+   "title": "Metal",
+   "params": "ggMPOg1uXzdlSXhKZ0hMV1Z4"
+  },
+  {
+   "title": "OPM",
+   "params": "ggMPOg1uX2JScEx5R3J4bmp5"
+  },
+  {
+   "title": "Pop",
+   "params": "ggMPOg1uX1BmNzc2V2p0YXJ5"
+  },
+  {
+   "title": "R&B & soul",
+   "params": "ggMPOg1uX2JxQ2hxc2J5UFhR"
+  },
+  {
+   "title": "Reggae & caribbean",
+   "params": "ggMPOg1uX1JUc2lFcDFuUUth"
+  },
+  {
+   "title": "Rock",
+   "params": "ggMPOg1uXzJKTm5jUEZ5Uzlu"
+  },
+  {
+   "title": "Songwriters & producers",
+   "params": "ggMPOg1uX0cyenN2blVadXBC"
+  },
+  {
+   "title": "Soundtracks & musicals",
+   "params": "ggMPOg1uX2tWZXBsRm05cHNR"
+  }
+ ]
+}
