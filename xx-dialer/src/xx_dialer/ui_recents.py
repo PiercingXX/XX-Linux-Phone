@@ -182,6 +182,7 @@ class RecentsController:
 
     def items(self) -> list[RecentItem]:
         now = self._now_ms()
+        region = self._region()
         out: list[RecentItem] = []
         for grouped in recents.group(self.visible_calls(),
                                      self.grouping_on, self.expanded):
@@ -190,27 +191,31 @@ class RecentsController:
                 item = RecentItem()
                 item.kind = "header"
                 item.identity = grouped.identity
-                item.title = recents.display_name_of(first)
-                item.number = grouped.identity
+                item.title = recents.display_name_of(first, region)
+                item.number = recents.format_number(
+                    grouped.identity, region)
                 item.count = len(grouped.calls)
                 item.expanded = grouped.expanded
                 item.date = first.time_ms
                 out.append(item)
                 if grouped.expanded:
                     for call in grouped.calls:
-                        out.append(self._row_item(call, now))
+                        out.append(self._row_item(call, now, region))
             else:
-                out.append(self._row_item(grouped.call, now))
+                out.append(self._row_item(grouped.call, now, region))
         return out
 
     def _row_item(self, call: recents.MergedCall,
-                  now_ms: int) -> RecentItem:
+                  now_ms: int, region: str | None = None) -> RecentItem:
+        if region is None:
+            region = self._region()
         item = RecentItem()
         item.kind = "item"
         item.row_id = call.key
         item.date = call.time_ms
-        item.title = recents.display_name_of(call)
-        item.number = call.e164 or recents.format_number(call.raw)
+        item.title = recents.display_name_of(call, region)
+        item.number = recents.format_number(
+            call.e164 or call.raw, region)
         item.when = recents.format_when(call.time_ms, now_ms,
                                         self._local_tz())
         item.chip = recents.direction_chip(call)
@@ -322,7 +327,8 @@ class RecentsController:
         except Exception:
             self._notice("Could not copy the number.")
             return
-        self._notice("Copied %s" % recents.format_number(number))
+        self._notice("Copied %s" % recents.format_number(
+            number, self._region()))
 
     def add_contact(self, call: recents.MergedCall) -> None:
         number = self._dialable(call)
@@ -369,7 +375,8 @@ class RecentsController:
                         number, self._region()) or number)
             except Exception:
                 pass
-        self._notice("Blocked %s" % recents.format_number(number))
+        self._notice("Blocked %s" % recents.format_number(
+            number, self._region()))
         self.load()
 
     def ring_next_time(self, call: recents.MergedCall) -> None:
@@ -585,6 +592,8 @@ class RecentsView:
                         spacing=2)
         inner.set_margin_start(20)
         inner.set_margin_end(20)
+        inner.set_valign(Gtk.Align.CENTER)
+        root.set_valign(Gtk.Align.CENTER)
         root.append(inner)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                          spacing=12)
@@ -654,6 +663,10 @@ class RecentsView:
         row.set_visible(not is_header)
         verdict.set_visible(not is_header
                             and bool(item.verdict))
+        if is_header:
+            root.add_css_class("xx-dialer-group")
+        else:
+            root.remove_css_class("xx-dialer-group")
         if is_header:
             arrow.set_from_icon_name(
                 "go-down-symbolic" if item.expanded
@@ -803,16 +816,18 @@ class RecentsView:
         for uid, name, e164 in starred:
             from xx_dialer import t9
 
+            region = self.controller._region()
+            shown = name or recents.format_number(e164, region)
             button = Gtk.Button()
             cell = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
             cell.set_valign(Gtk.Align.CENTER)
             cell.append(widgets.avatar(
                 t9.initials(name or e164), 32))
-            text = self._row_label(name or e164, "xx-title")
+            text = self._row_label(shown, "xx-title")
             cell.append(text)
             button.set_child(cell)
-            button.set_tooltip_text(name or e164)
+            button.set_tooltip_text(shown)
             button.connect("clicked", self._on_star, e164)
             self._star_bar.append(button)
         unread = self.controller.unread
@@ -828,7 +843,8 @@ class RecentsView:
         if deeplink is not None:
             self._deep_note.set_label(
                 "Showing calls with %s — show all"
-                % recents.format_number(deeplink))
+                % recents.format_number(
+                    deeplink, self.controller._region()))
         empty = self._store.get_n_items() == 0
         self._empty.set_visible(empty)
         if empty:

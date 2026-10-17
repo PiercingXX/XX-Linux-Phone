@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import re
 
 from xx_dialer.store import (
     CALL_TYPE_INCOMING,
@@ -298,19 +299,103 @@ def should_clear(recents_visible: bool,
     return recents_visible or missed_filter_active
 
 
-def display_name_of(call: MergedCall) -> str:
+_NANP_FORMAT_REGIONS = frozenset({"US", "CA"})
+
+_KNOWN_COUNTRY_CODES = frozenset(
+    {"1", "44", "49", "33", "34", "39", "91", "61", "55", "52"})
+
+
+def _group_national(national: str) -> str:
+    """Space-group a national digit string for reading (3-3-rest)."""
+    chunks: list[str] = []
+    rest = national
+    while len(rest) > 4:
+        chunks.append(rest[:3])
+        rest = rest[3:]
+    chunks.append(rest)
+    return " ".join(chunks)
+
+
+def _format_nanp(national10: str) -> str:
+    return "(%s) %s-%s" % (
+        national10[:3], national10[3:6], national10[6:10])
+
+
+def display_name_of(call: MergedCall, region: str = "US") -> str:
     if call.display_name:
         return call.display_name
     if call.cached_name and call.cached_name.strip():
         return call.cached_name.strip()
     if call.raw and call.raw.strip():
-        return format_number(call.raw)
+        return format_number(call.raw, region)
+    if call.e164 and call.e164.strip():
+        return format_number(call.e164, region)
     return "Withheld"
 
 
-def format_number(raw: str | None) -> str:
-    """Identity-preserving display: stripped, never re-punctuated."""
-    return (raw or "").strip()
+def format_number(raw: str | None, region: str = "US") -> str:
+    """Display-only grouping; the dialed/stored string stays untouched.
+
+    NANP numbers in a NANP region render as ``(614) 555-0142``.
+    Other international numbers render as ``+44 207 946 0958``-style
+    groupings. Short codes and unknown shapes come back as-is.
+    Checked against xx-contacts' ``format_display_number``: its
+    international/short-code handling matches, but its NANP shape
+    (``+1 555 010 0200``) differs, so the dialer keeps its own copy
+    to match the Android ``(206) 555-0133`` reference.
+    """
+    if raw is None:
+        return ""
+    text = raw.strip() if isinstance(raw, str) else str(raw).strip()
+    if not text:
+        return ""
+    if "*" in text or "#" in text:
+        return text
+    if any(ch.isalpha() for ch in text):
+        return text
+    digits = re.sub(r"[^\d]", "", text)
+    if not digits:
+        return text
+    region_up = (region or "US").upper()
+    is_plus = text.startswith("+")
+    is_idd = text.startswith("00")
+    if is_plus:
+        if not 7 <= len(digits) <= 15:
+            return text
+        if (region_up in _NANP_FORMAT_REGIONS
+                and digits.startswith("1") and len(digits) == 11):
+            return _format_nanp(digits[1:])
+        for code in sorted(_KNOWN_COUNTRY_CODES,
+                           key=len, reverse=True):
+            if digits.startswith(code) and len(digits) > len(code):
+                return "+%s %s" % (
+                    code, _group_national(digits[len(code):]))
+        return "+%s" % _group_national(digits)
+    if is_idd:
+        rest = digits[2:] if digits.startswith("00") else digits
+        if not 7 <= len(rest) <= 15:
+            return text
+        if (region_up in _NANP_FORMAT_REGIONS
+                and rest.startswith("1") and len(rest) == 11):
+            return _format_nanp(rest[1:])
+        for code in sorted(_KNOWN_COUNTRY_CODES,
+                           key=len, reverse=True):
+            if rest.startswith(code) and len(rest) > len(code):
+                return "+%s %s" % (
+                    code, _group_national(rest[len(code):]))
+        return "+%s" % _group_national(rest)
+    if len(digits) > 15:
+        return text
+    if len(digits) <= 3:
+        return text
+    if region_up in _NANP_FORMAT_REGIONS:
+        if len(digits) == 10:
+            return _format_nanp(digits)
+        if len(digits) == 11 and digits.startswith("1"):
+            return _format_nanp(digits[1:])
+    if 4 <= len(digits) <= 15:
+        return _group_national(digits)
+    return text
 
 
 def duration_text(duration_s: int, missed: bool) -> str:
@@ -407,12 +492,14 @@ def silenced_title(count: int) -> str:
     return "Silenced call"
 
 
-def silenced_card_line(number: str | None, reason: str) -> str:
+def silenced_card_line(number: str | None, reason: str,
+                       region: str = "US") -> str:
     """Card body: who, then why — the title already says Silenced."""
     why = (reason or "").strip()
     if why.lower().startswith("silenced"):
         why = why[len("silenced"):].lstrip(" ·:").strip()
-    who = format_number(number) if number and number.strip() else ""
+    who = format_number(number, region) \
+        if number and number.strip() else ""
     return " · ".join(part for part in (who, why) if part) or "Silenced"
 
 

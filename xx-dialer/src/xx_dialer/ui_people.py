@@ -210,10 +210,10 @@ class PeopleController:
         except Exception:
             self._notice("Could not update the block.")
             return
-        self._notice("Blocked %s" % (person.display_name or
-                                     person.primary) if blocked
-                     else "Unblocked %s" % (person.display_name or
-                                            person.primary))
+        shown = person.display_name or recents.format_number(
+            person.primary, self._region())
+        self._notice("Blocked %s" % shown if blocked
+                     else "Unblocked %s" % shown)
         self.load()
 
     def block_number(self, number: str) -> None:
@@ -234,7 +234,8 @@ class PeopleController:
             try:
                 client.set_blocked(uid, True)
                 self._notice("Blocked %s"
-                             % recents.format_number(normalized))
+                             % recents.format_number(
+                                 normalized, self._region()))
                 self.load()
                 return
             except Exception:
@@ -244,7 +245,8 @@ class PeopleController:
                 store.add_blocked(normalized)
         except Exception:
             pass
-        self._notice("Blocked %s" % recents.format_number(normalized))
+        self._notice("Blocked %s" % recents.format_number(
+            normalized, self._region()))
         self.load()
 
     def call(self, person: Person, number: str | None = None) -> None:
@@ -322,11 +324,18 @@ class PeopleView:
         scroll.set_child(self._list)
         self._root.append(scroll)
 
+    def _region(self) -> str:
+        try:
+            return self.controller._region()
+        except Exception:
+            return "US"
+
     def refresh(self) -> None:
         snapshot = self.controller.load()
         while self._store.get_n_items():
             self._store.remove(0)
         total = 0
+        region = self._region()
         for title, people in snapshot.sections:
             if not people:
                 continue
@@ -338,8 +347,10 @@ class PeopleView:
                 item = PeopleItem()
                 item.kind = "item"
                 item.uid = person.uid
-                item.title = person.display_name or person.primary
-                item.number = person.primary
+                item.title = person.display_name or recents.format_number(
+                    person.primary, region)
+                item.number = recents.format_number(
+                    person.primary, region)
                 item.meta = person_marks(person)
                 self._store.append(item)
                 total += 1
@@ -362,6 +373,7 @@ class PeopleView:
         section.set_valign(Gtk.Align.CENTER)
         section_title = Gtk.Label(label="", xalign=0.0)
         section_title.add_css_class("xx-caption")
+        section_title.add_css_class("xx-section-label")
         section_title.set_hexpand(True)
         section_title.set_ellipsize(Pango.EllipsizeMode.END)
         section.append(section_title)
@@ -408,16 +420,19 @@ class PeopleView:
             last = list_item.get_position() == total - 1
         except Exception:
             last = False
-        if last:
-            root.add_css_class("last")
-        else:
-            root.remove_css_class("last")
         if item.kind == "header":
+            root.remove_css_class("xx-row")
+            root.remove_css_class("last")
             section.set_visible(True)
             row.set_visible(False)
             section_title.set_text(item.title.upper())
             list_item.get_child().person_uid = None
             return
+        root.add_css_class("xx-row")
+        if last:
+            root.add_css_class("last")
+        else:
+            root.remove_css_class("last")
         section.set_visible(False)
         row.set_visible(True)
         while True:
@@ -450,17 +465,21 @@ class PeopleView:
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                        spacing=12)
         head.set_valign(Gtk.Align.CENTER)
+        region = self._region()
         head.append(widgets.avatar(
             t9.initials(person.display_name or person.primary), 64))
         title = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         title.set_hexpand(True)
         title.set_valign(Gtk.Align.CENTER)
         name = Gtk.Label(
-            label=person.display_name or person.primary, xalign=0.0)
+            label=person.display_name or recents.format_number(
+                person.primary, region), xalign=0.0)
         name.add_css_class("xx-title")
         name.set_ellipsize(Pango.EllipsizeMode.END)
         numbers = Gtk.Label(
-            label="\n".join(person.numbers) or "No numbers",
+            label="\n".join(recents.format_number(
+                number, region) for number in person.numbers)
+            or "No numbers",
             xalign=0.0)
         numbers.add_css_class("xx-secondary")
         numbers.set_ellipsize(Pango.EllipsizeMode.END)

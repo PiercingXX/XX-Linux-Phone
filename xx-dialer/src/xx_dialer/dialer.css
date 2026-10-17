@@ -16,3 +16,10 @@
   padding-left: 10px;
   padding-right: 10px;
 }
+
+/* Collapsed group header: single-line like Android's one-line group
+   row. The shared xx-row stays for the hairline; this only drops the
+   two-line min-height so no blank band sits under the title. */
+.xx-dialer-group {
+  min-height: 56px;
+}

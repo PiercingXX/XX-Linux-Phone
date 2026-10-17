@@ -34,12 +34,15 @@ def _notifier(tmp_path, **over):
 
 
 def test_immediate_single_card_with_actions(tmp_path):
+    from xx_dialer import recents as _recents
+
     notifier, sink = _notifier(tmp_path)
     notifier.screened(ADA, "Silence", "unknown caller", at_ms=WALL)
     assert len(sink.cards) == 1
     (card,) = sink.cards
     assert card["summary"] == "Silenced call"
-    assert ADA in card["body"] and "unknown caller" in card["body"]
+    assert _recents.format_number(ADA) in card["body"] \
+        and "unknown caller" in card["body"]
     assert [key for key, _label in card["actions"]] == [
         "call-back:%s" % ADA, "ring-next-time:%s" % ADA,
         "block-contact:%s" % ADA]

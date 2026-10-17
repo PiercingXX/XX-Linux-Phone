@@ -22,7 +22,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
-from xx_dialer import contacts_client, policy, t9  # noqa: E402
+from xx_dialer import contacts_client, policy, recents, t9  # noqa: E402
 from xx_dialer.store import Store  # noqa: E402
 
 MAX_MATCHES = 6
@@ -303,9 +303,22 @@ class KeypadView:
             return []
         return [(uid, number, name) for uid, number, name, _hit in hits]
 
+    def _region(self) -> str:
+        try:
+            from xx_dialer import config as app_config
+
+            return policy.region_of(app_config.load(self.deps.home))
+        except Exception:
+            return "US"
+
     def refresh(self) -> None:
-        widgets.fit_text(
-            self._number, self.buffer.digits or "Enter number", 12)
+        region = self._region()
+        if self.buffer.digits:
+            widgets.fit_text(
+                self._number,
+                recents.format_number(self.buffer.digits, region), 12)
+        else:
+            widgets.fit_text(self._number, "Enter number", 12)
         self._call.set_sensitive(self.buffer.can_call)
         hits = self.match_rows()
         digit_count = sum(ch.isdigit() for ch in self.buffer.digits)
@@ -321,7 +334,8 @@ class KeypadView:
             button = Gtk.Button()
             button.add_css_class("xx-btn")
             button.add_css_class("xx-dialer-tight")
-            shown = "%s · %s" % (name, number) if name else number
+            disp = recents.format_number(number, region)
+            shown = "%s · %s" % (name, disp) if name else disp
             text = Gtk.Label(label=shown, xalign=0.0)
             text.add_css_class("xx-title")
             text.set_ellipsize(Pango.EllipsizeMode.END)
@@ -348,6 +362,8 @@ class KeypadView:
         self._match_card.set_visible(True)
         number = top[1] if top is not None else saveable
         name = top[2] if top is not None else ""
+        region = self._region()
+        shown = recents.format_number(number, region)
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                       spacing=12)
         row.set_valign(Gtk.Align.CENTER)
@@ -356,10 +372,10 @@ class KeypadView:
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         text.set_hexpand(True)
         text.set_valign(Gtk.Align.CENTER)
-        primary = Gtk.Label(label=name or number, xalign=0.0)
+        primary = Gtk.Label(label=name or shown, xalign=0.0)
         primary.add_css_class("xx-title")
         primary.set_ellipsize(Pango.EllipsizeMode.END)
-        secondary = Gtk.Label(label=number, xalign=0.0)
+        secondary = Gtk.Label(label=shown, xalign=0.0)
         secondary.add_css_class("xx-secondary")
         secondary.set_ellipsize(Pango.EllipsizeMode.END)
         text.append(primary)

@@ -152,12 +152,20 @@ class Notifier:
         else:
             self.post_batch(1, e164, reason)
 
+    def _region(self) -> str:
+        try:
+            from xx_dialer import policy as _policy
+
+            return _policy.region_of(app_config.load(self._home))
+        except Exception:
+            return "US"
+
     def post_batch(self, count: int, e164: str | None,
                    reason: str) -> None:
         """Post a card for ``count`` silenced calls; bypasses the policy."""
         total = max(1, int(count))
         title = recents.silenced_title(total)
-        body = recents.silenced_card_line(e164, reason)
+        body = recents.silenced_card_line(e164, reason, self._region())
         actions: list[tuple[str, str]] = []
         if total == 1 and (e164 or "").strip():
             number = (e164 or "").strip()

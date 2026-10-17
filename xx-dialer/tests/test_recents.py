@@ -223,10 +223,11 @@ def test_missed_copy():
 def test_silenced_card_line():
     assert recents.silenced_title(1) == "Silenced call"
     assert recents.silenced_title(4) == "4 silenced calls"
+    shown = recents.format_number(ADA)
     assert recents.silenced_card_line(
-        ADA, "unknown caller") == "%s · unknown caller" % ADA
+        ADA, "unknown caller") == "%s · unknown caller" % shown
     assert recents.silenced_card_line(
-        ADA, "Silenced · unknown caller").startswith(ADA)
+        ADA, "Silenced · unknown caller").startswith(shown)
     assert recents.silenced_card_line(None, "") == "Silenced"
 
 
@@ -275,7 +276,7 @@ def test_display_name_and_duration():
     row.cached_name = "Cached Ada"
     assert recents.display_name_of(row) == "Cached Ada"
     row.cached_name = None
-    assert recents.display_name_of(row) == ADA
+    assert recents.display_name_of(row) == recents.format_number(ADA)
     row.raw = None
     row.e164 = None
     assert recents.display_name_of(row) == "Withheld"

@@ -25,7 +25,7 @@ from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from xx_ui import widgets  # noqa: E402
 from xx_dialer import config as app_config  # noqa: E402
-from xx_dialer import importers, masks, policy, rules  # noqa: E402
+from xx_dialer import importers, masks, policy, recents, rules  # noqa: E402
 from xx_dialer.service import PolicyService  # noqa: E402
 from xx_dialer.store import BLOCKED_GROUP, PatternRow, Store  # noqa: E402
 
@@ -668,6 +668,12 @@ class RulesView:
             line.append(delete)
             self._pattern_list.append(line)
 
+    def _region(self) -> str:
+        try:
+            return policy.region_of(self.controller._config())
+        except Exception:
+            return "US"
+
     def _render_blocked(self, snap: RulesSnapshot) -> None:
         while True:
             row = self._blocked_list.get_row_at_index(0)
@@ -679,12 +685,15 @@ class RulesView:
             note.add_css_class("xx-muted")
             self._blocked_list.append(note)
             return
+        region = self._region()
         for number in sorted(snap.blocked):
             line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                            spacing=8)
             line.add_css_class("xx-row")
             line.set_valign(Gtk.Align.CENTER)
-            text = Gtk.Label(label=number, xalign=0.0, hexpand=True)
+            text = Gtk.Label(
+                label=recents.format_number(number, region),
+                xalign=0.0, hexpand=True)
             text.add_css_class("xx-title")
             text.set_ellipsize(Pango.EllipsizeMode.END)
             text.set_valign(Gtk.Align.CENTER)
@@ -719,14 +728,17 @@ class RulesView:
             note.add_css_class("xx-muted")
             self._log_list.append(note)
             return
+        region = self._region()
         for entry in snap.log:
             glyph = {"Block": "Blocked", "Silence": "Silenced",
                      "Ring": "Rang"}.get(entry.verdict, entry.verdict)
             line = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                            spacing=0)
             line.add_css_class("xx-row")
+            who = recents.format_number(entry.e164, region) \
+                if entry.e164 else "hidden"
             head = Gtk.Label(
-                label="%s · %s" % (glyph, entry.e164 or "hidden"),
+                label="%s · %s" % (glyph, who),
                 xalign=0.0)
             head.add_css_class("xx-title")
             head.set_ellipsize(Pango.EllipsizeMode.END)

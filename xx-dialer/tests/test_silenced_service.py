@@ -84,6 +84,8 @@ def _silenced_service(tmp_path):
 
 
 def test_service_posts_one_card_for_silenced_missed(tmp_path):
+    from xx_dialer import recents as _recents
+
     service, sink, _placed, _contacts = _silenced_service(tmp_path)
     assert service.check_number(ADA) == ("silence", "silenced by pattern")
     service.note_call(ADA, "incoming", int(time.time() * 1000), 0,
@@ -91,7 +93,8 @@ def test_service_posts_one_card_for_silenced_missed(tmp_path):
     assert len(sink.cards) == 1
     (card,) = sink.cards
     assert card["summary"] == "Silenced call"
-    assert ADA in card["body"] and "by pattern" in card["body"]
+    assert _recents.format_number(ADA) in card["body"] \
+        and "by pattern" in card["body"]
     assert [key for key, _label in card["actions"]] == [
         "call-back:%s" % ADA, "ring-next-time:%s" % ADA,
         "block-contact:%s" % ADA]
@@ -304,10 +307,11 @@ _SILENCED_E2E = textwrap.dedent("""\
 
     def _finish():
         try:
+            from xx_dialer import recents as _recents
             assert [title for title, _body, _acts in captured] == [
                 "Silenced call", "2 silenced calls"], captured
             _title, body, actions = captured[0]
-            assert NUMBER_A in body, body
+            assert _recents.format_number(NUMBER_A) in body, body
             assert actions[0::2] == [
                 "call-back:%s" % NUMBER_A,
                 "ring-next-time:%s" % NUMBER_A,
