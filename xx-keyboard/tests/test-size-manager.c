@@ -161,6 +161,23 @@ test_size_manager_portrait_osk_too_little_physical_height (void)
   g_assert_cmpint (calc_height (output, &dz, ALL_FLAGS), ==, POS_INPUT_SURFACE_DEFAULT_HEIGHT);
 }
 
+/* xx-keyboard: a large panel (QEMU reports 180x360 mm at 360x720 logical)
+ * must never shrink the OSK below the default height */
+static void
+test_size_manager_portrait_osk_never_below_default (void)
+{
+  g_autoptr (PosOutput) output = g_object_new (POS_TYPE_OUTPUT, NULL);
+  guint dz;
+
+  pos_output_set_logical_width (output, 360);
+  pos_output_set_logical_height (output, 720);
+  pos_output_set_physical_width (output, 180);
+  pos_output_set_physical_height (output, 360);
+
+  g_assert_true (pos_output_is_portrait (output));
+  g_assert_cmpint (calc_height (output, &dz, ALL_FLAGS), ==, POS_INPUT_SURFACE_DEFAULT_HEIGHT);
+}
+
 /* OnePlus 6T at scale 2.5 */
 static void
 test_size_manager_portrait_osk_scale_up_op6t_at_250 (void)
@@ -227,6 +244,8 @@ main (int argc, char *argv[])
                    test_size_manager_portrait_osk_too_little_logical_height);
   g_test_add_func ("/pos/size-manager/portrait/osk/too_little_physical_height",
                    test_size_manager_portrait_osk_too_little_physical_height);
+  g_test_add_func ("/pos/size-manager/portrait/osk/never_below_default",
+                   test_size_manager_portrait_osk_never_below_default);
   g_test_add_func ("/pos/size-manager/portrait/osk/scale_up/op6t@250",
                    test_size_manager_portrait_osk_scale_up_op6t_at_250);
   g_test_add_func ("/pos/size-manager/portrait/osk/scale_up/l5@200",

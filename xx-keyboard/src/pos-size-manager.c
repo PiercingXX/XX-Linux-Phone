@@ -113,7 +113,7 @@ calc_height (PosOutput *output, guint *dead_zone, PhoshOskScalingFlags flags)
       return osk_height;
 
     if (flags & PHOSH_OSK_SCALING_AUTO_PORTRAIT)
-      osk_height = TARGET_PORTRAIT_PHYS_HEIGHT / pixel_size;
+      osk_height = MAX (osk_height, TARGET_PORTRAIT_PHYS_HEIGHT / pixel_size);
 
     phys_dz = (MIN_PORTRAIT_RATIO * screen_physical_height) - (osk_height * pixel_size);
     if (flags & PHOSH_OSK_SCALING_BOTTOM_DEAD_ZONE)
