@@ -23,14 +23,17 @@ Every reply is unpacked as a tuple of out-args (``reply.unpack()[0]``),
 never as a bare value. ``Create`` only ever sends ``number`` + ``text``
 — delivery/read reports are never requested (``SendPolicy`` parity).
 
-mmsd-tng shapes (session bus ``org.ofono.mms``) follow the observed
-ofono message-app traffic: ``Service.GetMessages`` -> ``ao``,
-``Service.MessageAdded(o path, ...)`` on the per-modem service object
-(default ``/org/ofono/mms/modemmanager``), ``Service.SendMessage(as
-recipients, a(sss) attachments)`` -> ``o`` with staged text/SMIL/image
-files, ``Message`` properties via ``GetAll`` plus ``Delete``. Pinned by
-tests against a fake bus with those shapes; on-device proof against the
-real mmsd-tng must confirm the per-modem service path.
+mmsd-tng shapes (session bus ``org.ofono.mms``) follow the documented
+mmsd-tng API (``doc/service-api.txt``, ``doc/message-api.txt``,
+``src/service.c``): ``Service.GetMessages`` -> ``a(oa{sv})``,
+``Service.MessageAdded(o path, a{sv} properties)`` on the per-modem
+service object (default ``/org/ofono/mms/modemmanager``),
+``Service.SendMessage(as recipients, v smil, a(sss) attachments)``
+-> ``o`` with staged text/image files, ``Message`` properties via
+``GetAll`` (``Attachments`` are ``(id, type, file, offset, length)``)
+plus ``Delete``. Pinned by tests against a fake bus with those shapes;
+on-device proof against the real mmsd-tng must confirm the per-modem
+service path.
 """
 
 from __future__ import annotations
@@ -432,16 +435,20 @@ def worker_send(number: str, text: str, timeout_ms: int = IO_TIMEOUT_MS) -> tupl
 class MmsAdapter:
     """mmsd-tng client on the session bus, behind one seam.
 
-    Real shapes (session bus ``org.ofono.mms``): ``Service.GetMessages``
-    -> ``ao``; ``Service.MessageAdded(o path, ...)``; ``Service.SendMessage
-    (as recipients, a(sss) attachments)`` -> ``o`` where each attachment
-    is ``(filename, content-type, file-path)`` and the caller stages the
-    text/SMIL/image files itself; ``Message.GetAll`` -> ``a{sv}``;
-    ``Message.Delete``. Service object defaults to
-    :data:`MMS_SERVICE_PATH` (per-modem variants exist, hence the
-    override). ``bus`` is any object with ``call_sync`` returning
-    tuple-``unpack()`` replies plus ``signal_subscribe`` — the real Gio
-    session connection in production, a fake in tests.
+    Real shapes (session bus ``org.ofono.mms``, per mmsd-tng
+    ``doc/service-api.txt``, ``doc/message-api.txt`` and ``src/service.c``):
+    ``Service.GetMessages`` -> ``a(oa{sv})`` (path + properties structs);
+    ``Service.MessageAdded(o path, a{sv} properties)``;
+    ``Service.SendMessage(as recipients, v smil, a(sss) attachments)``
+    -> ``o`` where each attachment is ``(content-id, content-type,
+    file-path)`` and the SMIL body rides as the middle variant;
+    ``Message.GetAll`` -> ``a{sv}`` with documented ``Attachments`` of
+    ``(id, content-type, file, offset, length)``; ``Message.Delete``.
+    Service object defaults to :data:`MMS_SERVICE_PATH` (per-modem
+    variants exist, hence the override). ``bus`` is any object with
+    ``call_sync`` returning tuple-``unpack()`` replies plus
+    ``signal_subscribe`` — the real Gio session connection in
+    production, a fake in tests.
     """
 
     def __init__(
@@ -457,12 +464,23 @@ class MmsAdapter:
         return self.list_messages() is not None
 
     def list_messages(self) -> list[str] | None:
+        """Message object paths, or None on transport failure.
+
+        Accepts the documented ``a(oa{sv})`` structs (path first) and,
+        for older fakes, a bare ``ao`` list.
+        """
         try:
             reply = self._bus.call_sync(
                 MMS_BUS_NAME, self._service_path, MMS_SERVICE_IFACE, "GetMessages",
                 None, None, Gio.DBusCallFlags.NONE, self._timeout_ms, None,
             )
-            return [str(path) for path in reply.unpack()[0]]
+            paths = []
+            for entry in reply.unpack()[0] or []:
+                if isinstance(entry, (tuple, list)) and entry:
+                    paths.append(str(entry[0]))
+                else:
+                    paths.append(str(entry))
+            return paths
         except Exception:
             return None
 
@@ -478,22 +496,24 @@ class MmsAdapter:
             return None
 
     def send_message(
-        self, recipients: list[str],
+        self, recipients: list[str], smil: str = "",
         attachments: list[tuple[str, str, str]] | None = None,
     ) -> tuple[bool, str]:
         """``Service.SendMessage``; (True, message path) or (False, detail).
 
-        ``attachments`` holds ``(filename, content-type, file-path)``
-        triples the caller staged (text file, SMIL, images) — the real
-        mmsd-tng shape, not ``(recipients, text, files)``.
+        The documented ``(as, v, a(sss))`` shape: recipients, the SMIL
+        body as the middle variant, then ``(content-id, content-type,
+        file-path)`` triples the caller staged (text file plus images —
+        never ``(recipients, text, files)``).
         """
         try:
             staged = [
                 (str(name), str(content_type), str(path))
                 for name, content_type, path in (attachments or [])
             ]
-            payload = GLib.Variant("(asa(sss))", (
+            payload = GLib.Variant("(asva(sss))", (
                 [str(r) for r in recipients],
+                GLib.Variant("s", str(smil or "")),
                 staged,
             ))
             reply = self._bus.call_sync(

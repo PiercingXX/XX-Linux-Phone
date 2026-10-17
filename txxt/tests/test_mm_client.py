@@ -354,12 +354,21 @@ class TestDeleteAfterImport:
 # ---- mmsd-tng adapter (real org.ofono.mms shapes, pinned by these tests) ----
 
 class FakeSessionBus(FakeSystemBus):
+    """Session-bus fake serving the documented org.ofono.mms shapes.
+
+    ``GetMessages`` returns ``a(oa{sv})`` structs, ``SendMessage`` takes
+    ``(as, v, a(sss))`` (recipients, smil-or-options variant,
+    attachments), and message ``Attachments`` are documented
+    ``(id, content-type, file, offset, length)`` 5-tuples.
+    """
+
     def __init__(self):
         super().__init__()
         self.mms_paths = ["/org/ofono/mms/message/1"]
         self.mms_props = {
             "/org/ofono/mms/message/1": {
-                "Recipients": ["+15551234567"], "Text": "caption",
+                "Sender": "+15551234567", "Text": "caption",
+                "Status": "received",
             }
         }
 
@@ -369,13 +378,16 @@ class FakeSessionBus(FakeSystemBus):
             raise FakeError("mmsd away")
         if method == "GetMessages":
             assert path == mm_client.MMS_SERVICE_PATH, path
-            return FakeReply((list(self.mms_paths),))
+            return FakeReply((
+                [(p, dict(self.mms_props.get(p, {}))) for p in self.mms_paths],
+            ))
         if method == "GetAll":
             return FakeReply((dict(self.mms_props.get(path, {})),))
         if method == "SendMessage":
             assert path == mm_client.MMS_SERVICE_PATH, path
-            recipients, attachments = params.unpack()
+            recipients, smil, attachments = params.unpack()
             assert isinstance(recipients, list) and recipients
+            assert isinstance(smil, str)
             for entry in attachments:
                 name, content_type, staged = entry
                 assert name and content_type and staged
@@ -402,15 +414,41 @@ class TestMmsAdapter:
         bus = FakeSessionBus()
         adapter = MmsAdapter(bus)
         staged = [("image_0.jpg", "image/jpeg", "/tmp/p.jpg")]
-        ok, path = adapter.send_message(["+1555"], staged)
+        ok, path = adapter.send_message(["+1555"], "<smil/>", staged)
         assert ok and path == "/org/ofono/mms/message/9"
         sent = bus.calls[-1][4].unpack()
-        assert sent[0] == ["+1555"] and sent[1] == staged
+        assert sent[0] == ["+1555"] and sent[1] == "<smil/>" and sent[2] == staged
+
+    def test_send_message_payload_is_recipients_smil_attachments(self):
+
+        bus = FakeSessionBus()
+        adapter = MmsAdapter(bus)
+        staged = [("text_0.txt", "text/plain", "/tmp/t.txt")]
+        ok, _path = adapter.send_message(["+1555"], "<smil>hi</smil>", staged)
+        assert ok
+        payload = bus.calls[-1][4]
+        assert payload.get_type_string() == "(asva(sss))"
+        recipients, smil, attachments = payload.unpack()
+        assert recipients == ["+1555"]
+        assert smil == "<smil>hi</smil>"
+        assert list(attachments) == staged
+
+    def test_send_message_variant_builds_under_real_glib(self):
+        from gi.repository import GLib
+
+        payload = GLib.Variant(
+            "(asva(sss))",
+            (["+1555"], GLib.Variant("s", "<smil/>"), [("a.jpg", "image/jpeg", "/f")]),
+        )
+        assert payload.get_type_string() == "(asva(sss))"
+        assert payload.unpack() == (
+            ["+1555"], "<smil/>", [("a.jpg", "image/jpeg", "/f")],
+        )
 
     def test_send_failure_reports_detail(self):
         bus = FakeSessionBus()
         bus.failures.add(("org.ofono.mms.Service", "SendMessage"))
-        ok, detail = MmsAdapter(bus).send_message(["+1555"], [])
+        ok, detail = MmsAdapter(bus).send_message(["+1555"], "", [])
         assert not ok and detail == "mmsd away"
 
     def test_mark_read_and_delete(self):

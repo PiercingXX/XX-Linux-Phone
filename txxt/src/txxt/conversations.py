@@ -30,6 +30,7 @@ import time  # noqa: E402
 
 from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
+from txxt import blocking as blocking_mod  # noqa: E402
 from txxt import list_presenter as presenter  # noqa: E402
 
 
@@ -587,19 +588,26 @@ class ConversationListPage(Adw.NavigationPage):
         worker.start()
 
     def _block_in_worker(self, address: str) -> None:
-        if self._resolver is None:
-            GLib.idle_add(self._announce_block, address, False)
-            return
         try:
-            done = self._resolver.set_blocked(address, True)
+            self._store.blocklist_add("sender", address)
+            done = True
         except Exception:
             done = False
+        try:
+            blocking_mod.live_apply_from_store(self._store)
+        except Exception:
+            pass
+        if self._resolver is not None:
+            try:
+                self._resolver.set_blocked(address, True)
+            except Exception:
+                pass
         GLib.idle_add(self._announce_block, address, done)
 
     def _announce_block(self, address: str, done: bool) -> bool:
         heading = "Blocked" if done else "Could not block"
         body = (
-            f"New messages from {address} are tagged."
+            f"New messages from {address} are blocked."
             if done else f"No contact holds {address}; nothing changed."
         )
         dialog = Adw.AlertDialog.new(heading, body)

@@ -32,6 +32,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
+from txxt import blocking as blocking_mod
 from txxt import conversations_core as core
 from txxt import phone_numbers
 
@@ -230,12 +231,30 @@ def _apply_migrations(conn: sqlite3.Connection, from_version: int) -> int:
         steps = MIGRATIONS.get((version, version + 1))
         if not steps:
             raise sqlite3.DatabaseError(f"no migration path from schema {version}")
-        for sql in steps:
-            conn.execute(sql)
-        if version == 6:
-            _backfill_dialable_6_7(conn)
-        version += 1
-        conn.execute(f"PRAGMA user_version = {version:d}")
+        # One transaction per step: the ALTERs, the backfill and the
+        # version bump commit atomically, so a crash in between retries
+        # the step instead of bricking the store. A column the step adds
+        # that already exists (a previous crash landed it before this
+        # guard existed) is skipped so an interrupted upgrade reopens.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for sql in steps:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+            if version == 6:
+                _backfill_dialable_6_7(conn)
+            version += 1
+            conn.execute(f"PRAGMA user_version = {version:d}")
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
     return version
 
 
@@ -614,9 +633,15 @@ class Store:
         return self.write(_find)
 
     def persist_inbound_sms(
-        self, address: str, body: str, date_millis: int, quarantined: bool = False
+        self, address: str, body: str, date_millis: int, quarantined: bool = False,
+        surface: bool = True,
     ) -> int:
-        """Persist an inbound SMS as unread; returns the message id."""
+        """Persist an inbound SMS as unread; returns the message id.
+
+        Blocked senders persist with ``surface=False``: the thread is
+        neither un-archived nor un-quarantined, so the message lands
+        silently instead of popping into the inbox.
+        """
 
         def _persist(c):
             conversation_id = self._find_or_create_locked(c, address)
@@ -624,7 +649,7 @@ class Store:
                 c.execute(
                     "UPDATE conversations SET isQuarantined = 1 WHERE id = ?", (conversation_id,)
                 )
-            else:
+            elif surface:
                 self._surface_locked(c, conversation_id)
             message_id = _fresh_id(c, "messages")
             c.execute(
@@ -643,6 +668,7 @@ class Store:
         date_millis: int,
         content_location: str | None = None,
         quarantined: bool = False,
+        surface: bool = True,
     ) -> int:
         """Persist an inbound MMS metadata row (``[Photo]`` until tapped)."""
 
@@ -652,7 +678,7 @@ class Store:
                 c.execute(
                     "UPDATE conversations SET isQuarantined = 1 WHERE id = ?", (conversation_id,)
                 )
-            else:
+            elif surface:
                 self._surface_locked(c, conversation_id)
             message_id = _fresh_id(c, "messages")
             c.execute(
@@ -810,6 +836,13 @@ class Store:
                 "REPLACE INTO blocklist (kind, value) VALUES (?, ?)", (kind, trimmed)
             )
         )
+        if kind == "sender":
+            # A block beats a stale quarantine "Deliver" override for the
+            # same sender; without this the override keeps delivering.
+            try:
+                blocking_mod.remove_persistent_override(self, trimmed)
+            except Exception:
+                pass
 
     def blocklist_remove(self, kind: str, value: str) -> None:
         self.write(

@@ -7,6 +7,7 @@ block/InboundFilterTest.kt and block/BlockOverrideTest.kt.
 """
 
 from txxt.blocking import (
+    OVERRIDES_SETTING_KEY,
     BlockDecision,
     Blocklist,
     BlockOverrideStore,
@@ -18,7 +19,9 @@ from txxt.blocking import (
     MessageDisposition,
     StarredBypass,
     UnknownSenderRule,
+    add_persistent_override,
     live_apply,
+    live_apply_from_store,
     live_current,
     live_reset_for_test,
 )
@@ -461,10 +464,11 @@ def test_remove_override_clears_every_format_variant():
 def test_overridden_senders_are_delivered_without_a_reason():
     kv = DictKeyValueStore()
     BlockOverrideStore(kv).add_override("+1 555 8888")
+    # A later block beats the stale deliver override (bug_txxt finding 30).
     f = make_inbound(blocked={"+1 555 8888"}, overrides=BlockOverrideStore(kv))
     disposition, reason = f.evaluate("+1 555 8888", "Hello")
-    assert disposition is MessageDisposition.DELIVER
-    assert reason is None
+    assert disposition is MessageDisposition.BLOCK
+    assert reason is not None and reason.type is BlockReasonType.BLOCKED_LIST
 
     kv = DictKeyValueStore()
     BlockOverrideStore(kv).add_override("+1 555 9999")
@@ -497,3 +501,28 @@ def test_live_apply_reaches_the_running_filter_and_reset_restores_default():
     finally:
         live_reset_for_test()
     assert live_current().evaluate("+1 555 8888", "Hello")[0] is MessageDisposition.DELIVER
+
+
+# ---- bug_txxt finding 30: a later block beats a stale deliver override ----
+
+def test_blocklist_beats_a_stale_deliver_override():
+    kv = DictKeyValueStore()
+    BlockOverrideStore(kv).add_override("+1 555 8888")
+    f = make_inbound(blocked={"+1 555 8888"}, overrides=BlockOverrideStore(kv))
+    disposition, _reason = f.evaluate("+1 555 8888", "Hello")
+    assert disposition is MessageDisposition.BLOCK
+
+
+def test_blocking_a_sender_clears_its_persistent_override():
+    from txxt.store import Store
+
+    store = Store.memory()
+    add_persistent_override(store, "+1 555 8888")
+    store.blocklist_add("sender", "+1 555 8888")
+    saved = store.get_setting(OVERRIDES_SETTING_KEY, [])
+    assert list(saved) == []
+    live_apply_from_store(store)
+    try:
+        assert live_current().evaluate("+1 555 8888", "Hello")[0] is MessageDisposition.BLOCK
+    finally:
+        live_reset_for_test()

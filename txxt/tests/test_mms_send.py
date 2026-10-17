@@ -52,10 +52,11 @@ class TestSendMms:
         source.write_bytes(_jpeg_with_gps())
         seen = []
 
-        def _sender(recipients, attachments):
-            seen.append((recipients, attachments))
+        def _sender(recipients, smil, attachments):
+            seen.append((recipients, smil, attachments))
             kinds = {kind for _, kind, _ in attachments}
-            assert {"image/jpeg", "application/smil"} <= kinds
+            assert kinds == {"text/plain", "image/jpeg"}
+            assert "image_0.jpg" in smil and "text_0.txt" in smil
             for _name, _kind, path in attachments:
                 if _kind == "image/jpeg":
                     assert b"GPS" not in open(path, "rb").read()
@@ -75,7 +76,7 @@ class TestSendMms:
         source = tmp_path / "p.jpg"
         source.write_bytes(_jpeg_with_gps())
         store = Store.memory()
-        d = make_daemon(store, mms_sender=lambda r, a: (True, "/m/1"))
+        d = make_daemon(store, mms_sender=lambda r, s, a: (True, "/m/1"))
         message_id = d.send_mms(["+1555"], "", [str(source)])
         assert store.get_message(message_id).body == "[Photo]"
 
@@ -84,7 +85,7 @@ class TestSendMms:
         source = tmp_path / "evil.heic"
         source.write_bytes(b"\x00\x00\x00\x18ftypheic" + b"\x00" * 64)
         store = Store.memory()
-        d = make_daemon(store, mms_sender=lambda r, a: (True, "/m/1"))
+        d = make_daemon(store, mms_sender=lambda r, s, a: (True, "/m/1"))
         with pytest.raises(ValueError):
             d.send_mms(["+1555"], "look", [str(source)])
         assert store.get_all_conversations() == []
@@ -93,7 +94,7 @@ class TestSendMms:
     def test_missing_recipients_or_content_is_invalid(self, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
         store = Store.memory()
-        d = make_daemon(store, mms_sender=lambda r, a: (True, "/m/1"))
+        d = make_daemon(store, mms_sender=lambda r, s, a: (True, "/m/1"))
         with pytest.raises(ValueError):
             d.send_mms([], "hi", [])
         with pytest.raises(ValueError):
@@ -104,7 +105,7 @@ class TestSendMms:
         source = tmp_path / "p.jpg"
         source.write_bytes(_jpeg_with_gps())
         store = Store.memory()
-        d = make_daemon(store, mms_sender=lambda r, a: (False, "no signal"))
+        d = make_daemon(store, mms_sender=lambda r, s, a: (False, "no signal"))
         message_id = d.send_mms(["+1555"], "hi", [str(source)])
         assert store.get_message(message_id).sent is False
         assert len(d._retry) == 1
@@ -117,7 +118,7 @@ class TestSendMms:
         store = Store.memory()
         attempts = {"n": 0}
 
-        def _sender(recipients, attachments):
+        def _sender(recipients, smil, attachments):
             attempts["n"] += 1
             if attempts["n"] < 2:
                 return False, "down"
@@ -146,7 +147,7 @@ class TestSendMmsDispatch:
         source = tmp_path / "p.jpg"
         source.write_bytes(_jpeg_with_gps())
         store = Store.memory()
-        d = make_daemon(store, mms_sender=lambda r, a: (True, "/m/1"))
+        d = make_daemon(store, mms_sender=lambda r, s, a: (True, "/m/1"))
 
         class FakeInvocation:
             def __init__(self):
@@ -182,7 +183,7 @@ class TestSendMmsDispatch:
         refused = tmp_path / "evil.bin"
         refused.write_bytes(b"not an image at all...........")
         store = Store.memory()
-        d = make_daemon(store, mms_sender=lambda r, a: (True, "/m/1"))
+        d = make_daemon(store, mms_sender=lambda r, s, a: (True, "/m/1"))
 
         class FakeInvocation:
             def __init__(self):
@@ -261,8 +262,10 @@ class TestFetchMms:
 
     def test_tap_copies_mmsd_attachment_to_mms_dir(self, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        carrier_file = tmp_path / "carrier.jpg"
-        carrier_file.write_bytes(b"\xff\xd8-carrier-bytes\xff\xd9")
+        photo = b"\xff\xd8-carrier-bytes\xff\xd9"
+        carrier_file = tmp_path / "carrier.bin"
+        carrier_file.write_bytes(b"PDUHEAD" + photo + b"PDUTAIL")
+        offset = len(b"PDUHEAD")
         store = Store.memory()
         message_id = store.persist_inbound_mms_metadata(
             "+1555", 1717243200000, content_location="http://mms/7",
@@ -276,7 +279,10 @@ class TestFetchMms:
                 assert path == "/org/ofono/mms/message/7"
                 return {
                     "ContentLocation": "http://mms/7",
-                    "Attachments": [("image_0.jpg", "image/jpeg", str(carrier_file))],
+                    "Attachments": [
+                        ("image_0.jpg", "image/jpeg", str(carrier_file),
+                         offset, len(photo)),
+                    ],
                 }
 
             def delete_message(self, path):
@@ -286,7 +292,42 @@ class TestFetchMms:
         d._mms = _Adapter()
         found = d.fetch_mms(message_id)
         assert found and found.endswith(".jpg")
+        assert open(found, "rb").read() == photo
         assert store.get_message(message_id).media_path == found
+
+    def test_tap_prefers_exact_date_match(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        old_photo = tmp_path / "old.bin"
+        old_photo.write_bytes(b"\xff\xd8-old\xff\xd9")
+        new_photo = tmp_path / "new.bin"
+        new_photo.write_bytes(b"\xff\xd8-new\xff\xd9")
+        store = Store.memory()
+        old_id = store.persist_inbound_mms_metadata("+1555", 1717243200000)
+        new_id = store.persist_inbound_mms_metadata("+1555", 1717243800000)
+
+        class _Adapter:
+            def list_messages(self):
+                return ["/org/ofono/mms/message/1", "/org/ofono/mms/message/2"]
+
+            def get_message(self, path):
+                if path.endswith("/1"):
+                    return {
+                        "Sender": "+1555", "Date": "2024-06-01T12:00:00+00:00",
+                        "Attachments": [("a.jpg", "image/jpeg", str(old_photo))],
+                    }
+                return {
+                    "Sender": "+1555", "Date": "2024-06-01T12:10:00+00:00",
+                    "Attachments": [("b.jpg", "image/jpeg", str(new_photo))],
+                }
+
+            def delete_message(self, path):
+                return True
+
+        d = make_daemon(store)
+        d._mms = _Adapter()
+        found = d.fetch_mms(new_id)
+        assert open(found, "rb").read() == b"\xff\xd8-new\xff\xd9"
+        assert store.get_message(old_id).media_path is None
 
     def test_unknown_message_is_invalid(self):
         with pytest.raises(ValueError):
@@ -338,6 +379,11 @@ class TestAudioDrop:
         props = {"Attachments": [("a.jpg", "audio/amr", "/tmp/a")]}
         assert mms_content_type(props) == "audio/amr"
         assert mms_content_type({}) is None
+
+    def test_mms_content_type_reads_documented_5_tuples(self):
+        props = {"Attachments": [("a.jpg", "image/jpeg", "/tmp/a", 0, 10)]}
+        assert mms_content_type(props) == "image/jpeg"
+        assert mms_content_type({"Attachments": [("only-two",)]}) is None
 
 
 class TestDefaultRegion:

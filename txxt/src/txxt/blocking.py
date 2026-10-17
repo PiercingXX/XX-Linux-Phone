@@ -13,9 +13,10 @@ Pure-Python port of the Android blocking stack:
 - ``block/InboundFilter.kt`` -> :class:`InboundFilter`
 - ``block/LiveInboundFilter.kt`` -> process-wide holder below
 
-Decision order (:meth:`InboundFilter.evaluate`): per-sender override first,
-then the blocked-address list, then the content filter (keyword/phrase),
-then the unknown-sender rule (quarantine only when opted in, default off so
+Decision order (:meth:`InboundFilter.evaluate`): the blocked-address
+list first (a later block beats a stale deliver override), then the
+per-sender override, then the content filter (keyword/phrase), then the
+unknown-sender rule (quarantine only when opted in, default off so
 the factory posture is fail-open delivery), otherwise deliver. Starred
 contacts bypass every suppression and surface a can-override reason instead
 of being blocked silently.
@@ -282,9 +283,9 @@ class InboundFilter:
         self._known_lookup = known_sender_lookup if callable(known_sender_lookup) else None
 
     def evaluate(self, sender: str, body: str) -> tuple[MessageDisposition, BlockReason | None]:
-        if self._overrides is not None and self._overrides.has_override(sender):
-            return MessageDisposition.DELIVER, None
-
+        # The blocklist runs before per-sender deliver overrides: a block
+        # placed after a quarantine "Deliver" must take effect, while an
+        # override still beats the content and unknown-sender rules below.
         if self._is_blocked_address(sender):
             if self._starred.is_starred(sender):
                 return (
@@ -292,6 +293,9 @@ class InboundFilter:
                     BlockReason.starred_contact_rule("blocked-address-list"),
                 )
             return MessageDisposition.BLOCK, BlockReason.blocked_list()
+
+        if self._overrides is not None and self._overrides.has_override(sender):
+            return MessageDisposition.DELIVER, None
 
         term = self._filter.matched_term(body or "")
         if term is not None:
@@ -420,6 +424,31 @@ def add_persistent_override(store, sender: str) -> None:
     names.add(phone_numbers.normalize(sender))
     try:
         store.set_setting(OVERRIDES_SETTING_KEY, sorted(names))
+    except Exception:
+        pass
+
+
+def remove_persistent_override(store, sender: str) -> None:
+    """Forget ``sender``'s deliver override (blocking it later wins).
+
+    Format-tolerant: the stored entry may spell the number differently
+    from the block action, so every matching variant goes.
+    """
+    try:
+        saved = store.get_setting(OVERRIDES_SETTING_KEY, [])
+    except Exception:
+        return
+    names = {str(v) for v in saved} if isinstance(saved, list) else set()
+    if not names:
+        return
+    kept = {
+        value for value in names
+        if not phone_numbers.matches(sender, value)
+    }
+    if kept == names:
+        return
+    try:
+        store.set_setting(OVERRIDES_SETTING_KEY, sorted(kept))
     except Exception:
         pass
 

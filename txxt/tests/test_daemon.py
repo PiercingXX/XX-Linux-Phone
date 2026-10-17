@@ -163,7 +163,9 @@ class TestReconcileMms:
                        "ContentLocation": "http://mms/1"})],
             store, modem,
         )
-        assert (counts.imported, counts.deleted) == (1, 1)
+        # The mmsd copy is retained for tap-to-fetch (bug_txxt finding 2).
+        assert (counts.imported, counts.deleted) == (1, 0)
+        assert modem.deleted == []
         rows = [
             item for conv in store.get_all_conversations()
             for item in store.get_messages_for_conversation(conv.id)
@@ -178,13 +180,19 @@ class TestReconcileMms:
                           "Date": "2024-06-01T12:00:00+00:00"})
         reconcile_mms_messages([pair], store, FakeModemStore())
         counts = reconcile_mms_messages([pair], store, FakeModemStore())
-        assert (counts.imported, counts.already_known, counts.deleted) == (0, 1, 1)
+        assert (counts.imported, counts.already_known, counts.deleted) == (0, 1, 0)
 
-    def test_dateless_mms_imports_once_and_deletes(self):
+    def test_dateless_mms_imports_once_and_retains(self):
         store = Store.memory()
         pair = ("/m/1", {"Recipients": ["+1555"], "Text": "cap"})
         counts = reconcile_mms_messages([pair], store, FakeModemStore())
-        assert (counts.imported, counts.deleted) == (1, 1)
+        assert (counts.imported, counts.deleted) == (1, 0)
+        again = reconcile_mms_messages([pair], store, FakeModemStore())
+        assert (again.imported, again.already_known) == (0, 1)
+        assert len([
+            item for conv in store.get_all_conversations()
+            for item in store.get_messages_for_conversation(conv.id)
+        ]) == 1
 
 
 # ---- inbound pipeline ----
@@ -333,6 +341,9 @@ class TestRetryQueue:
         now = [1_000_000]
         queue = RetryQueue(now_millis=lambda: now[0])
         queue.add("+1555", "hi", 7)
+        # Fresh sends wait out one base delay (bug_txxt finding 21).
+        assert queue.due() == []
+        now[0] += daemon.RETRY_BASE_DELAY_MS
         assert len(queue.due()) == 1
         key = next(iter(queue._items))
         queue.mark_attempted(key)
@@ -430,11 +441,11 @@ class TestPumpRetry:
 
 
 class FakeRaceBus(FakeBusForPump):
-    """One SMS row whose modem copy survives ``Delete``.
+    """One SMS row; ``Delete`` removes it like the real modem store.
 
-    The delete is recorded as a success but the props stay readable, so
-    a second import of the same path can only be stopped by the
-    daemon's own bookkeeping — exactly the startup/signal overlap.
+    A deleted object is gone: a later ``GetAll``/``List`` no longer
+    sees it, so the startup/signal overlap can only double-import when
+    the daemon's own bookkeeping lets it through.
     """
 
     def __init__(self):
@@ -458,7 +469,12 @@ class FakeRaceBus(FakeBusForPump):
                 raise OSError("gone")
             return _TupleReply((dict(props),))
         if method == "Delete":
-            self.deletes.append(params.unpack()[0])
+            deleted = params.unpack()[0]
+            self.deletes.append(deleted)
+            self.sms_props.pop(deleted, None)
+            for listed in self.sms_lists.values():
+                if deleted in listed:
+                    listed.remove(deleted)
             return _TupleReply(())
         raise AssertionError(method)
 
@@ -473,7 +489,16 @@ class TestDuplicateImportRace:
             session_bus_fn=lambda: None,
         )
 
-    def test_reconcile_then_signal_imports_once(self):
+    @staticmethod
+    def _no_poll(monkeypatch):
+        """Single GetAll instead of the worker-thread RECEIVING backoff."""
+        monkeypatch.setattr(
+            mm_client, "wait_received_props",
+            lambda bus, path: mm_client.get_sms_properties(bus, path),
+        )
+
+    def test_reconcile_then_signal_imports_once(self, monkeypatch):
+        self._no_poll(monkeypatch)
         store = Store.memory()
         bus = FakeRaceBus()
         posts = FakeNotifyBus()
@@ -486,23 +511,25 @@ class TestDuplicateImportRace:
         assert d.startup_reconcile().imported == 1
         d._fetch_and_handle("/s/race")
         assert bodies(store) == ["race"]
-        # The late signal re-deletes the modem copy instead of storing
-        # (and notifying) a second time.
-        assert bus.deletes == ["/s/race", "/s/race"]
+        # The modem copy is gone after the reconcile delete, so the late
+        # signal finds nothing and stores (and notifies) nothing new.
+        assert bus.deletes == ["/s/race"]
         assert posts.posts == []
 
-    def test_signal_then_reconcile_imports_once(self):
+    def test_signal_then_reconcile_imports_once(self, monkeypatch):
+        self._no_poll(monkeypatch)
         store = Store.memory()
         bus = FakeRaceBus()
         d = self._race_daemon(store, bus)
         d._fetch_and_handle("/s/race")
         counts = d.startup_reconcile()
-        assert (counts.imported, counts.already_known) == (0, 1)
+        assert (counts.imported, counts.already_known) == (0, 0)
         assert bodies(store) == ["race"]
 
-    def test_concurrent_reconcile_and_signal_import_once(self):
+    def test_concurrent_reconcile_and_signal_import_once(self, monkeypatch):
         import threading
 
+        self._no_poll(monkeypatch)
         store = Store.memory()
         bus = FakeRaceBus()
         d = self._race_daemon(store, bus)
@@ -600,6 +627,380 @@ class TestDaemonWiring:
 
 def test_blocking_live_filter_default_delivers():
     assert blocking.live_current().evaluate("+1555", "hi")[0] is MessageDisposition.DELIVER
+
+
+# ---- bug_txxt finding 2: inbound MMS photo lost with default settings ----
+
+class _TapAdapter:
+    """Fake mmsd-tng holding one photo message (documented 5-tuples)."""
+
+    def __init__(self, photo_bytes):
+        self.photo_bytes = photo_bytes
+        self.messages = {
+            "/org/ofono/mms/message/7": {
+                "Sender": "+15550100999",
+                "Recipients": ["+15550100000"],
+                "Date": "2024-06-01T12:00:00+00:00",
+                "Status": "received",
+                "Attachments": None,  # filled by carrier_path()
+            }
+        }
+        self.deleted = []
+
+    def carrier_path(self, tmp_path):
+        carrier = tmp_path / "carrier.bin"
+        carrier.write_bytes(b"PDUHEAD" + self.photo_bytes + b"PDUTAIL")
+        offset = len(b"PDUHEAD")
+        self.messages["/org/ofono/mms/message/7"]["Attachments"] = [
+            ("image_0.jpg", "image/jpeg", str(carrier), offset, len(self.photo_bytes)),
+        ]
+        return str(carrier)
+
+    def list_messages(self):
+        return list(self.messages)
+
+    def get_message(self, path):
+        return self.messages.get(path)
+
+    def delete_message(self, path):
+        if path in self.messages:
+            del self.messages[path]
+            self.deleted.append(path)
+            return True
+        return False
+
+
+class TestMmsPhotoRetained:
+    def test_reconcile_keeps_mmsd_copy_until_tap(self, tmp_path, monkeypatch):
+
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        store = Store.memory()
+        adapter = _TapAdapter(b"\xff\xd8-photo\xff\xd9")
+        adapter.carrier_path(tmp_path)
+        counts = reconcile_mms_messages(
+            [("/org/ofono/mms/message/7", adapter.messages["/org/ofono/mms/message/7"])],
+            store, adapter.delete_message,
+        )
+        assert counts.imported == 1 and counts.deleted == 0
+        assert "/org/ofono/mms/message/7" in adapter.messages
+
+    def test_tap_fetches_retained_copy_then_deletes(self, tmp_path, monkeypatch):
+        from txxt.daemon import Daemon
+
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        store = Store.memory()
+        adapter = _TapAdapter(b"\xff\xd8-photo\xff\xd9")
+        adapter.carrier_path(tmp_path)
+        props = adapter.messages["/org/ofono/mms/message/7"]
+        counts = reconcile_mms_messages(
+            [("/org/ofono/mms/message/7", props)], store, adapter.delete_message,
+        )
+        assert counts.imported == 1
+        row = next(
+            item for conv in store.get_all_conversations()
+            for item in store.get_messages_for_conversation(conv.id)
+        )
+        daemon = Daemon(
+            store, system_bus_fn=lambda: None, session_bus_fn=lambda: None,
+        )
+        daemon._mms = adapter
+        found = daemon.fetch_mms(row.id)
+        assert found and open(found, "rb").read() == b"\xff\xd8-photo\xff\xd9"
+        assert store.get_message(row.id).media_path == found
+        assert adapter.messages == {}
+        assert store.pending_delete_rows() == []
+
+    def test_second_pass_neither_duplicates_nor_deletes(self, tmp_path):
+        store = Store.memory()
+        adapter = _TapAdapter(b"\xff\xd8-photo\xff\xd9")
+        adapter.carrier_path(tmp_path)
+        props = adapter.messages["/org/ofono/mms/message/7"]
+        reconcile_mms_messages([("/org/ofono/mms/message/7", props)], store, adapter.delete_message)
+        counts = reconcile_mms_messages(
+            [("/org/ofono/mms/message/7", props)], store, adapter.delete_message,
+        )
+        assert (counts.imported, counts.already_known, counts.deleted) == (0, 1, 0)
+        assert "/org/ofono/mms/message/7" in adapter.messages
+
+    def test_same_sender_new_date_imports_again(self):
+        store = Store.memory()
+        first = {
+            "Sender": "+1555", "Date": "2024-06-01T12:00:00+00:00",
+            "Status": "received",
+        }
+        second = {
+            "Sender": "+1555", "Date": "2024-06-01T12:03:00+00:00",
+            "Status": "received",
+        }
+        modem = FakeModemStore()
+        assert reconcile_mms_messages([("/m/1", first)], store, modem).imported == 1
+        counts = reconcile_mms_messages([("/m/2", second)], store, modem)
+        assert counts.imported == 1
+        assert len([
+            item for conv in store.get_all_conversations()
+            for item in store.get_messages_for_conversation(conv.id)
+        ]) == 2
+
+    def test_content_location_disambiguates_same_window(self):
+        store = Store.memory()
+        stamp = "2024-06-01T12:00:00+00:00"
+        first = {
+            "Sender": "+1555", "Date": stamp, "Status": "received",
+            "ContentLocation": "http://mms/one",
+        }
+        second = {
+            "Sender": "+1555", "Date": stamp, "Status": "received",
+            "ContentLocation": "http://mms/two",
+        }
+        modem = FakeModemStore()
+        assert reconcile_mms_messages([("/m/1", first)], store, modem).imported == 1
+        assert reconcile_mms_messages([("/m/2", second)], store, modem).imported == 1
+
+    def test_sent_mmsd_copy_is_not_imported_as_inbound(self):
+        store = Store.memory()
+        modem = FakeModemStore()
+        props = {
+            "Recipients": ["+1555"], "Date": "2024-06-01T12:00:00+00:00",
+            "Status": "sent",
+        }
+        counts = reconcile_mms_messages([("/m/9", props)], store, modem)
+        assert (counts.imported, counts.deleted) == (0, 0)
+        assert store.get_all_conversations() == []
+
+
+# ---- bug_txxt finding 3: inbound SMS/MMS treated as duplicates ----
+
+class _LiveSmsBus:
+    """Fake system bus: one inbound SMS plus a one-modem ObjectManager."""
+
+    def __init__(self, props, modem=MODEM):
+        self.props = dict(props) if props is not None else None
+        self.modem = modem
+        self.deletes = []
+
+    def call_sync(self, bus, path, iface, method, params, *rest):
+        if method == "GetManagedObjects":
+            return _TupleReply(({
+                self.modem: {
+                    "org.freedesktop.ModemManager1.Modem": {},
+                    "org.freedesktop.ModemManager1.Modem.Messaging": {},
+                },
+            },))
+        if method == "GetAll":
+            if self.props is None:
+                raise OSError("gone")
+            return _TupleReply((dict(self.props),))
+        if method == "Delete":
+            self.deletes.append(params.unpack()[0])
+            return _TupleReply(())
+        raise AssertionError(method)
+
+
+def _live_props(number, text, stamp="2024-06-01T12:00:00+00:00"):
+    return {
+        "Number": f"tel:{number}", "Text": text,
+        "State": 3, "PduType": 1, "Timestamp": stamp,
+    }
+
+
+class TestLiveDuplicateScope:
+    def _daemon(self, store, bus, **kwargs):
+        posts = FakeNotifyBus()
+        pipe = InboundPipeline(store, notify_bus=posts)
+        under_test = daemon.Daemon(
+            store, pipeline=pipe,
+            system_bus_fn=lambda: bus, session_bus_fn=lambda: None,
+        )
+        return under_test, posts
+
+    def test_incoming_matching_my_outgoing_is_stored(self):
+        store = Store.memory()
+        store.persist_outgoing_sms("+1555", "ok", now_millis=1717243200000)
+        bus = _LiveSmsBus(_live_props("+1555", "ok"))
+        daemon, posts = self._daemon(store, bus)
+        modem = FakeModemStore()
+        counts = reconcile_records(
+            [record("/s/1", "+1555", "ok")], store, modem,
+        )
+        assert counts.imported == 1
+        assert bodies(store) == ["ok", "ok"]
+
+    def test_repeat_text_twice_both_kept_live(self):
+        store = Store.memory()
+        bus = _LiveSmsBus(_live_props("+1555", "again"))
+        daemon, posts = self._daemon(store, bus)
+        daemon._fetch_and_handle("/s/1")
+        daemon._fetch_and_handle("/s/2")
+        assert bodies(store) == ["again", "again"]
+        assert len(posts.posts) == 2
+
+    def test_outgoing_does_not_swallow_incoming_live(self):
+        store = Store.memory()
+        store.persist_outgoing_sms("+1555", "ok", now_millis=1717243200000)
+        bus = _LiveSmsBus(_live_props("+1555", "ok"))
+        daemon, posts = self._daemon(store, bus)
+        daemon._fetch_and_handle("/s/9")
+        assert bodies(store) == ["ok", "ok"]
+        assert len(posts.posts) == 1
+
+    def test_flagged_row_still_redeletes_without_dup(self):
+        store = Store.memory()
+        mid = store.persist_inbound_sms("+1555", "again", 1717243200000)
+        store.mark_pending_delete(mid)
+        bus = _LiveSmsBus(_live_props("+1555", "again"))
+        daemon, posts = self._daemon(store, bus)
+        daemon._fetch_and_handle("/s/1")
+        assert bodies(store) == ["again"]
+        assert posts.posts == []
+        assert bus.deletes == ["/s/1"]
+        assert store.pending_delete_rows() == []
+
+    def test_mms_sender_wins_over_recipients(self):
+        store = Store.memory()
+        modem = FakeModemStore()
+        props = {
+            "Sender": "+15550100999",
+            "Recipients": ["+15550100000"],
+            "Date": "2024-06-01T12:00:00+00:00",
+            "Status": "received",
+        }
+        assert reconcile_mms_messages([("/m/1", props)], store, modem).imported == 1
+        conv = store.get_all_conversations()[0]
+        assert "15550100999" in conv.participant_addresses
+        assert "15550100000" not in conv.participant_addresses
+
+
+# ---- bug_txxt finding 21: the same SMS can be sent twice ----
+
+class TestRetryRace:
+    def test_new_send_is_not_due_until_base_delay(self):
+        from txxt.daemon import RETRY_BASE_DELAY_MS
+
+        now = [1_000_000]
+        queue = RetryQueue(now_millis=lambda: now[0])
+        queue.add("+1555", "hi", 7)
+        assert queue.due() == []
+        now[0] += RETRY_BASE_DELAY_MS
+        assert len(queue.due()) == 1
+
+    def test_concurrent_pumps_send_once(self):
+        import threading
+
+        store = Store.memory()
+        store.persist_outgoing_sms("+1555", "once", now_millis=9)
+        sent = []
+        gate = threading.Barrier(2)
+
+        def _sender(bus, modem, address, body):
+            try:
+                gate.wait(timeout=2)
+            except threading.BrokenBarrierError:
+                pass
+            sent.append(body)
+            import time as _t
+            _t.sleep(0.2)
+            return True, "/s/1"
+
+        under_test = daemon.Daemon(
+            store,
+            system_bus_fn=FakeBusForPump,
+            session_bus_fn=lambda: None,
+            sender=_sender,
+            retry=RetryQueue(),
+        )
+        under_test.startup_reconcile()
+        workers = [
+            threading.Thread(target=under_test.pump_retry) for _ in range(2)
+        ]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=30)
+        assert sent == ["once"]
+
+
+# ---- bug_txxt finding 22: modem path cached forever ----
+
+class TestModemPathCache:
+    def _daemon(self, store, objects, sender):
+        bus_holder = {"bus": None}
+
+        class _Bus(_LiveSmsBus):
+            def call_sync(self, bus, path, iface, method, params, *rest):
+                if method == "GetManagedObjects":
+                    return _TupleReply((dict(objects),))
+                return super().call_sync(bus, path, iface, method, params, *rest)
+
+        bus_holder["bus"] = _Bus(None)
+        return daemon.Daemon(
+            store, system_bus_fn=lambda: bus_holder["bus"],
+            session_bus_fn=lambda: None, sender=sender,
+        )
+
+    def test_failed_send_clears_cached_path(self):
+        store = Store.memory()
+        modem_a = "/org/freedesktop/ModemManager1/Modem/0"
+        objects = {modem_a: {"org.freedesktop.ModemManager1.Modem": {}}}
+        daemon = self._daemon(store, objects, lambda b, m, a, t: (False, "boom"))
+        daemon.send_message("+1555", "hi")
+        assert daemon._modem_path is None
+
+    def test_retry_resolves_new_path_after_reset(self):
+        store = Store.memory()
+        modem_a = "/org/freedesktop/ModemManager1/Modem/0"
+        modem_b = "/org/freedesktop/ModemManager1/Modem/1"
+        seen = []
+        objects = {modem_a: {"org.freedesktop.ModemManager1.Modem": {}}}
+
+        def _sender(bus, modem, address, body):
+            seen.append(modem)
+            return (False, "boom") if modem == modem_a else (True, "/s/9")
+
+        daemon = self._daemon(store, objects, _sender)
+        daemon.send_message("+1555", "hi")
+        assert daemon._modem_path is None
+        objects.clear()
+        objects[modem_b] = {"org.freedesktop.ModemManager1.Modem": {}}
+        now = [0]
+        daemon._retry = RetryQueue(now_millis=lambda: now[0])
+        daemon.startup_reconcile()
+        now[0] += 30_000
+        counts = daemon.pump_retry()
+        assert counts.resent == 1
+        assert seen[-1] == modem_b
+
+
+# ---- bug_txxt finding 30: block surface + mute ----
+
+class TestBlockSurfaceAndMute:
+    def test_blocked_keeps_archived_thread_hidden(self):
+        store = Store.memory()
+        filt = InboundFilter(blocked_addresses={"+1555"})
+        pipe = pipeline(store, filter_provider=lambda: filt)
+        first = pipe.handle_sms("+1555", "first")
+        row = store.get_message(first.message_id)
+        conv = store.get_conversation(row.conversation_id)
+        flags = conv.flags()
+        store.set_flags(conv.id, flags.archive())
+        assert store.get_conversation(conv.id).is_archived is True
+        outcome = pipe.handle_sms("+1555", "second")
+        assert outcome.disposition is MessageDisposition.BLOCK
+        assert store.get_conversation(conv.id).is_archived is True
+
+    def test_muted_thread_stores_without_notifying(self):
+
+        store = Store.memory()
+        bus = FakeNotifyBus()
+        pipe = pipeline(store, notify_bus=bus)
+        outcome = pipe.handle_sms("+1555", "hello")
+        conv = store.get_conversation(outcome.conversation_id)
+        flags = conv.flags()
+        store.set_flags(conv.id, flags.mute())
+        assert len(bus.posts) == 1
+        outcome2 = pipe.handle_sms("+1555", "quiet hello")
+        assert outcome2.message_id is not None
+        assert len(bus.posts) == 1
+        assert outcome2.notified is False
 
 
 def test_daemon_module_has_no_gtk():

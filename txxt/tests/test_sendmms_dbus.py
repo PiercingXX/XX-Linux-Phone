@@ -1,13 +1,14 @@
 """L5 SendMms over a real bus against a fake mmsd-tng.
 
 Runs under ``dbus-run-session``: a fake mmsd-tng owns ``org.ofono.mms``
-and exports the real service shapes (``org.ofono.mms.Service`` at
-``/org/ofono/mms/modemmanager``: ``GetMessages`` -> ``ao``,
-``SendMessage(as recipients, a(sss) attachments)`` -> ``o``; message
-objects with ``org.ofono.mms.Message`` + ``Properties.GetAll`` ->
-``a{sv}``), while the real :class:`Daemon` serves ``io.piercingxx.TxxT1``
-and the real :class:`TxxtClient` drives ``SendMms``/``FetchMms``.
-Skipped without ``dbus-run-session``.
+and exports the documented service shapes (``org.ofono.mms.Service`` at
+``/org/ofono/mms/modemmanager``: ``GetMessages`` -> ``a(oa{sv})``,
+``SendMessage(as recipients, v smil, a(sss) attachments)`` -> ``o``;
+message objects with ``org.ofono.mms.Message`` + ``Properties.GetAll``
+-> ``a{sv}`` and documented ``(id, type, file, offset, length)``
+attachment 5-tuples), while the real :class:`Daemon` serves
+``io.piercingxx.TxxT1`` and the real :class:`TxxtClient` drives
+``SendMms``/``FetchMms``. Skipped without ``dbus-run-session``.
 """
 
 import os
@@ -44,12 +45,13 @@ SERVICE_XML = """\
     </method>
     <method name="SendMessage">
       <arg direction="in" type="as" name="recipients"/>
+      <arg direction="in" type="v" name="smil"/>
       <arg direction="in" type="a(sss)" name="attachments"/>
       <arg direction="out" type="o" name="path"/>
     </method>
     <signal name="MessageAdded">
       <arg type="o" name="path"/>
-      <arg type="s" name="kind"/>
+      <arg type="a{sv}" name="properties"/>
     </signal>
   </interface>
 </node>
@@ -82,6 +84,12 @@ def _variant_props(props):
     packed = {}
     for key, value in props.items():
         if isinstance(value, list) and value and all(
+                isinstance(entry, (list, tuple)) and len(entry) == 5
+                for entry in value):
+            packed[key] = GLib.Variant("a(ssstt)", [
+                (str(a), str(b), str(c), int(d), int(e))
+                for a, b, c, d, e in value])
+        elif isinstance(value, list) and value and all(
                 isinstance(entry, (list, tuple)) and len(entry) == 3
                 for entry in value):
             packed[key] = GLib.Variant("a(sss)", [
@@ -99,10 +107,11 @@ def _service_handler(connection, sender, obj_path, iface, method, params, invoca
             invocation.return_value(
                 GLib.Variant("(ao)", (list(mmsd["messages"]),)))
         elif method == "SendMessage":
-            recipients, attachments = params.unpack()
+            recipients, smil, attachments = params.unpack()
             assert list(recipients) == ["+15550100200"], recipients
+            assert "image_0.jpg" in smil and "text_0.txt" in smil, smil
             kinds = {kind for _, kind, _ in attachments}
-            assert {"image/jpeg", "application/smil"} <= kinds, kinds
+            assert kinds == {"text/plain", "image/jpeg"}, kinds
             for _name, kind, staged in attachments:
                 if kind == "image/jpeg":
                     with open(staged, "rb") as handle:
@@ -170,10 +179,11 @@ Gio.bus_own_name(
 
 inbound_path = "/org/ofono/mms/message/7"
 mmsd["messages"][inbound_path] = {
-    "Recipients": ["+15550100999"],
+    "Recipients": ["+15550100000"],
     "Sender": "+15550100999",
+    "Status": "received",
     "ContentLocation": "http://mms/inbound-7",
-    "Attachments": [("image_0.jpg", "image/jpeg", carrier_path)],
+    "Attachments": [("image_0.jpg", "image/jpeg", carrier_path, 0, 26)],
 }
 message_node = Gio.DBusNodeInfo.new_for_xml(MESSAGE_XML)
 for message_iface in message_node.interfaces:

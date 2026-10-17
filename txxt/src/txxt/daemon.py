@@ -5,10 +5,12 @@ headless under the systemd user unit ``txxt-daemon.service`` or the XDG
 autostart entry — a lock file guarantees only one instance either way:
 
 - Startup reconcile: ``List`` the modem store, import what SQLite lacks
-  (L1's 5-minute ``find_missing`` match, never duplicates), then
-  ``Delete`` after the row is committed (crash-safe via the
-  ``pending_delete`` flag: rows flagged but never deleted match again on
-  the next pass and are re-deleted, never re-imported).
+  (L1's 5-minute ``find_missing`` match within one direction, never
+  duplicates), then ``Delete`` after the row is committed (crash-safe
+  via the ``pending_delete`` flag: rows flagged but never deleted match
+  again on the next pass and are re-deleted, never re-imported). MMS
+  copies are deleted only after the photo is on disk, so an untapped
+  ``[Photo]`` placeholder never loses its source.
 - Inbound pipeline: ``Messaging.Added`` (wait for RECEIVED first, else
   the text is a multipart prefix) through L1's ``InboundFilter`` —
   delivered rows notify, quarantined rows are held with a sender-only
@@ -150,31 +152,47 @@ class RetryQueue:
     def __init__(self, now_millis=None) -> None:
         self._items: dict[str, QueuedSend] = {}
         self._now = now_millis or (lambda: int(time.time() * 1000))
+        self._lock = threading.RLock()
 
-    def add(self, address: str, body: str, message_id: int) -> str:
+    def add(
+        self, address: str, body: str, message_id: int,
+        due_now: bool = False,
+    ) -> str:
+        """Queue one outgoing SMS.
+
+        Fresh sends stay undue for one base delay: the caller transmits
+        synchronously first, and an immediate due date would let the
+        5-second retry tick resend before that transmit returns. Seeds
+        for already-waiting rows pass ``due_now``.
+        """
         key = f"{message_id}:{phone_numbers.conversation_key(address) or address.strip()}"
-        item = self._items.get(key)
-        if item is None:
-            self._items[key] = QueuedSend(
-                key=key, address=address, body=body, message_id=message_id,
-                next_due_millis=self._now(),
-            )
-        return key
+        with self._lock:
+            item = self._items.get(key)
+            if item is None:
+                delay = 0 if due_now else RETRY_BASE_DELAY_MS
+                self._items[key] = QueuedSend(
+                    key=key, address=address, body=body, message_id=message_id,
+                    next_due_millis=self._now() + delay,
+                )
+            return key
 
     def add_mms(
         self, address: str, body: str, message_id: int,
         files: tuple | list = (),
+        due_now: bool = False,
     ) -> str:
         """Queue one outgoing MMS (staged file paths ride along for retry)."""
         key = f"mms:{message_id}:{phone_numbers.conversation_key(address) or address.strip()}"
-        item = self._items.get(key)
-        if item is None:
-            self._items[key] = QueuedSend(
-                key=key, address=address, body=body, message_id=message_id,
-                next_due_millis=self._now(), transport="MMS",
-                files=tuple(files or ()),
-            )
-        return key
+        with self._lock:
+            item = self._items.get(key)
+            if item is None:
+                delay = 0 if due_now else RETRY_BASE_DELAY_MS
+                self._items[key] = QueuedSend(
+                    key=key, address=address, body=body, message_id=message_id,
+                    next_due_millis=self._now() + delay, transport="MMS",
+                    files=tuple(files or ()),
+                )
+            return key
 
     def seed_mms(self, store, rows) -> int:
         """Queue unconfirmed outgoing MMS rows (media_path rides as files).
@@ -192,7 +210,7 @@ class RetryQueue:
                 files = (row.media_path,) if row and row.media_path else ()
             except Exception:
                 files = ()
-            self.add_mms(seed.address, seed.body, seed.id, files)
+            self.add_mms(seed.address, seed.body, seed.id, files, due_now=True)
             count += 1
         return count
 
@@ -202,41 +220,66 @@ class RetryQueue:
         ``rows`` carry ``address``/``body``/``id`` (see
         :func:`seeds_with_addresses`); rows already queued keep their
         backoff state so a second reconcile never resets the schedule.
+        Seeds are due at once: their first attempt long predates this
+        process, unlike a fresh :meth:`add`.
         """
         count = 0
         for row in rows:
             if not row.address:
                 continue
-            self.add(row.address, row.body, row.id)
+            self.add(row.address, row.body, row.id, due_now=True)
             count += 1
         return count
 
     def due(self) -> list[QueuedSend]:
-        now = self._now()
-        return [
-            item for item in self._items.values()
-            if not item.held and item.next_due_millis <= now
-        ]
+        with self._lock:
+            now = self._now()
+            return [
+                item for item in self._items.values()
+                if not item.held and item.next_due_millis <= now
+            ]
+
+    def claim(self, key: str) -> QueuedSend | None:
+        """Take a due item for one transmission, pushing its due date out.
+
+        The push (without bumping ``attempts``) closes the window where
+        two concurrent pumps both see the item due and both transmit;
+        the loser of the race finds nothing due and skips. Success
+        removes the item via :meth:`mark_sent`, failure re-arms it via
+        :meth:`mark_attempted`.
+        """
+        with self._lock:
+            item = self._items.get(key)
+            if item is None or item.held:
+                return None
+            if item.next_due_millis > self._now():
+                return None
+            item.next_due_millis = self._now() + retry_delay_ms(item.attempts)
+            return item
 
     def mark_attempted(self, key: str) -> QueuedSend | None:
-        item = self._items.get(key)
-        if item is None:
-            return None
-        item.attempts += 1
-        if item.attempts >= RETRY_MAX_ATTEMPTS:
-            item.held = True
-        else:
-            item.next_due_millis = self._now() + retry_delay_ms(item.attempts)
-        return item
+        with self._lock:
+            item = self._items.get(key)
+            if item is None:
+                return None
+            item.attempts += 1
+            if item.attempts >= RETRY_MAX_ATTEMPTS:
+                item.held = True
+            else:
+                item.next_due_millis = self._now() + retry_delay_ms(item.attempts)
+            return item
 
     def mark_sent(self, key: str) -> None:
-        self._items.pop(key, None)
+        with self._lock:
+            self._items.pop(key, None)
 
     def held_items(self) -> list[QueuedSend]:
-        return [item for item in self._items.values() if item.held]
+        with self._lock:
+            return [item for item in self._items.values() if item.held]
 
     def __len__(self) -> int:
-        return len(self._items)
+        with self._lock:
+            return len(self._items)
 
 
 @dataclass
@@ -323,31 +366,78 @@ def sms_timestamp_millis(stamp: str) -> int:
     return int(moment.timestamp() * 1000)
 
 
-def _known_with_ids(store) -> list[tuple[int, str, int, str]]:
-    """Stored messages as ``(id, participants, timestamp, body)``."""
+def _known_with_ids(store) -> list[tuple]:
+    """Stored messages as ``(id, participants, timestamp, body, direction,
+    transport, pending_delete, content_location)``."""
     rows = []
     for conversation in store.get_all_conversations():
         participants = conversation.participant_addresses
         for item in store.get_messages_for_conversation(conversation.id):
-            rows.append((item.id, participants, item.timestamp_millis, item.body))
+            rows.append((
+                item.id, participants, item.timestamp_millis, item.body,
+                item.direction, item.transport, bool(item.pending_delete),
+                item.content_location or "",
+            ))
     return rows
 
 
-def _match_ids(
-    candidates: list[tuple[int, str, int, str]],
-    address: str, stamp: int, body: str | None,
-) -> list[int]:
-    """Ids of stored rows matching a modem row (L1 5-minute window).
+def _mms_identity_matches(
+    row_location: str, content_location: str | None,
+    row_stamp: int, stamp: int,
+) -> bool:
+    """Whether an mmsd message is the same one a stored MMS row came from.
 
-    ``body`` None matches sender + window only — the MMS case, where the
-    store holds the ``[Photo]`` placeholder instead of the caption.
+    mmsd-tng exposes no per-message id besides the object path (which the
+    store never records), so identity is the content location when both
+    sides carry one, else the exact sender date: two distinct MMS almost
+    never share a second, while a re-seen mmsd copy keeps its date.
+    Dateless pairs match so one placeholder covers one dateless copy.
     """
-    return [
-        row_id for row_id, participants, timestamp, known_body in candidates
-        if (body is None or known_body == body)
-        and abs(timestamp - stamp) <= backup.MATCH_WINDOW_MS
-        and backup.same_sender(participants, address)
-    ]
+    row_location = (row_location or "").strip()
+    needle = (content_location or "").strip()
+    if row_location or needle:
+        return bool(row_location and needle and row_location == needle)
+    if stamp and row_stamp:
+        return row_stamp == stamp
+    return not stamp and not row_stamp
+
+
+def _match_ids(
+    candidates: list[tuple],
+    address: str, stamp: int, body: str | None,
+    direction: str = "INCOMING", transport: str = "SMS",
+    pending_only: bool = False, content_location: str | None = None,
+) -> list[int]:
+    """Ids of stored rows matching a modem row.
+
+    SMS matches sender + 5-minute window + body within one direction of
+    one transport: an outgoing row never stands in for an incoming
+    message. The live path passes ``pending_only`` so only a row still
+    flagged ``pending_delete`` (this modem copy, imported but not yet
+    deleted) counts — a same-worded earlier message is a new message.
+    MMS (``body`` None, the store holds ``[Photo]``) matches by sender
+    plus :func:`_mms_identity_matches`.
+    """
+    matched = []
+    for entry in candidates:
+        (row_id, participants, timestamp, known_body,
+         row_direction, row_transport, pending, row_location) = entry
+        if row_direction != direction or row_transport != transport:
+            continue
+        if pending_only and not pending:
+            continue
+        if not backup.same_sender(participants, address):
+            continue
+        if transport == "MMS":
+            if _mms_identity_matches(row_location, content_location, timestamp, stamp):
+                matched.append(row_id)
+            continue
+        if body is not None and known_body != body:
+            continue
+        if abs(timestamp - stamp) > backup.MATCH_WINDOW_MS:
+            continue
+        matched.append(row_id)
+    return matched
 
 
 def reconcile_records(records, store, delete_fn) -> ReconcileCounts:
@@ -365,9 +455,15 @@ def reconcile_records(records, store, delete_fn) -> ReconcileCounts:
     if not records:
         return counts
     candidates = _known_with_ids(store)
-    known = [
+    known_in = [
         backup.KnownMessage(participants=p, timestamp_millis=t, body=b)
-        for _, p, t, b in candidates
+        for _, p, t, b, direction, transport, _, _ in candidates
+        if direction == "INCOMING" and transport == "SMS"
+    ]
+    known_out = [
+        backup.KnownMessage(participants=p, timestamp_millis=t, body=b)
+        for _, p, t, b, direction, transport, _, _ in candidates
+        if direction == "OUTGOING" and transport == "SMS"
     ]
     platform = [
         backup.PlatformRow(
@@ -379,17 +475,30 @@ def reconcile_records(records, store, delete_fn) -> ReconcileCounts:
         )
         for record in records
     ]
-    missing = {
+    missing_in = {
         (row.address, row.date_millis, row.body)
-        for row in backup.find_missing(platform, known)
+        for row in backup.find_missing(
+            [row for row in platform if row.type == backup.SMS_TYPE_INBOX],
+            known_in,
+        )
+    }
+    missing_out = {
+        (row.address, row.date_millis, row.body)
+        for row in backup.find_missing(
+            [row for row in platform if row.type == backup.SMS_TYPE_SENT],
+            known_out,
+        )
     }
     for record, row in zip(records, platform):
+        direction = "OUTGOING" if record.outgoing else "INCOMING"
+        missing = missing_out if record.outgoing else missing_in
         if (row.address, row.date_millis, row.body) not in missing:
             counts.already_known += 1
             if delete_fn(record.path):
                 counts.deleted += 1
                 for row_id in _match_ids(
-                    candidates, row.address, row.date_millis, row.body
+                    candidates, row.address, row.date_millis, row.body,
+                    direction=direction,
                 ):
                     store.clear_pending_delete(row_id)
             else:
@@ -402,7 +511,10 @@ def reconcile_records(records, store, delete_fn) -> ReconcileCounts:
             store.mark_sent(message_id)
         else:
             message_id = store.persist_inbound_sms(row.address, row.body, row.date_millis)
-        candidates.append((message_id, row.address, row.date_millis, row.body))
+        candidates.append((
+            message_id, row.address, row.date_millis, row.body,
+            direction, "SMS", True, "",
+        ))
         counts.imported += 1
         store.mark_pending_delete(message_id)
         if delete_fn(record.path):
@@ -414,45 +526,75 @@ def reconcile_records(records, store, delete_fn) -> ReconcileCounts:
     return counts
 
 
+#: Message ``Status`` values mmsd-tng reports for receivable MMS
+#: (``doc/message-api.txt``: received, then read after ``MarkRead``).
+_MMS_IMPORTABLE_STATUSES = frozenset({"received", "read"})
+
+
+def _mms_status_skippable(props: dict) -> bool:
+    """Whether an mmsd message must not become an inbound MMS row.
+
+    mmsd-tng lists sent, draft and failed-notification copies alongside
+    received ones; only received/read messages are inbound photos. A
+    missing status (older fakes) still imports.
+    """
+    status = props.get("Status", props.get("status", None))
+    if status is None or not str(status).strip():
+        return False
+    return str(status).strip().lower() not in _MMS_IMPORTABLE_STATUSES
+
+
+def _mms_row_fetched(store, message_id: int) -> bool:
+    """Whether an MMS row already has its photo on disk."""
+    try:
+        row = store.get_message(message_id)
+    except Exception:
+        return False
+    return bool(row is not None and row.media_path)
+
+
 def reconcile_mms_messages(messages, store, delete_fn) -> ReconcileCounts:
     """mmsd-tng startup pass: import missing MMS metadata rows ([Photo]
-    until tapped), delete-after-import. ``messages`` are
-    ``(path, props)`` pairs from :class:`mm_client.MmsAdapter`."""
+    until tapped), delete only after the photo is on disk. ``messages``
+    are ``(path, props)`` pairs from :class:`mm_client.MmsAdapter`.
+
+    The mmsd copy is retained until :meth:`Daemon.fetch_mms` (or the
+    auto-download prefetch) copies the attachment: deleting the
+    placeholder's source first loses every photo the user never taps.
+    A re-seen copy matches its placeholder (sender plus
+    :func:`_mms_identity_matches`) and is skipped, never re-imported;
+    it is deleted only once the matching row carries ``media_path``.
+    """
     counts = ReconcileCounts()
     if not messages:
         return counts
     candidates = _known_with_ids(store)
     for path, props in messages:
-        recipients = props.get("Recipients") or props.get("recipients") or []
-        address = ""
-        for candidate in list(recipients):
-            text = str(candidate).strip()
-            if text and text != "insert-address-token":
-                address = text
-                break
-        if not address:
-            address = str(props.get("Sender") or props.get("sender") or "").strip()
+        if _mms_status_skippable(props):
+            continue
+        address = mms_sender_of(props)
         if not address:
             continue
         stamp = sms_timestamp_millis(str(props.get("Date") or props.get("date") or ""))
-        # A dateless MMS matches nothing: it imports once and is deleted,
-        # so it can never loop — collapsing two dateless MMS as one dup
-        # would lose a photo.
-        matched = _match_ids(candidates, address, stamp, None) if stamp else []
+        location = str(
+            props.get("ContentLocation") or props.get("content_location") or ""
+        ).strip() or None
+        matched = _match_ids(
+            candidates, address, stamp, None,
+            transport="MMS", content_location=location,
+        )
         if matched:
             counts.already_known += 1
-            if delete_fn(path):
-                counts.deleted += 1
-                for row_id in matched:
-                    store.clear_pending_delete(row_id)
-            else:
-                counts.delete_failed += 1
+            if any(_mms_row_fetched(store, row_id) for row_id in matched):
+                if delete_fn(path):
+                    counts.deleted += 1
+                    for row_id in matched:
+                        store.clear_pending_delete(row_id)
+                else:
+                    counts.delete_failed += 1
             continue
         message_id = store.persist_inbound_mms_metadata(
-            address, stamp,
-            content_location=str(
-                props.get("ContentLocation") or props.get("content_location") or ""
-            ) or None,
+            address, stamp, content_location=location,
         )
         conversation = store.get_conversation(
             store.get_message(message_id).conversation_id
@@ -460,16 +602,37 @@ def reconcile_mms_messages(messages, store, delete_fn) -> ReconcileCounts:
         candidates.append((
             message_id,
             conversation.participant_addresses if conversation else address,
-            stamp, "",
+            stamp, "", "INCOMING", "MMS", True, location or "",
         ))
         counts.imported += 1
         store.mark_pending_delete(message_id)
-        if delete_fn(path):
-            counts.deleted += 1
-            store.clear_pending_delete(message_id)
-        else:
-            counts.delete_failed += 1
     return counts
+
+
+def split_mms_attachment(entry) -> tuple[str, str, str, int, int] | None:
+    """One mmsd-tng attachment entry as ``(id, type, file, offset, length)``.
+
+    The documented ``Message.Attachments`` struct is ``(ssstt)``: the
+    file holds ``length`` bytes at ``offset`` (parts share one stored
+    file). Older triples carry ``(id, type, file)`` for the whole file
+    (offset 0, length 0). Anything else is not an attachment.
+    """
+    try:
+        parts = tuple(entry)
+    except TypeError:
+        return None
+    if len(parts) == 5:
+        name, content_type, path, offset, length = parts
+        try:
+            offset, length = int(offset), int(length)
+        except (TypeError, ValueError):
+            return None
+    elif len(parts) == 3:
+        name, content_type, path = parts
+        offset, length = 0, 0
+    else:
+        return None
+    return (str(name), str(content_type), str(path), offset, length)
 
 
 def mms_content_type(props: dict) -> str | None:
@@ -480,32 +643,43 @@ def mms_content_type(props: dict) -> str | None:
             return value.strip()
     attachments = props.get("Attachments") or props.get("attachments") or []
     for entry in list(attachments):
-        try:
-            _name, content_type, _path = entry
-        except (TypeError, ValueError):
+        split = split_mms_attachment(entry)
+        if split is None:
             continue
-        if str(content_type).strip():
-            return str(content_type).strip()
+        _name, content_type, _path, _offset, _length = split
+        if content_type.strip():
+            return content_type.strip()
     return None
 
 
 def mms_sender_of(props: dict) -> str:
-    """Sender/recipient address carried by an mmsd-tng property map."""
+    """Sender address carried by an mmsd-tng property map.
+
+    ``Sender`` is the sender (``doc/message-api.txt``); ``Recipients``
+    are the destinations (usually our own number on inbound), so they
+    only fill in when no sender is carried, e.g. sent copies.
+    """
+    sender = str(props.get("Sender") or props.get("sender") or "").strip()
+    if sender:
+        return sender
     recipients = props.get("Recipients") or props.get("recipients") or []
     for candidate in list(recipients):
         text = str(candidate).strip()
         if text and text != "insert-address-token":
             return text
-    return str(props.get("Sender") or props.get("sender") or "").strip()
+    return ""
 
 
 def stage_mms_attachments(
     text: str, prepared_images: list[bytes], staging: Path,
-) -> list[tuple[str, str, str]]:
-    """Write text/SMIL/image files for one mmsd-tng ``SendMessage`` call.
+) -> tuple[list[tuple[str, str, str]], str]:
+    """Write text/image files for one mmsd-tng ``SendMessage`` call.
 
-    Returns ``(filename, content-type, file-path)`` triples in send
-    order (text, images, SMIL last). Raises OSError when staging fails.
+    Returns the ``(filename, content-type, file-path)`` attachment
+    triples in send order (text, images) plus the SMIL body, which
+    rides as the middle ``SendMessage`` variant — never as a staged
+    file, so the MMS carries exactly one SMIL. Raises OSError when
+    staging fails.
     """
     from txxt import media as media_mod
 
@@ -526,9 +700,7 @@ def stage_mms_attachments(
         image_names[0] if image_names else None,
         text_name or None,
     )
-    (staging / "smil.xml").write_bytes(smil.encode("utf-8"))
-    staged.append(("smil.xml", "application/smil", str(staging / "smil.xml")))
-    return staged
+    return staged, smil
 
 
 # ---- inbound pipeline ----
@@ -589,7 +761,9 @@ class InboundPipeline:
         except Exception:
             disposition = blocking.MessageDisposition.DELIVER
         if disposition is blocking.MessageDisposition.BLOCK:
-            message_id = self._store.persist_inbound_sms(number, text or "", stamp)
+            message_id = self._store.persist_inbound_sms(
+                number, text or "", stamp, surface=False
+            )
             self._store.mark_message_read(message_id)
             return PipelineOutcome(disposition, message_id, notified=False)
         quarantined = disposition is blocking.MessageDisposition.QUARANTINE
@@ -603,17 +777,24 @@ class InboundPipeline:
         except Exception:
             conversation_id = None
         notified, notification_id = self._notify_inbound(
-            number, text or "", quarantined, conversation_id
+            number, text or "", quarantined, conversation_id, stamp
         )
         return PipelineOutcome(
             disposition, message_id, conversation_id, notified, notification_id,
         )
 
     def _notify_inbound(
-        self, number: str, text: str, quarantined: bool, conversation_id: int | None,
+        self, number: str, text: str, quarantined: bool,
+        conversation_id: int | None, stamp_millis: int | None = None,
     ) -> tuple[bool, int | None]:
         if self._notify_bus is None:
             return False, None
+        if stamp_millis is not None:
+            try:
+                if self._store.is_muted(number, stamp_millis):
+                    return False, None
+            except Exception:
+                pass
         privacy, style = self._posture()
         if privacy == "nothing":
             return False, None
@@ -796,12 +977,25 @@ class Daemon:
         # Serializes every modem-store import/delete path: D-Bus signals
         # arrive whenever they like, including mid-reconcile, so the
         # "check known -> persist -> delete" sequence below always holds
-        # this lock. Duplicates are caught by content match (sender +
-        # 5-minute window + body, the same rule the reconcile uses), not
-        # by modem path — the modem may reuse a path after delete, but
-        # a stored row never matches a message it isn't.
+        # this lock. Duplicates are caught by content match within one
+        # direction and transport (SMS: sender + 5-minute window + body;
+        # MMS: sender + identity), not by modem path — the modem may
+        # reuse a path after delete, but a stored row never matches a
+        # message it isn't.
         self._modem_lock = threading.Lock()
+        # Only one retry pump transmits at a time: the 5-second tick
+        # submits to a 3-worker pool, so a slow modem would otherwise
+        # stack overlapping pumps that resend the same queued row.
+        self._pump_lock = threading.Lock()
         self._dbus_connection = None
+
+    def _drop_modem_path(self) -> None:
+        """Forget the cached modem path so the next operation re-resolves.
+
+        Modems re-index after resets (``/Modem/0`` becomes ``/Modem/1``);
+        any failed modem call may mean the cached path is stale.
+        """
+        self._modem_path = None
 
     # -- startup (worker thread) --
 
@@ -856,13 +1050,26 @@ class Daemon:
         """Send every due queued SMS/MMS (worker thread); successes mark
         rows sent and clear modem copies, failures back off, exhausted
         rows hold."""
+        if not self._pump_lock.acquire(blocking=False):
+            return ReconcileCounts()
+        try:
+            return self._pump_retry_locked()
+        finally:
+            self._pump_lock.release()
+
+    def _pump_retry_locked(self) -> ReconcileCounts:
         counts = ReconcileCounts()
         bus = self._safe(self._system_bus_fn)
         modem = self._modem_path or (
             mm_client.resolve_modem_path(bus) if bus is not None else None
         )
         self._modem_path = modem
-        for item in self._retry.due():
+        if bus is None or modem is None:
+            self._drop_modem_path()
+        for snapshot in self._retry.due():
+            item = self._retry.claim(snapshot.key)
+            if item is None:
+                continue
             if getattr(item, "transport", "SMS") == "MMS":
                 self._pump_one_mms(item, counts)
                 continue
@@ -877,12 +1084,15 @@ class Daemon:
             if ok:
                 self._safe(self._store.mark_sent, item.message_id)
                 try:
-                    mm_client.delete_sms(bus, modem, str(detail))
+                    deleted = mm_client.delete_sms(bus, modem, str(detail))
                 except Exception:
-                    pass
+                    deleted = False
+                if not deleted:
+                    self._drop_modem_path()
                 self._retry.mark_sent(item.key)
                 counts.resent += 1
             else:
+                self._drop_modem_path()
                 updated = self._retry.mark_attempted(item.key)
                 log.warning("resend %s failed: %s", item.message_id, detail)
                 if updated is not None and updated.held:
@@ -892,6 +1102,8 @@ class Daemon:
         return counts
 
     def _pump_one_mms(self, item, counts) -> None:
+        from txxt import media as media_mod
+
         try:
             row = self._store.get_message(item.message_id)
         except Exception:
@@ -902,9 +1114,7 @@ class Daemon:
         staged = []
         for path in staged_paths:
             name = Path(path).name or "image_0.jpg"
-            kind = "text/plain" if name.endswith(".txt") else (
-                "application/smil" if name.endswith(".xml") else "image/jpeg"
-            )
+            kind = "text/plain" if name.endswith(".txt") else "image/jpeg"
             staged.append((name, kind, path))
         if not staged:
             updated = self._retry.mark_attempted(item.key)
@@ -913,7 +1123,14 @@ class Daemon:
             else:
                 counts.resend_failed += 1
             return
-        ok, detail = self._transmit_mms(item.address, staged)
+        image_name = next(
+            (name for name, kind, _path in staged if kind == "image/jpeg"), None,
+        )
+        text_name = next(
+            (name for name, kind, _path in staged if kind == "text/plain"), None,
+        )
+        smil = media_mod.build_smil(image_name, text_name)
+        ok, detail = self._transmit_mms(item.address, smil, staged)
         if ok:
             self._safe(self._store.mark_sent, item.message_id)
             self._retry.mark_sent(item.key)
@@ -943,31 +1160,44 @@ class Daemon:
         props = mm_client.wait_received_props(bus, sms_path)
         if props is None:
             return
-        record = mm_client.record_from_props(sms_path, props)
-        if record is None:
-            return
         modem = self._modem_path or mm_client.resolve_modem_path(bus)
-        stamp = sms_timestamp_millis(record.timestamp)
         with self._modem_lock:
+            # Re-read under the lock: the startup reconcile may have
+            # imported and deleted this copy after the wait above
+            # returned. A gone object means already handled — return.
+            # Fresh props also stay correct when the modem reuses paths.
+            fresh = mm_client.get_sms_properties(bus, sms_path)
+            if fresh is None:
+                return
+            record = mm_client.record_from_props(sms_path, fresh)
+            if record is None:
+                return
+            stamp = sms_timestamp_millis(record.timestamp)
             matched = _match_ids(
                 _known_with_ids(self._store),
                 record.number, stamp, record.text,
+                pending_only=True,
             )
             if matched:
-                # The reconcile already archived this message: re-delete
-                # the modem copy instead of storing (and notifying) twice.
+                # The reconcile already archived this modem copy (still
+                # flagged): re-delete it instead of storing (and
+                # notifying) twice. A same-worded earlier message is not
+                # flagged, so it falls through and stores as new.
                 if modem is not None and mm_client.delete_sms(bus, modem, sms_path):
                     for row_id in matched:
                         self._store.clear_pending_delete(row_id)
+                else:
+                    self._drop_modem_path()
                 return
             outcome = self._pipeline.handle_sms(
                 record.number, record.text, stamp or None,
             )
             if outcome.message_id is not None:
                 if modem is not None:
-                    mm_client.delete_sms_after_import(
+                    if not mm_client.delete_sms_after_import(
                         bus, modem, sms_path, self._store, outcome.message_id
-                    )
+                    ):
+                        self._drop_modem_path()
                 stored_id = outcome.message_id
             else:
                 stored_id = None
@@ -1024,19 +1254,23 @@ class Daemon:
         """Copy this MMS photo now when auto-download is on.
 
         The row is persisted first so the reconcile below matches it as
-        already-known (sender + 5-minute window) and only deletes the
-        modem copy. Off by default: MMS stays tap-to-fetch. Dateless
-        MMS skips the prefetch (it can never match) and imports as
-        metadata through the normal path.
+        already-known (sender + identity) and only deletes the modem
+        copy. Off by default: MMS stays tap-to-fetch.
         """
         _ = adapter
         if not self._auto_download_enabled():
             return None
         stamp = sms_timestamp_millis(str(props.get("Date") or props.get("date") or ""))
-        if not stamp or not (sender or "").strip():
+        if not (sender or "").strip():
             return None
         try:
-            if _match_ids(_known_with_ids(self._store), sender, stamp, None):
+            location = str(
+                props.get("ContentLocation") or props.get("content_location") or ""
+            ).strip() or None
+            if _match_ids(
+                _known_with_ids(self._store), sender, stamp, None,
+                transport="MMS", content_location=location,
+            ):
                 return None
             message_id = self._store.persist_inbound_mms_metadata(
                 sender, stamp,
@@ -1282,6 +1516,7 @@ class Daemon:
         )
         self._modem_path = modem
         if bus is None or modem is None:
+            self._drop_modem_path()
             self._retry.mark_attempted(key)
         else:
             try:
@@ -1291,11 +1526,14 @@ class Daemon:
             if ok:
                 self._safe(self._store.mark_sent, message_id)
                 try:
-                    mm_client.delete_sms(bus, modem, str(detail))
+                    deleted = mm_client.delete_sms(bus, modem, str(detail))
                 except Exception:
-                    pass
+                    deleted = False
+                if not deleted:
+                    self._drop_modem_path()
                 self._retry.mark_sent(key)
             else:
+                self._drop_modem_path()
                 self._retry.mark_attempted(key)
                 log.warning("send %s failed: %s", message_id, detail)
         self._emit_store_changed(conversation_id)
@@ -1308,11 +1546,12 @@ class Daemon:
 
         Every ``file_paths`` entry is scrubbed and fit (fail closed:
         an unscrubbable photo raises ValueError and nothing sends), the
-        scrubbed bytes are staged with the text and SMIL for the real
-        ``SendMessage(as, a(sss))`` shape, and one MMS row per recipient
-        enters the retry queue. Returns the first message id; failures
-        queue with backoff, never drop. Raises ValueError on empty
-        recipients or on (empty text and no photos).
+        scrubbed bytes are staged with the text for the real
+        ``SendMessage(as, v, a(sss))`` shape (SMIL as the middle
+        variant), and one MMS row per recipient enters the retry queue.
+        Returns the first message id; failures queue with backoff, never
+        drop. Raises ValueError on empty recipients or on (empty text
+        and no photos).
         """
         from txxt import media as media_mod
 
@@ -1360,7 +1599,7 @@ class Daemon:
                 first_conversation = conversation_id
             staging = ensure_private_dir(cache_dir() / f"mms-{message_id}")
             try:
-                staged = stage_mms_attachments(caption, prepared, staging)
+                staged, smil = stage_mms_attachments(caption, prepared, staging)
             except OSError as exc:
                 raise ValueError(f"cannot stage photo: {exc}")
             staged_all = [triple[2] for triple in staged]
@@ -1372,7 +1611,7 @@ class Daemon:
             except Exception:
                 pass
             key = self._retry.add_mms(target, placeholder, message_id, staged_all)
-            ok, detail = self._transmit_mms(target, staged)
+            ok, detail = self._transmit_mms(target, smil, staged)
             if ok:
                 self._safe(self._store.mark_sent, message_id)
                 self._retry.mark_sent(key)
@@ -1383,19 +1622,19 @@ class Daemon:
         self._emit_store_changed(first_conversation)
         return first_id
 
-    def _transmit_mms(self, target: str, staged) -> tuple[bool, str]:
+    def _transmit_mms(self, target: str, smil: str, staged) -> tuple[bool, str]:
         """One mmsd-tng ``SendMessage`` attempt; (True, path)/(False, detail)."""
         sender = self._mms_sender
         if sender is not None:
             try:
-                return sender([target], staged)
+                return sender([target], smil, staged)
             except Exception as exc:
                 return False, str(exc)
         adapter = self._mms_adapter()
         if adapter is None:
             return False, "mmsd-tng unavailable"
         try:
-            return adapter.send_message([target], staged)
+            return adapter.send_message([target], smil, staged)
         except Exception as exc:
             return False, str(exc)
 
@@ -1425,10 +1664,12 @@ class Daemon:
             return row.media_path or ""
         needle_location = (row.content_location or "").strip()
         needle_sender = (row.sender_address or "").strip()
+        needle_stamp = row.timestamp_millis or 0
         try:
             paths = adapter.list_messages() or []
         except Exception:
             return row.media_path or ""
+        matches = []
         for mms_path in paths:
             try:
                 props = adapter.get_message(mms_path) or {}
@@ -1446,6 +1687,17 @@ class Daemon:
                         continue
                 except Exception:
                     continue
+            prop_stamp = sms_timestamp_millis(
+                str(props.get("Date") or props.get("date") or "")
+            )
+            matches.append((mms_path, props, prop_stamp))
+        ordered = sorted(
+            matches,
+            key=lambda entry: (
+                0 if (needle_stamp and entry[2] and entry[2] == needle_stamp) else 1
+            ),
+        )
+        for mms_path, props, _prop_stamp in ordered:
             found = self._copy_mms_attachment(props, int(message_id))
             if found:
                 try:
@@ -1453,7 +1705,8 @@ class Daemon:
                 except Exception:
                     pass
                 try:
-                    adapter.delete_message(mms_path)
+                    if adapter.delete_message(mms_path):
+                        self._store.clear_pending_delete(int(message_id))
                 except Exception:
                     pass
                 self._emit_store_changed(
@@ -1463,34 +1716,46 @@ class Daemon:
         return row.media_path or ""
 
     def _copy_mms_attachment(self, props: dict, message_id: int) -> str | None:
-        """Copy the first image attachment in ``props`` to the MMS dir."""
-        import shutil
+        """Copy the first image attachment in ``props`` to the MMS dir.
 
-        candidates: list[str] = []
+        Documented entries are ``(id, type, file, offset, length)``: the
+        bytes live at ``offset`` for ``length`` bytes inside the shared
+        stored file, so only that slice is copied — never the whole PDU
+        blob. Older triples name the whole file and copy it in full.
+        """
+        candidates: list[tuple[str, int, int]] = []
         attachments = props.get("Attachments") or props.get("attachments") or []
         for entry in list(attachments):
-            try:
-                _name, content_type, path = entry
-            except (TypeError, ValueError):
+            split = split_mms_attachment(entry)
+            if split is None:
                 continue
+            _name, content_type, path, offset, length = split
             if str(content_type).lower().startswith("audio/"):
                 continue
             if str(path).strip():
-                candidates.append(str(path).strip())
+                candidates.append((str(path).strip(), offset, length))
         for key in ("Attachment", "Path", "Data", "File", "Image"):
             value = props.get(key)
             if isinstance(value, str) and value.strip():
-                candidates.append(value.strip())
+                candidates.append((value.strip(), 0, 0))
         dest_dir = ensure_private_dir(mms_dir(message_id))
-        for index, source in enumerate(candidates):
+        for index, (source, offset, length) in enumerate(candidates):
             try:
                 if not Path(source).is_file():
                     continue
-            except Exception:
+                with open(source, "rb") as handle:
+                    if length > 0:
+                        handle.seek(offset)
+                        chunk = handle.read(length)
+                    else:
+                        chunk = handle.read()
+            except (OSError, ValueError):
+                continue
+            if not chunk:
                 continue
             dest = dest_dir / f"photo-{index}.jpg"
             try:
-                shutil.copyfile(source, dest)
+                dest.write_bytes(chunk)
                 return str(dest)
             except OSError:
                 continue

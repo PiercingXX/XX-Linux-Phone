@@ -461,3 +461,109 @@ def test_meta_round_trip():
     store.set_meta("last_reconcile_millis", "123")
     assert store.get_meta("backup_version") == "5"
     assert store.get_meta("last_reconcile_millis") == "123"
+
+
+# ---- bug_txxt finding 30: blocked inbound stays out of the surfaced inbox ----
+
+def test_blocked_style_persist_does_not_surface_archived_thread():
+    store = fresh_store()
+    first = store.persist_inbound_sms("+15550001111", "first", DATE)
+    row = store.get_message(first)
+    conv = store.get_conversation(row.conversation_id)
+    store.set_flags(conv.id, conv.flags().archive())
+    store.persist_inbound_sms("+15550001111", "spam", DATE + 1, surface=False)
+    assert store.get_conversation(conv.id).is_archived is True
+
+
+# ---- bug_txxt finding 33: crash between ALTER and version bump ----
+
+def test_interrupted_migration_reopens_cleanly(tmp_path):
+    path = str(tmp_path / "txxt.db")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE conversations (id INTEGER NOT NULL PRIMARY KEY,"
+        " participantAddresses TEXT NOT NULL, isStarred INTEGER NOT NULL DEFAULT 0,"
+        " isPinned INTEGER NOT NULL DEFAULT 0, isArchived INTEGER NOT NULL DEFAULT 0,"
+        " sortOrder TEXT NOT NULL DEFAULT 'PINNED_FIRST')")
+    conn.execute(
+        "CREATE TABLE messages (id INTEGER NOT NULL PRIMARY KEY,"
+        " conversationId INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,"
+        " direction TEXT NOT NULL, transport TEXT NOT NULL, body TEXT NOT NULL,"
+        " timestampMillis INTEGER NOT NULL, senderAddress TEXT,"
+        " isRead INTEGER NOT NULL DEFAULT 0)")
+    for table in ("blocklist", "starred", "settings", "meta"):
+        conn.execute(
+            f"CREATE TABLE {table} ("
+            + ("kind TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (kind, value)"
+               if table == "blocklist" else
+               "address TEXT NOT NULL PRIMARY KEY"
+               if table == "starred" else
+               "key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL")
+            + ")")
+    # Crash after the 1->2 ALTER but before its version bump.
+    conn.execute("ALTER TABLE messages ADD COLUMN sent INTEGER NOT NULL DEFAULT 1")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+
+    store = Store(path)
+    try:
+        assert store.schema_version == SCHEMA_VERSION
+        cols = store.read(
+            lambda c: [r["name"] for r in c.execute("PRAGMA table_info(messages)")])
+        assert cols.count("sent") == 1
+    finally:
+        store.close()
+    reopened = Store(path)
+    try:
+        assert reopened.schema_version == SCHEMA_VERSION
+    finally:
+        reopened.close()
+
+
+def test_failed_migration_step_leaves_version_untouched(tmp_path):
+    from txxt import store as store_mod
+
+    path = str(tmp_path / "txxt.db")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE conversations (id INTEGER NOT NULL PRIMARY KEY,"
+        " participantAddresses TEXT NOT NULL, isStarred INTEGER NOT NULL DEFAULT 0,"
+        " isPinned INTEGER NOT NULL DEFAULT 0, isArchived INTEGER NOT NULL DEFAULT 0,"
+        " sortOrder TEXT NOT NULL DEFAULT 'PINNED_FIRST')")
+    conn.execute(
+        "CREATE TABLE messages (id INTEGER NOT NULL PRIMARY KEY,"
+        " conversationId INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,"
+        " direction TEXT NOT NULL, transport TEXT NOT NULL, body TEXT NOT NULL,"
+        " timestampMillis INTEGER NOT NULL, senderAddress TEXT,"
+        " isRead INTEGER NOT NULL DEFAULT 0)")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+
+    real = dict(store_mod.MIGRATIONS)
+    poisoned = dict(real)
+    poisoned[(1, 2)] = [
+        "ALTER TABLE messages ADD COLUMN sent INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE messages_missing ADD COLUMN boom_broken INTEGER NOT NULL DEFAULT 1",
+    ]
+    store_mod.MIGRATIONS.clear()
+    store_mod.MIGRATIONS.update(poisoned)
+    try:
+        with pytest.raises(Exception):
+            Store(path)
+    finally:
+        store_mod.MIGRATIONS.clear()
+        store_mod.MIGRATIONS.update(real)
+    check = sqlite3.connect(path)
+    try:
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+        cols = [r[1] for r in check.execute("PRAGMA table_info(messages)")]
+        assert "sent" not in cols
+    finally:
+        check.close()
+    store = Store(path)
+    try:
+        assert store.schema_version == SCHEMA_VERSION
+    finally:
+        store.close()
