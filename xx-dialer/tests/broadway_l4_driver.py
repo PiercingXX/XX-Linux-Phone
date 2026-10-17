@@ -47,6 +47,34 @@ def _pump(seconds: float) -> None:
     loop.run()
 
 
+def _row_at(list_view, x: float, y: float) -> str | None:
+    target = list_view.pick(x, y, Gtk.PickFlags.DEFAULT)
+    node = target
+    while node is not None and node is not list_view:
+        key = getattr(node, "recent_key", None)
+        if key is not None:
+            return str(key)
+        node = node.get_parent()
+    return None
+
+
+def _wait_rows_allocated(list_view, timeout_s: float = 5.0) -> bool:
+    """Pump until row widgets have allocations.
+
+    GtkListView lays rows out over frame ticks, so a pointer sweep
+    right after a fixed pump can run before any row is hittable and
+    resolve nothing. Wait (bounded) for a row to become resolvable
+    first; the sweep below then exercises the real gesture path.
+    """
+    steps = int(timeout_s * 1000 / 50)
+    for _ in range(steps):
+        for y in range(10, 700, 15):
+            if _row_at(list_view, 10.0, float(y)) is not None:
+                return True
+        _pump(0.05)
+    return False
+
+
 class _Voice:
     def __init__(self):
         self.placed: list[str] = []
@@ -132,6 +160,8 @@ def main() -> int:
                 view.recents_view._list.observe_controllers()]
     presses = [controller for controller in gestures
                if isinstance(controller, Gtk.GestureLongPress)]
+    settled = _wait_rows_allocated(view.recents_view._list)
+    print("LAYOUT_SETTLED:", settled)
     found = None
     original = view.recents_view._open_menu
     seen: list[str] = []

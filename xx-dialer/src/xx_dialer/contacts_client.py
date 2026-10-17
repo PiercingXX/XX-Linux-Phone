@@ -14,9 +14,11 @@ cache from ``List``/``Get`` (tags removed upstream disappear locally,
 including the star overlay), and dialer edits send single-tag
 add/remove deltas — never a read-modify-write of the full set, so two
 clients toggling different tags cannot clobber each other. When
-xx-contacts is absent the local tables stay authoritative;
-edits made while absent are recorded in the ``pending_tag_edit`` table
-and pushed once on the absent -> present transition, then cleared.
+there is no bus the local tables stay authoritative; edits made while
+the service merely owns no name still go out directly (an idle-exited
+service auto-starts on the call) and only a real failure records the
+toggle's delta in ``pending_tag_edit`` for replay as ``UpdateTags``
+once the service answers again.
 
 The ``LookupNumber`` dataset for the dialer's own Policy1 service
 (``lookup_number``) answers from the warm SQLite tables only, never
@@ -54,25 +56,68 @@ def normalize_tags(tags) -> list[str]:
     return sorted(out)
 
 
-def parse_vcard(text: str | None) -> tuple[str, list[str]]:
+def _unfold_lines(text: str | None) -> list[str]:
+    """Physical lines to logical lines: a leading space/tab continues."""
+    logical: list[str] = []
+    for raw in (text or "").replace("\r\n", "\n").replace("\r", "\n") \
+            .split("\n"):
+        if raw[:1] in (" ", "\t") and logical:
+            logical[-1] += raw[1:]
+        elif raw.strip():
+            logical.append(raw)
+    return logical
+
+
+def _unescape_value(value: str) -> str:
+    """Inverse of xx-contacts' escape_value (\\n/\\,/\\;/\\\\)."""
+    out: list[str] = []
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if ch == "\\" and i + 1 < len(value):
+            nxt = value[i + 1]
+            out.append("\n" if nxt in "nN" else nxt)
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _prop_name(line: str) -> str:
+    """Upper-cased property name with params and group prefix stripped."""
+    head, _, _ = line.partition(":")
+    head = head.split(";")[0].strip()
+    group, dot, rest = head.partition(".")
+    if dot and group.replace("-", "").isalnum() and rest:
+        head = rest
+    return head.upper()
+
+
+def parse_vcard(text: str | None,
+                default_region: str = "US") -> tuple[str, list[str]]:
     """First FN value plus TEL numbers in card order, E.164-normalized.
 
     Garbage yields ("", []), never raises; unparseable TEL lines drop.
+    xx-contacts writes labeled phones as grouped ``item{n}.TEL`` lines,
+    folds long lines and escapes FN text, so unfold, strip the group
+    prefix and unescape before matching. Numbers canonicalize with the
+    dial region so national and E.164 forms share one cache identity.
     """
     name = ""
     numbers: list[str] = []
-    for raw_line in (text or "").splitlines():
-        line = raw_line.strip()
-        if not line:
+    for line in _unfold_lines(text):
+        stripped = line.strip()
+        if not stripped:
             continue
-        upper = line.upper()
-        if upper.startswith("FN:") or upper.startswith("FN;"):
-            _, _, value = line.partition(":")
+        prop = _prop_name(stripped)
+        _, _, value = stripped.partition(":")
+        if prop == "FN":
             if not name and value.strip():
-                name = value.strip()
-        elif upper.startswith("TEL;") or upper.startswith("TEL:"):
-            _, _, value = line.partition(":")
-            normalized = policy.normalize_number(value.strip())
+                name = _unescape_value(value.strip())
+        elif prop == "TEL":
+            normalized = policy.canonical_number(
+                _unescape_value(value.strip()), default_region)
             if normalized is not None and normalized not in numbers:
                 numbers.append(normalized)
     return (name, numbers)
@@ -163,9 +208,11 @@ class SyncReport:
 class ContactsClient:
     """Async Gio consumer of io.piercingxx.Contacts1 with a warm cache."""
 
-    def __init__(self, store: Store, on_sync=None) -> None:
+    def __init__(self, store: Store, on_sync=None,
+                 default_region: str = "US") -> None:
         self._store = store
         self._on_sync = on_sync
+        self._default_region = default_region or "US"
         self._bus = None
         self._gio = None
         self._glib = None
@@ -318,7 +365,7 @@ class ContactsClient:
 
     def create_async(self, vcard: str, on_done,
                      on_error=None) -> None:
-        if self._bus is None or not self._present:
+        if self._bus is None:
             if on_error is not None:
                 on_error(RuntimeError("contacts service is not present"))
             return
@@ -356,22 +403,17 @@ class ContactsClient:
 
         The toggle paths (star/business/blocked switches) use this so a
         concurrent edit elsewhere never gets clobbered by a stale full
-        set. Offline it folds the delta into the local cache and records
-        the resulting full set as a pending edit for reconcile.
+        set. With no bus, or when a call fails while the service owns no
+        name, it folds the delta into the local cache and queues the
+        delta for UpdateTags replay.
         """
         adding = normalize_tags(add)
         removing = [tag for tag in normalize_tags(remove)
                     if tag not in adding]
-        if self._bus is None or not self._present:
-            current = local_tags(self._store, uid)
-            self._apply_tags_locally(uid, (current | set(adding))
-                                     - set(removing))
-            try:
-                self._store.record_pending_edit(
-                    uid, sorted(local_tags(self._store, uid)),
-                    int(time.time() * 1000))
-            except Exception:
-                pass
+        if self._bus is None:
+            self._apply_offline(uid, (local_tags(self._store, uid)
+                                      | set(adding)) - set(removing),
+                                adding, removing)
             if on_done is not None:
                 on_done()
             return
@@ -387,24 +429,53 @@ class ContactsClient:
             if on_done is not None:
                 on_done()
 
-        self._call("UpdateTags", params, _reply, on_error)
+        def _failed(err) -> None:
+            if self._present:
+                if on_error is not None:
+                    on_error(err)
+                return
+            self._apply_offline(uid, (local_tags(self._store, uid)
+                                      | set(adding)) - set(removing),
+                                adding, removing)
+            if on_error is not None:
+                on_error(err)
+            elif on_done is not None:
+                on_done()
+
+        self._call("UpdateTags", params, _reply, _failed)
+
+    def _apply_offline(self, uid: str, tags: set, add: list,
+                       remove: list) -> None:
+        """Fold a delta into the local cache and queue it for replay.
+
+        Used when there is no bus, and when a bus call fails while the
+        service is not present (idle-exited and not activatable): the
+        edit is already visible locally and replays as an UpdateTags
+        delta once the service answers again.
+        """
+        self._apply_tags_locally(uid, set(tags))
+        try:
+            self._store.record_pending_edit(
+                uid, sorted(local_tags(self._store, uid)),
+                int(time.time() * 1000), add=list(add),
+                remove=list(remove))
+        except Exception:
+            pass
 
     def set_tags_async(self, uid: str, tags, on_done=None,
                        on_error=None) -> None:
-        """Exact-set replace, kept for pending-edit reconcile only.
+        """Exact-set replace for explicit whole-set writes.
 
         Toggle paths must use ``update_tags_async`` instead: sending the
         full set there is a read-modify-write that can clobber a
         concurrent change.
         """
         exact = normalize_tags(tags)
-        if self._bus is None or not self._present:
-            self._apply_tags_locally(uid, set(exact))
-            try:
-                self._store.record_pending_edit(
-                    uid, list(exact), int(time.time() * 1000))
-            except Exception:
-                pass
+        if self._bus is None:
+            current = local_tags(self._store, uid)
+            self._apply_offline(uid, set(exact),
+                                [t for t in exact if t not in current],
+                                [t for t in current if t not in exact])
             if on_done is not None:
                 on_done()
             return
@@ -420,7 +491,21 @@ class ContactsClient:
             if on_done is not None:
                 on_done()
 
-        self._call("SetTags", params, _reply, on_error)
+        def _failed(err) -> None:
+            if self._present:
+                if on_error is not None:
+                    on_error(err)
+                return
+            current = local_tags(self._store, uid)
+            self._apply_offline(uid, set(exact),
+                                [t for t in exact if t not in current],
+                                [t for t in current if t not in exact])
+            if on_error is not None:
+                on_error(err)
+            elif on_done is not None:
+                on_done()
+
+        self._call("SetTags", params, _reply, _failed)
 
     def _on_list_reply(self, revision: int, changed: list,
                        deleted: list) -> None:
@@ -445,7 +530,7 @@ class ContactsClient:
 
     def _look_up_tags(self, uid: str, vcard: str, finished: dict,
                       maybe_done, failed: list) -> None:
-        name, numbers = parse_vcard(vcard)
+        name, numbers = parse_vcard(vcard, self._default_region)
         if not numbers:
             finished[uid] = (name, [], set())
             maybe_done()
@@ -474,17 +559,21 @@ class ContactsClient:
         if self._present and self._needs_reconcile:
             self._needs_reconcile = False
             try:
-                pending = self._store.pending_edits()
+                deltas = self._store.pending_deltas()
             except Exception:
-                pending = []
-            for uid, tags, _updated_at in pending:
-                self.set_tags_async(uid, list(tags))
-            for uid, _tags, _updated_at in pending:
-                try:
-                    self._store.clear_pending_edit(uid)
-                except Exception:
-                    pass
+                deltas = []
+            for uid, add, remove, _updated_at in deltas:
+                self.update_tags_async(
+                    uid, list(add), list(remove),
+                    on_done=lambda u=uid: self._clear_queued(u),
+                    on_error=lambda _err: None)
         self._finish_refresh(report)
+
+    def _clear_queued(self, uid: str) -> None:
+        try:
+            self._store.clear_pending_edit(uid)
+        except Exception:
+            pass
 
     def _finish_refresh(self, report: SyncReport) -> None:
         self._refresh_inflight = False
@@ -613,17 +702,35 @@ class ContactsClient:
         return numbers
 
     def _push_delta(self, uid: str, tag: str, on: bool) -> None:
-        """Push one toggle as an atomic delta, never a full-set rewrite."""
+        """Push one toggle as an atomic delta, never a full-set rewrite.
+
+        The call goes out even when the service is not currently present:
+        an idle-exited service auto-starts on the method call. The toggle
+        is queued first, synchronously, so an offline edit is never lost
+        while the bus round trip is in flight; a successful push clears
+        the queue entry again.
+        """
+        add = [tag] if on else []
+        remove = [] if on else [tag]
         if self._bus is None or not self._present:
-            try:
-                self._store.record_pending_edit(
-                    uid, sorted(local_tags(self._store, uid)),
-                    int(time.time() * 1000))
-            except Exception:
-                pass
+            self._record_queued(uid, add, remove)
+            if self._bus is None:
+                return
+            self.update_tags_async(
+                uid, add, remove,
+                on_done=lambda u=uid: self._clear_queued(u),
+                on_error=lambda _err: None)
             return
-        self.update_tags_async(uid, [tag] if on else [],
-                               [] if on else [tag])
+        self.update_tags_async(uid, add, remove)
+
+    def _record_queued(self, uid: str, add: list, remove: list) -> None:
+        try:
+            self._store.record_pending_edit(
+                uid, sorted(local_tags(self._store, uid)),
+                int(time.time() * 1000), add=list(add),
+                remove=list(remove))
+        except Exception:
+            pass
 
     def _on_changed_signal(self, conn, sender, path, iface, signal,
                            params, user_data) -> None:

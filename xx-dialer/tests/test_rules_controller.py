@@ -94,6 +94,58 @@ def test_blocklist_import_unblock_and_clear_log(tmp_path):
     assert snapshot.log == []
 
 
+def test_unblock_clears_blocked_tier_and_pushes_delta(tmp_path):
+    from xx_dialer.store import BLOCKED_GROUP, MirrorRow
+
+    pushed = []
+
+    class _Client:
+        def set_blocked(self, uid, blocked):
+            pushed.append((uid, blocked))
+            with Store(tmp_path / "calls.db") as store:
+                if blocked:
+                    store.upsert_tier(uid, BLOCKED_GROUP)
+                    for number in store.mirror_numbers_for_key(uid):
+                        store.add_blocked(number)
+                else:
+                    store.remove_tier(uid, BLOCKED_GROUP)
+                    for number in store.mirror_numbers_for_key(uid):
+                        store.remove_blocked(number)
+            return []
+
+    with Store(tmp_path / "calls.db") as store:
+        store.upsert_mirror([MirrorRow("uid-spam", "+19999999999",
+                                       "Spammer", False, None, False,
+                                       NOW)])
+        store.upsert_tier("uid-spam", BLOCKED_GROUP)
+        store.add_blocked("+19999999999")
+    controller = RulesController(RulesDeps(
+        db_file=tmp_path / "calls.db", home=tmp_path,
+        notice=lambda _t: None, contacts=_Client()))
+    snapshot = controller.unblock("+1 (999) 999-9999")
+    assert snapshot.blocked == []
+    assert pushed == [("uid-spam", False)]
+    with Store(tmp_path / "calls.db") as store:
+        assert store.all_tiers() == []
+        assert not store.is_blocked("+19999999999")
+
+
+def test_unblock_without_client_clears_tier_locally(tmp_path):
+    from xx_dialer.store import BLOCKED_GROUP, MirrorRow
+
+    with Store(tmp_path / "calls.db") as store:
+        store.upsert_mirror([MirrorRow("uid-spam", "+19999999999",
+                                       "Spammer", False, None, False,
+                                       NOW)])
+        store.upsert_tier("uid-spam", BLOCKED_GROUP)
+        store.add_blocked("+19999999999")
+    snapshot = _controller(tmp_path).unblock("+19999999999")
+    assert snapshot.blocked == []
+    with Store(tmp_path / "calls.db") as store:
+        assert store.all_tiers() == []
+        assert not store.is_blocked("+19999999999")
+
+
 def test_test_number_validates_and_runs_engine(tmp_path):
     controller = _controller(tmp_path)
     settings = app_config.load(tmp_path)

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -106,12 +107,15 @@ CREATE TABLE IF NOT EXISTS star_overlay (
 CREATE TABLE IF NOT EXISTS pending_tag_edit (
     uid TEXT PRIMARY KEY,
     tags TEXT NOT NULL DEFAULT '[]',
+    added TEXT NOT NULL DEFAULT '[]',
+    removed TEXT NOT NULL DEFAULT '[]',
     updatedAt INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS emergency_marker (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     lastEmergencyCallAt INTEGER NOT NULL,
-    lastEmergencyElapsed INTEGER NOT NULL
+    lastEmergencyElapsed INTEGER NOT NULL,
+    lastEmergencyBoot TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS recents_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -198,8 +202,34 @@ class Store:
         # on the same file; wait on locks instead of raising BUSY.
         self._db.execute("PRAGMA busy_timeout = 5000")
         self._db.executescript(_SCHEMA)
+        self._ensure_emergency_boot_column()
+        self._ensure_pending_delta_columns()
         self._db.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
         self._db.commit()
+
+    def _ensure_emergency_boot_column(self) -> None:
+        cols = {row[1] for row in self._db.execute(
+            "PRAGMA table_info(emergency_marker)")}
+        if "lastEmergencyBoot" not in cols:
+            self._db.execute(
+                "ALTER TABLE emergency_marker ADD COLUMN"
+                " lastEmergencyBoot TEXT NOT NULL DEFAULT ''")
+
+    def _ensure_pending_delta_columns(self) -> None:
+        cols = {row[1] for row in self._db.execute(
+            "PRAGMA table_info(pending_tag_edit)")}
+        migrated = False
+        for column in ("added", "removed"):
+            if column not in cols:
+                self._db.execute(
+                    "ALTER TABLE pending_tag_edit ADD COLUMN %s"
+                    " TEXT NOT NULL DEFAULT '[]'" % column)
+                migrated = True
+        if migrated and "tags" in cols:
+            self._db.execute(
+                "UPDATE pending_tag_edit SET added = tags"
+                " WHERE added = '[]' AND removed = '[]'"
+                " AND tags IS NOT NULL AND tags <> '[]'")
 
     def close(self) -> None:
         self._db.close()
@@ -348,14 +378,73 @@ class Store:
     # once on the absent -> present transition and then clears them.
 
     def record_pending_edit(self, uid: str, tags: list[str],
-                            updated_at: int) -> None:
+                            updated_at: int, add=None,
+                            remove=None) -> None:
+        """Queue an offline tag edit; repeat toggles merge to one delta.
+
+        ``tags`` stays the full intended set while ``add``/``remove``
+        carry the toggle itself, so replay goes out as an atomic
+        UpdateTags delta instead of a full-set rewrite that could undo
+        newer edits. An unknown delta degrades to additive-only.
+        """
+        if add is None and remove is None:
+            net_add, net_remove = set(tags), set()
+        else:
+            add_set = set(add or [])
+            remove_set = set(remove or []) - add_set
+            cur = self._db.execute(
+                "SELECT added, removed FROM pending_tag_edit"
+                " WHERE uid = ?", (uid,))
+            row = cur.fetchone()
+            if row is None:
+                net_add, net_remove = add_set, remove_set
+            else:
+                try:
+                    old_add = set(json.loads(row["added"]))
+                except ValueError:
+                    old_add = set()
+                try:
+                    old_remove = set(json.loads(row["removed"]))
+                except ValueError:
+                    old_remove = set()
+                net_add = (old_add - remove_set) | add_set
+                net_remove = (old_remove - add_set) | remove_set
+        payload = json.dumps(sorted(tags))
+        added = json.dumps(sorted(net_add))
+        removed = json.dumps(sorted(net_remove))
         self._execute(
-            "INSERT INTO pending_tag_edit (uid, tags, updatedAt)"
-            " VALUES (?, ?, ?)"
-            " ON CONFLICT (uid) DO UPDATE SET tags = ?, updatedAt = ?",
-            (uid, json.dumps(sorted(tags)), int(updated_at),
-             json.dumps(sorted(tags)), int(updated_at)),
+            "INSERT INTO pending_tag_edit (uid, tags, added, removed,"
+            " updatedAt) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT (uid) DO UPDATE SET tags = ?, added = ?,"
+            " removed = ?, updatedAt = ?",
+            (uid, payload, added, removed, int(updated_at),
+             payload, added, removed, int(updated_at)),
         )
+
+    def pending_deltas(self) -> list[tuple[str, list[str], list[str],
+                                           int]]:
+        """Queued (uid, add, remove, updatedAt) for UpdateTags replay."""
+        cur = self._db.execute(
+            "SELECT uid, added, removed, updatedAt FROM pending_tag_edit"
+            " ORDER BY updatedAt, uid")
+        out = []
+        for r in cur.fetchall():
+            add: list[str] = []
+            remove: list[str] = []
+            try:
+                parsed = json.loads(r["added"])
+                if isinstance(parsed, list):
+                    add = [str(t) for t in parsed]
+            except ValueError:
+                pass
+            try:
+                parsed = json.loads(r["removed"])
+                if isinstance(parsed, list):
+                    remove = [str(t) for t in parsed]
+            except ValueError:
+                pass
+            out.append((r["uid"], add, remove, int(r["updatedAt"])))
+        return out
 
     def pending_edits(self) -> list[tuple[str, list[str], int]]:
         cur = self._db.execute(
@@ -672,15 +761,19 @@ class Store:
 
     # ---- emergency_marker ---------------------------------------------------
 
-    def record_emergency(self, wall_ms: int, elapsed_ms: int) -> None:
+    def record_emergency(self, wall_ms: int, elapsed_ms: int,
+                         boot_id: str | None = None) -> None:
+        boot = boot_id if boot_id is not None else current_boot_id()
         self._execute(
             "INSERT INTO emergency_marker"
-            " (id, lastEmergencyCallAt, lastEmergencyElapsed)"
-            " VALUES (1, ?, ?)"
+            " (id, lastEmergencyCallAt, lastEmergencyElapsed,"
+            " lastEmergencyBoot)"
+            " VALUES (1, ?, ?, ?)"
             " ON CONFLICT (id) DO UPDATE SET"
             " lastEmergencyCallAt = excluded.lastEmergencyCallAt,"
-            " lastEmergencyElapsed = excluded.lastEmergencyElapsed",
-            (wall_ms, elapsed_ms),
+            " lastEmergencyElapsed = excluded.lastEmergencyElapsed,"
+            " lastEmergencyBoot = excluded.lastEmergencyBoot",
+            (wall_ms, elapsed_ms, boot or ""),
         )
 
     def read_emergency(self) -> tuple[int, int] | None:
@@ -692,13 +785,23 @@ class Store:
             return None
         return (r["lastEmergencyCallAt"], r["lastEmergencyElapsed"])
 
+    def read_emergency_boot(self) -> str | None:
+        cur = self._db.execute(
+            "SELECT lastEmergencyBoot FROM emergency_marker WHERE id = 1")
+        r = cur.fetchone()
+        if r is None:
+            return None
+        return str(r["lastEmergencyBoot"] or "") or None
+
     def emergency_active(self, now_wall_ms: int,
-                         now_elapsed_ms: int) -> bool:
+                         now_elapsed_ms: int,
+                         now_boot_id: str | None = None) -> bool:
         marker = self.read_emergency()
         if marker is None:
             return False
-        return emergency_window_active(now_wall_ms, marker[0],
-                                       now_elapsed_ms, marker[1])
+        return emergency_window_active(
+            now_wall_ms, marker[0], now_elapsed_ms, marker[1],
+            now_boot_id, self.read_emergency_boot())
 
 
 def _screen_from(r: sqlite3.Row) -> ScreenRow:
@@ -860,15 +963,58 @@ def config_to_settings(config: dict) -> dict:
 
 # ---- emergency window (port of telecom/EmergencyWindow) --------------------
 
+_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
+_boot_id_read = False
+_cached_boot_id: str | None = None
+
+
+def current_boot_id() -> str | None:
+    """Kernel boot id, cached: None where the platform has no boot id."""
+    global _boot_id_read, _cached_boot_id
+    if _boot_id_read:
+        return _cached_boot_id
+    _boot_id_read = True
+    try:
+        with open(_BOOT_ID_PATH, encoding="utf-8") as handle:
+            _cached_boot_id = handle.read().strip() or None
+    except OSError:
+        _cached_boot_id = None
+    return _cached_boot_id
+
+
+def boottime_ms() -> int:
+    """ms since boot including suspend; monotonic fallback off Linux."""
+    try:
+        return int(time.clock_gettime(time.CLOCK_BOOTTIME) * 1000)
+    except (AttributeError, OSError):
+        return int(time.monotonic() * 1000)
+
+
+def _boot_mismatch(now_boot_id: str | None,
+                   marker_boot_id: str | None) -> bool:
+    """True when the elapsed reading provably comes from another boot."""
+    return now_boot_id is not None and marker_boot_id != now_boot_id
+
+
 def emergency_window_active(now_wall_ms: int, marker_wall_ms: int | None,
                             now_elapsed_ms: int,
-                            marker_elapsed_ms: int | None) -> bool:
+                            marker_elapsed_ms: int | None,
+                            now_boot_id: str | None = None,
+                            marker_boot_id: str | None = None) -> bool:
     """The 24 h post-emergency bypass closes only when both usable readings
-    agree it is over; every single-reading corruption errs toward open."""
+    agree it is over; every single-reading corruption errs toward open.
+
+    The elapsed reading is usable only on the boot that wrote it: the
+    monotonic/boottime clock restarts at zero on every boot, so a
+    post-reboot value that merely aliases the marker must not reopen
+    the window — the wall clock alone decides then.
+    """
     wall_fresh = marker_wall_ms is not None \
         and _fresh(marker_wall_ms, now_wall_ms)
-    elapsed_fresh = marker_elapsed_ms is not None \
+    elapsed_usable = marker_elapsed_ms is not None \
         and now_elapsed_ms >= marker_elapsed_ms \
+        and not _boot_mismatch(now_boot_id, marker_boot_id)
+    elapsed_fresh = elapsed_usable \
         and _fresh(marker_elapsed_ms, now_elapsed_ms)
     return wall_fresh or elapsed_fresh
 

@@ -180,6 +180,27 @@ def test_note_call_tolerates_garbage_disposition(store):
                         "missed", wall_ms=WALL, monotonic_ms=WALL)
 
 
+def test_national_and_e164_forms_match_same_contact(store, tmp_path):
+    _starred(store, number="+15551234567")
+    got = facts.build_facts("(555) 123-4567", MONDAY_10AM, store,
+                            wall_ms=WALL, monotonic_ms=WALL)
+    assert got.number == "+15551234567"
+    assert (got.saved, got.starred) == (True, True)
+    assert got.cnap_name == "Ada Lovelace"
+
+
+def test_national_blocklist_and_callback_match(store, tmp_path):
+    store.add_blocked("+15551234567")
+    blocked = facts.build_facts("5551234567", MONDAY_10AM, store,
+                                wall_ms=WALL, monotonic_ms=WALL)
+    assert blocked.user_blocked is True
+    facts.note_call(store, "(555) 123-4567", "outgoing", WALL - 1_000,
+                    10_000, "answered", wall_ms=WALL, monotonic_ms=WALL)
+    callback = facts.build_facts("+15551234567", MONDAY_10AM, store,
+                                 wall_ms=WALL, monotonic_ms=WALL)
+    assert callback.recent_outgoing is True
+
+
 def test_facts_module_has_no_bus_imports():
     from pathlib import Path
 

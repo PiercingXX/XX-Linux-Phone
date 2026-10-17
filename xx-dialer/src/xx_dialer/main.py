@@ -132,7 +132,10 @@ def build_dialer_view(deps: DialerDeps):
         try:
             with Store(db_file):
                 pass
-            candidate = contacts_client.ContactsClient(Store(db_file))
+            from xx_dialer import policy as _policy
+            region = _policy.region_of(app_config.load(home))
+            candidate = contacts_client.ContactsClient(
+                Store(db_file), default_region=region)
             if candidate.start():
                 client = candidate
         except Exception:
@@ -161,7 +164,8 @@ def build_dialer_view(deps: DialerDeps):
     if "people" not in hidden:
         stack.add_titled(people_view.widget, "people", "People")
     rules_view = ui_rules.build_rules(
-        ui_rules.RulesDeps(db_file=db_file, home=home, notice=_notice))
+        ui_rules.RulesDeps(db_file=db_file, home=home, notice=_notice,
+                           contacts=client))
     stack.add_titled(rules_view.widget, "rules", "Rules")
     setup_view = ui_setup.build_setup(
         ui_setup.SetupDeps(db_file=db_file, home=home, notice=_notice))

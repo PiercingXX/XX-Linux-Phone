@@ -58,6 +58,55 @@ def test_reboot_makes_elapsed_unusable_fresh_wall_keeps_open():
                                    5000000000)
 
 
+def test_reboot_does_not_reopen_bypass():
+    """A post-reboot elapsed value aliasing the marker must stay closed."""
+    marker_wall = NOW_WALL - 30 * 3600 * 1000
+    marker_elapsed = 2 * 3600 * 1000
+    now_elapsed = 3 * 3600 * 1000
+    assert not emergency_window_active(NOW_WALL, marker_wall,
+                                       now_elapsed, marker_elapsed,
+                                       "boot-B", "boot-A")
+
+
+def test_same_boot_elapsed_fresh_keeps_open():
+    assert emergency_window_active(NOW_WALL, NOW_WALL - WINDOW - 1,
+                                   10000, 5000, "boot-A", "boot-A")
+
+
+def test_unknown_boot_ids_keep_legacy_readings():
+    assert emergency_window_active(NOW_WALL, NOW_WALL - WINDOW - 1,
+                                   10000, 5000)
+    assert emergency_window_active(NOW_WALL, NOW_WALL - 1000, 10000,
+                                   5000000000, "boot-A", None)
+
+
+def test_store_bypass_closes_after_reboot(store):
+    wall = NOW_WALL - 30 * 3600 * 1000
+    store.record_emergency(wall, 2 * 3600 * 1000, "boot-A")
+    assert store.read_emergency_boot() == "boot-A"
+    assert store.emergency_active(wall + 1_000, 2 * 3600 * 1000 + 1_000,
+                                  "boot-A")
+    assert not store.emergency_active(NOW_WALL, 3 * 3600 * 1000,
+                                      "boot-B")
+
+
+def test_emergency_boot_column_migrates(tmp_path):
+    from xx_dialer.store import Store
+
+    path = tmp_path / "calls.db"
+    handle = Store(path)
+    handle._db.execute(
+        "ALTER TABLE emergency_marker DROP COLUMN lastEmergencyBoot")
+    handle._db.commit()
+    handle.close()
+    migrated = Store(path)
+    try:
+        migrated.record_emergency(NOW_WALL, 5_000)
+        assert migrated.read_emergency() == (NOW_WALL, 5_000)
+    finally:
+        migrated.close()
+
+
 def test_marker_round_trips_through_the_store(store):
     assert store.read_emergency() is None
     assert not store.emergency_active(NOW_WALL, NOW_ELAPSED)

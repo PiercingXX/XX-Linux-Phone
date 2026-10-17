@@ -561,3 +561,37 @@ def test_first_check_number_activates_service(tmp_path):
         capture_output=True, text=True, timeout=90, env=env)
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert "ACTIVATION-OK" in proc.stdout
+
+
+def test_default_call_placer_starts_voice_client(monkeypatch):
+    from xx_dialer import service as service_module
+
+    calls = {}
+
+    class _Voice:
+        def start(self):
+            calls["started"] = True
+            return True
+
+        def place(self, number, on_done):
+            calls["placed"] = number
+            on_done(True, "ok")
+
+    monkeypatch.setattr("xx_dialer.modem.VoiceClient", lambda: _Voice())
+    service_module._default_call_placer("+15551234567")
+    assert calls == {"started": True, "placed": "+15551234567"}
+
+
+def test_default_call_placer_gives_up_when_start_fails(monkeypatch):
+    from xx_dialer import service as service_module
+
+    class _FailingVoice:
+        def start(self):
+            return False
+
+        def place(self, number, on_done):
+            raise AssertionError("place must not run without start")
+
+    monkeypatch.setattr("xx_dialer.modem.VoiceClient",
+                        lambda: _FailingVoice())
+    service_module._default_call_placer("+15551234567")

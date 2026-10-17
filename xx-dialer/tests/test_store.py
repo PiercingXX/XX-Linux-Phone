@@ -125,3 +125,41 @@ def test_load_rules_combines_config_and_stored_patterns(store):
     assert not rules.repeat_caller_enabled
     assert rules.bypass_until is not None
     assert len(rules.block_patterns) == 1
+
+
+def test_pending_edits_merge_to_net_delta(store):
+    store.record_pending_edit("uid-a", ["starred"], 1, add=["starred"],
+                              remove=[])
+    store.record_pending_edit("uid-a", ["business", "starred"], 2,
+                              add=["business"], remove=[])
+    assert store.pending_deltas() == [
+        ("uid-a", ["business", "starred"], [], 2)]
+    store.record_pending_edit("uid-a", ["business"], 3, add=[],
+                              remove=["starred"])
+    assert store.pending_deltas() == [
+        ("uid-a", ["business"], ["starred"], 3)]
+    assert [uid for uid, _tags, _ts in store.pending_edits()] == ["uid-a"]
+    store.clear_pending_edit("uid-a")
+    assert store.pending_deltas() == []
+
+
+def test_pending_delta_columns_migrate(tmp_path):
+    import sqlite3
+
+    from xx_dialer.store import Store
+
+    path = tmp_path / "calls.db"
+    db = sqlite3.connect(str(path))
+    db.execute("CREATE TABLE pending_tag_edit (uid TEXT PRIMARY KEY,"
+               " tags TEXT NOT NULL DEFAULT '[]',"
+               " updatedAt INTEGER NOT NULL DEFAULT 0)")
+    db.execute("INSERT INTO pending_tag_edit (uid, tags, updatedAt)"
+               " VALUES ('uid-a', '[\"blocked\"]', 7)")
+    db.commit()
+    db.close()
+    handle = Store(path)
+    try:
+        assert handle.pending_deltas() == [
+            ("uid-a", ["blocked"], [], 7)]
+    finally:
+        handle.close()

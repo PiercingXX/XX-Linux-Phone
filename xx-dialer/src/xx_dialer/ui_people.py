@@ -151,6 +151,14 @@ class PeopleController:
     def _client(self):
         return self._deps.contacts
 
+    def _region(self) -> str:
+        try:
+            from xx_dialer import config as app_config
+
+            return policy.region_of(app_config.load(self._deps.home))
+        except Exception:
+            return "US"
+
     def set_star(self, person: Person, starred: bool) -> None:
         client = self._client()
         try:
@@ -209,7 +217,8 @@ class PeopleController:
 
     def block_number(self, number: str) -> None:
         """Block a number with no contact behind it: local block table."""
-        normalized = policy.normalize_number(number) or number.strip()
+        normalized = policy.canonical_number(number, self._region()) \
+            or number.strip()
         if not normalized:
             return
         client = self._client()

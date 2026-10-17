@@ -100,6 +100,14 @@ class RecentsController:
             return int(self._deps.now_ms())
         return int(time.time() * 1000)
 
+    def _region(self) -> str:
+        try:
+            from xx_dialer import config as app_config
+
+            return policy.region_of(app_config.load(self._deps.home))
+        except Exception:
+            return "US"
+
     def load(self) -> None:
         with Store(self._deps.db_file) as store:
             try:
@@ -113,12 +121,13 @@ class RecentsController:
             screen_rows = store.last_screened(400)
             mirror = store.all_mirror()
             viewed_at = store.get_recents_viewed()
+        region = self._region()
         names = {row.e164: row.display_name for row in mirror
                  if row.display_name}
         outgoing: dict[str, list[int]] = {}
         platform = []
         for row in call_rows:
-            e164 = policy.normalize_number(row.number or "")
+            e164 = policy.canonical_number(row.number or "", region)
             missed = row.call_type == CALL_TYPE_MISSED \
                 or (row.call_type == CALL_TYPE_INCOMING
                     and (row.duration or 0) <= 0)
@@ -343,8 +352,8 @@ class RecentsController:
         else:
             try:
                 with Store(self._deps.db_file) as store:
-                    store.add_blocked(policy.normalize_number(number)
-                                      or number)
+                    store.add_blocked(policy.canonical_number(
+                        number, self._region()) or number)
             except Exception:
                 pass
         self._notice("Blocked %s" % recents.format_number(number))

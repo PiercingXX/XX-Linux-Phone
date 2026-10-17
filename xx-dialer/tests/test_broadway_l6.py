@@ -89,7 +89,7 @@ def _seed(home: Path) -> None:
 
 
 @pytest.fixture(scope="module")
-def broadway_env(tmp_path_factory):
+def broadway_env(tmp_path_factory, private_bus):
     if shutil.which("gtk4-broadwayd") is None:
         pytest.skip("gtk4-broadwayd is missing")
     home = tmp_path_factory.mktemp("l6-home")
@@ -133,6 +133,7 @@ def broadway_env(tmp_path_factory):
         env["XDG_RUNTIME_DIR"] = runtime
         env["HOME"] = str(home)
         env["XX_DIALER_TEST_HOME"] = str(home)
+        env["DBUS_SESSION_BUS_ADDRESS"] = private_bus
         try:
             yield env
         finally:

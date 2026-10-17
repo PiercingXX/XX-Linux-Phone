@@ -112,7 +112,16 @@ def _default_call_placer(number: str) -> None:
     """Place a callback call; worker-thread safe, result ignored."""
     from xx_dialer import modem
 
-    modem.VoiceClient().place(number, lambda _ok, _detail: None)
+    try:
+        client = modem.VoiceClient()
+        if not client.start():
+            return
+    except Exception:
+        return
+    try:
+        client.place(number, lambda _ok, _detail: None)
+    except Exception:
+        pass
 
 
 class PolicyService:
@@ -205,9 +214,9 @@ class PolicyService:
             uid, display_name, tags = found
         except (TypeError, ValueError):
             return None
-        from xx_dialer.policy import normalize_number
+        from xx_dialer.policy import canonical_number
 
-        e164 = normalize_number(number)
+        e164 = canonical_number(number, self._region())
         if not uid or not e164:
             return None
         return (e164, str(uid), str(display_name or ""),
@@ -262,11 +271,22 @@ class PolicyService:
             store.upsert_tier(uid, BLOCKED_GROUP)
             store.add_blocked(e164)
 
+    def _region(self) -> str:
+        from xx_dialer import policy as _policy
+
+        try:
+            settings = app_config.load(self._home)
+        except Exception:
+            return "US"
+        return _policy.region_of(settings)
+
     def note_call(self, number: str, direction: str, started_ms: int,
                   duration_ms: int, disposition: str) -> None:
+        region = self._region()
         with Store(self._db_file) as store:
             engine.note_call(store, number, direction, started_ms,
-                             duration_ms, disposition)
+                             duration_ms, disposition,
+                             default_region=region)
         self._maybe_post_silenced(number, direction, disposition)
 
     def _maybe_post_silenced(self, number: str, direction: str,
@@ -288,7 +308,7 @@ class PolicyService:
                 return
             from xx_dialer import policy as _policy
 
-            e164 = _policy.normalize_number(number)
+            e164 = _policy.canonical_number(number, self._region())
             key = e164 or str(number or "").strip()
             if not key:
                 return
@@ -352,7 +372,8 @@ class PolicyService:
 
             with Store(self._db_file) as store:
                 store.add_blocked(
-                    _policy.normalize_number(number) or str(number))
+                    _policy.canonical_number(number, self._region())
+                    or str(number))
         except Exception:
             pass
 
@@ -591,8 +612,13 @@ def run_service(home: Path | None = None) -> int:
     service = PolicyService(home=home)
     contacts_store = Store(db_path(home))
     from xx_dialer.contacts_client import ContactsClient
+    from xx_dialer import policy as _policy
 
-    client = ContactsClient(contacts_store)
+    try:
+        region = _policy.region_of(app_config.load(home))
+    except Exception:
+        region = "US"
+    client = ContactsClient(contacts_store, default_region=region)
     loop = GLib.MainLoop()
     state: dict[str, object] = {}
 

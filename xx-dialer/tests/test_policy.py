@@ -18,6 +18,7 @@ from xx_dialer.policy import (
     Verdict,
     Window,
     apply_mode,
+    canonical_number,
     decide,
     normalize_number,
 )
@@ -129,6 +130,19 @@ def test_normalize_groups_caller_forms():
     assert normalize_number("") is None
     assert normalize_number("12") is None
     assert normalize_number(None) is None
+
+
+def test_canonical_number_is_region_aware():
+    assert canonical_number("(555) 123-4567") == "+15551234567"
+    assert canonical_number("5551234567") == "+15551234567"
+    assert canonical_number("1-555-123-4567") == "+15551234567"
+    assert canonical_number("+15551234567") == "+15551234567"
+    assert canonical_number("004415550100") == "+4415550100"
+    assert canonical_number("(555) 123-4567", "DE") == "5551234567"
+    assert canonical_number("911") == "911"
+    assert canonical_number("") is None
+    assert canonical_number("12") is None
+    assert canonical_number(None) is None
 
 
 def test_stir_action_off_never_blocks():

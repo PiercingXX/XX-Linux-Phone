@@ -26,7 +26,7 @@ from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 from xx_dialer import config as app_config  # noqa: E402
 from xx_dialer import importers, masks, policy, rules  # noqa: E402
 from xx_dialer.service import PolicyService  # noqa: E402
-from xx_dialer.store import PatternRow, Store  # noqa: E402
+from xx_dialer.store import BLOCKED_GROUP, PatternRow, Store  # noqa: E402
 
 HIDDEN_OPTIONS = ("Treat as unknown", "Silence", "Block")
 HIDDEN_VALUES = ("unknown", "silence", "block")
@@ -46,6 +46,7 @@ class RulesDeps:
     home: Path | None = None
     notice: object = None
     service_factory: object = None
+    contacts: object = None
 
 
 @dataclass
@@ -215,8 +216,9 @@ class RulesController:
                     store.delete_pattern(row.row_id)
                 self._notice("Neighbor-spoof rule removed.")
                 return self.load()
+            region = policy.region_of(self._config())
             digits = masks.digits_of(
-                policy.normalize_number(line_number or "") or "")
+                policy.canonical_number(line_number or "", region) or "")
             draft = masks.neighbor_draft(digits) if digits else None
             if draft is None:
                 raise ValueError("need your own number to derive the prefix")
@@ -235,9 +237,46 @@ class RulesController:
         return self.load()
 
     def unblock(self, number: str) -> RulesSnapshot:
+        """Unblock a number locally and on the contact behind it.
+
+        Removing only the ``blocked_number`` row leaves the Blocked
+        group membership behind, so the engine still rejects the caller
+        and the next contacts sync restores the row: clear the tier
+        too, and push the removal upstream as an UpdateTags delta.
+        """
+        region = policy.region_of(self._config())
+        canonical = policy.canonical_number(number, region) \
+            or (number or "").strip()
+        uid = None
+        if canonical:
+            with Store(self._deps.db_file) as store:
+                row = store.find_mirror(canonical)
+                uid = row.lookup_key if row is not None else None
+        client = self._deps.contacts
+        if uid is not None and client is not None:
+            try:
+                client.set_blocked(uid, False)
+                return self.load()
+            except Exception:
+                pass
         with Store(self._deps.db_file) as store:
-            store.remove_blocked(number)
+            if uid is None:
+                if canonical:
+                    store.remove_blocked(canonical)
+            else:
+                store.remove_tier(uid, BLOCKED_GROUP)
+                for known in store.mirror_numbers_for_key(uid):
+                    if not self._blocked_elsewhere(store, uid, known):
+                        store.remove_blocked(known)
         return self.load()
+
+    @staticmethod
+    def _blocked_elsewhere(store: Store, uid: str, number: str) -> bool:
+        for key, tier, _ in store.all_tiers():
+            if tier == BLOCKED_GROUP and key != uid \
+                    and number in store.mirror_numbers_for_key(key):
+                return True
+        return False
 
     def clear_log(self) -> RulesSnapshot:
         with Store(self._deps.db_file) as store:

@@ -21,6 +21,8 @@ from xx_dialer.store import (
     CallRow,
     ScreenRow,
     Store,
+    boottime_ms,
+    current_boot_id,
     emergency_window_active,
     in_recent_outgoing_window,
     in_repeat_window,
@@ -71,20 +73,23 @@ def lookup_tier(store: Store, e164: str | None
 
 def build_facts(raw_number: str | None, now: datetime, store: Store,
                 wall_ms: int | None = None,
-                monotonic_ms: int | None = None) -> policy.CallerFacts:
+                monotonic_ms: int | None = None,
+                default_region: str = "US",
+                boot_id: str | None = None) -> policy.CallerFacts:
     """Assemble engine facts from the warm tables; never raises on lookup."""
     wall = wall_ms if wall_ms is not None else int(time.time() * 1000)
     elapsed = monotonic_ms \
-        if monotonic_ms is not None else int(time.monotonic() * 1000)
+        if monotonic_ms is not None else boottime_ms()
+    boot = boot_id if boot_id is not None else current_boot_id()
     if raw_number is None or not str(raw_number).strip():
         return policy.CallerFacts(
             withheld=True,
-            emergency_window=store.emergency_active(wall, elapsed),
+            emergency_window=store.emergency_active(wall, elapsed, boot),
         )
-    e164 = policy.normalize_number(str(raw_number))
+    e164 = policy.canonical_number(str(raw_number), default_region)
     if e164 is None:
         return policy.CallerFacts(
-            emergency_window=store.emergency_active(wall, elapsed),
+            emergency_window=store.emergency_active(wall, elapsed, boot),
         )
     row = store.find_mirror(e164)
     starred = bool(row is not None and (
@@ -109,7 +114,7 @@ def build_facts(raw_number: str | None, now: datetime, store: Store,
         recent_outgoing=store.has_outgoing_since(
             e164, wall - 48 * 60 * 60 * 1000),
         cnap_name=(row.display_name or None) if row is not None else None,
-        emergency_window=store.emergency_active(wall, elapsed),
+        emergency_window=store.emergency_active(wall, elapsed, boot),
         withheld=False,
         group_blocked=group_blocked,
     )
@@ -175,7 +180,8 @@ def screen_number(raw_number: str | None, now: datetime, store: Store,
                   config: dict, rules: policy.Rules | None = None,
                   wall_ms: int | None = None,
                   monotonic_ms: int | None = None,
-                  log: bool = True
+                  log: bool = True,
+                  boot_id: str | None = None
                   ) -> tuple[str, str, str]:
     """Full CheckNumber core: (applied verdict, reason, log mode).
 
@@ -190,7 +196,8 @@ def screen_number(raw_number: str | None, now: datetime, store: Store,
     wall = wall_ms if wall_ms is not None else int(time.time() * 1000)
     active_rules = rules if rules is not None \
         else load_rules(store, config)
-    facts = build_facts(raw_number, now, store, wall, monotonic_ms)
+    facts = build_facts(raw_number, now, store, wall, monotonic_ms,
+                        policy.region_of(config), boot_id)
     computed = policy.decide(now, facts, active_rules)
     enforcing = config.get("enforcement_mode") == "enforcing"
     applied, mode = policy.apply_mode(computed, enforcing)
@@ -208,7 +215,9 @@ def screen_number(raw_number: str | None, now: datetime, store: Store,
 def note_call(store: Store, number: str, direction: str, started_ms: int,
               duration_ms: int, disposition: str,
               wall_ms: int | None = None,
-              monotonic_ms: int | None = None) -> dict:
+              monotonic_ms: int | None = None,
+              default_region: str = "US",
+              boot_id: str | None = None) -> dict:
     """Ingest one shell call event into the call log (plus side tables).
 
     Returns the stored row summary. Unknown dispositions degrade to
@@ -223,7 +232,7 @@ def note_call(store: Store, number: str, direction: str, started_ms: int,
         call_type = CALL_TYPE_OUTGOING
     else:
         raise ValueError("unknown direction: %r" % (direction,))
-    e164 = policy.normalize_number(number)
+    e164 = policy.canonical_number(number, default_region)
     logged = e164 if e164 is not None else str(number or "").strip()
     try:
         started = int(started_ms)
@@ -247,8 +256,9 @@ def note_call(store: Store, number: str, direction: str, started_ms: int,
             store.set_answered(latest.row_id, answered)
     if call_type == CALL_TYPE_OUTGOING and is_emergency_number(e164):
         elapsed = monotonic_ms \
-            if monotonic_ms is not None else int(time.monotonic() * 1000)
-        store.record_emergency(started, elapsed)
+            if monotonic_ms is not None else boottime_ms()
+        boot = boot_id if boot_id is not None else current_boot_id()
+        store.record_emergency(started, elapsed, boot)
     return {"number": logged, "call_type": call_type, "date": started,
             "duration": duration_s, "answered": answered}
 
@@ -263,6 +273,9 @@ def recent_outgoing_due(now_ms: int, last_at_ms: int) -> bool:
 
 def emergency_due(now_wall_ms: int, marker_wall_ms: int | None,
                   now_elapsed_ms: int,
-                  marker_elapsed_ms: int | None) -> bool:
+                  marker_elapsed_ms: int | None,
+                  now_boot_id: str | None = None,
+                  marker_boot_id: str | None = None) -> bool:
     return emergency_window_active(now_wall_ms, marker_wall_ms,
-                                   now_elapsed_ms, marker_elapsed_ms)
+                                   now_elapsed_ms, marker_elapsed_ms,
+                                   now_boot_id, marker_boot_id)

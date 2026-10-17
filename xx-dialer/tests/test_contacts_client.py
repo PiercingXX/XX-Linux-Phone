@@ -64,6 +64,7 @@ class FakeContactsService:
         self.history = []
         self.set_tags_calls = []
         self.update_tags_calls = []
+        self.fail_methods = set()
 
     def put(self, uid, name, numbers, tags):
         self.contacts[uid] = {"name": name, "numbers": list(numbers),
@@ -84,6 +85,17 @@ class FakeContactsService:
         return "\n".join(lines) + "\n"
 
     def dispatch(self, method, params):
+        if method in self.fail_methods:
+            raise FakeGlib.Error("simulated %s failure" % method)
+        if method == "Create":
+            (vcard,) = params
+            uid = "uid-new-%d" % (len(self.contacts) + 1)
+            name, numbers = parse_vcard(vcard)
+            self.contacts[uid] = {"name": name, "numbers": list(numbers),
+                                  "tags": set()}
+            self.revision += 1
+            self.history.append((self.revision, "changed", uid))
+            return FakeVariant("(s)", (uid,))
         if method == "List":
             (since,) = params
             changed = []
@@ -344,7 +356,26 @@ def test_update_tags_drops_unknown_tags(store):
         (["starred"], ["business"])]
 
 
-def test_offline_edits_flush_on_reappear(store):
+def test_edits_push_through_while_name_unowned(store):
+    """An idle-exited service auto-starts: with a bus, toggles go out as
+    UpdateTags deltas even when the name is currently unowned."""
+    service = FakeContactsService()
+    service.put("uid-ada", "Ada Lovelace", ["+14155550100"],
+                {"business"})
+    client, bus, gio = _wired(store, service)
+    _appear_and_drain(client, bus, gio)
+    client.handle_vanished(bus, BUS_NAME)
+    assert not client.is_present
+    client.set_star("uid-ada", True)
+    bus.drain()
+    assert local_tags(store, "uid-ada") == {"business", "starred"}
+    assert store.pending_edits() == []
+    assert _update_tags_for(bus, "uid-ada") == [(["starred"], [])]
+    assert service.contacts["uid-ada"]["tags"] == {"business", "starred"}
+    assert bus.service.set_tags_calls == []
+
+
+def test_failed_edits_queue_and_replay_as_deltas(store):
     service = FakeContactsService()
     service.put("uid-ada", "Ada Lovelace", ["+14155550100"],
                 {"business"})
@@ -354,23 +385,74 @@ def test_offline_edits_flush_on_reappear(store):
     assert local_tags(store, "uid-ada") == {"business"}
     client.handle_vanished(bus, BUS_NAME)
     assert not client.is_present
+    service.fail_methods.add("UpdateTags")
     client.set_star("uid-ada", True)
+    bus.drain()
     assert bus.service.set_tags_calls == []
     assert local_tags(store, "uid-ada") == {"business", "starred"}
     assert [uid for uid, _tags, _ts in store.pending_edits()] == ["uid-ada"]
+    assert [(uid, add, remove)
+            for uid, add, remove, _ts in store.pending_deltas()] == [
+                ("uid-ada", ["starred"], [])]
+    service.fail_methods.clear()
     _, _, _, appeared, _ = gio.watches[-1]
     appeared(bus, BUS_NAME, ":1.9")
     bus.drain()
     assert client.is_present
     assert local_tags(store, "uid-ada") == {"business", "starred"}
-    pushed = _set_tags_for(bus, "uid-ada")
-    assert pushed and pushed[-1] == ["business", "starred"]
+    assert _update_tags_for(bus, "uid-ada") == [(["starred"], [])]
+    assert bus.service.set_tags_calls == []
     assert _set_tags_for(bus, "uid-bo") == []
+    assert service.contacts["uid-ada"]["tags"] == {"business", "starred"}
     assert store.pending_edits() == []
     bus.emit_changed(service.revision, ["uid-ada"])
     bus.drain()
-    assert _set_tags_for(bus, "uid-ada") == pushed
+    assert _update_tags_for(bus, "uid-ada") == [(["starred"], [])]
     assert store.pending_edits() == []
+
+
+def test_replay_keeps_newer_upstream_edits(store):
+    """A queued toggle replays as its own delta, so an upstream edit
+    that landed while the service was away survives the replay."""
+    service = FakeContactsService()
+    service.put("uid-ada", "Ada Lovelace", ["+14155550100"],
+                {"business"})
+    client, bus, gio = _wired(store, service)
+    _appear_and_drain(client, bus, gio)
+    client.handle_vanished(bus, BUS_NAME)
+    service.fail_methods.add("UpdateTags")
+    client.set_star("uid-ada", True)
+    bus.drain()
+    service.fail_methods.clear()
+    service.put("uid-ada", "Ada Lovelace", ["+14155550100"],
+                {"business", "blocked"})
+    _, _, _, appeared, _ = gio.watches[-1]
+    appeared(bus, BUS_NAME, ":1.9")
+    bus.drain()
+    assert service.contacts["uid-ada"]["tags"] == \
+        {"business", "blocked", "starred"}
+    assert store.pending_edits() == []
+    bus.emit_changed(service.revision, ["uid-ada"])
+    bus.drain()
+    assert local_tags(store, "uid-ada") == \
+        {"business", "blocked", "starred"}
+
+
+def test_create_goes_out_while_name_unowned(store):
+    from xx_dialer.contacts_client import new_contact_vcard
+
+    service = FakeContactsService()
+    client, bus, gio = _wired(store, service)
+    _appear_and_drain(client, bus, gio)
+    client.handle_vanished(bus, BUS_NAME)
+    assert not client.is_present
+    created, errors = [], []
+    client.create_async(new_contact_vcard("+15551234567", "New"),
+                        created.append, on_error=errors.append)
+    bus.drain()
+    assert errors == []
+    assert len(created) == 1
+    assert service.contacts[created[0]]["numbers"] == ["+15551234567"]
 
 
 def test_number_collision_overwrites_without_pushback(store):
@@ -483,6 +565,29 @@ def test_vcard_parsing_tolerant():
     assert parse_vcard("") == ("", [])
     assert parse_vcard(None) == ("", [])
     assert parse_vcard("BEGIN:VCARD\n") == ("", [])
+
+
+def test_vcard_parsing_grouped_labeled_tel():
+    vcard = ("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Doe\\, Jane\r\n"
+             "item1.TEL;TYPE=CELL:+14155550100\r\n"
+             "item1.X-ABLABEL:Work cell\r\n"
+             "END:VCARD\r\n")
+    assert parse_vcard(vcard) == ("Doe, Jane", ["+14155550100"])
+
+
+def test_vcard_parsing_national_tel_canonicalizes():
+    vcard = ("BEGIN:VCARD\nFN:Ada\n"
+             "item1.TEL;TYPE=CELL:(555) 123-4567\n"
+             "item1.X-ABLABEL:Work cell\n")
+    assert parse_vcard(vcard) == ("Ada", ["+15551234567"])
+    assert parse_vcard(vcard, "DE") == ("Ada", ["5551234567"])
+
+
+def test_vcard_parsing_unfolds_long_names():
+    folded = ("BEGIN:VCARD\r\nFN:" + "A" * 70 + "\r\n " + "A" * 30 + "\r\n"
+              "TEL:+14155550100\r\nEND:VCARD\r\n")
+    name, numbers = parse_vcard(folded)
+    assert (name, numbers) == ("A" * 100, ["+14155550100"])
 
 
 def test_tag_normalization_drops_unknowns():

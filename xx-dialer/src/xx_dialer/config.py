@@ -30,6 +30,7 @@ DEFAULTS = {
     "default_tone": "",
     "hidden_tabs": [],
     "voicemail_number": "",
+    "default_region": "US",
 }
 
 _ENUMS = {

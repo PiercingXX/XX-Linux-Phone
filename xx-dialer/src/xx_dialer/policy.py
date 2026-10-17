@@ -260,6 +260,48 @@ def apply_mode(verdict: Verdict, enforcing: bool) -> tuple[Verdict, str]:
 
 _NON_DIGIT = re.compile(r"[^\d]")
 
+NANP_REGIONS = frozenset({"US", "CA"})
+
+
+def region_of(config) -> str:
+    """Two-letter dial region from config; "US" unless configured."""
+    region = (config or {}).get("default_region") or "US"
+    return str(region).upper()
+
+
+def canonical_number(raw: str | None,
+                    default_region: str = "US") -> str | None:
+    """Region-aware canonical form for cache, blocklist, log and facts.
+
+    Explicit international forms (leading ``+`` or ``00``) map directly;
+    national NANP shapes gain ``+1`` under a NANP default region (parity
+    with xx-contacts' ``to_e164(..., "US")``). Anything else falls back
+    to :func:`normalize_number` so short codes keep working.
+    """
+    e164 = _region_e164(raw, default_region)
+    if e164 is not None:
+        return e164
+    return normalize_number(raw)
+
+
+def _region_e164(raw: str | None, default_region: str) -> str | None:
+    if not raw or not raw.strip():
+        return None
+    text = raw.strip()
+    if text.startswith("+"):
+        digits = _NON_DIGIT.sub("", text)
+        return "+" + digits if 7 <= len(digits) <= 15 else None
+    digits = _NON_DIGIT.sub("", text)
+    if text.startswith("00"):
+        rest = digits[2:] if digits.startswith("00") else digits
+        return "+" + rest if 7 <= len(rest) <= 15 else None
+    if (default_region or "US").upper() in NANP_REGIONS:
+        if len(digits) == 10:
+            return "+1" + digits
+        if len(digits) == 11 and digits.startswith("1"):
+            return "+" + digits
+    return None
+
 
 def normalize_number(raw: str | None) -> str | None:
     """Offline E.164-ish normalization: one caller, one identity.
